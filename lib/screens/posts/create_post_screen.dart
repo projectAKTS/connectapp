@@ -37,9 +37,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         return;
       }
 
+      // ✅ Fetch `userName` from Firestore
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUser.uid)
+          .get();
+
+      String userName = userDoc.exists ? userDoc['name'] ?? 'Anonymous' : 'Anonymous';
+
       await FirebaseFirestore.instance.collection('posts').doc(postId).set({
         'id': postId,
         'userID': currentUser.uid,
+        'userName': userName, // ✅ Store userName in Firestore
         'content': _contentController.text.trim(),
         'timestamp': FieldValue.serverTimestamp(),
         'likes': 0,
@@ -52,11 +61,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
       _contentController.clear();
 
-      // ✅ Fix: Only pop if there is a previous screen
       if (Navigator.canPop(context)) {
         Navigator.pop(context);
       } else {
-        // Navigate to HomeScreen if no previous screen
         Navigator.pushReplacementNamed(context, '/home');
       }
     } catch (e) {

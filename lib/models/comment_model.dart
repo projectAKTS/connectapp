@@ -1,40 +1,49 @@
 class Comment {
   final String id;
+  final String postId;
   final String userId;
-  final String userName;
-  final String content;
+  final String text;
   final DateTime timestamp;
+  final int likes;
   final List<String> likedBy;
+  final String? parentId; // Null if it's a top-level comment
 
   Comment({
     required this.id,
+    required this.postId,
     required this.userId,
-    required this.userName,
-    required this.content,
+    required this.text,
     required this.timestamp,
-    required this.likedBy,
+    this.likes = 0,
+    this.likedBy = const [],
+    this.parentId,
   });
 
-  // Convert Firestore Document to Comment Object
-  factory Comment.fromFirestore(Map<String, dynamic> data, String docId) {
-    return Comment(
-      id: docId,
-      userId: data['userId'] ?? '',
-      userName: data['userName'] ?? 'Anonymous',
-      content: data['content'] ?? '',
-      timestamp: (data['timestamp'] as Timestamp).toDate(),
-      likedBy: List<String>.from(data['likedBy'] ?? []),
-    );
+  // Convert to JSON for Firestore
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'postId': postId,
+      'userId': userId,
+      'text': text,
+      'timestamp': timestamp.toIso8601String(),
+      'likes': likes,
+      'likedBy': likedBy,
+      'parentId': parentId,
+    };
   }
 
-  // Convert Comment Object to Map for Firestore
-  Map<String, dynamic> toFirestore() {
-    return {
-      'userId': userId,
-      'userName': userName,
-      'content': content,
-      'timestamp': timestamp,
-      'likedBy': likedBy,
-    };
+  // Convert from Firestore JSON
+  factory Comment.fromJson(Map<String, dynamic> json) {
+    return Comment(
+      id: json['id'],
+      postId: json['postId'],
+      userId: json['userId'],
+      text: json['text'],
+      timestamp: DateTime.parse(json['timestamp']),
+      likes: json['likes'] ?? 0,
+      likedBy: List<String>.from(json['likedBy'] ?? []),
+      parentId: json['parentId'],
+    );
   }
 }
