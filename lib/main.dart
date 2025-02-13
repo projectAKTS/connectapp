@@ -5,11 +5,11 @@ import 'services/firebase_options.dart';
 import 'services/firestore_service.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/signup_screen.dart';
-import 'screens/home_screen.dart';
-import 'screens/profile_screen.dart';
-import 'screens/post_screen.dart';
-import 'screens/search_screen.dart';
-import 'screens/create_post_screen.dart'; // Ensure correct import
+import 'screens/home/home_screen.dart';
+import 'screens/profile/profile_screen.dart';
+import 'screens/posts/post_screen.dart';
+import 'screens/search/search_screen.dart';
+import 'screens/posts/create_post_screen.dart'; // Ensure correct import
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

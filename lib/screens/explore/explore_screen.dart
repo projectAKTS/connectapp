@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:connect_app/screens/post_screen.dart';
-import 'package:connect_app/screens/profile_screen.dart';
+import 'package:connect_app/screens/posts/post_screen.dart';
+import 'package:connect_app/screens/profile/profile_screen.dart';
 
 class ExploreScreen extends StatefulWidget {
   const ExploreScreen({Key? key}) : super(key: key);

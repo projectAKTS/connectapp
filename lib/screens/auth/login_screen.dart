@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/firebase_auth_service.dart'; // Correct path for Firebase Auth Service
-import '../home_screen.dart'; // Correct path for Home Screen
+import '../home/home_screen.dart'; // Correct path for Home Screen
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});

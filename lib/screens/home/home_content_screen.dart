@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'post_screen.dart';
+import '../posts/post_screen.dart';
 
 class HomeContentScreen extends StatelessWidget {
   const HomeContentScreen({Key? key}) : super(key: key);

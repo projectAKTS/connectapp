@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'profile_screen.dart';
+import 'profile/profile_screen.dart';
 
 class FollowingScreen extends StatelessWidget {
   final List<dynamic> following;
