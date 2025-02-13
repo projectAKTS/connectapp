@@ -2,54 +2,38 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // User Collection Rules
+    // Users Collection
     match /users/{userId} {
-      // Allow users to read any profile
       allow read: if request.auth != null;
+      
+      // ✅ Allow user to update ONLY their own profile (name & bio)
+      allow update: if request.auth != null && request.auth.uid == userId &&
+        request.resource.data.keys().hasAny(['name', 'bio']); // 🔥 FIXED: Allows updates
 
-      // Allow users to update their own profile
-      allow update: if request.auth != null && request.auth.uid == userId;
+      // ✅ Allow users to create their own profiles
+      allow create: if request.auth != null && request.auth.uid == userId;
 
-      // Allow authenticated users to update `followers` and `following` fields
-      allow update: if request.auth != null &&
-        (request.resource.data.followers == resource.data.followers ||
-         request.resource.data.following == resource.data.following);
-
-      // Prevent deletion of user profiles
       allow delete: if false;
-
-      // Allow authenticated users to create user profiles
-      allow create: if request.auth != null;
     }
 
-    // Post Collection Rules
+    // Posts Collection
     match /posts/{postId} {
-      // Allow authenticated users to create posts
-      allow create: if request.auth != null;
-
-      // Allow authenticated users to read posts
       allow read: if request.auth != null;
+      
+      // ✅ Allow only authenticated users to create posts
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.userID;
 
-      // Allow authenticated users to update `likes` and `likedBy` fields
+      // ✅ Allow post owner to edit content & timestamp
       allow update: if request.auth != null &&
-        (request.resource.data.keys().hasAny(['likes', 'likedBy'])) &&
-        (request.resource.data.likes == null || request.resource.data.likes is int) &&
-        (request.resource.data.likedBy == null || request.resource.data.likedBy is list);
+        request.auth.uid == resource.data.userID &&
+        request.resource.data.keys().hasOnly(['content', 'timestamp']);
 
-      // Allow post owners to delete their posts
+      // ✅ Fully allow users to like/unlike posts
+      allow update: if request.auth != null &&
+        request.resource.data.keys().hasAny(['likes', 'likedBy']);
+
+      // ✅ Allow post owner to delete their own post
       allow delete: if request.auth != null && request.auth.uid == resource.data.userID;
-    }
-
-    // Comments on Posts
-    match /posts/{postId}/comments/{commentId} {
-      // Allow authenticated users to create comments
-      allow create: if request.auth != null;
-
-      // Allow authenticated users to read comments
-      allow read: if request.auth != null;
-
-      // Allow comment owners to update or delete their comments
-      allow update, delete: if request.auth != null && request.auth.uid == resource.data.userID;
     }
   }
 }

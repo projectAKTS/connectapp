@@ -1,9 +1,6 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class EditProfileScreen extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -15,62 +12,48 @@ class EditProfileScreen extends StatefulWidget {
 }
 
 class _EditProfileScreenState extends State<EditProfileScreen> {
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _bioController = TextEditingController();
-  File? _imageFile;
+  late TextEditingController nameController;
+  late TextEditingController bioController;
   bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    _nameController.text = widget.userData['name'] ?? '';
-    _bioController.text = widget.userData['bio'] ?? '';
-  }
-
-  Future<void> _pickImage() async {
-    try {
-      final pickedFile = await ImagePicker().pickImage(source: ImageSource.gallery);
-
-      if (pickedFile != null) {
-        setState(() {
-          _imageFile = File(pickedFile.path);
-        });
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error picking image: $e')),
-      );
-    }
+    nameController = TextEditingController(text: widget.userData['name'] ?? '');
+    bioController = TextEditingController(text: widget.userData['bio'] ?? '');
   }
 
   Future<void> _saveProfile() async {
+    final userId = FirebaseAuth.instance.currentUser!.uid;
+    final newName = nameController.text.trim();
+    final newBio = bioController.text.trim();
+
+    if (newName.isEmpty || newBio.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Name and bio cannot be empty')),
+      );
+      return;
+    }
+
     setState(() {
       _isLoading = true;
     });
 
     try {
-      final userId = FirebaseAuth.instance.currentUser!.uid;
-      String? profilePictureUrl;
-
-      if (_imageFile != null) {
-        final storageRef = FirebaseStorage.instance.ref().child('profile_pictures').child('$userId.jpg');
-        final uploadTask = await storageRef.putFile(_imageFile!);
-        profilePictureUrl = await uploadTask.ref.getDownloadURL();
-      }
-
       await FirebaseFirestore.instance.collection('users').doc(userId).update({
-        'name': _nameController.text.trim(),
-        'bio': _bioController.text.trim(),
-        if (profilePictureUrl != null) 'profilePicture': profilePictureUrl,
+        'name': newName,
+        'bio': newBio,
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Profile updated successfully!')),
+        const SnackBar(content: Text('Profile updated successfully')),
       );
-      Navigator.pop(context);
+
+      // ✅ Send updated data back to ProfileScreen
+      Navigator.pop(context, {'name': newName, 'bio': newBio});
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error saving profile: $e')),
+        SnackBar(content: Text('Error updating profile: $e')),
       );
     } finally {
       setState(() {
@@ -80,58 +63,39 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   @override
-  void dispose() {
-    _nameController.dispose();
-    _bioController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Edit Profile')),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: SingleChildScrollView(
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              GestureDetector(
-                onTap: _pickImage,
+              const Center(
                 child: CircleAvatar(
                   radius: 50,
-                  backgroundImage: _imageFile != null
-                      ? FileImage(_imageFile!)
-                      : (widget.userData['profilePicture'] != null
-                          ? NetworkImage(widget.userData['profilePicture'])
-                          : const AssetImage('assets/default_profile.png')) as ImageProvider,
-                  child: _imageFile == null && widget.userData['profilePicture'] == null
-                      ? const Icon(Icons.add_a_photo, size: 30)
-                      : null,
+                  backgroundImage: AssetImage('assets/default_profile.png'), // Default Image
                 ),
               ),
               const SizedBox(height: 16),
               TextField(
-                controller: _nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Name',
-                  hintText: 'Enter your name',
-                ),
+                controller: nameController,
+                decoration: const InputDecoration(labelText: 'Name'),
               ),
               const SizedBox(height: 10),
               TextField(
-                controller: _bioController,
-                decoration: const InputDecoration(
-                  labelText: 'Bio',
-                  hintText: 'Enter some details about yourself',
-                ),
+                controller: bioController,
+                decoration: const InputDecoration(labelText: 'Bio'),
+                maxLines: 3,
               ),
               const SizedBox(height: 20),
-              _isLoading
-                  ? const CircularProgressIndicator()
-                  : ElevatedButton(
-                      onPressed: _saveProfile,
-                      child: const Text('Save'),
-                    ),
+              ElevatedButton(
+                onPressed: _isLoading ? null : _saveProfile,
+                child: _isLoading
+                    ? const CircularProgressIndicator(color: Colors.white)
+                    : const Text('Save Changes'),
+              ),
             ],
           ),
         ),

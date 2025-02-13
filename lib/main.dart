@@ -9,6 +9,7 @@ import 'screens/home_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/post_screen.dart';
 import 'screens/search_screen.dart';
+import 'screens/create_post_screen.dart'; // Ensure correct import
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,20 +32,34 @@ class MyApp extends StatelessWidget {
       ),
       initialRoute: FirebaseAuth.instance.currentUser != null ? '/home' : '/login',
       routes: {
+        // Login screen route
         '/login': (context) => const LoginScreen(),
+
+        // Register screen route
         '/register': (context) => const RegisterScreen(),
+
+        // Home screen route
         '/home': (context) => const HomeScreen(),
+
+        // Profile screen route
         '/profile': (context) {
           final currentUser = FirebaseAuth.instance.currentUser;
-          if (currentUser != null) {
-            return ProfileScreen(userID: currentUser.uid);
-          } else {
-            return const Center(
-              child: Text('Please log in to view your profile'),
-            );
-          }
+          return currentUser != null
+              ? ProfileScreen(userID: currentUser.uid)
+              : const Scaffold(
+                  body: Center(
+                    child: Text(
+                      'Please log in to view your profile',
+                      style: TextStyle(fontSize: 16),
+                    ),
+                  ),
+                );
         },
+
+        // Create post screen route
         '/create_post': (context) => const CreatePostScreen(),
+
+        // Search screen route
         '/search': (context) => const SearchScreen(),
       },
     );
