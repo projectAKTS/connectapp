@@ -2,12 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../posts/comment_bottom_sheet.dart';
-import 'package:intl/intl.dart'; // ✅ For formatting timestamps
+import 'package:intl/intl.dart';
 
 class HomeContentScreen extends StatelessWidget {
   const HomeContentScreen({Key? key}) : super(key: key);
 
-  /// Toggles the "like" status of a post.
   Future<void> _toggleLike(BuildContext context, String postId, List<String> likedBy) async {
     final String userId = FirebaseAuth.instance.currentUser!.uid;
     final postRef = FirebaseFirestore.instance.collection('posts').doc(postId);
@@ -65,14 +64,14 @@ class HomeContentScreen extends StatelessWidget {
               final data = post.data() as Map<String, dynamic>? ?? {};
 
               final String postId = post.id;
-              final String userName = data['userName'] ?? 'Anonymous'; // ✅ Fixed userName issue
+              final String userName = data['userName'] ?? 'Anonymous'; // ✅ Fetch stored name
               final String content = data['content'] ?? 'No content available';
               final List<String> likedBy =
                   data['likedBy'] != null ? List<String>.from(data['likedBy']) : [];
               final int likes = data['likes'] ?? 0;
               final String currentUserId = FirebaseAuth.instance.currentUser!.uid;
 
-              // ✅ Format timestamp properly
+              // ✅ Format timestamp
               String formattedTime = data['timestamp'] != null
                   ? DateFormat('MMM d, yyyy - hh:mm a')
                       .format((data['timestamp'] as Timestamp).toDate())
@@ -90,12 +89,12 @@ class HomeContentScreen extends StatelessWidget {
                       Row(
                         children: [
                           const CircleAvatar(
-                            child: Icon(Icons.person), // Default user avatar
+                            child: Icon(Icons.person),
                             radius: 20,
                           ),
                           const SizedBox(width: 10),
                           Text(
-                            userName, // ✅ Fixed userName display
+                            userName, // ✅ Display stored user name
                             style: const TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 16,

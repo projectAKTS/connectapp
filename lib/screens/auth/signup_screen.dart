@@ -16,11 +16,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
 
+  /// ✅ Ensure required fields are filled before registering
   Future<void> _register() async {
+    if (_firstNameController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('First Name is required!')),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
-      // Create a user with Firebase Authentication
+      // 🔹 Create a user with Firebase Authentication
       final UserCredential userCredential = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(
         email: _emailController.text.trim(),
@@ -29,11 +37,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       final user = userCredential.user;
 
-      // If registration is successful, save user data to Firestore
+      // 🔹 If registration is successful, save user data to Firestore
       if (user != null) {
+        final String fullName =
+            "${_firstNameController.text.trim()} ${_lastNameController.text.trim()}";
+
         await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-          'firstName': _firstNameController.text.trim(),
-          'lastName': _lastNameController.text.trim(),
+          'fullName': fullName, // ✅ Store full name
           'email': _emailController.text.trim(),
           'bio': 'No bio available yet.',
           'followers': [],
@@ -43,7 +53,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           'createdAt': FieldValue.serverTimestamp(),
         });
 
-        // Navigate to the home screen
+        // ✅ Navigate to home screen after successful sign-up
         Navigator.pushReplacementNamed(context, '/home');
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -51,7 +61,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         );
       }
     } on FirebaseAuthException catch (e) {
-      // Handle specific Firebase errors
+      // 🔹 Handle specific Firebase errors
       if (e.code == 'email-already-in-use') {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('This email is already registered. Please log in.')),
@@ -70,7 +80,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         );
       }
     } catch (e) {
-      // Handle other unexpected errors
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );
@@ -91,12 +100,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
             children: [
               TextField(
                 controller: _firstNameController,
-                decoration: const InputDecoration(labelText: 'First Name'),
+                decoration: const InputDecoration(labelText: 'First Name *'), // ✅ Required
               ),
               const SizedBox(height: 10),
               TextField(
                 controller: _lastNameController,
-                decoration: const InputDecoration(labelText: 'Last Name'),
+                decoration: const InputDecoration(labelText: 'Last Name (Optional)'),
               ),
               const SizedBox(height: 10),
               TextField(

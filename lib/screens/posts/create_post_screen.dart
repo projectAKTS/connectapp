@@ -37,18 +37,23 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         return;
       }
 
-      // ✅ Fetch `userName` from Firestore
+      // ✅ Fetch `fullName` from Firestore
       DocumentSnapshot userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(currentUser.uid)
           .get();
 
-      String userName = userDoc.exists ? userDoc['name'] ?? 'Anonymous' : 'Anonymous';
+      Map<String, dynamic> userData =
+          userDoc.exists ? userDoc.data() as Map<String, dynamic> : {};
+
+      String userName = userData.containsKey('fullName') && userData['fullName'] != null
+          ? userData['fullName']
+          : 'Anonymous';
 
       await FirebaseFirestore.instance.collection('posts').doc(postId).set({
         'id': postId,
         'userID': currentUser.uid,
-        'userName': userName, // ✅ Store userName in Firestore
+        'userName': userName, // ✅ Stores `fullName`
         'content': _contentController.text.trim(),
         'timestamp': FieldValue.serverTimestamp(),
         'likes': 0,

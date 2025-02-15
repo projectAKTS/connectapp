@@ -88,7 +88,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            Text('Name: ${userData!['name'] ?? 'N/A'}'),
+            Text('Name: ${userData!['fullName'] ?? 'N/A'}'), // ✅ Fetches `fullName`
             Text('Email: ${userData!['email'] ?? 'N/A'}'),
             Text('Bio: ${userData!['bio'] ?? 'No bio available'}'),
             const SizedBox(height: 16),
@@ -106,7 +106,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   // ✅ Refresh UI if data was updated
                   if (updatedData != null) {
                     setState(() {
-                      userData!['name'] = updatedData['name'];
+                      userData!['fullName'] = updatedData['fullName'];
                       userData!['bio'] = updatedData['bio'];
                     });
                   }
