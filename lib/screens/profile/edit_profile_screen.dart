@@ -19,7 +19,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   @override
   void initState() {
     super.initState();
-    nameController = TextEditingController(text: widget.userData['name'] ?? '');
+    nameController = TextEditingController(text: widget.userData['fullName'] ?? '');
     bioController = TextEditingController(text: widget.userData['bio'] ?? '');
   }
 
@@ -41,7 +41,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
     try {
       await FirebaseFirestore.instance.collection('users').doc(userId).update({
-        'name': newName,
+        'fullName': newName, // ✅ Fixed: Use `fullName` instead of `name`
         'bio': newBio,
       });
 
@@ -50,7 +50,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       );
 
       // ✅ Send updated data back to ProfileScreen
-      Navigator.pop(context, {'name': newName, 'bio': newBio});
+      Navigator.pop(context, {'fullName': newName, 'bio': newBio});
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error updating profile: $e')),

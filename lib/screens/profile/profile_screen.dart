@@ -88,7 +88,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            Text('Name: ${userData!['fullName'] ?? 'N/A'}'), // ✅ Fetches `fullName`
+            Text('Name: ${userData!['fullName'] ?? 'N/A'}'), // ✅ Fixed: Now uses `fullName`
             Text('Email: ${userData!['email'] ?? 'N/A'}'),
             Text('Bio: ${userData!['bio'] ?? 'No bio available'}'),
             const SizedBox(height: 16),
