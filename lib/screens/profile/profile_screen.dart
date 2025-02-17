@@ -58,63 +58,78 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
     }
 
-    if (userData == null) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Profile')),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text("User not found"),
-              if (errorMessage.isNotEmpty)
-                Text(errorMessage, style: const TextStyle(color: Colors.red)),
-            ],
-          ),
-        ),
-      );
-    }
-
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Center(
-              child: CircleAvatar(
-                radius: 50,
-                backgroundImage: AssetImage('assets/default_profile.png'),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Center(
+                child: CircleAvatar(
+                  radius: 50,
+                  backgroundImage: AssetImage('assets/default_profile.png'),
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Text('Name: ${userData!['fullName'] ?? 'N/A'}'), // ✅ Fixed: Now uses `fullName`
-            Text('Email: ${userData!['email'] ?? 'N/A'}'),
-            Text('Bio: ${userData!['bio'] ?? 'No bio available'}'),
-            const SizedBox(height: 16),
-            Center(
-              child: ElevatedButton(
-                onPressed: () async {
-                  // ✅ Wait for returned updated data
-                  final updatedData = await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => EditProfileScreen(userData: userData!),
-                    ),
-                  );
+              const SizedBox(height: 16),
 
-                  // ✅ Refresh UI if data was updated
-                  if (updatedData != null) {
-                    setState(() {
-                      userData!['fullName'] = updatedData['fullName'];
-                      userData!['bio'] = updatedData['bio'];
-                    });
-                  }
-                },
-                child: const Text('Edit Profile'),
+              Text('Name: ${userData!['fullName'] ?? 'N/A'}'),
+              Text('Bio: ${userData!['bio'] ?? 'No bio available'}'),
+              Text('Journey: ${userData!['careerJourney'] ?? 'Not provided'}'),
+
+              const SizedBox(height: 16),
+
+              // Help Topics
+              if (userData!['helpTopics'] != null &&
+                  (userData!['helpTopics'] as List).isNotEmpty) ...[
+                const Text('Help Topics:', style: TextStyle(fontWeight: FontWeight.bold)),
+                Wrap(
+                  spacing: 8,
+                  children: (userData!['helpTopics'] as List)
+                      .map<Widget>((topic) => Chip(label: Text(topic)))
+                      .toList(),
+                ),
+              ],
+
+              const SizedBox(height: 16),
+
+              // Interest Tags
+              if (userData!['interestTags'] != null &&
+                  (userData!['interestTags'] as List).isNotEmpty) ...[
+                const Text('Interest Tags:', style: TextStyle(fontWeight: FontWeight.bold)),
+                Wrap(
+                  spacing: 8,
+                  children: (userData!['interestTags'] as List)
+                      .map<Widget>((tag) => Chip(label: Text('#$tag')))
+                      .toList(),
+                ),
+              ],
+
+              const SizedBox(height: 20),
+
+              // ✅ Fix: Add back "Edit Profile" button
+              Center(
+                child: ElevatedButton(
+                  onPressed: () async {
+                    final updatedData = await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => EditProfileScreen(userData: userData!),
+                      ),
+                    );
+
+                    if (updatedData != null) {
+                      setState(() {
+                        userData!.addAll(updatedData);
+                      });
+                    }
+                  },
+                  child: const Text('Edit Profile'),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
