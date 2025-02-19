@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../services/firebase_auth_service.dart'; // Correct path for Firebase Auth Service
-import '../home/home_screen.dart'; // Correct path for Home Screen
+import '../../services/firebase_auth_service.dart';
+import '../home/home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -41,27 +41,35 @@ class _LoginScreenState extends State<LoginScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            TextField(
-              controller: _emailController,
-              decoration: const InputDecoration(labelText: 'Email'),
-            ),
+            TextField(controller: _emailController, decoration: const InputDecoration(labelText: 'Email')),
             const SizedBox(height: 10),
-            TextField(
-              controller: _passwordController,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Password'),
-            ),
+            TextField(controller: _passwordController, obscureText: true, decoration: const InputDecoration(labelText: 'Password')),
             const SizedBox(height: 20),
+
             _isLoading
                 ? const CircularProgressIndicator()
-                : ElevatedButton(
-                    onPressed: _login,
-                    child: const Text('Login'),
-                  ),
-            TextButton(
-              onPressed: () {
-                Navigator.pushNamed(context, '/register');
+                : ElevatedButton(onPressed: _login, child: const Text('Login')),
+            const SizedBox(height: 10),
+
+            // 🔹 Google & Apple Sign-In
+            ElevatedButton.icon(
+              icon: const Icon(Icons.login),
+              label: const Text('Sign In with Google'),
+              onPressed: () async {
+                await _authService.signInWithGoogle();
               },
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.apple),
+              label: const Text('Sign In with Apple'),
+              onPressed: () async {
+                await _authService.signInWithApple();
+              },
+            ),
+
+            TextButton(
+              onPressed: () => Navigator.pushNamed(context, '/register'),
               child: const Text('Don’t have an account? Register'),
             ),
           ],

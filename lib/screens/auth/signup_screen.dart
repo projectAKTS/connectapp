@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../services/firebase_auth_service.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -10,13 +11,14 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
+  final FirebaseAuthService _authService = FirebaseAuthService();
   final TextEditingController _firstNameController = TextEditingController();
   final TextEditingController _lastNameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
 
-  /// ✅ Ensure required fields are filled before registering
+  /// ✅ Register with email & password
   Future<void> _register() async {
     if (_firstNameController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -28,7 +30,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // 🔹 Create a user with Firebase Authentication
       final UserCredential userCredential = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(
         email: _emailController.text.trim(),
@@ -37,13 +38,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       final user = userCredential.user;
 
-      // 🔹 If registration is successful, save user data to Firestore
       if (user != null) {
         final String fullName =
             "${_firstNameController.text.trim()} ${_lastNameController.text.trim()}";
 
         await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-          'fullName': fullName, // ✅ Store full name
+          'fullName': fullName,
           'email': _emailController.text.trim(),
           'bio': 'No bio available yet.',
           'followers': [],
@@ -53,30 +53,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
           'createdAt': FieldValue.serverTimestamp(),
         });
 
-        // ✅ Navigate to home screen after successful sign-up
         Navigator.pushReplacementNamed(context, '/home');
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Registration failed. Please try again.')),
-        );
-      }
-    } on FirebaseAuthException catch (e) {
-      // 🔹 Handle specific Firebase errors
-      if (e.code == 'email-already-in-use') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('This email is already registered. Please log in.')),
-        );
-      } else if (e.code == 'weak-password') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Password is too weak. Choose a stronger password.')),
-        );
-      } else if (e.code == 'invalid-email') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invalid email address. Please check and try again.')),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Registration failed: ${e.message}')),
         );
       }
     } catch (e) {
@@ -98,36 +78,40 @@ class _RegisterScreenState extends State<RegisterScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              TextField(
-                controller: _firstNameController,
-                decoration: const InputDecoration(labelText: 'First Name *'), // ✅ Required
-              ),
+              TextField(controller: _firstNameController, decoration: const InputDecoration(labelText: 'First Name *')),
               const SizedBox(height: 10),
-              TextField(
-                controller: _lastNameController,
-                decoration: const InputDecoration(labelText: 'Last Name (Optional)'),
-              ),
+              TextField(controller: _lastNameController, decoration: const InputDecoration(labelText: 'Last Name (Optional)')),
               const SizedBox(height: 10),
-              TextField(
-                controller: _emailController,
-                decoration: const InputDecoration(labelText: 'Email'),
-              ),
+              TextField(controller: _emailController, decoration: const InputDecoration(labelText: 'Email')),
               const SizedBox(height: 10),
-              TextField(
-                controller: _passwordController,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: 'Password'),
-              ),
+              TextField(controller: _passwordController, obscureText: true, decoration: const InputDecoration(labelText: 'Password')),
               const SizedBox(height: 20),
+
               _isLoading
                   ? const CircularProgressIndicator()
                   : ElevatedButton(
                       onPressed: _register,
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(50),
-                      ),
+                      style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(50)),
                       child: const Text('Register'),
                     ),
+              const SizedBox(height: 20),
+
+              // 🔹 Google & Apple Sign-In
+              ElevatedButton.icon(
+                icon: const Icon(Icons.login),
+                label: const Text('Sign Up with Google'),
+                onPressed: () async {
+                  await _authService.signInWithGoogle();
+                },
+              ),
+              const SizedBox(height: 10),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.apple),
+                label: const Text('Sign Up with Apple'),
+                onPressed: () async {
+                  await _authService.signInWithApple();
+                },
+              ),
             ],
           ),
         ),

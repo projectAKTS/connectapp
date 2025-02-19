@@ -10,12 +10,32 @@ class ExploreScreen extends StatefulWidget {
   State<ExploreScreen> createState() => _ExploreScreenState();
 }
 
-class _ExploreScreenState extends State<ExploreScreen> {
+class _ExploreScreenState extends State<ExploreScreen>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = "";
   String _selectedTag = "";
+  late TabController _tabController;
 
   final List<String> _tags = ["Career", "Travel", "Health", "Technology", "Education"];
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this); // ✅ Fixed Initialization
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose(); // ✅ Properly Dispose Controller
+    super.dispose();
+  }
+
+  void _search(String query) {
+    setState(() {
+      _searchQuery = query.trim().toLowerCase();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -24,244 +44,187 @@ class _ExploreScreenState extends State<ExploreScreen> {
         title: const Text('Explore'),
         centerTitle: true,
       ),
-      body: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Search Bar
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: TextField(
-                controller: _searchController,
-                onChanged: (value) {
-                  setState(() {
-                    _searchQuery = value.trim().toLowerCase();
-                  });
-                },
-                decoration: InputDecoration(
-                  labelText: 'Search posts or users...',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  prefixIcon: const Icon(Icons.search),
-                  suffixIcon: IconButton(
-                    icon: const Icon(Icons.clear),
-                    onPressed: () {
-                      _searchController.clear();
+      body: Column(
+        children: [
+          // 🔎 Search Bar
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: TextField(
+              controller: _searchController,
+              onChanged: _search,
+              decoration: InputDecoration(
+                labelText: 'Search users or posts...',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.clear),
+                  onPressed: () {
+                    _searchController.clear();
+                    _search("");
+                  },
+                ),
+              ),
+            ),
+          ),
+
+          // 🔹 Filter Chips (Tags)
+          SizedBox(
+            height: 40,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              children: _tags.map((tag) {
+                final isSelected = _selectedTag == tag;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                  child: ChoiceChip(
+                    label: Text(tag),
+                    selected: isSelected,
+                    onSelected: (selected) {
                       setState(() {
-                        _searchQuery = "";
+                        _selectedTag = selected ? tag : "";
                       });
                     },
+                    selectedColor: Colors.blue,
+                    backgroundColor: Colors.grey[200],
+                    labelStyle: TextStyle(
+                      color: isSelected ? Colors.white : Colors.black,
+                    ),
                   ),
-                ),
-              ),
+                );
+              }).toList(),
             ),
+          ),
 
-            // Filters (Tags/Interests)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: SizedBox(
-                height: 40,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: _tags.map((tag) {
-                    final isSelected = _selectedTag == tag;
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                      child: ChoiceChip(
-                        label: Text(tag),
-                        selected: isSelected,
-                        onSelected: (selected) {
-                          setState(() {
-                            _selectedTag = selected ? tag : "";
-                          });
-                        },
-                        selectedColor: Colors.blue,
-                        backgroundColor: Colors.grey[200],
-                        labelStyle: TextStyle(
-                          color: isSelected ? Colors.white : Colors.black,
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
+          const SizedBox(height: 10),
+
+          // 🔹 Instagram-Like Tabs for Users & Posts
+          TabBar(
+            controller: _tabController,
+            labelColor: Colors.black,
+            unselectedLabelColor: Colors.grey,
+            tabs: const [
+              Tab(text: 'Users'),
+              Tab(text: 'Posts'),
+            ],
+          ),
+
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                // 🧑‍💻 Users Tab
+                _buildUserSearchResults(),
+
+                // 📝 Posts Tab
+                _buildPostSearchResults(),
+              ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
 
-            const SizedBox(height: 16),
+  // 🔍 Search Users
+  Widget _buildUserSearchResults() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance.collection('users').snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-            // Trending Posts Section
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16.0),
-              child: Text(
-                'Trending Posts 🔥',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-            ),
-            SizedBox(
-              height: 200,
-              child: StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('posts')
-                    .orderBy('likes', descending: true)
-                    .limit(10)
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
+        final users = snapshot.data!.docs.where((doc) {
+          final userData = doc.data() as Map<String, dynamic>;
+          final name = userData['fullName']?.toString().toLowerCase() ?? '';
+          final bio = userData['bio']?.toString().toLowerCase() ?? '';
+          final journey = userData['journey']?.toString().toLowerCase() ?? '';
+          final tags = (userData['interestTags'] ?? []) as List<dynamic>;
 
-                  final trendingPosts = snapshot.data!.docs;
+          final matchesQuery = _searchQuery.isEmpty ||
+              name.contains(_searchQuery) ||
+              bio.contains(_searchQuery) ||
+              journey.contains(_searchQuery) ||
+              tags.contains(_searchQuery);
 
-                  if (trendingPosts.isEmpty) {
-                    return const Center(
-                      child: Text('No trending posts yet!'),
-                    );
-                  }
+          return matchesQuery;
+        }).toList();
 
-                  return ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: trendingPosts.length,
-                    itemBuilder: (context, index) {
-                      final post = trendingPosts[index];
-                      final postData = post.data() as Map<String, dynamic>;
+        if (users.isEmpty) {
+          return const Center(child: Text('No users found'));
+        }
 
-                      return GestureDetector(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => PostScreen(postData: postData),
-                            ),
-                          );
-                        },
-                        child: Card(
-                          margin: const EdgeInsets.symmetric(horizontal: 8),
-                          elevation: 4,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: SizedBox(
-                            width: 300,
-                            child: Padding(
-                              padding: const EdgeInsets.all(16.0),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    postData['userName'] ?? 'Anonymous',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    postData['content'] ?? 'No content available',
-                                    maxLines: 3,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 14),
-                                  ),
-                                  const Spacer(),
-                                  Row(
-                                    children: [
-                                      const Icon(Icons.favorite, color: Colors.red),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        '${postData['likes']} likes',
-                                        style: const TextStyle(fontSize: 12),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    },
+        return ListView(
+          children: users.map((user) {
+            final userData = user.data() as Map<String, dynamic>;
+            final userId = user.id; // ✅ Fix: Get userID instead of userData
+
+            return Card(
+              margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+              child: ListTile(
+                title: Text(userData['fullName'] ?? 'Unknown User'),
+                subtitle: Text(userData['bio'] ?? ''),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ProfileScreen(userID: userId), // ✅ Fix: Pass userID
+                    ),
                   );
                 },
               ),
-            ),
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
 
-            const SizedBox(height: 16),
+  // 🔍 Search Posts
+  Widget _buildPostSearchResults() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance.collection('posts').snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-            // Search Results for Users
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16.0),
-              child: Text(
-                'Users',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-            ),
-            // User search section...
+        final posts = snapshot.data!.docs.where((doc) {
+          final postData = doc.data() as Map<String, dynamic>;
+          final content = postData['content']?.toString().toLowerCase() ?? '';
+          final tags = (postData['tags'] ?? []) as List<dynamic>;
 
-            const SizedBox(height: 16),
+          final matchesQuery = content.contains(_searchQuery);
+          final matchesTag = _selectedTag.isEmpty || tags.contains(_selectedTag);
 
-            // Search Results for Posts
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16.0),
-              child: Text(
-                'Posts',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-            ),
-            StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('posts')
-                  .where('content', isNotEqualTo: null)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+          return matchesQuery && matchesTag;
+        }).toList();
 
-                final posts = snapshot.data!.docs.where((doc) {
-                  final postData = doc.data() as Map<String, dynamic>;
-                  final content = postData['content']?.toString().toLowerCase() ?? '';
-                  final tags = (postData['tags'] ?? []) as List<dynamic>;
+        if (posts.isEmpty) {
+          return const Center(child: Text('No posts found'));
+        }
 
-                  final matchesQuery = content.contains(_searchQuery);
-                  final matchesTag = _selectedTag.isEmpty || tags.contains(_selectedTag);
+        return ListView(
+          children: posts.map((post) {
+            final postData = post.data() as Map<String, dynamic>;
 
-                  return matchesQuery && matchesTag;
-                }).toList();
-
-                if (posts.isEmpty) {
-                  return const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(16.0),
-                      child: Text('No posts found matching your criteria.'),
+            return Card(
+              margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+              child: ListTile(
+                title: Text(postData['userName'] ?? 'Anonymous'),
+                subtitle: Text(postData['content'] ?? 'No content'),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => PostScreen(postData: postData),
                     ),
                   );
-                }
-
-                return ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: posts.length,
-                  itemBuilder: (context, index) {
-                    final post = posts[index];
-                    final postData = post.data() as Map<String, dynamic>;
-
-                    return ListTile(
-                      title: Text(postData['userName'] ?? 'Anonymous'),
-                      subtitle: Text(postData['content'] ?? 'No content'),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => PostScreen(postData: postData),
-                          ),
-                        );
-                      },
-                    );
-                  },
-                );
-              },
-            ),
-          ],
-        ),
-      ),
+                },
+              ),
+            );
+          }).toList(),
+        );
+      },
     );
   }
 }

@@ -64,69 +64,94 @@ class _ProfileScreenState extends State<ProfileScreen> {
         padding: const EdgeInsets.all(16.0),
         child: SingleChildScrollView(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const Center(
-                child: CircleAvatar(
-                  radius: 50,
-                  backgroundImage: AssetImage('assets/default_profile.png'),
-                ),
+              CircleAvatar(
+                radius: 60,
+                backgroundImage: AssetImage('assets/default_profile.png'),
               ),
               const SizedBox(height: 16),
 
-              Text('Name: ${userData!['fullName'] ?? 'N/A'}'),
-              Text('Bio: ${userData!['bio'] ?? 'No bio available'}'),
-              Text('Journey: ${userData!['careerJourney'] ?? 'Not provided'}'),
+              Text(userData!['fullName'] ?? 'N/A',
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text(userData!['bio'] ?? 'No bio available',
+                  style: TextStyle(fontSize: 16, color: Colors.grey[700])),
 
               const SizedBox(height: 16),
 
-              // Help Topics
+              Card(
+                elevation: 3,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Journey', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 4),
+                      Text(userData!['careerJourney'] ?? 'Not provided'),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
               if (userData!['helpTopics'] != null &&
                   (userData!['helpTopics'] as List).isNotEmpty) ...[
-                const Text('Help Topics:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text('How You Can Help', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
                   children: (userData!['helpTopics'] as List)
-                      .map<Widget>((topic) => Chip(label: Text(topic)))
+                      .map<Widget>((topic) => Chip(
+                            label: Text(topic),
+                            backgroundColor: Colors.blue.shade100,
+                          ))
                       .toList(),
                 ),
               ],
 
               const SizedBox(height: 16),
 
-              // Interest Tags
               if (userData!['interestTags'] != null &&
                   (userData!['interestTags'] as List).isNotEmpty) ...[
-                const Text('Interest Tags:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text('Interest Tags', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
                   children: (userData!['interestTags'] as List)
-                      .map<Widget>((tag) => Chip(label: Text('#$tag')))
+                      .map<Widget>((tag) => Chip(
+                            label: Text('#$tag'),
+                            backgroundColor: Colors.green.shade100,
+                          ))
                       .toList(),
                 ),
               ],
 
               const SizedBox(height: 20),
 
-              // ✅ Fix: Add back "Edit Profile" button
-              Center(
-                child: ElevatedButton(
-                  onPressed: () async {
-                    final updatedData = await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => EditProfileScreen(userData: userData!),
-                      ),
-                    );
-
-                    if (updatedData != null) {
-                      setState(() {
-                        userData!.addAll(updatedData);
-                      });
-                    }
-                  },
-                  child: const Text('Edit Profile'),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
+                onPressed: () async {
+                  final updatedData = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => EditProfileScreen(userData: userData!),
+                    ),
+                  );
+
+                  if (updatedData != null) {
+                    setState(() {
+                      userData!.addAll(updatedData);
+                    });
+                  }
+                },
+                child: const Text('Edit Profile'),
               ),
             ],
           ),
