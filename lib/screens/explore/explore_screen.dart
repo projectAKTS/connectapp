@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connect_app/screens/posts/post_screen.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class ExploreScreen extends StatefulWidget {
   const ExploreScreen({Key? key}) : super(key: key);
@@ -22,12 +23,12 @@ class _ExploreScreenState extends State<ExploreScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this); // ✅ Fixed Initialization
+    _tabController = TabController(length: 3, vsync: this); // ✅ Fixed Tab Initialization
   }
 
   @override
   void dispose() {
-    _tabController.dispose(); // ✅ Properly Dispose Controller
+    _tabController.dispose(); // ✅ Dispose Properly
     super.dispose();
   }
 
@@ -41,34 +42,25 @@ class _ExploreScreenState extends State<ExploreScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Explore'),
-        centerTitle: true,
+        title: TextField(
+          controller: _searchController,
+          onChanged: _search,
+          decoration: InputDecoration(
+            hintText: 'Search users or posts...',
+            border: InputBorder.none,
+            prefixIcon: const Icon(Icons.search),
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.clear),
+              onPressed: () {
+                _searchController.clear();
+                _search("");
+              },
+            ),
+          ),
+        ),
       ),
       body: Column(
         children: [
-          // 🔎 Search Bar
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: TextField(
-              controller: _searchController,
-              onChanged: _search,
-              decoration: InputDecoration(
-                labelText: 'Search users or posts...',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.clear),
-                  onPressed: () {
-                    _searchController.clear();
-                    _search("");
-                  },
-                ),
-              ),
-            ),
-          ),
-
           // 🔹 Filter Chips (Tags)
           SizedBox(
             height: 40,
@@ -100,12 +92,14 @@ class _ExploreScreenState extends State<ExploreScreen>
 
           const SizedBox(height: 10),
 
-          // 🔹 Instagram-Like Tabs for Users & Posts
+          // 🔹 Instagram-Like Tabs
           TabBar(
             controller: _tabController,
             labelColor: Colors.black,
             unselectedLabelColor: Colors.grey,
+            indicatorColor: Colors.blue, // ✅ Highlight selected tab
             tabs: const [
+              Tab(text: 'For You'),
               Tab(text: 'Users'),
               Tab(text: 'Posts'),
             ],
@@ -114,7 +108,11 @@ class _ExploreScreenState extends State<ExploreScreen>
           Expanded(
             child: TabBarView(
               controller: _tabController,
+              physics: const NeverScrollableScrollPhysics(), // ✅ Fixed to make it clickable
               children: [
+                // 🔥 For You Tab
+                _buildForYouContent(),
+
                 // 🧑‍💻 Users Tab
                 _buildUserSearchResults(),
 
@@ -125,6 +123,46 @@ class _ExploreScreenState extends State<ExploreScreen>
           ),
         ],
       ),
+    );
+  }
+
+  // 🔥 For You Content
+  Widget _buildForYouContent() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance.collection('posts').snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+
+        final posts = snapshot.data!.docs.take(10).toList(); // ✅ Limit to 10 posts for now
+
+        if (posts.isEmpty) {
+          return const Center(child: Text('No content available'));
+        }
+
+        return ListView(
+          children: posts.map((post) {
+            final postData = post.data() as Map<String, dynamic>;
+            return Card(
+              margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundImage: AssetImage('assets/default_profile.png'),
+                ),
+                title: Text(postData['userName'] ?? 'Anonymous'),
+                subtitle: Text(postData['content'] ?? 'No content'),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => PostScreen(postData: postData),
+                    ),
+                  );
+                },
+              ),
+            );
+          }).toList(),
+        );
+      },
     );
   }
 
@@ -139,13 +177,11 @@ class _ExploreScreenState extends State<ExploreScreen>
           final userData = doc.data() as Map<String, dynamic>;
           final name = userData['fullName']?.toString().toLowerCase() ?? '';
           final bio = userData['bio']?.toString().toLowerCase() ?? '';
-          final journey = userData['journey']?.toString().toLowerCase() ?? '';
           final tags = (userData['interestTags'] ?? []) as List<dynamic>;
 
           final matchesQuery = _searchQuery.isEmpty ||
               name.contains(_searchQuery) ||
               bio.contains(_searchQuery) ||
-              journey.contains(_searchQuery) ||
               tags.contains(_searchQuery);
 
           return matchesQuery;
@@ -155,27 +191,29 @@ class _ExploreScreenState extends State<ExploreScreen>
           return const Center(child: Text('No users found'));
         }
 
-        return ListView(
-          children: users.map((user) {
+        return ListView.builder(
+          itemCount: users.length,
+          itemBuilder: (context, index) {
+            final user = users[index];
             final userData = user.data() as Map<String, dynamic>;
-            final userId = user.id; // ✅ Fix: Get userID instead of userData
+            final userId = user.id;
 
-            return Card(
-              margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-              child: ListTile(
-                title: Text(userData['fullName'] ?? 'Unknown User'),
-                subtitle: Text(userData['bio'] ?? ''),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => ProfileScreen(userID: userId), // ✅ Fix: Pass userID
-                    ),
-                  );
-                },
+            return ListTile(
+              leading: CircleAvatar(
+                backgroundImage: AssetImage('assets/default_profile.png'),
               ),
+              title: Text(userData['fullName'] ?? 'Unknown User'),
+              subtitle: Text(userData['bio'] ?? ''),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ProfileScreen(userID: userId),
+                  ),
+                );
+              },
             );
-          }).toList(),
+          },
         );
       },
     );
@@ -203,26 +241,28 @@ class _ExploreScreenState extends State<ExploreScreen>
           return const Center(child: Text('No posts found'));
         }
 
-        return ListView(
-          children: posts.map((post) {
+        return ListView.builder(
+          itemCount: posts.length,
+          itemBuilder: (context, index) {
+            final post = posts[index];
             final postData = post.data() as Map<String, dynamic>;
 
-            return Card(
-              margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-              child: ListTile(
-                title: Text(postData['userName'] ?? 'Anonymous'),
-                subtitle: Text(postData['content'] ?? 'No content'),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => PostScreen(postData: postData),
-                    ),
-                  );
-                },
+            return ListTile(
+              leading: CircleAvatar(
+                backgroundImage: AssetImage('assets/default_profile.png'),
               ),
+              title: Text(postData['userName'] ?? 'Anonymous'),
+              subtitle: Text(postData['content'] ?? 'No content'),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => PostScreen(postData: postData),
+                  ),
+                );
+              },
             );
-          }).toList(),
+          },
         );
       },
     );
