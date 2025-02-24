@@ -12,65 +12,59 @@ class CreatePostScreen extends StatefulWidget {
 
 class _CreatePostScreenState extends State<CreatePostScreen> {
   final TextEditingController _contentController = TextEditingController();
-  final TextEditingController _tagController = TextEditingController();
   bool _isPosting = false;
   List<String> selectedTags = [];
 
-  final List<String> predefinedTags = [
-    'Career', 'Travel', 'Health', 'Technology', 'Education', 'Finance'
-  ];
+  final List<String> predefinedTags = ['Career', 'Travel', 'Health', 'Technology', 'Education', 'Finance'];
 
   Future<void> _savePost() async {
     if (_contentController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please write some content')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please write some content')));
       return;
     }
 
-    setState(() {
-      _isPosting = true;
-    });
+    setState(() => _isPosting = true);
 
     try {
       final String postId = const Uuid().v4();
       final User? currentUser = FirebaseAuth.instance.currentUser;
 
       if (currentUser == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('User not logged in.')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('User not logged in.')));
         return;
       }
 
-      // ✅ Fetch `fullName` from Firestore
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser.uid)
-          .get();
-
-      Map<String, dynamic> userData =
-          userDoc.exists ? userDoc.data() as Map<String, dynamic> : {};
-
-      String userName = userData.containsKey('fullName') && userData['fullName'] != null
-          ? userData['fullName']
-          : 'Anonymous';
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('users').doc(currentUser.uid).get();
+      Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
+      String userName = userData['fullName'] ?? 'Anonymous';
 
       await FirebaseFirestore.instance.collection('posts').doc(postId).set({
         'id': postId,
         'userID': currentUser.uid,
-        'userName': userName, // ✅ Stores `fullName`
+        'userName': userName,
         'content': _contentController.text.trim(),
-        'tags': selectedTags, // ✅ Stores selected tags
+        'tags': selectedTags,
         'timestamp': FieldValue.serverTimestamp(),
         'likes': 0,
         'likedBy': [],
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Post created successfully!')),
-      );
+      // ✅ Update User XP and Post Count
+      int newPostCount = (userData['postCount'] ?? 0) + 1;
+      int newXP = (userData['xpPoints'] ?? 0) + 10;
 
+      List<String> updatedBadges = List<String>.from(userData['badges'] ?? []);
+      if (newPostCount == 2 && !updatedBadges.contains('First Contributor')) updatedBadges.add('First Contributor');
+      if (newPostCount == 5 && !updatedBadges.contains('Profile Highlight')) updatedBadges.add('Profile Highlight');
+      if (newPostCount == 15 && !updatedBadges.contains('Priority Post Boost')) updatedBadges.add('Priority Post Boost');
+
+      await FirebaseFirestore.instance.collection('users').doc(currentUser.uid).update({
+        'postCount': newPostCount,
+        'xpPoints': newXP,
+        'badges': updatedBadges,
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Post created successfully!')));
       _contentController.clear();
       selectedTags.clear();
 
@@ -80,29 +74,20 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         Navigator.pushReplacementNamed(context, '/home');
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to create post. Error: $e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to create post. Error: $e')));
     } finally {
-      setState(() {
-        _isPosting = false;
-      });
+      setState(() => _isPosting = false);
     }
   }
 
   void _addTag(String tag) {
     if (!selectedTags.contains(tag) && tag.isNotEmpty) {
-      setState(() {
-        selectedTags.add(tag);
-      });
-      _tagController.clear();
+      setState(() => selectedTags.add(tag));
     }
   }
 
   void _removeTag(String tag) {
-    setState(() {
-      selectedTags.remove(tag);
-    });
+    setState(() => selectedTags.remove(tag));
   }
 
   @override
@@ -117,67 +102,27 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               controller: _contentController,
               decoration: InputDecoration(
                 hintText: 'Write a post...',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
               ),
               maxLines: 3,
             ),
             const SizedBox(height: 16),
 
-            // Predefined Tag Selector
             Wrap(
               spacing: 8.0,
               children: predefinedTags.map((tag) {
                 return FilterChip(
                   label: Text(tag),
                   selected: selectedTags.contains(tag),
-                  onSelected: (selected) {
-                    selected ? _addTag(tag) : _removeTag(tag);
-                  },
+                  onSelected: (selected) => selected ? _addTag(tag) : _removeTag(tag),
                 );
               }).toList(),
             ),
-
             const SizedBox(height: 10),
-
-            // Custom Tag Input
-            TextField(
-              controller: _tagController,
-              decoration: InputDecoration(
-                hintText: 'Enter a custom tag',
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.add),
-                  onPressed: () {
-                    _addTag(_tagController.text.trim());
-                  },
-                ),
-              ),
-              onSubmitted: (value) {
-                _addTag(value.trim());
-              },
-            ),
-
-            const SizedBox(height: 10),
-
-            // Display Selected Tags
-            Wrap(
-              spacing: 6.0,
-              children: selectedTags.map((tag) {
-                return Chip(
-                  label: Text(tag),
-                  onDeleted: () => _removeTag(tag),
-                );
-              }).toList(),
-            ),
-
-            const SizedBox(height: 16),
 
             ElevatedButton(
               onPressed: _isPosting ? null : _savePost,
-              child: _isPosting
-                  ? const CircularProgressIndicator(color: Colors.white)
-                  : const Text('Post'),
+              child: _isPosting ? const CircularProgressIndicator(color: Colors.white) : const Text('Post'),
             ),
           ],
         ),

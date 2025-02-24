@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connect_app/screens/posts/post_screen.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 
 class ExploreScreen extends StatefulWidget {
   const ExploreScreen({Key? key}) : super(key: key);
@@ -11,8 +10,7 @@ class ExploreScreen extends StatefulWidget {
   State<ExploreScreen> createState() => _ExploreScreenState();
 }
 
-class _ExploreScreenState extends State<ExploreScreen>
-    with SingleTickerProviderStateMixin {
+class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = "";
   String _selectedTag = "";
@@ -23,12 +21,12 @@ class _ExploreScreenState extends State<ExploreScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this); // ✅ Fixed Tab Initialization
+    _tabController = TabController(length: 4, vsync: this); // ✅ Added Leaderboard Tab
   }
 
   @override
   void dispose() {
-    _tabController.dispose(); // ✅ Dispose Properly
+    _tabController.dispose();
     super.dispose();
   }
 
@@ -92,32 +90,29 @@ class _ExploreScreenState extends State<ExploreScreen>
 
           const SizedBox(height: 10),
 
-          // 🔹 Instagram-Like Tabs
+          // 🔹 Tabs (Added Leaderboard Tab)
           TabBar(
             controller: _tabController,
             labelColor: Colors.black,
             unselectedLabelColor: Colors.grey,
-            indicatorColor: Colors.blue, // ✅ Highlight selected tab
+            indicatorColor: Colors.blue,
             tabs: const [
               Tab(text: 'For You'),
               Tab(text: 'Users'),
               Tab(text: 'Posts'),
+              Tab(text: 'Leaderboard'), // ✅ New Tab for Top Helpers
             ],
           ),
 
           Expanded(
             child: TabBarView(
               controller: _tabController,
-              physics: const NeverScrollableScrollPhysics(), // ✅ Fixed to make it clickable
+              physics: const NeverScrollableScrollPhysics(),
               children: [
-                // 🔥 For You Tab
                 _buildForYouContent(),
-
-                // 🧑‍💻 Users Tab
-                _buildUserSearchResults(),
-
-                // 📝 Posts Tab
+                _buildUserSearchResults(), // ✅ Fixed Null Safety
                 _buildPostSearchResults(),
+                _buildLeaderboard(),
               ],
             ),
           ),
@@ -126,47 +121,7 @@ class _ExploreScreenState extends State<ExploreScreen>
     );
   }
 
-  // 🔥 For You Content
-  Widget _buildForYouContent() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance.collection('posts').snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-
-        final posts = snapshot.data!.docs.take(10).toList(); // ✅ Limit to 10 posts for now
-
-        if (posts.isEmpty) {
-          return const Center(child: Text('No content available'));
-        }
-
-        return ListView(
-          children: posts.map((post) {
-            final postData = post.data() as Map<String, dynamic>;
-            return Card(
-              margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundImage: AssetImage('assets/default_profile.png'),
-                ),
-                title: Text(postData['userName'] ?? 'Anonymous'),
-                subtitle: Text(postData['content'] ?? 'No content'),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => PostScreen(postData: postData),
-                    ),
-                  );
-                },
-              ),
-            );
-          }).toList(),
-        );
-      },
-    );
-  }
-
-  // 🔍 Search Users
+  // 🧑‍💻 Users Search (Boosted Users First + Null-Safe)
   Widget _buildUserSearchResults() {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance.collection('users').snapshots(),
@@ -187,6 +142,13 @@ class _ExploreScreenState extends State<ExploreScreen>
           return matchesQuery;
         }).toList();
 
+        // ✅ Null-Safe Highlight Check
+        users.sort((a, b) {
+          final aHighlight = ((a.data() as Map<String, dynamic>)['activePerks'] ?? {})['profileHighlight'] != null;
+          final bHighlight = ((b.data() as Map<String, dynamic>)['activePerks'] ?? {})['profileHighlight'] != null;
+          return (bHighlight ? 1 : 0) - (aHighlight ? 1 : 0);
+        });
+
         if (users.isEmpty) {
           return const Center(child: Text('No users found'));
         }
@@ -198,12 +160,15 @@ class _ExploreScreenState extends State<ExploreScreen>
             final userData = user.data() as Map<String, dynamic>;
             final userId = user.id;
 
+            final bool hasProfileHighlight = (userData['activePerks'] ?? {}).containsKey('profileHighlight');
+
             return ListTile(
               leading: CircleAvatar(
                 backgroundImage: AssetImage('assets/default_profile.png'),
               ),
               title: Text(userData['fullName'] ?? 'Unknown User'),
               subtitle: Text(userData['bio'] ?? ''),
+              trailing: hasProfileHighlight ? const Icon(Icons.star, color: Colors.orange) : null,
               onTap: () {
                 Navigator.push(
                   context,
@@ -219,7 +184,55 @@ class _ExploreScreenState extends State<ExploreScreen>
     );
   }
 
-  // 🔍 Search Posts
+  // 🔥 For You Content
+  Widget _buildForYouContent() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance.collection('posts').snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+
+        final posts = snapshot.data!.docs.toList();
+
+        // ✅ Prioritize posts with active boosts
+        posts.sort((a, b) {
+          final aBoosted = (a.data() as Map<String, dynamic>)['priorityBoost'] ?? false;
+          final bBoosted = (b.data() as Map<String, dynamic>)['priorityBoost'] ?? false;
+          return (bBoosted ? 1 : 0) - (aBoosted ? 1 : 0);
+        });
+
+        if (posts.isEmpty) {
+          return const Center(child: Text('No content available'));
+        }
+
+        return ListView(
+          children: posts.map((post) {
+            final postData = post.data() as Map<String, dynamic>;
+            return Card(
+              margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundImage: AssetImage('assets/default_profile.png'),
+                ),
+                title: Text(postData['userName'] ?? 'Anonymous'),
+                subtitle: Text(postData['content'] ?? 'No content'),
+                trailing: postData['priorityBoost'] == true ? const Icon(Icons.star, color: Colors.orange) : null,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => PostScreen(postData: postData),
+                    ),
+                  );
+                },
+              ),
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
+
+  // 📝 Post Search
   Widget _buildPostSearchResults() {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance.collection('posts').snapshots(),
@@ -237,6 +250,13 @@ class _ExploreScreenState extends State<ExploreScreen>
           return matchesQuery && matchesTag;
         }).toList();
 
+        // ✅ Boosted posts first
+        posts.sort((a, b) {
+          final aBoosted = (a.data() as Map<String, dynamic>)['priorityBoost'] ?? false;
+          final bBoosted = (b.data() as Map<String, dynamic>)['priorityBoost'] ?? false;
+          return (bBoosted ? 1 : 0) - (aBoosted ? 1 : 0);
+        });
+
         if (posts.isEmpty) {
           return const Center(child: Text('No posts found'));
         }
@@ -253,6 +273,7 @@ class _ExploreScreenState extends State<ExploreScreen>
               ),
               title: Text(postData['userName'] ?? 'Anonymous'),
               subtitle: Text(postData['content'] ?? 'No content'),
+              trailing: postData['priorityBoost'] == true ? const Icon(Icons.star, color: Colors.orange) : null,
               onTap: () {
                 Navigator.push(
                   context,
@@ -266,5 +287,60 @@ class _ExploreScreenState extends State<ExploreScreen>
         );
       },
     );
+  }
+
+  // 🏆 Leaderboard (Top 10 Helpers Based on XP)
+  Widget _buildLeaderboard() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .orderBy('xpPoints', descending: true)
+          .limit(10)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+
+        final users = snapshot.data!.docs;
+
+        if (users.isEmpty) {
+          return const Center(child: Text('No top helpers found'));
+        }
+
+        return ListView.builder(
+          itemCount: users.length,
+          itemBuilder: (context, index) {
+            final user = users[index];
+            final userData = user.data() as Map<String, dynamic>;
+            final userId = user.id;
+
+            return ListTile(
+              leading: CircleAvatar(
+                backgroundImage: AssetImage('assets/default_profile.png'),
+              ),
+              title: Text(userData['fullName'] ?? 'Unknown User'),
+              subtitle: Text('${userData['xpPoints']} XP'),
+              trailing: _getBadgeIcon(userData['xpPoints']),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ProfileScreen(userID: userId),
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // 🏅 Badge Icon Based on XP
+  Widget? _getBadgeIcon(int xpPoints) {
+    if (xpPoints >= 1000) return const Icon(Icons.emoji_events, color: Colors.purple); // 👑 Legendary Helper
+    if (xpPoints >= 500) return const Icon(Icons.emoji_events, color: Colors.orange); // 🥇 Expert Helper
+    if (xpPoints >= 300) return const Icon(Icons.emoji_events, color: Colors.blue); // 🥈 Skilled Helper
+    if (xpPoints >= 100) return const Icon(Icons.emoji_events, color: Colors.green); // 🥉 Beginner Helper
+    return null;
   }
 }

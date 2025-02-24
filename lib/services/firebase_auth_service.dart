@@ -1,10 +1,53 @@
 import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 class FirebaseAuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  /// ✅ Initialize User in Firestore
+  Future<void> initializeUserInFirestore(User user, String fullName, String email) async {
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'fullName': fullName,
+        'email': email,
+        'bio': 'No bio available yet.',
+        'followers': [],
+        'following': [],
+        'postsCount': 0,
+        'profilePicture': '',
+        'createdAt': FieldValue.serverTimestamp(),
+
+        // ✅ Gamification Fields
+        'xpPoints': 0,
+        'badges': [],
+        'postCount': 0,
+        'commentCount': 0,
+        'helpfulMarks': 0,
+        'dailyLoginStreak': 0,
+        'postingStreak': 0,
+        'lastLoginDate': null,
+        'lastPostDate': null,
+        'referralCount': 0,
+        'categoryPosts': {
+          'Career': 0,
+          'Travel': 0,
+          'Finance': 0,
+          'Technology': 0,
+          'Health': 0
+        },
+        'activePerks': {
+          'priorityPostBoost': null,
+          'profileHighlight': null,
+          'commentBoost': null
+        }
+      });
+    } catch (e) {
+      print('Error initializing user: $e');
+    }
+  }
 
   /// ✅ Sign in with Email & Password
   Future<User?> signInWithEmail(String email, String password) async {
@@ -24,13 +67,18 @@ class FirebaseAuthService {
   }
 
   /// ✅ Register with Email & Password
-  Future<User?> registerWithEmail(String email, String password) async {
+  Future<User?> registerWithEmail(String email, String password, String fullName) async {
     try {
       UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
-      return userCredential.user;
+      User? user = userCredential.user;
+
+      if (user != null) {
+        await initializeUserInFirestore(user, fullName, email);
+      }
+      return user;
     } on FirebaseAuthException catch (e) {
       print('Error during registration: ${e.message}');
       return null;
@@ -44,7 +92,7 @@ class FirebaseAuthService {
   Future<User?> signInWithGoogle() async {
     try {
       final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
-      if (googleUser == null) return null; // User canceled login
+      if (googleUser == null) return null;
 
       final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
       final AuthCredential credential = GoogleAuthProvider.credential(
@@ -53,14 +101,19 @@ class FirebaseAuthService {
       );
 
       UserCredential userCredential = await _auth.signInWithCredential(credential);
-      return userCredential.user;
+      User? user = userCredential.user;
+
+      if (user != null) {
+        await initializeUserInFirestore(user, user.displayName ?? 'Anonymous', user.email ?? '');
+      }
+      return user;
     } catch (e) {
       print('Error during Google sign-in: $e');
       return null;
     }
   }
 
-  /// ✅ Sign in with Apple (Only for iOS/macOS)
+  /// ✅ Sign in with Apple
   Future<User?> signInWithApple() async {
     if (!Platform.isIOS && !Platform.isMacOS) {
       print("Apple Sign-In is only available on iOS & macOS");
@@ -78,32 +131,25 @@ class FirebaseAuthService {
       );
 
       UserCredential userCredential = await _auth.signInWithCredential(credential);
-      return userCredential.user;
+      User? user = userCredential.user;
+
+      if (user != null) {
+        await initializeUserInFirestore(user, user.displayName ?? 'Anonymous', user.email ?? '');
+      }
+      return user;
     } catch (e) {
       print('Error during Apple sign-in: $e');
       return null;
     }
   }
 
-  /// ✅ Sign Out (Supports Google sign-out as well)
+  /// ✅ Sign Out
   Future<void> signOut() async {
     try {
       await _auth.signOut();
-      await GoogleSignIn().signOut(); // Logout from Google
+      await GoogleSignIn().signOut();
     } catch (e) {
       print('Error during sign-out: $e');
-    }
-  }
-
-  /// ✅ Reset Password
-  Future<void> resetPassword(String email) async {
-    try {
-      await _auth.sendPasswordResetEmail(email: email);
-      print('Password reset email sent.');
-    } on FirebaseAuthException catch (e) {
-      print('Error during password reset: ${e.message}');
-    } catch (e) {
-      print('Unknown error during password reset: $e');
     }
   }
 
@@ -114,51 +160,6 @@ class FirebaseAuthService {
     } catch (e) {
       print('Error getting current user: $e');
       return null;
-    }
-  }
-
-  /// ✅ Update Email
-  Future<bool> updateEmail(String newEmail) async {
-    try {
-      final user = _auth.currentUser;
-      if (user != null) {
-        await user.updateEmail(newEmail);
-        return true;
-      }
-      return false;
-    } catch (e) {
-      print('Error updating email: $e');
-      return false;
-    }
-  }
-
-  /// ✅ Update Password
-  Future<bool> updatePassword(String newPassword) async {
-    try {
-      final user = _auth.currentUser;
-      if (user != null) {
-        await user.updatePassword(newPassword);
-        return true;
-      }
-      return false;
-    } catch (e) {
-      print('Error updating password: $e');
-      return false;
-    }
-  }
-
-  /// ✅ Delete User Account
-  Future<bool> deleteAccount() async {
-    try {
-      final user = _auth.currentUser;
-      if (user != null) {
-        await user.delete();
-        return true;
-      }
-      return false;
-    } catch (e) {
-      print('Error deleting account: $e');
-      return false;
     }
   }
 }

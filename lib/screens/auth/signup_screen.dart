@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../services/firebase_auth_service.dart';
 
@@ -30,29 +29,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final UserCredential userCredential = await FirebaseAuth.instance
-          .createUserWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
+      final String fullName =
+          "${_firstNameController.text.trim()} ${_lastNameController.text.trim()}";
+
+      final User? user = await _authService.registerWithEmail(
+        _emailController.text.trim(),
+        _passwordController.text.trim(),
+        fullName,
       );
 
-      final user = userCredential.user;
-
       if (user != null) {
-        final String fullName =
-            "${_firstNameController.text.trim()} ${_lastNameController.text.trim()}";
-
-        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-          'fullName': fullName,
-          'email': _emailController.text.trim(),
-          'bio': 'No bio available yet.',
-          'followers': [],
-          'following': [],
-          'postsCount': 0,
-          'profilePicture': '',
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-
         Navigator.pushReplacementNamed(context, '/home');
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -96,7 +82,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
               const SizedBox(height: 20),
 
-              // 🔹 Google & Apple Sign-In
               ElevatedButton.icon(
                 icon: const Icon(Icons.login),
                 label: const Text('Sign Up with Google'),

@@ -27,7 +27,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _checkIfCurrentUser() {
     String currentUserID = FirebaseAuth.instance.currentUser?.uid ?? '';
-    isCurrentUser = currentUserID == widget.userID; // ✅ Check if viewing own profile
+    isCurrentUser = currentUserID == widget.userID;
   }
 
   Future<void> fetchUserData() async {
@@ -80,79 +80,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // 🔹 Profile Image
-              CircleAvatar(
-                radius: 60,
-                backgroundImage: AssetImage('assets/default_profile.png'),
-              ),
+              CircleAvatar(radius: 60, backgroundImage: AssetImage('assets/default_profile.png')),
               const SizedBox(height: 16),
 
-              // 🔹 Full Name and Bio
-              Text(userData!['fullName'] ?? 'N/A',
-                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+              Text(userData!['fullName'] ?? 'N/A', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
-              Text(userData!['bio'] ?? 'No bio available',
-                  style: TextStyle(fontSize: 16, color: Colors.grey[700])),
-
+              Text(userData!['bio'] ?? 'No bio available', style: TextStyle(fontSize: 16, color: Colors.grey[700])),
               const SizedBox(height: 16),
 
-              // 🔹 Journey Section
-              if (userData!['careerJourney'] != null)
-                Card(
-                  elevation: 3,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Journey', style: TextStyle(fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 4),
-                        Text(userData!['careerJourney']),
-                      ],
-                    ),
-                  ),
-                ),
+              // 🔥 XP Points
+              Text('XP Points: ${userData!['xpPoints'] ?? 0}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
 
-              const SizedBox(height: 16),
-
-              // 🔹 Help Topics
-              if (userData!['helpTopics'] != null &&
-                  (userData!['helpTopics'] as List).isNotEmpty) ...[
-                const Text('How You Can Help', style: TextStyle(fontWeight: FontWeight.bold)),
+              // 🏆 Badges
+              if (userData!['badges'] != null && (userData!['badges'] as List).isNotEmpty) ...[
+                const Text('Badges:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
-                  children: (userData!['helpTopics'] as List)
-                      .map<Widget>((topic) => Chip(
-                            label: Text(topic),
-                            backgroundColor: Colors.blue.shade100,
-                          ))
-                      .toList(),
-                ),
-              ],
-
-              const SizedBox(height: 16),
-
-              // 🔹 Interest Tags
-              if (userData!['interestTags'] != null &&
-                  (userData!['interestTags'] as List).isNotEmpty) ...[
-                const Text('Interest Tags', style: TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  children: (userData!['interestTags'] as List)
-                      .map<Widget>((tag) => Chip(
-                            label: Text('#$tag'),
-                            backgroundColor: Colors.green.shade100,
-                          ))
-                      .toList(),
+                  children: (userData!['badges'] as List).map<Widget>((badge) => Chip(label: Text(badge))).toList(),
                 ),
               ],
 
               const SizedBox(height: 20),
 
-              // ✅ Only show Edit Profile button if it's **current user's profile**
+              // 🔥 Active Perks
+              if (userData!['activePerks'] != null) ...[
+                const Text('Active Perks:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: userData!['activePerks'].entries.map<Widget>((perk) {
+                    if (perk.value != null) {
+                      return Chip(label: Text('${perk.key.replaceAll('_', ' ')}: Active'));
+                    } else {
+                      return const SizedBox.shrink();
+                    }
+                  }).toList(),
+                ),
+              ],
+
+              const SizedBox(height: 20),
+
               if (isCurrentUser)
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
