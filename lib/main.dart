@@ -3,19 +3,24 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'services/firebase_options.dart';
 import 'services/firestore_service.dart';
+import 'services/notification_service.dart'; // ✅ Added Notification Service
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/signup_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/posts/post_screen.dart';
 import 'screens/search/search_screen.dart';
-import 'screens/posts/create_post_screen.dart'; // Ensure correct import
+import 'screens/posts/create_post_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // ✅ Initialize Notifications (FCM & Local)
+  await NotificationService().initialize();
+
   runApp(const MyApp());
 }
 
@@ -32,16 +37,13 @@ class MyApp extends StatelessWidget {
       ),
       initialRoute: FirebaseAuth.instance.currentUser != null ? '/home' : '/login',
       routes: {
-        // Login screen route
         '/login': (context) => const LoginScreen(),
-
-        // Register screen route
         '/register': (context) => const RegisterScreen(),
-
-        // Home screen route
         '/home': (context) => const HomeScreen(),
+        '/create_post': (context) => const CreatePostScreen(),
+        '/search': (context) => const SearchScreen(),
 
-        // Profile screen route
+        // ✅ Safe Profile Navigation (Prevents Crash If No User Logged In)
         '/profile': (context) {
           final currentUser = FirebaseAuth.instance.currentUser;
           return currentUser != null
@@ -55,12 +57,6 @@ class MyApp extends StatelessWidget {
                   ),
                 );
         },
-
-        // Create post screen route
-        '/create_post': (context) => const CreatePostScreen(),
-
-        // Search screen route
-        '/search': (context) => const SearchScreen(),
       },
     );
   }

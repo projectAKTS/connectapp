@@ -21,7 +21,7 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.debug
-            // Enable code shrinking, obfuscation, and optimization for release builds
+            // ✅ Enable Proguard for better optimization
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
@@ -33,6 +33,7 @@ android {
     }
 
     kotlinOptions {
+        // ✅ Ensure Kotlin 2.1.0 Compatibility
         jvmTarget = "17"
     }
 }
@@ -42,15 +43,17 @@ flutter {
 }
 
 dependencies {
+    // ✅ Firebase BOM for automatic version management
     implementation platform('com.google.firebase:firebase-bom:33.7.0')
 
-    // Add the Firebase products you want to use
+    // ✅ Firebase Dependencies
     implementation 'com.google.firebase:firebase-analytics'
     implementation 'com.google.firebase:firebase-auth'
     implementation 'com.google.firebase:firebase-firestore'
 
-    // Url launcher dependencies if not included already
+    // ✅ Fix URL Launcher Dependency Issue
     implementation 'androidx.browser:browser:1.5.0'
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:2.1.0"
 }
 
 apply plugin: 'com.google.gms.google-services'

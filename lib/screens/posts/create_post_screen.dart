@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:uuid/uuid.dart';
+import 'package:connect_app/services/post_service.dart';
+import 'package:connect_app/services/streak_service.dart';
 
 class CreatePostScreen extends StatefulWidget {
   const CreatePostScreen({Key? key}) : super(key: key);
@@ -11,6 +11,9 @@ class CreatePostScreen extends StatefulWidget {
 }
 
 class _CreatePostScreenState extends State<CreatePostScreen> {
+  final PostService _postService = PostService();
+  final StreakService _streakService = StreakService();
+
   final TextEditingController _contentController = TextEditingController();
   bool _isPosting = false;
   List<String> selectedTags = [];
@@ -18,7 +21,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   final List<String> predefinedTags = ['Career', 'Travel', 'Health', 'Technology', 'Education', 'Finance'];
 
   Future<void> _savePost() async {
-    if (_contentController.text.trim().isEmpty) {
+    String content = _contentController.text.trim();
+
+    if (content.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please write some content')));
       return;
     }
@@ -26,48 +31,28 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     setState(() => _isPosting = true);
 
     try {
-      final String postId = const Uuid().v4();
       final User? currentUser = FirebaseAuth.instance.currentUser;
-
       if (currentUser == null) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('User not logged in.')));
         return;
       }
 
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('users').doc(currentUser.uid).get();
-      Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
-      String userName = userData['fullName'] ?? 'Anonymous';
+      // ✅ Ensure `selectedTags` is always a List<String>
+      List<String> tagsToSave = selectedTags.isNotEmpty ? List<String>.from(selectedTags) : [];
 
-      await FirebaseFirestore.instance.collection('posts').doc(postId).set({
-        'id': postId,
-        'userID': currentUser.uid,
-        'userName': userName,
-        'content': _contentController.text.trim(),
-        'tags': selectedTags,
-        'timestamp': FieldValue.serverTimestamp(),
-        'likes': 0,
-        'likedBy': [],
-      });
+      // ✅ Create the post (XP is awarded inside PostService)
+      await _postService.createPost(content, tagsToSave);
 
-      // ✅ Update User XP and Post Count
-      int newPostCount = (userData['postCount'] ?? 0) + 1;
-      int newXP = (userData['xpPoints'] ?? 0) + 10;
-
-      List<String> updatedBadges = List<String>.from(userData['badges'] ?? []);
-      if (newPostCount == 2 && !updatedBadges.contains('First Contributor')) updatedBadges.add('First Contributor');
-      if (newPostCount == 5 && !updatedBadges.contains('Profile Highlight')) updatedBadges.add('Profile Highlight');
-      if (newPostCount == 15 && !updatedBadges.contains('Priority Post Boost')) updatedBadges.add('Priority Post Boost');
-
-      await FirebaseFirestore.instance.collection('users').doc(currentUser.uid).update({
-        'postCount': newPostCount,
-        'xpPoints': newXP,
-        'badges': updatedBadges,
-      });
+      // ✅ Update streaks
+      await _streakService.updateStreak(currentUser.uid);
 
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Post created successfully!')));
-      _contentController.clear();
-      selectedTags.clear();
 
+      // ✅ Clear input fields
+      _contentController.clear();
+      setState(() => selectedTags = []);
+
+      // ✅ Navigate back
       if (Navigator.canPop(context)) {
         Navigator.pop(context);
       } else {
@@ -108,6 +93,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             ),
             const SizedBox(height: 16),
 
+            // 🔹 Predefined Tags
             Wrap(
               spacing: 8.0,
               children: predefinedTags.map((tag) {
