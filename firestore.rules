@@ -2,38 +2,90 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Users Collection
+    // ✅ Users Collection
     match /users/{userId} {
       allow read: if request.auth != null;
-      
-      // ✅ Allow user to update ONLY their own profile (name & bio)
+
+      // ✅ Allow user to update ONLY their own profile (name, bio, badges, location, skills, interests)
       allow update: if request.auth != null && request.auth.uid == userId &&
-        request.resource.data.keys().hasAny(['name', 'bio']); // 🔥 FIXED: Allows updates
+        request.resource.data.keys().hasAny(['name', 'bio', 'badges', 'location', 'skills', 'interestTags']);
 
       // ✅ Allow users to create their own profiles
       allow create: if request.auth != null && request.auth.uid == userId;
 
+      // ❌ Prevent users from deleting their profiles
       allow delete: if false;
     }
 
-    // Posts Collection
+    // ✅ Posts Collection
     match /posts/{postId} {
       allow read: if request.auth != null;
-      
-      // ✅ Allow only authenticated users to create posts
+
+      // ✅ Only authenticated users can create posts
       allow create: if request.auth != null && request.auth.uid == request.resource.data.userID;
 
-      // ✅ Allow post owner to edit content & timestamp
+      // ✅ Allow post owner to edit content, timestamp & tags
       allow update: if request.auth != null &&
         request.auth.uid == resource.data.userID &&
-        request.resource.data.keys().hasOnly(['content', 'timestamp']);
+        request.resource.data.keys().hasOnly(['content', 'timestamp', 'tags']);
 
-      // ✅ Fully allow users to like/unlike posts
+      // ✅ Allow users to like/unlike posts
       allow update: if request.auth != null &&
         request.resource.data.keys().hasAny(['likes', 'likedBy']);
 
       // ✅ Allow post owner to delete their own post
       allow delete: if request.auth != null && request.auth.uid == resource.data.userID;
+
+      // ✅ Allow users to report inappropriate posts
+      allow update: if request.auth != null &&
+        request.resource.data.keys().hasAny(['reports']);
+
+      // 🚀 **Boost Post (Paid Feature)**
+      // ✅ Only allow system functions or admins to set boosts
+      allow update: if request.auth != null &&
+        request.auth.token.admin == true &&
+        request.resource.data.keys().hasAny(['isBoosted', 'boostExpiresAt']);
+    }
+
+    // ✅ Comments Collection
+    match /posts/{postId}/comments/{commentId} {
+      allow read: if request.auth != null;
+
+      // ✅ Allow users to comment on posts
+      allow create: if request.auth != null;
+
+      // ✅ Allow users to edit only their own comments
+      allow update: if request.auth != null && request.auth.uid == resource.data.userID &&
+        request.resource.data.keys().hasOnly(['content', 'timestamp']);
+
+      // ✅ Allow users to delete only their own comments
+      allow delete: if request.auth != null && request.auth.uid == resource.data.userID;
+    }
+
+    // ✅ Replies Collection (Nested under comments)
+    match /posts/{postId}/comments/{commentId}/replies/{replyId} {
+      allow read: if request.auth != null;
+
+      // ✅ Allow users to reply to comments
+      allow create: if request.auth != null;
+
+      // ✅ Allow users to edit only their own replies
+      allow update: if request.auth != null && request.auth.uid == resource.data.userID &&
+        request.resource.data.keys().hasOnly(['content', 'timestamp']);
+
+      // ✅ Allow users to delete only their own replies
+      allow delete: if request.auth != null && request.auth.uid == resource.data.userID;
+    }
+
+    // ✅ Followers Collection (Secure Follow/Unfollow Feature)
+    match /followers/{userId}/userFollowers/{followerId} {
+      allow read: if request.auth != null;  // ✅ Users can see followers
+
+      // ✅ Allow a user to follow/unfollow someone
+      allow create, delete: if request.auth != null && request.auth.uid == followerId;
+
+      // ❌ Prevent modifications by others (No editing follower data)
+      allow update: if false;
     }
   }
 }

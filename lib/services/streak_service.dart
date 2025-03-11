@@ -4,7 +4,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 class StreakService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  /// ✅ Check and update streaks daily
+  /// ✅ Check and update daily login/posting streaks
   Future<void> updateStreak(String userId) async {
     DocumentReference userRef = _firestore.collection('users').doc(userId);
 
@@ -19,16 +19,23 @@ class StreakService {
 
       if (lastPostDate == null || _isNewDay(lastPostDate)) {
         currentStreak++;
-      } else {
-        currentStreak = 1; // Reset streak if inactive
+      }
+
+      // 🔹 Streak Badges
+      List<String> updatedBadges = List<String>.from(userData['badges'] ?? []);
+      if (currentStreak == 7 && !updatedBadges.contains('🔥 Streak Starter')) {
+        updatedBadges.add('🔥 Streak Starter');
+      }
+      if (currentStreak == 30 && !updatedBadges.contains('💪 Dedicated Contributor')) {
+        updatedBadges.add('💪 Dedicated Contributor');
       }
 
       transaction.update(userRef, {
         'streakDays': currentStreak,
         'lastPostDate': FieldValue.serverTimestamp(),
+        'badges': updatedBadges,
       });
 
-      // ✅ Notify users at key milestones
       if ([5, 10, 30].contains(currentStreak)) {
         await FirebaseMessaging.instance.sendMessage(
           to: userId,
@@ -41,7 +48,7 @@ class StreakService {
     });
   }
 
-  /// ✅ Helper function to check if it's a new day
+  /// ✅ Check if it's a new day
   bool _isNewDay(Timestamp lastPostDate) {
     DateTime lastDate = lastPostDate.toDate();
     DateTime today = DateTime.now();

@@ -3,14 +3,15 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'services/firebase_options.dart';
 import 'services/firestore_service.dart';
-import 'services/notification_service.dart'; // ✅ Added Notification Service
+import 'services/notification_service.dart'; // ✅ Notifications
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/signup_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/posts/post_screen.dart';
-import 'screens/search/search_screen.dart';
 import 'screens/posts/create_post_screen.dart';
+import 'screens/search/search_screen.dart';
+import 'screens/posts/boost_post_screen.dart'; // ✅ Boost Post Screen
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -57,6 +58,32 @@ class MyApp extends StatelessWidget {
                   ),
                 );
         },
+      },
+      onGenerateRoute: (settings) {
+        if (settings.name == '/boostPost') {
+          final args = settings.arguments as Map<String, dynamic>?;
+
+          if (args == null || !args.containsKey('postId')) {
+            return MaterialPageRoute(
+              builder: (context) => const Scaffold(
+                body: Center(
+                  child: Text(
+                    'Invalid Post ID. Please try again.',
+                    style: TextStyle(fontSize: 16, color: Colors.red),
+                  ),
+                ),
+              ),
+            );
+          }
+
+          final postId = args['postId'];
+
+          return MaterialPageRoute(
+            builder: (context) => BoostPostScreen(postId: postId),
+          );
+        }
+
+        return null;
       },
     );
   }

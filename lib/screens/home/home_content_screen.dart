@@ -8,7 +8,15 @@ class HomeContentScreen extends StatelessWidget {
   const HomeContentScreen({Key? key}) : super(key: key);
 
   Future<void> _toggleLike(BuildContext context, String postId, List<String> likedBy) async {
-    final String userId = FirebaseAuth.instance.currentUser!.uid;
+    final User? currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You need to be logged in to like posts.')),
+      );
+      return;
+    }
+
+    final String userId = currentUser.uid;
     final postRef = FirebaseFirestore.instance.collection('posts').doc(postId);
 
     try {
@@ -18,15 +26,16 @@ class HomeContentScreen extends StatelessWidget {
 
         Map<String, dynamic> postData = postSnapshot.data() as Map<String, dynamic>;
         List likedByList = postData['likedBy'] ?? [];
+        int likes = postData['likes'] ?? 0;
 
         if (likedByList.contains(userId)) {
           transaction.update(postRef, {
-            'likes': FieldValue.increment(-1),
+            'likes': likes - 1,
             'likedBy': FieldValue.arrayRemove([userId]),
           });
         } else {
           transaction.update(postRef, {
-            'likes': FieldValue.increment(1),
+            'likes': likes + 1,
             'likedBy': FieldValue.arrayUnion([userId]),
           });
         }
@@ -40,6 +49,9 @@ class HomeContentScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final User? currentUser = FirebaseAuth.instance.currentUser;
+    final String? currentUserId = currentUser?.uid; 
+
     return Scaffold(
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
@@ -61,21 +73,21 @@ class HomeContentScreen extends StatelessWidget {
             itemCount: posts.length,
             itemBuilder: (context, index) {
               final post = posts[index];
-              final data = post.data() as Map<String, dynamic>? ?? {};
 
+              final Map<String, dynamic> data = post.data() as Map<String, dynamic>? ?? {};
               final String postId = post.id;
-              final String userName = data['userName'] ?? 'Anonymous'; // ✅ Fetch stored name
+              final String userName = data['userName'] ?? 'Unknown User'; // ✅ Fix for Anonymous issue
               final String content = data['content'] ?? 'No content available';
               final List<String> likedBy =
-                  data['likedBy'] != null ? List<String>.from(data['likedBy']) : [];
+                  (data['likedBy'] != null) ? List<String>.from(data['likedBy']) : [];
               final int likes = data['likes'] ?? 0;
-              final String currentUserId = FirebaseAuth.instance.currentUser!.uid;
+              final String postOwnerId = data['userID'] ?? 'unknown_user';
 
-              // ✅ Format timestamp
-              String formattedTime = data['timestamp'] != null
-                  ? DateFormat('MMM d, yyyy - hh:mm a')
-                      .format((data['timestamp'] as Timestamp).toDate())
-                  : 'Just now';
+              String formattedTime = 'Just now';
+              if (data.containsKey('timestamp') && data['timestamp'] is Timestamp) {
+                formattedTime = DateFormat('MMM d, yyyy - hh:mm a')
+                    .format((data['timestamp'] as Timestamp).toDate());
+              }
 
               return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -88,18 +100,10 @@ class HomeContentScreen extends StatelessWidget {
                     children: [
                       Row(
                         children: [
-                          const CircleAvatar(
-                            child: Icon(Icons.person),
-                            radius: 20,
-                          ),
+                          const CircleAvatar(child: Icon(Icons.person), radius: 20),
                           const SizedBox(width: 10),
-                          Text(
-                            userName, // ✅ Display stored user name
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
+                          Text(userName, // ✅ Display correct username
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                         ],
                       ),
                       const SizedBox(height: 10),
@@ -118,7 +122,15 @@ class HomeContentScreen extends StatelessWidget {
                                       : Icons.favorite_border,
                                   color: likedBy.contains(currentUserId) ? Colors.red : Colors.grey,
                                 ),
-                                onPressed: () => _toggleLike(context, postId, likedBy),
+                                onPressed: () {
+                                  if (currentUserId != null) {
+                                    _toggleLike(context, postId, likedBy);
+                                  } else {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('Please log in to like posts.')),
+                                    );
+                                  }
+                                },
                               ),
                               Text('$likes likes'),
                             ],
@@ -135,6 +147,32 @@ class HomeContentScreen extends StatelessWidget {
                         ],
                       ),
                       Text(formattedTime, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+
+                      if (currentUserId != null && postOwnerId != 'unknown_user')
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: () {
+                              if (currentUserId == postOwnerId) {
+                                Navigator.pushNamed(
+                                  context,
+                                  '/boostPost',
+                                  arguments: {'postId': postId},
+                                );
+                              } else {
+                                Navigator.pushNamed(
+                                  context,
+                                  '/profile',
+                                  arguments: {'userId': postOwnerId},
+                                );
+                              }
+                            },
+                            child: Text(
+                              currentUserId == postOwnerId ? 'Boost Post' : 'View Profile',
+                              style: TextStyle(color: Colors.blue),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),

@@ -38,6 +38,7 @@ dependencies:
   uuid: ^4.5.1 # Latest version
   firebase_messaging: ^15.2.3
   flutter_local_notifications: ^18.0.1
+  in_app_purchase: ^3.2.1
 
 dev_dependencies:
   flutter_test:

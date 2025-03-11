@@ -15,8 +15,8 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   Map<String, dynamic>? userData;
   bool isLoading = true;
-  String errorMessage = "";
   bool isCurrentUser = false;
+  bool isFollowing = false;
 
   @override
   void initState() {
@@ -26,34 +26,72 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _checkIfCurrentUser() {
-    String currentUserID = FirebaseAuth.instance.currentUser?.uid ?? '';
-    isCurrentUser = currentUserID == widget.userID;
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser != null) {
+      setState(() {
+        isCurrentUser = currentUser.uid == widget.userID;
+      });
+    }
   }
 
   Future<void> fetchUserData() async {
     try {
-      DocumentSnapshot snapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(widget.userID)
-          .get();
+      DocumentSnapshot snapshot =
+          await FirebaseFirestore.instance.collection('users').doc(widget.userID).get();
 
       if (snapshot.exists) {
         setState(() {
           userData = snapshot.data() as Map<String, dynamic>;
           isLoading = false;
         });
+
+        // ✅ Check if the current user follows this profile
+        if (!isCurrentUser) {
+          final currentUser = FirebaseAuth.instance.currentUser;
+          if (currentUser != null) {
+            final followDoc = await FirebaseFirestore.instance
+                .collection('followers')
+                .doc(widget.userID)
+                .collection('userFollowers')
+                .doc(currentUser.uid)
+                .get();
+
+            setState(() {
+              isFollowing = followDoc.exists;
+            });
+          }
+        }
       } else {
         setState(() {
-          errorMessage = "No user found for userID: ${widget.userID}";
           isLoading = false;
         });
       }
     } catch (e) {
       setState(() {
-        errorMessage = "Error fetching user data: $e";
         isLoading = false;
       });
+      print('Error fetching user data: $e');
     }
+  }
+
+  Future<void> toggleFollow() async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+
+    final followRef = FirebaseFirestore.instance
+        .collection('followers')
+        .doc(widget.userID)
+        .collection('userFollowers');
+
+    if (isFollowing) {
+      await followRef.doc(currentUser.uid).delete();
+    } else {
+      await followRef.doc(currentUser.uid).set({'timestamp': FieldValue.serverTimestamp()});
+    }
+
+    setState(() {
+      isFollowing = !isFollowing;
+    });
   }
 
   @override
@@ -65,87 +103,110 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
     }
 
-    if (errorMessage.isNotEmpty) {
+    if (userData == null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Profile')),
-        body: Center(child: Text(errorMessage, style: const TextStyle(color: Colors.red))),
+        body: const Center(child: Text('User not found!')),
       );
     }
 
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              CircleAvatar(radius: 60, backgroundImage: AssetImage('assets/default_profile.png')),
-              const SizedBox(height: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // Profile Picture
+            Center(
+              child: CircleAvatar(
+                radius: 60,
+                backgroundImage: AssetImage('assets/default_profile.png'),
+              ),
+            ),
+            const SizedBox(height: 16),
 
-              Text(userData!['fullName'] ?? 'N/A', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Text(userData!['bio'] ?? 'No bio available', style: TextStyle(fontSize: 16, color: Colors.grey[700])),
-              const SizedBox(height: 16),
+            // Name & Bio
+            Text(userData?['fullName'] ?? 'Unknown User',
+                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Text(userData?['bio'] ?? 'No bio available',
+                textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.grey[700])),
+            const SizedBox(height: 16),
 
-              // 🔥 XP Points
-              Text('XP Points: ${userData!['xpPoints'] ?? 0}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            // Follow/Unfollow Button (Only for Other Users)
+            if (!isCurrentUser)
+              ElevatedButton(
+                onPressed: toggleFollow,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                child: Text(isFollowing ? 'Unfollow' : 'Follow'),
+              ),
+            const SizedBox(height: 16),
+
+            // XP Points
+            Text('XP Points: ${userData?['xpPoints'] ?? 0}',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+
+            // Streak Days
+            Text('🔥 Streak: ${userData?['streakDays'] ?? 0} days',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+
+            // Helpful Marks
+            Text('👍 Helpful Marks: ${userData?['helpfulMarks'] ?? 0}',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+
+            // Interests
+            if (userData?['interestTags'] != null && (userData!['interestTags'] as List).isNotEmpty) ...[
+              const Text('Interests:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              Wrap(
+                spacing: 8,
+                children: (userData!['interestTags'] as List)
+                    .map<Widget>((interest) => Chip(label: Text(interest)))
+                    .toList(),
+              ),
               const SizedBox(height: 8),
-
-              // 🏆 Badges
-              if (userData!['badges'] != null && (userData!['badges'] as List).isNotEmpty) ...[
-                const Text('Badges:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  children: (userData!['badges'] as List).map<Widget>((badge) => Chip(label: Text(badge))).toList(),
-                ),
-              ],
-
-              const SizedBox(height: 20),
-
-              // 🔥 Active Perks
-              if (userData!['activePerks'] != null) ...[
-                const Text('Active Perks:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  children: userData!['activePerks'].entries.map<Widget>((perk) {
-                    if (perk.value != null) {
-                      return Chip(label: Text('${perk.key.replaceAll('_', ' ')}: Active'));
-                    } else {
-                      return const SizedBox.shrink();
-                    }
-                  }).toList(),
-                ),
-              ],
-
-              const SizedBox(height: 20),
-
-              if (isCurrentUser)
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  onPressed: () async {
-                    final updatedData = await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => EditProfileScreen(userData: userData!),
-                      ),
-                    );
-
-                    if (updatedData != null) {
-                      setState(() {
-                        userData!.addAll(updatedData);
-                      });
-                    }
-                  },
-                  child: const Text('Edit Profile'),
-                ),
             ],
-          ),
+
+            // Badges
+            if (userData?['badges'] != null && (userData!['badges'] as List).isNotEmpty) ...[
+              const Text('🏅 Badges:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              Wrap(
+                spacing: 8,
+                children: (userData!['badges'] as List).map<Widget>((badge) => Chip(label: Text(badge))).toList(),
+              ),
+              const SizedBox(height: 8),
+            ],
+
+            // Edit Profile Button (For Current User)
+            if (isCurrentUser)
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: () async {
+                  final updatedData = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => EditProfileScreen(userData: userData!),
+                    ),
+                  );
+
+                  if (updatedData != null) {
+                    setState(() {
+                      userData!.addAll(updatedData);
+                    });
+                  }
+                },
+                child: const Text('Edit Profile'),
+              ),
+          ],
         ),
       ),
     );
