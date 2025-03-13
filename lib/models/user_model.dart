@@ -7,6 +7,7 @@ class UserModel {
   final int helpfulMarks;
   final int streakDays;
   final List<String> badges;
+  final List<Map<String, dynamic>> helpfulVotesGiven; // ✅ Track daily helpful votes
 
   UserModel({
     required this.userId,
@@ -17,6 +18,7 @@ class UserModel {
     this.helpfulMarks = 0,
     this.streakDays = 0,
     this.badges = const [],
+    this.helpfulVotesGiven = const [],
   });
 
   factory UserModel.fromMap(Map<String, dynamic> data, String userId) {
@@ -29,6 +31,7 @@ class UserModel {
       helpfulMarks: data['helpfulMarks'] ?? 0,
       streakDays: data['streakDays'] ?? 0,
       badges: List<String>.from(data['badges'] ?? []),
+      helpfulVotesGiven: List<Map<String, dynamic>>.from(data['helpfulVotesGiven'] ?? []),
     );
   }
 }

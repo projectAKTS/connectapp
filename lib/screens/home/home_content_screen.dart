@@ -4,8 +4,15 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../posts/comment_bottom_sheet.dart';
 import 'package:intl/intl.dart';
 
-class HomeContentScreen extends StatelessWidget {
+class HomeContentScreen extends StatefulWidget {
   const HomeContentScreen({Key? key}) : super(key: key);
+
+  @override
+  _HomeContentScreenState createState() => _HomeContentScreenState();
+}
+
+class _HomeContentScreenState extends State<HomeContentScreen> {
+  final Map<String, int> helpfulVotesMap = {}; // ✅ Store Helpful Votes in State
 
   Future<void> _toggleLike(BuildContext context, String postId, List<String> likedBy) async {
     final User? currentUser = FirebaseAuth.instance.currentUser;
@@ -47,16 +54,104 @@ class HomeContentScreen extends StatelessWidget {
     }
   }
 
+  /// ✅ Mark Post as Helpful (Final Version)
+  Future<void> _markHelpful(BuildContext context, String postId, String postOwnerId) async {
+    final User? currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You need to be logged in to mark as helpful.')),
+      );
+      return;
+    }
+
+    final String userId = currentUser.uid;
+    final userRef = FirebaseFirestore.instance.collection('users').doc(userId);
+    final postRef = FirebaseFirestore.instance.collection('posts').doc(postId);
+    final ownerRef = FirebaseFirestore.instance.collection('users').doc(postOwnerId);
+
+    try {
+      DocumentSnapshot userSnapshot = await userRef.get();
+      if (!userSnapshot.exists) return;
+
+      List<dynamic> userHelpfulVotes = userSnapshot['helpfulVotesGiven'] ?? [];
+      bool hasVoted = userHelpfulVotes.any((vote) => vote['postId'] == postId);
+
+      setState(() {
+        int currentVotes = helpfulVotesMap[postId] ?? 0;
+        if (hasVoted) {
+          helpfulVotesMap[postId] = (currentVotes > 0) ? currentVotes - 1 : 0; // ✅ Prevent Negative
+        } else {
+          helpfulVotesMap[postId] = currentVotes + 1;
+        }
+      });
+
+      if (hasVoted) {
+        await FirebaseFirestore.instance.runTransaction((transaction) async {
+          transaction.update(userRef, {
+            'helpfulVotesGiven': FieldValue.arrayRemove([
+              {'postId': postId, 'date': DateTime.now().toString().substring(0, 10)}
+            ]),
+          });
+          transaction.update(postRef, {
+            'helpfulVotes': FieldValue.increment(-1),
+          });
+          transaction.update(ownerRef, {
+            'xpPoints': FieldValue.increment(-10),
+            'helpfulMarks': FieldValue.increment(-1),
+          });
+        });
+      } else {
+        int helpfulVotesToday = userHelpfulVotes.where((vote) {
+          return vote['date'] == DateTime.now().toString().substring(0, 10);
+        }).length;
+
+        if (helpfulVotesToday >= 5) {
+          setState(() {
+            helpfulVotesMap[postId] = helpfulVotesMap[postId]! - 1;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('You can only mark 5 posts as helpful per day.')),
+          );
+          return;
+        }
+
+        await FirebaseFirestore.instance.runTransaction((transaction) async {
+          transaction.update(userRef, {
+            'helpfulVotesGiven': FieldValue.arrayUnion([
+              {'postId': postId, 'date': DateTime.now().toString().substring(0, 10)}
+            ]),
+          });
+          transaction.update(postRef, {
+            'helpfulVotes': FieldValue.increment(1),
+          });
+          transaction.update(ownerRef, {
+            'xpPoints': FieldValue.increment(10),
+            'helpfulMarks': FieldValue.increment(1),
+          });
+        });
+      }
+    } catch (e) {
+      setState(() {
+        helpfulVotesMap[postId] = (helpfulVotesMap[postId] ?? 0) - 1;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error marking helpful: $e')),
+      );
+    }
+  }
+
+
   @override
   Widget build(BuildContext context) {
     final User? currentUser = FirebaseAuth.instance.currentUser;
-    final String? currentUserId = currentUser?.uid; 
+    final String? currentUserId = currentUser?.uid;
 
     return Scaffold(
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
             .collection('posts')
             .orderBy('timestamp', descending: true)
+            .orderBy('helpfulVotes', descending: true)
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -73,14 +168,13 @@ class HomeContentScreen extends StatelessWidget {
             itemCount: posts.length,
             itemBuilder: (context, index) {
               final post = posts[index];
-
               final Map<String, dynamic> data = post.data() as Map<String, dynamic>? ?? {};
               final String postId = post.id;
-              final String userName = data['userName'] ?? 'Unknown User'; // ✅ Fix for Anonymous issue
+              final String userName = data['userName'] ?? 'Unknown User';
               final String content = data['content'] ?? 'No content available';
-              final List<String> likedBy =
-                  (data['likedBy'] != null) ? List<String>.from(data['likedBy']) : [];
+              final List<String> likedBy = (data['likedBy'] != null) ? List<String>.from(data['likedBy']) : [];
               final int likes = data['likes'] ?? 0;
+              final int helpfulVotes = helpfulVotesMap[postId] ?? data['helpfulVotes'] ?? 0;
               final String postOwnerId = data['userID'] ?? 'unknown_user';
 
               String formattedTime = 'Just now';
@@ -98,81 +192,20 @@ class HomeContentScreen extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          const CircleAvatar(child: Icon(Icons.person), radius: 20),
-                          const SizedBox(width: 10),
-                          Text(userName, // ✅ Display correct username
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                        ],
-                      ),
+                      Text(userName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                       const SizedBox(height: 10),
                       Text(content, style: const TextStyle(fontSize: 14)),
-                      const SizedBox(height: 10),
-
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Row(
-                            children: [
-                              IconButton(
-                                icon: Icon(
-                                  likedBy.contains(currentUserId)
-                                      ? Icons.favorite
-                                      : Icons.favorite_border,
-                                  color: likedBy.contains(currentUserId) ? Colors.red : Colors.grey,
-                                ),
-                                onPressed: () {
-                                  if (currentUserId != null) {
-                                    _toggleLike(context, postId, likedBy);
-                                  } else {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('Please log in to like posts.')),
-                                    );
-                                  }
-                                },
-                              ),
-                              Text('$likes likes'),
-                            ],
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.comment),
-                            onPressed: () {
-                              showModalBottomSheet(
-                                context: context,
-                                builder: (context) => CommentBottomSheet(postId: postId),
-                              );
-                            },
-                          ),
+                          IconButton(icon: Icon(Icons.favorite, color: likedBy.contains(currentUserId) ? Colors.red : Colors.grey),
+                            onPressed: () => _toggleLike(context, postId, likedBy)),
+                          IconButton(icon: const Icon(Icons.thumb_up, color: Colors.blue),
+                            onPressed: () => _markHelpful(context, postId, postOwnerId)),
+                          Text('$helpfulVotes helpful'),
                         ],
                       ),
                       Text(formattedTime, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-
-                      if (currentUserId != null && postOwnerId != 'unknown_user')
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton(
-                            onPressed: () {
-                              if (currentUserId == postOwnerId) {
-                                Navigator.pushNamed(
-                                  context,
-                                  '/boostPost',
-                                  arguments: {'postId': postId},
-                                );
-                              } else {
-                                Navigator.pushNamed(
-                                  context,
-                                  '/profile',
-                                  arguments: {'userId': postOwnerId},
-                                );
-                              }
-                            },
-                            child: Text(
-                              currentUserId == postOwnerId ? 'Boost Post' : 'View Profile',
-                              style: TextStyle(color: Colors.blue),
-                            ),
-                          ),
-                        ),
                     ],
                   ),
                 ),

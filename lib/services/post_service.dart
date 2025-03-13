@@ -71,4 +71,48 @@ class PostService {
       }
     }
   }
+
+  /// ✅ Mark Post as Helpful (Max 5 per day)
+  Future<void> markPostHelpful(String postId, String postOwnerId) async {
+    final User? user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    String userId = user.uid;
+    final userRef = _firestore.collection('users').doc(userId);
+    final postRef = _firestore.collection('posts').doc(postId);
+
+    await _firestore.runTransaction((transaction) async {
+      DocumentSnapshot userSnapshot = await transaction.get(userRef);
+      DocumentSnapshot postSnapshot = await transaction.get(postRef);
+
+      if (!userSnapshot.exists || !postSnapshot.exists) return;
+
+      Map<String, dynamic> userData = userSnapshot.data() as Map<String, dynamic>;
+      Map<String, dynamic> postData = postSnapshot.data() as Map<String, dynamic>;
+
+      List userHelpfulVotes = userData['helpfulVotesGiven'] ?? [];
+      int helpfulVotesToday = userHelpfulVotes.where((vote) {
+        return vote['date'] == DateTime.now().toString().substring(0, 10);
+      }).length;
+
+      if (helpfulVotesToday >= 5) {
+        print('⚠ You can only mark 5 posts as helpful per day.');
+        return;
+      }
+
+      transaction.update(userRef, {
+        'helpfulVotesGiven': FieldValue.arrayUnion([
+          {'postId': postId, 'date': DateTime.now().toString().substring(0, 10)}
+        ]),
+      });
+
+      transaction.update(postRef, {
+        'helpfulVotes': (postData['helpfulVotes'] ?? 0) + 1,
+      });
+
+      _gamificationService.awardXP(postOwnerId, 10, isHelpful: true);
+    });
+
+    print('✅ Marked post as helpful!');
+  }
 }

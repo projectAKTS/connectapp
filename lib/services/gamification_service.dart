@@ -19,6 +19,13 @@ class GamificationService {
       int helpfulMarks = (userData['helpfulMarks'] ?? 0) + (isHelpful ? 1 : 0);
       List<String> updatedBadges = List<String>.from(userData['badges'] ?? []);
 
+      // 🔹 Track Helpful Votes Given
+      if (isHelpful) {
+        List<Map<String, dynamic>> helpfulVotesGiven = List<Map<String, dynamic>>.from(userData['helpfulVotesGiven'] ?? []);
+        helpfulVotesGiven.add({'date': DateTime.now().toString().substring(0, 10)});
+        transaction.update(userRef, {'helpfulVotesGiven': helpfulVotesGiven});
+      }
+
       // 🔹 Post Milestone Badges
       if (newPostCount == 2 && !updatedBadges.contains('🏅 First Contributor')) {
         updatedBadges.add('🏅 First Contributor');
