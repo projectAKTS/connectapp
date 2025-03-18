@@ -1,8 +1,9 @@
-import 'dart:io';
+import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+import 'dart:io';
 
 class FirebaseAuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -42,7 +43,10 @@ class FirebaseAuthService {
           'priorityPostBoost': null,
           'profileHighlight': null,
           'commentBoost': null
-        }
+        },
+        // New fields for premium trial
+        'premiumStatus': 'none',
+        'trialUsed': false,
       });
     } catch (e) {
       print('Error initializing user: $e');

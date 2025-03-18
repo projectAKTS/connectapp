@@ -64,24 +64,32 @@ class _RegisterScreenState extends State<RegisterScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              TextField(controller: _firstNameController, decoration: const InputDecoration(labelText: 'First Name *')),
+              TextField(
+                  controller: _firstNameController,
+                  decoration: const InputDecoration(labelText: 'First Name *')),
               const SizedBox(height: 10),
-              TextField(controller: _lastNameController, decoration: const InputDecoration(labelText: 'Last Name (Optional)')),
+              TextField(
+                  controller: _lastNameController,
+                  decoration: const InputDecoration(labelText: 'Last Name (Optional)')),
               const SizedBox(height: 10),
-              TextField(controller: _emailController, decoration: const InputDecoration(labelText: 'Email')),
+              TextField(
+                  controller: _emailController,
+                  decoration: const InputDecoration(labelText: 'Email')),
               const SizedBox(height: 10),
-              TextField(controller: _passwordController, obscureText: true, decoration: const InputDecoration(labelText: 'Password')),
+              TextField(
+                  controller: _passwordController,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: 'Password')),
               const SizedBox(height: 20),
-
               _isLoading
                   ? const CircularProgressIndicator()
                   : ElevatedButton(
                       onPressed: _register,
-                      style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(50)),
+                      style: ElevatedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(50)),
                       child: const Text('Register'),
                     ),
               const SizedBox(height: 20),
-
               ElevatedButton.icon(
                 icon: const Icon(Icons.login),
                 label: const Text('Sign Up with Google'),

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
-
 import '../posts/comment_bottom_sheet.dart'; // If you still need it
 import 'package:connect_app/services/post_service.dart';
 import 'package:connect_app/services/gamification_service.dart'; // If needed for direct calls

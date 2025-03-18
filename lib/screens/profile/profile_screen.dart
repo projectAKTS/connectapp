@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'edit_profile_screen.dart';
+import 'package:intl/intl.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String userID;
@@ -36,8 +37,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> fetchUserData() async {
     try {
-      DocumentSnapshot snapshot =
-          await FirebaseFirestore.instance.collection('users').doc(widget.userID).get();
+      DocumentSnapshot snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.userID)
+          .get();
 
       if (snapshot.exists) {
         setState(() {
@@ -131,7 +134,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             Text(userData?['bio'] ?? 'No bio available',
-                textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.grey[700])),
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, color: Colors.grey[700])),
             const SizedBox(height: 16),
 
             // Follow/Unfollow Button (Only for Other Users)
@@ -161,8 +165,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
 
+            // Premium Info Section
+            if (userData?['premiumStatus'] != null && userData?['premiumStatus'] != 'none') ...[
+              const Text('Premium Status:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              Text('${userData?['premiumStatus']}',
+                  style: const TextStyle(fontSize: 16, color: Colors.blueAccent)),
+              if (userData?['premiumExpiresAt'] != null)
+                Text(
+                  'Expires: ${DateFormat.yMMMd().format((userData?['premiumExpiresAt'] as Timestamp).toDate())}',
+                  style: const TextStyle(fontSize: 16, color: Colors.blueAccent),
+                ),
+              if (userData?['freeConsultationMinutes'] != null)
+                Text(
+                  'Free Consultation Minutes: ${userData?['freeConsultationMinutes']}',
+                  style: const TextStyle(fontSize: 16, color: Colors.blueAccent),
+                ),
+              if (userData?['discountPercent'] != null)
+                Text(
+                  'Discount on Calls: ${userData?['discountPercent']}%',
+                  style: const TextStyle(fontSize: 16, color: Colors.blueAccent),
+                ),
+              const SizedBox(height: 8),
+            ],
+
+            // (Optional) Show if trial used
+            Text('Trial Used: ${userData?['trialUsed'] == true ? 'Yes' : 'No'}',
+                style: TextStyle(fontSize: 16, color: Colors.grey[700])),
+
             // Interests
             if (userData?['interestTags'] != null && (userData!['interestTags'] as List).isNotEmpty) ...[
+              const SizedBox(height: 16),
               const Text('Interests:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               Wrap(
                 spacing: 8,
@@ -178,7 +210,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const Text('🏅 Badges:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               Wrap(
                 spacing: 8,
-                children: (userData!['badges'] as List).map<Widget>((badge) => Chip(label: Text(badge))).toList(),
+                children: (userData!['badges'] as List)
+                    .map<Widget>((badge) => Chip(label: Text(badge)))
+                    .toList(),
               ),
               const SizedBox(height: 8),
             ],
