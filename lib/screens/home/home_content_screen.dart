@@ -19,13 +19,48 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
 
   /// A safe helper to show a SnackBar if the widget is still mounted
   void _safeShowSnackBar(String message) {
-    // 1) Check if widget is still in the widget tree
     if (!mounted) return;
-    // 2) Get the messenger if it exists
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (messenger == null) return;
-    // 3) Show the SnackBar
     messenger.showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// Function to report a post
+  Future<void> _reportPost(BuildContext context, String postId) async {
+    final User? currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      _safeShowSnackBar('You need to be logged in to report posts.');
+      return;
+    }
+    bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Report Post'),
+        content: const Text('Are you sure you want to report this post?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Report'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      try {
+        await FirebaseFirestore.instance.collection('reports').add({
+          'postId': postId,
+          'reportedBy': currentUser.uid,
+          'timestamp': FieldValue.serverTimestamp(),
+        });
+        _safeShowSnackBar('Post reported. Thank you for your feedback.');
+      } catch (e) {
+        _safeShowSnackBar('Error reporting post: $e');
+      }
+    }
   }
 
   /// Toggle the "like" status of a post
@@ -49,13 +84,11 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
         int likes = postData['likes'] ?? 0;
 
         if (likedByList.contains(userId)) {
-          // Already liked -> unlike
           transaction.update(postRef, {
             'likes': likes - 1,
             'likedBy': FieldValue.arrayRemove([userId]),
           });
         } else {
-          // Not liked -> like
           transaction.update(postRef, {
             'likes': likes + 1,
             'likedBy': FieldValue.arrayUnion([userId]),
@@ -90,20 +123,16 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
       List<dynamic> userHelpfulVotes = userSnapshot['helpfulVotesGiven'] ?? [];
       bool hasVoted = userHelpfulVotes.any((vote) => vote['postId'] == postId);
 
-      // Update local UI immediately
       setState(() {
         int currentVotes = helpfulVotesMap[postId] ?? 0;
         if (hasVoted) {
-          // Removing a vote -> clamp to 0
           helpfulVotesMap[postId] = (currentVotes > 0) ? currentVotes - 1 : 0;
         } else {
-          // Adding a vote
           helpfulVotesMap[postId] = currentVotes + 1;
         }
       });
 
       if (hasVoted) {
-        // Remove the helpful vote in Firestore
         await FirebaseFirestore.instance.runTransaction((transaction) async {
           transaction.update(userRef, {
             'helpfulVotesGiven': FieldValue.arrayRemove([
@@ -122,16 +151,13 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
           });
         });
 
-        // Show feedback if still mounted
         _safeShowSnackBar('Helpful vote removed.');
       } else {
-        // Check how many helpful votes user has cast today
         int helpfulVotesToday = userHelpfulVotes.where((vote) {
           return vote['date'] == DateTime.now().toString().substring(0, 10);
         }).length;
 
         if (helpfulVotesToday >= 5) {
-          // Revert local increment
           setState(() {
             int currentLocal = helpfulVotesMap[postId] ?? 1;
             currentLocal = (currentLocal > 0) ? currentLocal - 1 : 0;
@@ -142,7 +168,6 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
           return;
         }
 
-        // Mark post helpful in Firestore
         await FirebaseFirestore.instance.runTransaction((transaction) async {
           transaction.update(userRef, {
             'helpfulVotesGiven': FieldValue.arrayUnion([
@@ -164,15 +189,12 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
         _safeShowSnackBar('Post marked as helpful!');
       }
     } catch (e) {
-      // If the transaction failed, revert local increment
       setState(() {
         int currentLocal = helpfulVotesMap[postId] ?? 0;
-        // Only decrement if we previously incremented
         if (currentLocal > 0) {
           helpfulVotesMap[postId] = currentLocal - 1;
         }
       });
-
       _safeShowSnackBar('Error marking helpful: $e');
     }
   }
@@ -180,7 +202,6 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
   /// Boost a Post (6 hours, sets a boostScore)
   Future<void> _boostPost(BuildContext context, String postId) async {
     try {
-      // Now we boost for 6 hours
       await _postService.boostPost(postId, 6);
       _safeShowSnackBar('Post boosted successfully for 6 hours!');
     } catch (e) {
@@ -197,7 +218,6 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
             .collection('posts')
-            // Order by isBoosted, then boostScore, then helpfulVotes, then time
             .orderBy('isBoosted', descending: true)
             .orderBy('boostScore', descending: true)
             .orderBy('helpfulVotes', descending: true)
@@ -221,24 +241,17 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
               final Map<String, dynamic> data =
                   post.data() as Map<String, dynamic>? ?? {};
               final String postId = post.id;
-
               final String userName = data['userName'] ?? 'Unknown User';
               final String content = data['content'] ?? 'No content available';
               final List<String> likedBy = (data['likedBy'] != null)
                   ? List<String>.from(data['likedBy'])
                   : [];
               final int likes = data['likes'] ?? 0;
-
-              // If we haven't cached helpfulVotes in local map, fallback to DB value
               final int dbHelpfulVotes = data['helpfulVotes'] ?? 0;
               final int localHelpful = helpfulVotesMap[postId] ?? dbHelpfulVotes;
-              // Extra clamp in case we accidentally go below 0
               final int helpfulVotes = (localHelpful < 0) ? 0 : localHelpful;
-
               final String postOwnerId = data['userID'] ?? 'unknown_user';
               final bool isBoosted = data['isBoosted'] ?? false;
-
-              // Format timestamp
               String formattedTime = 'Just now';
               if (data.containsKey('timestamp') && data['timestamp'] is Timestamp) {
                 formattedTime = DateFormat('MMM d, yyyy - hh:mm a')
@@ -256,7 +269,6 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // User name
                       Text(
                         userName,
                         style: const TextStyle(
@@ -265,16 +277,11 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                         ),
                       ),
                       const SizedBox(height: 10),
-
-                      // Post content
                       Text(content, style: const TextStyle(fontSize: 14)),
                       const SizedBox(height: 8),
-
-                      // Row of buttons (like, helpful, boost)
                       Row(
                         mainAxisAlignment: MainAxisAlignment.start,
                         children: [
-                          // Like button
                           IconButton(
                             icon: Icon(
                               Icons.favorite,
@@ -285,8 +292,6 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                             onPressed: () =>
                                 _toggleLike(context, postId, likedBy),
                           ),
-
-                          // Mark helpful
                           IconButton(
                             icon: const Icon(Icons.thumb_up, color: Colors.blue),
                             onPressed: () =>
@@ -294,8 +299,6 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                           ),
                           Text('$helpfulVotes helpful'),
                           const SizedBox(width: 16),
-
-                          // If the user owns this post and it's not boosted, show "Boost" button
                           if (currentUserId == postOwnerId && !isBoosted) ...[
                             IconButton(
                               icon: const Icon(Icons.rocket_launch,
@@ -305,21 +308,21 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                             const SizedBox(width: 8),
                             const Text('Boost'),
                           ],
-
-                          // If the post is boosted, show a label or different icon
                           if (isBoosted) ...[
-                            const Icon(Icons.rocket_launch,
-                                color: Colors.orange),
+                            const Icon(Icons.rocket_launch, color: Colors.orange),
                             const SizedBox(width: 4),
                             const Text(
                               'Boosted!',
                               style: TextStyle(fontWeight: FontWeight.bold),
                             ),
                           ],
+                          // New Report Button
+                          IconButton(
+                            icon: const Icon(Icons.flag, color: Colors.red),
+                            onPressed: () => _reportPost(context, postId),
+                          ),
                         ],
                       ),
-
-                      // Timestamp
                       Text(
                         formattedTime,
                         style:

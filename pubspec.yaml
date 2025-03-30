@@ -1,6 +1,5 @@
 name: connect_app
 description: "A Flutter app with Firebase integration."
-
 publish_to: none
 
 version: 1.0.0+1
@@ -11,20 +10,35 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+
+  # For date/time internationalization
   intl: ^0.20.2 
+
+  # Social logins
   google_sign_in: ^6.1.5
   sign_in_with_apple: ^6.1.4
 
-  # State Management
+  # 🔹 Jitsi Meet (Local Override)
+  # Use the local path to fix the namespace issue
+  # jitsi_meet: ^4.0.0
+  jitsi_meet:
+    path: local_jitsi_meet/jitsi_meet-4.0.0
+
+  # State management
   provider: ^6.1.2
 
-  # Firebase Integration
+  # Firebase integrations
   firebase_core: ^3.9.0
-  firebase_auth: ^5.4.0 # Latest version
-  cloud_firestore: ^5.6.1 # Latest version
-  firebase_storage: ^12.4.0 # Latest version
+  firebase_auth: ^5.4.0
+  cloud_firestore: ^5.6.1
+  firebase_storage: ^12.4.0
+  firebase_messaging: ^15.2.3
+  flutter_local_notifications: ^18.0.1
 
-  # HTTP Requests
+  # In-app purchases
+  in_app_purchase: ^3.2.1
+
+  # HTTP requests
   http: ^1.0.0
 
   # Flutter-specific packages
@@ -32,13 +46,10 @@ dependencies:
   url_launcher: ^6.3.1
 
   # Image picking
-  image_picker: ^1.1.2 # Latest version
+  image_picker: ^1.1.2
 
   # UUID generation
-  uuid: ^4.5.1 # Latest version
-  firebase_messaging: ^15.2.3
-  flutter_local_notifications: ^18.0.1
-  in_app_purchase: ^3.2.1
+  uuid: ^4.5.1
 
 dev_dependencies:
   flutter_test:

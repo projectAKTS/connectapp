@@ -16,12 +16,13 @@ class NotificationService {
 
     if (settings.authorizationStatus == AuthorizationStatus.authorized) {
       print("✅ Notifications are enabled");
+    } else {
+      print("❌ Notification permission not granted");
     }
 
     // Initialize local notifications for foreground messages
     const AndroidInitializationSettings androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
     const InitializationSettings initSettings = InitializationSettings(android: androidSettings);
-
     await _localNotificationsPlugin.initialize(initSettings);
 
     // Handle foreground notifications
@@ -32,9 +33,10 @@ class NotificationService {
     // Handle notification tap when the app is in the background
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       print("🔔 Notification opened: ${message.data}");
+      // You can navigate to a specific screen here if needed.
     });
 
-    // Get FCM Token (for testing)
+    // Get and print FCM Token (for testing)
     String? token = await _firebaseMessaging.getToken();
     print("🔥 FCM Token: $token");
   }

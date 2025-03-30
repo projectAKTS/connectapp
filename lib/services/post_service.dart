@@ -1,13 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
-import 'package:connect_app/services/gamification_service.dart'; // ✅ Import XP system
+import 'package:connect_app/services/gamification_service.dart';
 
 class PostService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final GamificationService _gamificationService = GamificationService(); // ✅ Add Gamification
+  final GamificationService _gamificationService = GamificationService();
 
-  /// ✅ Create a new post and award XP
+  /// Create a new post and award XP
   Future<void> createPost(String content, List<String> tags) async {
     final User? user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -15,13 +15,11 @@ class PostService {
     String postId = const Uuid().v4();
     String userId = user.uid;
 
-    // ✅ Fetch user details from Firestore
     DocumentSnapshot userDoc =
         await _firestore.collection('users').doc(userId).get();
     String userName =
         userDoc.exists ? (userDoc['fullName'] ?? 'Unknown User') : 'Unknown User';
 
-    // ✅ Store Post in Firestore (add boostScore: 0)
     await _firestore.collection('posts').doc(postId).set({
       'id': postId,
       'userID': userId,
@@ -35,16 +33,15 @@ class PostService {
       'engagementScore': 0,
       'isBoosted': false,
       'boostExpiresAt': null,
-      'boostScore': 0, // NEW: default 0
+      'boostScore': 0,
       'likedBy': [],
     });
 
-    // ✅ Award XP for posting
     await _gamificationService.awardXP(userId, 10, isPost: true);
     print('🎉 XP awarded for post!');
   }
 
-  /// 🚀 **Boost a Post (Costs 50 XP, 6-hour duration, boostScore=100, 1 boost per day)**
+  /// Boost a Post (Costs 50 XP, 6-hour duration, boostScore=100, 1 boost per day)
   Future<void> boostPost(String postId, int boostDurationHours) async {
     final User? user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -62,7 +59,6 @@ class PostService {
       Map<String, dynamic> userData =
           userSnapshot.data() as Map<String, dynamic>;
 
-      // Check daily boost limit: use YYYY-MM-DD format
       String currentDate = DateTime.now().toString().substring(0, 10);
       String? lastBoostDate = userData['lastBoostDate'];
       if (lastBoostDate != null && lastBoostDate == currentDate) {
@@ -76,14 +72,12 @@ class PostService {
 
       final boostExpiration = DateTime.now().add(Duration(hours: boostDurationHours));
 
-      // Add a boostScore so it sorts higher
       transaction.update(postRef, {
         'isBoosted': true,
         'boostExpiresAt': boostExpiration,
-        'boostScore': 100, // Arbitrary number to rank boosted posts
+        'boostScore': 100,
       });
 
-      // Deduct XP and update last boost date
       transaction.update(userRef, {
         'xpPoints': FieldValue.increment(-50),
         'lastBoostDate': currentDate,
@@ -93,7 +87,7 @@ class PostService {
     });
   }
 
-  /// ⏳ **Automatically Remove Expired Boosts**
+  /// Automatically Remove Expired Boosts
   Future<void> removeExpiredBoosts() async {
     final QuerySnapshot snapshot = await _firestore
         .collection('posts')
@@ -108,14 +102,14 @@ class PostService {
           await doc.reference.update({
             'isBoosted': false,
             'boostExpiresAt': null,
-            'boostScore': 0, // Reset boost score
+            'boostScore': 0,
           });
         }
       }
     }
   }
 
-  /// ✅ **Mark Post as Helpful (Max 5 per day)**
+  /// Mark Post as Helpful (Max 5 per day)
   Future<void> markPostHelpful(String postId, String postOwnerId) async {
     final User? user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -140,7 +134,6 @@ class PostService {
       bool hasVoted = userHelpfulVotes.any((vote) => vote['postId'] == postId);
 
       if (hasVoted) {
-        // Remove vote
         transaction.update(userRef, {
           'helpfulVotesGiven': FieldValue.arrayRemove([
             {'postId': postId, 'date': DateTime.now().toString().substring(0, 10)}
@@ -148,7 +141,7 @@ class PostService {
         });
 
         transaction.update(postRef, {
-          'helpfulVotes': (postData['helpfulVotes'] ?? 0) - 1,
+          'helpfulVotes': FieldValue.increment(-1),
         });
 
         transaction.update(ownerRef, {
@@ -174,7 +167,7 @@ class PostService {
         });
 
         transaction.update(postRef, {
-          'helpfulVotes': (postData['helpfulVotes'] ?? 0) + 1,
+          'helpfulVotes': FieldValue.increment(1),
         });
 
         transaction.update(ownerRef, {

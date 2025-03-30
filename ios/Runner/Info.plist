@@ -45,5 +45,6 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+    <!-- ✅ Firebase Cloud Messaging Config (if needed, add additional keys here) -->
 </dict>
 </plist>

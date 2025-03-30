@@ -1,12 +1,18 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:uuid/uuid.dart';
 
 class ConsultationService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   /// Books a consultation with the given target user for a specified number of minutes.
+  /// Optionally takes a scheduledAt DateTime for future appointments.
   /// Applies free minutes and discount if the booking user is premium (trial or active).
-  Future<void> bookConsultation(String targetUserId, int minutesRequested) async {
+  Future<void> bookConsultation(
+    String targetUserId,
+    int minutesRequested, {
+    DateTime? scheduledAt,
+  }) async {
     final User? currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
       throw Exception("User not logged in.");
@@ -20,7 +26,6 @@ class ConsultationService {
     final DocumentReference userRef = _firestore.collection('users').doc(userId);
     final DocumentReference targetRef = _firestore.collection('users').doc(targetUserId);
 
-    // Fetch both user and target documents.
     final DocumentSnapshot userDoc = await userRef.get();
     final DocumentSnapshot targetDoc = await targetRef.get();
 
@@ -31,54 +36,60 @@ class ConsultationService {
     final Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
     final Map<String, dynamic> targetData = targetDoc.data() as Map<String, dynamic>;
 
-    // Get target user's rate per minute (for consultation). 
-    // You may set a default value if not specified.
+    // Rate per minute for the target user (default 0 if not set).
     final int ratePerMinute = targetData['ratePerMinute'] ?? 0;
     final int baseCost = ratePerMinute * minutesRequested;
 
-    // Check user's premium status and consultation benefits.
-    String premiumStatus = userData['premiumStatus'] ?? 'none';
+    // Check booking user's premium status and benefits.
+    final String premiumStatus = userData['premiumStatus'] ?? 'none';
     int freeMinutes = userData['freeConsultationMinutes'] ?? 0;
     int discountPercent = userData['discountPercent'] ?? 0;
 
     int cost = baseCost;
     int appliedFreeMinutes = 0;
 
-    // For premium users (trial or active), apply free minutes and discount.
+    // If user is trial or active premium, apply free minutes and discount.
     if (premiumStatus == 'trial' || premiumStatus == 'active') {
       if (freeMinutes > 0) {
         appliedFreeMinutes = (minutesRequested <= freeMinutes)
             ? minutesRequested
             : freeMinutes;
-        int reduction = ratePerMinute * appliedFreeMinutes;
-        cost = cost - reduction;
+        final int reduction = ratePerMinute * appliedFreeMinutes;
+        cost -= reduction;
       }
       if (cost > 0 && discountPercent > 0) {
-        cost = cost - ((cost * discountPercent) ~/ 100);
+        cost -= ((cost * discountPercent) ~/ 100);
       }
     }
 
     if (cost < 0) cost = 0;
 
-    // Create a consultation record.
+    // If no scheduledAt is provided, default to now.
+    final DateTime finalScheduledAt = scheduledAt ?? DateTime.now();
+
     final DocumentReference consultationRef =
         _firestore.collection('consultations').doc();
 
+    // Generate a unique room ID for the consultation
+    final String roomId = const Uuid().v4();
+
     await _firestore.runTransaction((transaction) async {
-      // If free minutes were applied, update the user's free minutes.
+      // Update free minutes if applied.
       if (appliedFreeMinutes > 0) {
         int newFreeMinutes = freeMinutes - appliedFreeMinutes;
         transaction.update(userRef, {'freeConsultationMinutes': newFreeMinutes});
       }
-
-      // Insert the consultation record.
+      // Create the consultation document with extra fields.
       transaction.set(consultationRef, {
         'consultationId': consultationRef.id,
         'userId': userId,
         'targetUserId': targetUserId,
+        'participants': [userId, targetUserId], // Enables queries for both users.
+        'roomId': roomId, // Unique room ID for joining the call.
         'minutesRequested': minutesRequested,
         'cost': cost,
         'timestamp': FieldValue.serverTimestamp(),
+        'scheduledAt': finalScheduledAt,
       });
     });
   }

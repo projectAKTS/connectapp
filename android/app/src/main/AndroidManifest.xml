@@ -1,12 +1,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="com.example.connect_app">
 
-    <!-- ✅ Required Permissions for Notifications -->
+    <!-- Required Permissions for Notifications and Media -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+
     <application
+        android:enableOnBackInvokedCallback="true"
         android:label="connect_app"
+        tools:replace="android:label"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         
@@ -30,7 +35,19 @@
             </intent-filter>
         </activity>
 
-        <!-- ✅ Firebase Messaging Service (Handles Push Notifications) -->
+        <!-- Declare the Jitsi Meet Plugin Activity -->
+        <activity
+            android:name="com.gunschu.jitsi_meet.JitsiMeetPluginActivity"
+            android:exported="false"
+            android:theme="@style/LaunchTheme" />
+
+        <!-- Override for Jitsi Meet ConnectionService -->
+        <service
+            android:name="org.jitsi.meet.sdk.ConnectionService"
+            android:exported="false"
+            tools:node="replace" />
+
+        <!-- Firebase Messaging Service (Handles Push Notifications) -->
         <service
             android:name=".services.MyFirebaseMessagingService"
             android:exported="false">
@@ -39,12 +56,11 @@
             </intent-filter>
         </service>
 
-        <!-- ✅ Firebase Required Services -->
+        <!-- Firebase Required Metadata -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="default_channel" />
 
-        <!-- ✅ Ensure Firebase Initialization -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_icon"
             android:resource="@mipmap/ic_launcher" />
@@ -53,13 +69,13 @@
             android:name="com.google.firebase.messaging.default_notification_color"
             android:resource="@color/notification_color" />
 
-        <!-- ✅ Don't delete: Used by Flutter -->
+        <!-- Flutter Embedding -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
     </application>
 
-    <!-- ✅ Required to query activities that can process text -->
+    <!-- Required to query activities that can process text -->
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />

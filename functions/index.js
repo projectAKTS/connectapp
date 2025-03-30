@@ -13,8 +13,8 @@ exports.addDefaultFieldsToUsers = functions.https.onRequest(async (req, res) => 
       const userRef = usersCollection.doc(doc.id);
       batch.update(userRef, {
         bio: doc.data().bio || "No bio available yet.",
-        name: doc.data().name || "", // Adding default for Name field
-        lastName: doc.data().lastName || "", // Adding default for Last Name field
+        name: doc.data().name || "",
+        lastName: doc.data().lastName || "",
         profilePicture: doc.data().profilePicture || "",
         userName: doc.data().userName || "",
         postsCount: doc.data().postsCount || 0,
@@ -24,7 +24,7 @@ exports.addDefaultFieldsToUsers = functions.https.onRequest(async (req, res) => 
     });
 
     await batch.commit();
-    res.status(200).send("All users updated successfully with Name and Last Name.");
+    res.status(200).send("All users updated successfully with default fields.");
   } catch (error) {
     console.error("Error updating users: ", error);
     res.status(500).send("Error updating users.");

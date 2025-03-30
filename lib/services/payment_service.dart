@@ -1,9 +1,9 @@
 import 'dart:math';
 
 class PaymentService {
-  /// 🔥 Simulate a payment (Replace this with Stripe/Razorpay)
+  /// Simulate a payment (Replace this with actual integration later)
   Future<bool> processPayment({required double amount}) async {
-    await Future.delayed(const Duration(seconds: 2)); // Simulate payment processing
-    return Random().nextBool(); // Simulate success/failure randomly
+    await Future.delayed(const Duration(seconds: 2));
+    return Random().nextBool();
   }
 }

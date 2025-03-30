@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'edit_profile_screen.dart';
 import 'package:intl/intl.dart';
+import '../consultation/consultation_booking_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String userID;
@@ -37,10 +38,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> fetchUserData() async {
     try {
-      DocumentSnapshot snapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(widget.userID)
-          .get();
+      DocumentSnapshot snapshot =
+          await FirebaseFirestore.instance.collection('users').doc(widget.userID).get();
 
       if (snapshot.exists) {
         setState(() {
@@ -48,7 +47,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           isLoading = false;
         });
 
-        // ✅ Check if the current user follows this profile
         if (!isCurrentUser) {
           final currentUser = FirebaseAuth.instance.currentUser;
           if (currentUser != null) {
@@ -89,7 +87,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (isFollowing) {
       await followRef.doc(currentUser.uid).delete();
     } else {
-      await followRef.doc(currentUser.uid).set({'timestamp': FieldValue.serverTimestamp()});
+      await followRef.doc(currentUser.uid).set({
+        'timestamp': FieldValue.serverTimestamp(),
+      });
     }
 
     setState(() {
@@ -124,18 +124,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Center(
               child: CircleAvatar(
                 radius: 60,
-                backgroundImage: AssetImage('assets/default_profile.png'),
+                backgroundImage: const AssetImage('assets/default_profile.png'),
               ),
             ),
             const SizedBox(height: 16),
 
             // Name & Bio
-            Text(userData?['fullName'] ?? 'Unknown User',
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+            Text(
+              userData?['fullName'] ?? 'Unknown User',
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 4),
-            Text(userData?['bio'] ?? 'No bio available',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, color: Colors.grey[700])),
+            Text(
+              userData?['bio'] ?? 'No bio available',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 16, color: Colors.grey[700]),
+            ),
             const SizedBox(height: 16),
 
             // Follow/Unfollow Button (Only for Other Users)
@@ -144,32 +148,83 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 onPressed: toggleFollow,
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
                 child: Text(isFollowing ? 'Unfollow' : 'Follow'),
               ),
             const SizedBox(height: 16),
 
+            // Book Consultation Button (Only for Other Users)
+            if (!isCurrentUser)
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ConsultationBookingScreen(
+                        targetUserId: widget.userID,
+                        targetUserName: userData?['fullName'] ?? 'Unknown User',
+                        ratePerMinute: userData?['ratePerMinute'] ?? 0,
+                      ),
+                    ),
+                  );
+                },
+                child: const Text('Book Consultation'),
+              ),
+            const SizedBox(height: 16),
+
+            // My Consultations Button (Only for Current User)
+            if (isCurrentUser)
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                onPressed: () {
+                  Navigator.pushNamed(context, '/my_consultations');
+                },
+                child: const Text('My Consultations'),
+              ),
+            const SizedBox(height: 16),
+
             // XP Points
-            Text('XP Points: ${userData?['xpPoints'] ?? 0}',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(
+              'XP Points: ${userData?['xpPoints'] ?? 0}',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 8),
 
             // Streak Days
-            Text('🔥 Streak: ${userData?['streakDays'] ?? 0} days',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(
+              '🔥 Streak: ${userData?['streakDays'] ?? 0} days',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 8),
 
             // Helpful Marks
-            Text('👍 Helpful Marks: ${userData?['helpfulMarks'] ?? 0}',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(
+              '👍 Helpful Marks: ${userData?['helpfulMarks'] ?? 0}',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 8),
 
             // Premium Info Section
             if (userData?['premiumStatus'] != null && userData?['premiumStatus'] != 'none') ...[
               const Text('Premium Status:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              Text('${userData?['premiumStatus']}',
-                  style: const TextStyle(fontSize: 16, color: Colors.blueAccent)),
+              Text(
+                '${userData?['premiumStatus']}',
+                style: const TextStyle(fontSize: 16, color: Colors.blueAccent),
+              ),
               if (userData?['premiumExpiresAt'] != null)
                 Text(
                   'Expires: ${DateFormat.yMMMd().format((userData?['premiumExpiresAt'] as Timestamp).toDate())}',
@@ -188,9 +243,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 8),
             ],
 
-            // (Optional) Show if trial used
-            Text('Trial Used: ${userData?['trialUsed'] == true ? 'Yes' : 'No'}',
-                style: TextStyle(fontSize: 16, color: Colors.grey[700])),
+            // Trial Used
+            Text(
+              'Trial Used: ${userData?['trialUsed'] == true ? 'Yes' : 'No'}',
+              style: TextStyle(fontSize: 16, color: Colors.grey[700]),
+            ),
 
             // Interests
             if (userData?['interestTags'] != null && (userData!['interestTags'] as List).isNotEmpty) ...[
@@ -222,7 +279,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
                 onPressed: () async {
                   final updatedData = await Navigator.push(
