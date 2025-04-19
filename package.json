@@ -1,5 +1,25 @@
 {
+  "name": "connect_functions",
+  "description": "Cloud Functions for Connect App",
+  "scripts": {
+    "serve": "firebase emulators:start --only functions",
+    "shell": "firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log",
+    "lint": "eslint ."
+  },
+  "engines": {
+    "node": "18"
+  },
+  "main": "index.js",
   "dependencies": {
-    "firebase-functions": "^6.3.2"
-  }
+    "firebase-admin": "^12.13.1",
+    "firebase-functions": "^3.24.1",
+    "stripe": "^18.0.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.45.0"
+  },
+  "private": true
 }

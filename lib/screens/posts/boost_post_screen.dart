@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '/services/payment_service.dart';
 import '/services/post_service.dart';
 
@@ -21,13 +22,33 @@ class _BoostPostScreenState extends State<BoostPostScreen> {
   Future<void> _boostPost() async {
     setState(() => isProcessing = true);
 
-    bool paymentSuccess = await _paymentService.processPayment(amount: 2.99); // Example price
+    // Retrieve the current user's ID from FirebaseAuth.
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('User not logged in.')),
+      );
+      setState(() => isProcessing = false);
+      return;
+    }
+    final userId = currentUser.uid;
+
+    // Process one-click payment using the stored payment method.
+    bool paymentSuccess = await _paymentService.processPayment(
+      amount: 2.99, // Example price in dollars
+      userId: userId,
+    );
+
     if (paymentSuccess) {
       await _postService.boostPost(widget.postId, selectedBoostHours);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Post boosted successfully!')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Post boosted successfully!')),
+      );
       Navigator.pop(context);
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Payment failed.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Payment failed.')),
+      );
     }
 
     setState(() => isProcessing = false);
@@ -41,7 +62,10 @@ class _BoostPostScreenState extends State<BoostPostScreen> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            const Text("Choose Boost Duration:", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              "Choose Boost Duration:",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             DropdownButton<int>(
               value: selectedBoostHours,
               items: const [
@@ -54,7 +78,9 @@ class _BoostPostScreenState extends State<BoostPostScreen> {
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: isProcessing ? null : _boostPost,
-              child: isProcessing ? const CircularProgressIndicator() : const Text("Boost Now"),
+              child: isProcessing
+                  ? const CircularProgressIndicator()
+                  : const Text("Boost Now"),
             ),
           ],
         ),
