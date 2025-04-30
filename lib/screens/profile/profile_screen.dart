@@ -1,9 +1,15 @@
+// lib/screens/profile/profile_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'edit_profile_screen.dart';
 import 'package:intl/intl.dart';
+
+import 'edit_profile_screen.dart';
 import '../consultation/consultation_booking_screen.dart';
+import '../credits_store_screen.dart';
+import '/services/boost_service.dart';
+import '../Agora_Call_Screen.dart'; // ← added for video call
 
 class ProfileScreen extends StatefulWidget {
   final String userID;
@@ -38,8 +44,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> fetchUserData() async {
     try {
-      DocumentSnapshot snapshot =
-          await FirebaseFirestore.instance.collection('users').doc(widget.userID).get();
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.userID)
+          .get();
 
       if (snapshot.exists) {
         setState(() {
@@ -63,14 +71,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           }
         }
       } else {
-        setState(() {
-          isLoading = false;
-        });
+        setState(() => isLoading = false);
       }
     } catch (e) {
-      setState(() {
-        isLoading = false;
-      });
+      setState(() => isLoading = false);
       print('Error fetching user data: $e');
     }
   }
@@ -113,6 +117,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
     }
 
+    // ─── determine boost state ───────────────────────────────────────────
+    final boostedUntil = (userData!['boostedUntil'] as Timestamp?)?.toDate();
+    final isBoosted = boostedUntil != null && boostedUntil.isAfter(DateTime.now());
+    // ─────────────────────────────────────────────────────────────────────
+
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
       body: SingleChildScrollView(
@@ -120,29 +129,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // Profile Picture
-            Center(
-              child: CircleAvatar(
+            // Profile Picture with boost badge
+            Stack(alignment: Alignment.topRight, children: [
+              CircleAvatar(
                 radius: 60,
                 backgroundImage: const AssetImage('assets/default_profile.png'),
               ),
-            ),
+              if (isBoosted)
+                const CircleAvatar(
+                  radius: 16,
+                  backgroundColor: Colors.orangeAccent,
+                  child: Icon(Icons.star, color: Colors.white, size: 20),
+                ),
+            ]),
             const SizedBox(height: 16),
 
             // Name & Bio
             Text(
-              userData?['fullName'] ?? 'Unknown User',
+              userData!['fullName'] ?? 'Unknown User',
               style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 4),
             Text(
-              userData?['bio'] ?? 'No bio available',
+              userData!['bio'] ?? 'No bio available',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 16, color: Colors.grey[700]),
             ),
             const SizedBox(height: 16),
 
-            // Follow/Unfollow Button (Only for Other Users)
+            // Follow/Unfollow (Other Users)
             if (!isCurrentUser)
               ElevatedButton(
                 onPressed: toggleFollow,
@@ -156,7 +171,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             const SizedBox(height: 16),
 
-            // Book Consultation Button (Only for Other Users)
+            // Book Consultation (Other Users)
             if (!isCurrentUser)
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
@@ -171,8 +186,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     MaterialPageRoute(
                       builder: (context) => ConsultationBookingScreen(
                         targetUserId: widget.userID,
-                        targetUserName: userData?['fullName'] ?? 'Unknown User',
-                        ratePerMinute: userData?['ratePerMinute'] ?? 0,
+                        targetUserName: userData!['fullName'] ?? 'Unknown User',
+                        ratePerMinute: userData!['ratePerMinute'] ?? 0,
                       ),
                     ),
                   );
@@ -181,7 +196,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             const SizedBox(height: 16),
 
-            // My Consultations Button (Only for Current User)
+            // ─── NEW: Video Call Button (Other Users) ─────────────────────────
+            if (!isCurrentUser)
+              ElevatedButton.icon(
+                icon: const Icon(Icons.video_call),
+                label: const Text('Start Video Call'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                onPressed: () {
+                  Navigator.pushNamed(context, '/video_call');
+                },
+              ),
+            const SizedBox(height: 16),
+            // ───────────────────────────────────────────────────────────────────
+
+            // My Consultations (Current User)
             if (isCurrentUser)
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
@@ -197,47 +230,51 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             const SizedBox(height: 16),
 
+            // Free Minutes & Buy Credits (Current User)
+            if (isCurrentUser) ...[
+              Text(
+                'Minutes Left: ${userData!['freeConsultationMinutes'] ?? 0}',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              ElevatedButton(
+                onPressed: () => Navigator.pushNamed(context, '/credits'),
+                child: const Text('Buy More Minutes'),
+              ),
+              const SizedBox(height: 16),
+            ],
+
             // XP Points
             Text(
-              'XP Points: ${userData?['xpPoints'] ?? 0}',
+              'XP Points: ${userData!['xpPoints'] ?? 0}',
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
 
             // Streak Days
             Text(
-              '🔥 Streak: ${userData?['streakDays'] ?? 0} days',
+              '🔥 Streak: ${userData!['streakDays'] ?? 0} days',
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
 
             // Helpful Marks
             Text(
-              '👍 Helpful Marks: ${userData?['helpfulMarks'] ?? 0}',
+              '👍 Helpful Marks: ${userData!['helpfulMarks'] ?? 0}',
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
 
-            // Premium Info Section
-            if (userData?['premiumStatus'] != null && userData?['premiumStatus'] != 'none') ...[
+            // Premium Status
+            if (userData!['premiumStatus'] != null && userData!['premiumStatus'] != 'none') ...[
               const Text('Premium Status:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               Text(
-                '${userData?['premiumStatus']}',
+                '${userData!['premiumStatus']}',
                 style: const TextStyle(fontSize: 16, color: Colors.blueAccent),
               ),
-              if (userData?['premiumExpiresAt'] != null)
+              if (userData!['premiumExpiresAt'] != null)
                 Text(
-                  'Expires: ${DateFormat.yMMMd().format((userData?['premiumExpiresAt'] as Timestamp).toDate())}',
-                  style: const TextStyle(fontSize: 16, color: Colors.blueAccent),
-                ),
-              if (userData?['freeConsultationMinutes'] != null)
-                Text(
-                  'Free Consultation Minutes: ${userData?['freeConsultationMinutes']}',
-                  style: const TextStyle(fontSize: 16, color: Colors.blueAccent),
-                ),
-              if (userData?['discountPercent'] != null)
-                Text(
-                  'Discount on Calls: ${userData?['discountPercent']}%',
+                  'Expires: ${DateFormat.yMMMd().format((userData!['premiumExpiresAt'] as Timestamp).toDate())}',
                   style: const TextStyle(fontSize: 16, color: Colors.blueAccent),
                 ),
               const SizedBox(height: 8),
@@ -245,13 +282,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
             // Trial Used
             Text(
-              'Trial Used: ${userData?['trialUsed'] == true ? 'Yes' : 'No'}',
+              'Trial Used: ${userData!['trialUsed'] == true ? 'Yes' : 'No'}',
               style: TextStyle(fontSize: 16, color: Colors.grey[700]),
             ),
+            const SizedBox(height: 16),
 
             // Interests
-            if (userData?['interestTags'] != null && (userData!['interestTags'] as List).isNotEmpty) ...[
-              const SizedBox(height: 16),
+            if (userData!['interestTags'] != null && (userData!['interestTags'] as List).isNotEmpty) ...[
               const Text('Interests:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               Wrap(
                 spacing: 8,
@@ -259,11 +296,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     .map<Widget>((interest) => Chip(label: Text(interest)))
                     .toList(),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 16),
             ],
 
             // Badges
-            if (userData?['badges'] != null && (userData!['badges'] as List).isNotEmpty) ...[
+            if (userData!['badges'] != null && (userData!['badges'] as List).isNotEmpty) ...[
               const Text('🏅 Badges:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               Wrap(
                 spacing: 8,
@@ -271,10 +308,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     .map<Widget>((badge) => Chip(label: Text(badge)))
                     .toList(),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 16),
             ],
 
-            // Edit Profile Button (For Current User)
+            // Boost Profile (Current User)
+            if (isCurrentUser)
+              ElevatedButton(
+                onPressed: () => BoostService.boostProfile(widget.userID, 24),
+                child: const Text('Boost My Profile'),
+              ),
+
+            // Edit Profile (Current User)
             if (isCurrentUser)
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
@@ -283,18 +327,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                 ),
-                onPressed: () async {
-                  final updatedData = await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => EditProfileScreen(userData: userData!),
-                    ),
-                  );
-
-                  if (updatedData != null) {
-                    setState(() {
-                      userData!.addAll(updatedData);
-                    });
+                onPressed: () {
+                  final user = FirebaseAuth.instance.currentUser;
+                  if (user == null) {
+                    Navigator.pushNamed(context, '/login');
+                  } else {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => EditProfileScreen(userData: userData!),
+                      ),
+                    );
                   }
                 },
                 child: const Text('Edit Profile'),

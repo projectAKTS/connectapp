@@ -1,15 +1,19 @@
-import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
-import 'dart:io';
 
 class FirebaseAuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  /// ✅ Initialize User in Firestore
-  Future<void> initializeUserInFirestore(User user, String fullName, String email) async {
+  /// Initialize a new user document in Firestore.
+  Future<void> initializeUserInFirestore(
+    User user,
+    String fullName,
+    String email,
+  ) async {
     try {
       await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
         'fullName': fullName,
@@ -20,8 +24,7 @@ class FirebaseAuthService {
         'postsCount': 0,
         'profilePicture': '',
         'createdAt': FieldValue.serverTimestamp(),
-
-        // ✅ Gamification Fields
+        // Gamification fields
         'xpPoints': 0,
         'badges': [],
         'postCount': 0,
@@ -37,133 +40,143 @@ class FirebaseAuthService {
           'Travel': 0,
           'Finance': 0,
           'Technology': 0,
-          'Health': 0
+          'Health': 0,
         },
         'activePerks': {
           'priorityPostBoost': null,
           'profileHighlight': null,
-          'commentBoost': null
+          'commentBoost': null,
         },
-        // New fields for premium trial
         'premiumStatus': 'none',
         'trialUsed': false,
       });
     } catch (e) {
-      print('Error initializing user: $e');
+      print('Error initializing user in Firestore: $e');
     }
   }
 
-  /// ✅ Sign in with Email & Password
+  /// Sign in with email & password.
   Future<User?> signInWithEmail(String email, String password) async {
     try {
-      UserCredential userCredential = await _auth.signInWithEmailAndPassword(
+      final creds = await _auth.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
-      return userCredential.user;
+      return creds.user;
     } on FirebaseAuthException catch (e) {
-      print('Error during sign-in: ${e.message}');
+      print('Error during sign‑in: ${e.code} ${e.message}');
       return null;
     } catch (e) {
-      print('Unknown error during sign-in: $e');
+      print('Unknown error during sign‑in: $e');
       return null;
     }
   }
 
-  /// ✅ Register with Email & Password
-  Future<User?> registerWithEmail(String email, String password, String fullName) async {
+  /// Register with email & password, set displayName, and write Firestore user.
+  Future<User?> registerWithEmail(
+    String email,
+    String password,
+    String fullName,
+  ) async {
     try {
-      UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
+      // 1) Create the user in Firebase Auth
+      final creds = await _auth.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
-      User? user = userCredential.user;
-
-      if (user != null) {
-        await initializeUserInFirestore(user, fullName, email);
+      final user = creds.user;
+      if (user == null) {
+        return null;
       }
-      return user;
+
+      // 2) Update their displayName in Auth
+      await user.updateDisplayName(fullName);
+      await user.reload(); // refresh the User object
+
+      // 3) Create the Firestore document
+      await initializeUserInFirestore(user, fullName, email);
+
+      // 4) Return the signed‑up user
+      return _auth.currentUser;
     } on FirebaseAuthException catch (e) {
-      print('Error during registration: ${e.message}');
+      print('Error during registration: ${e.code} ${e.message}');
       return null;
     } catch (e) {
-      print('Unknown error during registration: $e');
+      print('Unexpected error during registration: $e');
       return null;
     }
   }
 
-  /// ✅ Sign in with Google
+  /// Sign in with Google.
   Future<User?> signInWithGoogle() async {
     try {
-      final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
+      final googleUser = await GoogleSignIn().signIn();
       if (googleUser == null) return null;
 
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-      final AuthCredential credential = GoogleAuthProvider.credential(
+      final googleAuth = await googleUser.authentication;
+      final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
 
-      UserCredential userCredential = await _auth.signInWithCredential(credential);
-      User? user = userCredential.user;
-
+      final creds = await _auth.signInWithCredential(credential);
+      final user = creds.user;
       if (user != null) {
-        await initializeUserInFirestore(user, user.displayName ?? 'Anonymous', user.email ?? '');
+        await initializeUserInFirestore(
+          user,
+          user.displayName ?? 'Anonymous',
+          user.email ?? '',
+        );
       }
       return user;
     } catch (e) {
-      print('Error during Google sign-in: $e');
+      print('Error during Google sign‑in: $e');
       return null;
     }
   }
 
-  /// ✅ Sign in with Apple
+  /// Sign in with Apple.
   Future<User?> signInWithApple() async {
     if (!Platform.isIOS && !Platform.isMacOS) {
-      print("Apple Sign-In is only available on iOS & macOS");
+      print('Apple Sign-In only on iOS/macOS');
       return null;
     }
-
     try {
-      final AuthorizationCredentialAppleID appleCredential =
-          await SignInWithApple.getAppleIDCredential(
-        scopes: [AppleIDAuthorizationScopes.email, AppleIDAuthorizationScopes.fullName],
+      final appleCred = await SignInWithApple.getAppleIDCredential(
+        scopes: [
+          AppleIDAuthorizationScopes.email,
+          AppleIDAuthorizationScopes.fullName
+        ],
       );
-
-      final OAuthCredential credential = OAuthProvider("apple.com").credential(
-        idToken: appleCredential.identityToken,
+      final oauthCred = OAuthProvider('apple.com').credential(
+        idToken: appleCred.identityToken,
       );
-
-      UserCredential userCredential = await _auth.signInWithCredential(credential);
-      User? user = userCredential.user;
-
+      final creds = await _auth.signInWithCredential(oauthCred);
+      final user = creds.user;
       if (user != null) {
-        await initializeUserInFirestore(user, user.displayName ?? 'Anonymous', user.email ?? '');
+        await initializeUserInFirestore(
+          user,
+          user.displayName ?? 'Anonymous',
+          user.email ?? '',
+        );
       }
       return user;
     } catch (e) {
-      print('Error during Apple sign-in: $e');
+      print('Error during Apple sign‑in: $e');
       return null;
     }
   }
 
-  /// ✅ Sign Out
+  /// Sign out.
   Future<void> signOut() async {
     try {
-      await _auth.signOut();
       await GoogleSignIn().signOut();
+      await _auth.signOut();
     } catch (e) {
-      print('Error during sign-out: $e');
+      print('Error signing out: $e');
     }
   }
 
-  /// ✅ Get Current User
-  User? getCurrentUser() {
-    try {
-      return _auth.currentUser;
-    } catch (e) {
-      print('Error getting current user: $e');
-      return null;
-    }
-  }
+  /// Get the current user (or null).
+  User? getCurrentUser() => _auth.currentUser;
 }

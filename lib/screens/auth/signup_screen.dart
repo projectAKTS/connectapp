@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import '../../services/firebase_auth_service.dart';
-import '../profile/payment_setup_screen.dart';  // Ensure this route is configured
+import '../profile/payment_setup_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -19,7 +19,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
 
-  /// Register with email & password and then set up Stripe payment method.
+  // Point at your Cloud Functions region
+  final _functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+
   Future<void> _register() async {
     if (_firstNameController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -31,36 +33,50 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final String fullName =
+      final fullName =
           "${_firstNameController.text.trim()} ${_lastNameController.text.trim()}";
 
-      final User? user = await _authService.registerWithEmail(
+      // 1) Sign up the user
+      final user = await _authService.registerWithEmail(
         _emailController.text.trim(),
         _passwordController.text.trim(),
         fullName,
       );
 
-      if (user != null) {
-        // Call the Cloud Function to create a Stripe Customer.
-        final HttpsCallable callable =
-            FirebaseFunctions.instance.httpsCallable('createStripeCustomer');
-        final response = await callable.call({});
-        final String stripeCustomerId = response.data['stripeCustomerId'];
-        print("Stripe customer created with ID: $stripeCustomerId");
+      if (user == null) {
+        throw Exception('Registration failed—no user returned.');
+      }
 
-        // Navigate to Payment Setup Screen so the user can add their card.
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const PaymentSetupScreen(),
-          ),
-        );
+      // 2) Force-refresh the ID token so the function sees them as signed in
+      await user.getIdToken(true);
+
+      // 3) Call your createStripeCustomer onCall function
+      final callable =
+          _functions.httpsCallable('createStripeCustomer');
+      final response = await callable();
+      final stripeCustomerId = response.data['stripeCustomerId'] as String;
+
+      // 4) Success: navigate to payment setup
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content:
+                Text('Registered! Now please set up your payment method.')),
+      );
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const PaymentSetupScreen(),
+        ),
+      );
+    } on FirebaseFunctionsException catch (e) {
+      if (e.code == 'unauthenticated') {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Registration successful. Please set up your payment method.')),
+          const SnackBar(
+              content: Text('Auth failed. Please log in and try again.')),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Registration failed. Please try again.')),
+          SnackBar(content: Text('Function error: ${e.message}')),
         );
       }
     } catch (e) {
@@ -80,16 +96,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
         padding: const EdgeInsets.all(16.0),
         child: SingleChildScrollView(
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               TextField(
                 controller: _firstNameController,
-                decoration: const InputDecoration(labelText: 'First Name *'),
+                decoration:
+                    const InputDecoration(labelText: 'First Name *'),
               ),
               const SizedBox(height: 10),
               TextField(
                 controller: _lastNameController,
-                decoration: const InputDecoration(labelText: 'Last Name (Optional)'),
+                decoration:
+                    const InputDecoration(labelText: 'Last Name (Optional)'),
               ),
               const SizedBox(height: 10),
               TextField(
@@ -107,7 +124,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ? const CircularProgressIndicator()
                   : ElevatedButton(
                       onPressed: _register,
-                      style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(50)),
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(50),
+                      ),
                       child: const Text('Register'),
                     ),
               const SizedBox(height: 20),

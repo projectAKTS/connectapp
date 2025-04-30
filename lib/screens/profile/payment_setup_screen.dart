@@ -12,22 +12,28 @@ class PaymentSetupScreen extends StatefulWidget {
 
 class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
   bool _isProcessing = false;
-  final _functions = FirebaseFunctions.instance;
+
+  // Make sure this matches your deployed region!
+  final _functions = FirebaseFunctions.instanceFor(region: 'us-central1');
 
   Future<void> _setupPaymentMethod() async {
     setState(() => _isProcessing = true);
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) throw Exception('Not logged in');
+      if (user == null) throw Exception('You must be logged in to add a payment method.');
 
-      // Get client secret from your Cloud Function
+      // Refresh the ID token so cloud function sees a valid auth context
+      await user.getIdToken(true);
+
+      // 1) Call your v2 onCall function
       final resp = await _functions
           .httpsCallable('createSetupIntent')
-          .call(<String, dynamic>{});
-      final clientSecret = resp.data['clientSecret'] as String;
-      if (clientSecret.isEmpty) throw Exception('No client secret');
+          .call(); // no extra data needed
 
-      // Initialize PaymentSheet in Setup mode
+      final clientSecret = resp.data['clientSecret'] as String;
+      if (clientSecret.isEmpty) throw Exception('No client secret returned.');
+
+      // 2) Initialize the native PaymentSheet in “Setup” mode
       await Stripe.instance.initPaymentSheet(
         paymentSheetParameters: SetupPaymentSheetParameters(
           merchantDisplayName: 'Connect App',
@@ -35,29 +41,30 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
         ),
       );
 
-      // Present the sheet
+      // 3) Present the sheet to collect & save the card
       await Stripe.instance.presentPaymentSheet();
 
-      // After success, fetch the SetupIntent to get the paymentMethodId
-      // NOTE: you may want a backend call here to retrieve the SetupIntent ID,
-      // then use stripe.setupIntents.retrieve(...) and return the payment_method
-      // For now we'll fetch the last added payment method on the customer:
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      final stripeCustomerId = userDoc.data()?['stripeCustomerId'];
-      // This is a simplification: you should retrieve the actual PM from Stripe.
-      // Here we just mark that a method exists:
+      // 4) Record that we have a method – your backend should have updated Firestore,
+      //    but here we can optimistically mark it:
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
-          .update({'defaultPaymentMethodId': 'pm_attached_via_sheet'});
+          .update({'defaultPaymentMethodId': 'attached_via_setup'});
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Payment method set up successfully.')),
       );
       Navigator.pop(context);
+    } on FirebaseFunctionsException catch (e) {
+      if (e.code == 'unauthenticated') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please log in before adding a payment method.')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Setup failed: ${e.message}')),
+        );
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Setup failed: $e')),
@@ -68,7 +75,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
   }
 
   @override
-  Widget build(BuildContext c) {
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Add Payment Method")),
       body: Center(
