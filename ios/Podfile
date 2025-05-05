@@ -1,6 +1,9 @@
 # Uncomment to define a global platform for your project
 platform :ios, '11.0'
 
+require File.join(File.dirname(__FILE__), 'Flutter', 'podhelper')
+
+
 # Prevent CocoaPods 1.13+ from messing up Flutter's build paths
 install! 'cocoapods', :disable_input_output_paths => true
 
