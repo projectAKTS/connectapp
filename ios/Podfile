@@ -18,9 +18,9 @@ def flutter_root
 end
 
 # Load the Flutter CocoaPods helper from the Flutter SDK
-require File.expand_path(File.join(flutter_root, 'packages', 'flutter_tools', 'bin', 'podhelper')), __FILE__
+require File.expand_path(File.join(flutter_root, 'packages', 'flutter_tools', 'bin', 'podhelper'))
 
-# Run Flutter-specific Podfile setup
+# Run Flutter-specific Podfile setup (defines flutter_install_all_ios_pods)
 flutter_ios_podfile_setup
 
 # Prevent CocoaPods 1.13+ from messing up Flutter's build paths
