@@ -35,18 +35,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Declare the Jitsi Meet Plugin Activity -->
-        <activity
-            android:name="com.gunschu.jitsi_meet.JitsiMeetPluginActivity"
-            android:exported="false"
-            android:theme="@style/LaunchTheme" />
-
-        <!-- Override for Jitsi Meet ConnectionService -->
-        <service
-            android:name="org.jitsi.meet.sdk.ConnectionService"
-            android:exported="false"
-            tools:node="replace" />
-
         <!-- Firebase Messaging Service (Handles Push Notifications) -->
         <service
             android:name=".services.MyFirebaseMessagingService"

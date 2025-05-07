@@ -1,44 +1,48 @@
-# Uncomment to define a global platform for your project
-platform :ios, '11.0'
+# Uncomment this line to define a global platform for your project
+platform :ios, '12.0'
 
-# Disable CocoaPods stats to speed up CI builds
+# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
+project 'Runner', {
+  'Debug'   => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
 def flutter_root
-  generated_xcconfig = File.expand_path("../Flutter/Generated.xcconfig", __FILE__)
-  unless File.exist?(generated_xcconfig)
-    raise "#{generated_xcconfig} must exist. Run `flutter pub get` first."
+  generated_xcode_build_settings_path = File.expand_path(
+    File.join('..', 'Flutter', 'Generated.xcconfig'),
+    __FILE__
+  )
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. "
+        "Did you run `flutter pub get`?"
   end
-  File.foreach(generated_xcconfig) do |line|
-    if line =~ /FLUTTER_ROOT\=(.*)/
-      return $1.strip
-    end
-  end
-  raise "FLUTTER_ROOT not found in #{generated_xcconfig}. Try deleting it and running `flutter pub get`."
+  File.dirname(File.dirname(generated_xcode_build_settings_path))
 end
 
-# Load the Flutter CocoaPods helper from the Flutter SDK
-require File.expand_path(File.join(flutter_root, 'packages', 'flutter_tools', 'bin', 'podhelper'))
-
-# Run Flutter-specific Podfile setup (defines flutter_install_all_ios_pods)
-flutter_ios_podfile_setup
-
-# Prevent CocoaPods 1.13+ from messing up Flutter's build paths
-install! 'cocoapods', :disable_input_output_paths => true
+# Load the Flutter CocoaPods helper from the Flutter SDK:
+require File.expand_path(
+  File.join(flutter_root, 'packages', 'flutter_tools', 'bin', 'podhelper'),
+  __FILE__
+)
 
 target 'Runner' do
   use_frameworks!
   use_modular_headers!
 
-  # This pulls in all the plugin pods automatically
+  # This line pulls in all the pods for your plugins:
   flutter_install_all_ios_pods(File.dirname(File.realpath(__FILE__)))
 end
 
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
-      # Force every Pod to your minimum iOS version
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '11.0'
+      # Workaround for M1 simulator builds (optional):
+      config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64'
+      # Make sure every Pod builds with at least iOS 12.0:
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '12.0'
     end
   end
 end

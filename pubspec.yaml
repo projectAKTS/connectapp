@@ -53,6 +53,7 @@ dependencies:
   # Stripe Payment Integration (updated version)
   flutter_stripe: ^11.4.0
 
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
