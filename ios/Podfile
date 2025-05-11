@@ -12,14 +12,12 @@ project 'Runner', {
 
 # Read FLUTTER_ROOT out of ios/Flutter/Generated.xcconfig
 def flutter_root
-  xcconfig = File.expand_path(File.join(__dir__, 'Flutter', 'Generated.xcconfig'))
+  xcconfig = File.expand_path('Flutter/Generated.xcconfig', __dir__)
   unless File.exist?(xcconfig)
     raise "#{xcconfig} must exist. Run `flutter pub get` first."
   end
   File.foreach(xcconfig) do |line|
-    if m = line.match(/^FLUTTER_ROOT\=(.*)$/)
-      return m[1].strip
-    end
+    return $1.strip if line =~ /^FLUTTER_ROOT=(.*)$/
   end
   raise "FLUTTER_ROOT not set in #{xcconfig}"
 end
@@ -41,6 +39,9 @@ target 'Runner' do
 end
 
 post_install do |installer|
+  # This is crucial—lets Flutter set up all the framework search paths, etc.
+  flutter_post_install(installer)
+
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
       # Workaround for M1 simulator builds:
