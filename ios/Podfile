@@ -1,7 +1,5 @@
-# Uncomment this line to define a global platform for your project
+# Podfile
 platform :ios, '13.0'
-
-# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
 project 'Runner', {
@@ -10,19 +8,20 @@ project 'Runner', {
   'Release' => :release,
 }
 
-# Read FLUTTER_ROOT out of ios/Flutter/Generated.xcconfig
 def flutter_root
-  xcconfig = File.expand_path('Flutter/Generated.xcconfig', __dir__)
+  xcconfig = File.expand_path(File.join(__dir__, 'Flutter', 'Generated.xcconfig'))
   unless File.exist?(xcconfig)
     raise "#{xcconfig} must exist. Run `flutter pub get` first."
   end
   File.foreach(xcconfig) do |line|
-    return $1.strip if line =~ /^FLUTTER_ROOT=(.*)$/
+    if m = line.match(/^FLUTTER_ROOT\=(.*)$/)
+      return m[1].strip
+    end
   end
   raise "FLUTTER_ROOT not set in #{xcconfig}"
 end
 
-# Load the Flutter CocoaPods helper from the Flutter SDK:
+# Pull in all of the Flutter CocoaPods helpers
 require File.expand_path(
   File.join(flutter_root, 'packages', 'flutter_tools', 'bin', 'podhelper'),
   __FILE__
@@ -34,14 +33,11 @@ target 'Runner' do
   # Link everything as static frameworks so Flutter/Flutter.h is always found
   use_frameworks! :linkage => :static
 
-  # This pulls in all the pods for your plugins:
+  # This pulls in all the pods for your plugins
   flutter_install_all_ios_pods(__dir__)
 end
 
 post_install do |installer|
-  # This is crucial—lets Flutter set up all the framework search paths, etc.
-  flutter_post_install(installer)
-
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
       # Workaround for M1 simulator builds:
@@ -50,4 +46,8 @@ post_install do |installer|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
     end
   end
+
+  # If the flutter_post_install helper is available (Flutter ≥3.1.0),
+  # run it to wire up any additional build settings
+  flutter_post_install(installer) if defined?(flutter_post_install)
 end
