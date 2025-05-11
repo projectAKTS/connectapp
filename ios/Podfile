@@ -1,4 +1,5 @@
-# Podfile
+# ios/Podfile
+
 platform :ios, '13.0'
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
@@ -8,20 +9,19 @@ project 'Runner', {
   'Release' => :release,
 }
 
+# locate your Flutter SDK
 def flutter_root
-  xcconfig = File.expand_path(File.join(__dir__, 'Flutter', 'Generated.xcconfig'))
+  xcconfig = File.expand_path('Flutter/Generated.xcconfig', __dir__)
   unless File.exist?(xcconfig)
     raise "#{xcconfig} must exist. Run `flutter pub get` first."
   end
   File.foreach(xcconfig) do |line|
-    if m = line.match(/^FLUTTER_ROOT\=(.*)$/)
-      return m[1].strip
-    end
+    return $1.strip if line =~ /^FLUTTER_ROOT\=(.*)$/
   end
   raise "FLUTTER_ROOT not set in #{xcconfig}"
 end
 
-# Pull in all of the Flutter CocoaPods helpers
+# pull in Flutter's CocoaPods helper
 require File.expand_path(
   File.join(flutter_root, 'packages', 'flutter_tools', 'bin', 'podhelper'),
   __FILE__
@@ -30,24 +30,24 @@ require File.expand_path(
 install! 'cocoapods', :disable_input_output_paths => true
 
 target 'Runner' do
-  # Link everything as static frameworks so Flutter/Flutter.h is always found
+  # static frameworks + modular headers ensures Flutter/Flutter.h is found
   use_frameworks! :linkage => :static
+  use_modular_headers!
 
-  # This pulls in all the pods for your plugins
+  # this pulls in all your plugin pods
   flutter_install_all_ios_pods(__dir__)
 end
 
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
-      # Workaround for M1 simulator builds:
+      # M1 simulator workaround
       config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64'
-      # Make sure every Pod builds with at least iOS 13.0:
+      # enforce iOS 13.0 min
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
     end
   end
 
-  # If the flutter_post_install helper is available (Flutter ≥3.1.0),
-  # run it to wire up any additional build settings
+  # only call this if the helper exists (avoids undefined‐method errors)
   flutter_post_install(installer) if defined?(flutter_post_install)
 end
