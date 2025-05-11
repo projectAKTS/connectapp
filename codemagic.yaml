@@ -1,0 +1,17 @@
+workflows:
+  ios-ci:
+    name: iOS CI
+    environment:
+      flutter: stable
+      cocoapods_cache: true
+      xcode: latest
+    scripts:
+      - name: Get Dart packages
+        script: flutter pub get
+      - name: Install CocoaPods
+        script: |
+          cd ios
+          pod install --repo-update
+          cd ..
+      - name: Build iOS (no codesign)
+        script: flutter build ios --no-codesign

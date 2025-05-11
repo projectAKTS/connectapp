@@ -3,25 +3,18 @@
 platform :ios, '13.0'
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
-project 'Runner', {
-  'Debug'   => :debug,
-  'Profile' => :release,
-  'Release' => :release,
-}
+project 'Runner', 'Debug' => :debug, 'Profile' => :release, 'Release' => :release
 
-# locate your Flutter SDK
 def flutter_root
+  # load FLUTTER_ROOT from Generated.xcconfig
   xcconfig = File.expand_path('Flutter/Generated.xcconfig', __dir__)
-  unless File.exist?(xcconfig)
-    raise "#{xcconfig} must exist. Run `flutter pub get` first."
-  end
+  raise "#{xcconfig} must exist. Run `flutter pub get` first." unless File.exist?(xcconfig)
   File.foreach(xcconfig) do |line|
-    return $1.strip if line =~ /^FLUTTER_ROOT\=(.*)$/
+    return line.match(/^FLUTTER_ROOT\=(.*)$/)[1].strip if line.start_with?('FLUTTER_ROOT')
   end
   raise "FLUTTER_ROOT not set in #{xcconfig}"
 end
 
-# pull in Flutter's CocoaPods helper
 require File.expand_path(
   File.join(flutter_root, 'packages', 'flutter_tools', 'bin', 'podhelper'),
   __FILE__
@@ -30,24 +23,23 @@ require File.expand_path(
 install! 'cocoapods', :disable_input_output_paths => true
 
 target 'Runner' do
-  # static frameworks + modular headers ensures Flutter/Flutter.h is found
+  # static frameworks so Flutter/Flutter.h is always found
   use_frameworks! :linkage => :static
-  use_modular_headers!
 
-  # this pulls in all your plugin pods
+  # all your plugins
   flutter_install_all_ios_pods(__dir__)
 end
 
 post_install do |installer|
   installer.pods_project.targets.each do |target|
+    # inject Flutter build settings (search paths, clang flags, etc)
+    flutter_additional_ios_build_settings(target)
+
     target.build_configurations.each do |config|
-      # M1 simulator workaround
+      # M1-simulator workaround
       config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64'
-      # enforce iOS 13.0 min
+      # ensure minimum iOS 13.0
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
     end
   end
-
-  # only call this if the helper exists (avoids undefined‐method errors)
-  flutter_post_install(installer) if defined?(flutter_post_install)
 end
