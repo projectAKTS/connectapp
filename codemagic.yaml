@@ -1,6 +1,6 @@
 workflows:
-  ios-ci:
-    name: iOS CI
+  ios-android-ci:
+    name: iOS and Android CI
     environment:
       flutter: stable
       xcode: latest
@@ -14,20 +14,50 @@ workflows:
           pod install --no-repo-update
           cd ..
 
-      - name: Build iOS (unsigned)
-        script: flutter build ios --no-codesign
+      - name: Decode and Install iOS Certificate and Profile
+        script: |
+          # Decode and save the iOS certificate
+          echo $IOS_CERTIFICATE_BASE64 | base64 --decode > /tmp/akonnct.p12
+          security import /tmp/akonnct.p12 -P "$IOS_CERTIFICATE_PASSWORD" -A
 
+          # Create the Provisioning Profile directory
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+
+          # Decode and save the Provisioning Profile
+          echo $IOS_PROVISIONING_PROFILE_BASE64 | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/akonnct.mobileprovision
+
+      - name: Build iOS (Signed)
+        script: |
+          flutter build ios --release --no-codesign
+          xcodebuild -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -archivePath build/ios/Runner.xcarchive \
+            archive
+
+          xcodebuild -exportArchive \
+            -archivePath build/ios/Runner.xcarchive \
+            -exportOptionsPlist ios/exportOptions.plist \
+            -exportPath build/ios/ipa \
+            -allowProvisioningUpdates
+      
       - name: Zip iOS .app for download
         script: |
           mkdir -p artifacts
-          cp -r build/ios/iphoneos/Runner.app artifacts/
+          cp -r build/ios/ipa/*.ipa artifacts/Runner.ipa
           cd artifacts
-          zip -r Runner.app.zip Runner.app
+          zip -r Runner.app.zip Runner.ipa
 
-      - name: Build Android AAB
-        script: flutter build appbundle --debug
+      - name: Build Android AAB (Signed)
+        script: flutter build appbundle --release --build-name=1.0.0 --build-number=1
 
-    # Tell Codemagic what files to collect after the build:
     artifacts:
       - artifacts/Runner.app.zip
-      - build/app/outputs/bundle/debug/*.aab
+      - artifacts/Runner.ipa
+      - build/app/outputs/bundle/release/*.aab
+
+    publishing:
+      email:
+        recipients:
+          - your_email@example.com
+        notify_on_build_success: true
+        notify_on_build_failure: true
