@@ -1,6 +1,6 @@
 workflows:
-  ios-android-ci:
-    name: iOS and Android CI
+  ios-ci:
+    name: iOS CI
     environment:
       flutter: stable
       xcode: latest
@@ -14,16 +14,11 @@ workflows:
           pod install --no-repo-update
           cd ..
 
-      - name: Decode and Install iOS Certificate and Profile
+      - name: Decode Base64 Certificate (For iOS Signing)
         script: |
-          # Decode and save the iOS certificate
           echo $IOS_CERTIFICATE_BASE64 | base64 --decode > /tmp/akonnct.p12
           security import /tmp/akonnct.p12 -P "$IOS_CERTIFICATE_PASSWORD" -A
-
-          # Create the Provisioning Profile directory
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-
-          # Decode and save the Provisioning Profile
           echo $IOS_PROVISIONING_PROFILE_BASE64 | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/akonnct.mobileprovision
 
       - name: Build iOS (Signed)
@@ -40,6 +35,13 @@ workflows:
             -exportPath build/ios/ipa \
             -allowProvisioningUpdates
       
+      - name: Upload to TestFlight
+        script: |
+          xcrun altool --upload-app -t ios -f build/ios/ipa/Runner.ipa \
+            --apiKey $APPLE_API_KEY_ID \
+            --apiIssuer $APPLE_API_KEY_ISSUER_ID \
+            --private-key /tmp/AuthKey_$APPLE_API_KEY_ID.p8
+
       - name: Zip iOS .app for download
         script: |
           mkdir -p artifacts
@@ -47,17 +49,10 @@ workflows:
           cd artifacts
           zip -r Runner.app.zip Runner.ipa
 
-      - name: Build Android AAB (Signed)
-        script: flutter build appbundle --release --build-name=1.0.0 --build-number=1
+      - name: Build Android AAB
+        script: flutter build appbundle --release
 
     artifacts:
       - artifacts/Runner.app.zip
       - artifacts/Runner.ipa
       - build/app/outputs/bundle/release/*.aab
-
-    publishing:
-      email:
-        recipients:
-          - your_email@example.com
-        notify_on_build_success: true
-        notify_on_build_failure: true
