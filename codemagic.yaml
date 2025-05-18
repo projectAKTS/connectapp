@@ -35,15 +35,16 @@ workflows:
             -exportOptionsPlist ios/exportOptions.plist \
             -exportPath build/ios/ipa \
             -allowProvisioningUpdates
-      
+          
       - name: Upload to TestFlight
         script: |
           echo $TESTFLIGHT_API_KEY_BASE64 | base64 --decode > /tmp/AuthKey.p8
           xcrun altool --upload-app -t ios -f build/ios/ipa/Runner.ipa \
             --apiKey $TESTFLIGHT_API_KEY_ID \
             --apiIssuer $TESTFLIGHT_API_ISSUER_ID \
-            --private-key /tmp/AuthKey.p8
-
+            --private-key /tmp/AuthKey.p8 \
+            --verbose
+          
       - name: Zip iOS .app for download
         script: |
           mkdir -p artifacts
