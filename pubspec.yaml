@@ -18,7 +18,7 @@ dependencies:
   google_sign_in: ^6.1.5
   sign_in_with_apple: ^6.1.4
 
-  agora_rtc_engine: ^6.1.0  # latest as of April 2025
+  agora_rtc_engine: ^6.0.2  # latest as of April 2025
   permission_handler: ^11.0.1
 
   # State management
