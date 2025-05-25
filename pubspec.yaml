@@ -19,7 +19,7 @@ dependencies:
   sign_in_with_apple: ^6.1.4
 
   # ✅ Official Agora version from pub.dev (no git auth issues)
-  agora_rtc_engine: ^6.0.2
+  agora_rtc_engine: ^6.2.2
 
   # Permissions
   permission_handler: ^11.0.1
