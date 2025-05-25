@@ -1,5 +1,5 @@
 buildscript {
-    ext.kotlin_version = '2.1.0' // ✅ Upgraded Kotlin version
+    ext.kotlin_version = '2.1.0' // Kotlin version for plugins
 
     repositories {
         google()
@@ -7,13 +7,13 @@ buildscript {
     }
 
     dependencies {
-        // ✅ Latest Google Services Plugin
+        // Google Services Plugin
         classpath 'com.google.gms:google-services:4.3.15'
 
-        // ✅ Pick the compatible Gradle Plugin version (7.4.2 is safe)
+        // Android Gradle Plugin (AGP) — must match Gradle 8.4+
         classpath 'com.android.tools.build:gradle:8.3.0'
 
-        // ✅ Kotlin Gradle Plugin
+        // Kotlin plugin
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
     }
 }
@@ -25,8 +25,8 @@ allprojects {
     }
 }
 
-// ✅ Ensures Consistent Build Directory
 rootProject.buildDir = "../build"
+
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
@@ -34,7 +34,6 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
-// ✅ Register the "clean" task
 tasks.register("clean", Delete) {
     delete rootProject.buildDir
 }
