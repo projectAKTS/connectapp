@@ -1,9 +1,10 @@
 workflows:
   ios-ci:
-    name: iOS CI
+    name: iOS & Android CI
     environment:
       flutter: stable
       xcode: latest
+      java: 17
 
     scripts:
       - name: Get Dart packages
@@ -35,7 +36,7 @@ workflows:
             -exportOptionsPlist ios/exportOptions.plist \
             -exportPath build/ios/ipa \
             -allowProvisioningUpdates
-          
+
       - name: Upload to TestFlight
         script: |
           echo $TESTFLIGHT_API_KEY_BASE64 | base64 --decode > /tmp/AuthKey.p8
@@ -44,7 +45,7 @@ workflows:
             --apiIssuer $TESTFLIGHT_API_ISSUER_ID \
             --private-key /tmp/AuthKey.p8 \
             --verbose
-          
+
       - name: Zip iOS .app for download
         script: |
           mkdir -p artifacts
@@ -52,8 +53,12 @@ workflows:
           cd artifacts
           zip -r Runner.app.zip Runner.ipa
 
-      - name: Build Android AAB
-        script: flutter build appbundle --release
+      - name: Build Android AAB with Gradle 8.4 and AGP 8.3.0
+        script: |
+          cd android
+          ./gradlew wrapper --gradle-version 8.4
+          cd ..
+          flutter build appbundle --release --build-name=1.0.0 --build-number=1
 
     artifacts:
       - artifacts/Runner.app.zip
