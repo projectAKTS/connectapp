@@ -53,12 +53,16 @@ workflows:
           cd artifacts
           zip -r Runner.app.zip Runner.ipa
 
-      - name: Build Android AAB with Gradle 8.4 and AGP 8.3.0
+      - name: Upgrade Gradle Wrapper to 8.4
         script: |
           cd android
-          ./gradlew wrapper --gradle-version 8.4
+          ./gradlew wrapper --gradle-version 8.4 --distribution-type all
           cd ..
-          flutter build appbundle --release --build-name=1.0.0 --build-number=1
+
+      - name: Build Android AAB with Gradle 8.4 and AGP 8.3.0
+        script: |
+          flutter pub get
+          flutter build appbundle --release
 
     artifacts:
       - artifacts/Runner.app.zip
