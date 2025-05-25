@@ -12,13 +12,16 @@ dependencies:
     sdk: flutter
 
   # For date/time internationalization
-  intl: ^0.20.2 
+  intl: ^0.20.2
 
   # Social logins
   google_sign_in: ^6.1.5
   sign_in_with_apple: ^6.1.4
 
-  agora_rtc_engine: ^6.0.2  # latest as of April 2025
+  # ✅ Official Agora version from pub.dev (no git auth issues)
+  agora_rtc_engine: ^6.0.2
+
+  # Permissions
   permission_handler: ^11.0.1
 
   # State management
@@ -31,7 +34,7 @@ dependencies:
   firebase_storage: ^12.4.0
   firebase_messaging: ^15.2.3
   flutter_local_notifications: ^18.0.1
-  firebase_app_check: ^0.3.0 
+  firebase_app_check: ^0.3.0
 
   # In-app purchases
   in_app_purchase: ^3.2.1
@@ -49,10 +52,9 @@ dependencies:
 
   # UUID generation
   uuid: ^4.5.1
-  
-  # Stripe Payment Integration (updated version)
-  flutter_stripe: ^11.4.0
 
+  # Stripe Payment Integration
+  flutter_stripe: ^11.4.0
 
 dev_dependencies:
   flutter_test:
@@ -62,6 +64,5 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-  # Include assets (default profile picture)
   assets:
     - assets/default_profile.png
