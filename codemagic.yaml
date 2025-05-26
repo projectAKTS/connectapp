@@ -7,8 +7,12 @@ workflows:
       java: 17
 
     scripts:
-      - name: Get Dart packages
-        script: flutter pub get
+      - name: Clean environment and dependencies
+        script: |
+          flutter clean
+          rm pubspec.lock || true
+          rm -rf .dart_tool
+          flutter pub get
 
       - name: Install CocoaPods
         script: |
@@ -58,13 +62,12 @@ workflows:
           ./gradlew wrapper --gradle-version 8.4 --distribution-type all
           cd ..
 
-      - name: Build Android AAB using Gradle directly
+      - name: Build Android AAB
         script: |
-          flutter pub get
-          flutter build apk # to generate intermediates
           cd android
-          ./gradlew bundleRelease
+          ./gradlew clean
           cd ..
+          flutter build appbundle --release
 
     artifacts:
       - artifacts/Runner.app.zip
