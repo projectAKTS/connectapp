@@ -11,59 +11,35 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # For date/time internationalization
   intl: ^0.20.2
-
-  # Social logins
   google_sign_in: ^6.1.5
-  sign_in_with_apple: ^6.1.4
-
-  # ✅ Agora from pub.dev (NOT GitHub)
-  agora_rtc_engine: ^6.5.2
-
-  # Permissions
-  permission_handler: ^11.0.1
-
-  # State management
+  sign_in_with_apple: ^7.0.1
+  agora_rtc_engine: ^6.1.2
+  permission_handler: ^12.0.0+1
   provider: ^6.1.2
 
-  # Firebase integrations
-  firebase_core: ^3.9.0
+  firebase_core: ^3.5.0
   firebase_auth: ^5.4.0
   cloud_firestore: ^5.6.1
   firebase_storage: ^12.4.0
   firebase_messaging: ^15.2.3
-  flutter_local_notifications: ^18.0.1
-  firebase_app_check: ^0.3.0
-
-  # In-app purchases
-  in_app_purchase: ^3.2.1
-
-  # HTTP requests
-  http: ^1.0.0
-
-  # Flutter-specific packages
-  cupertino_icons: ^1.0.8
-  url_launcher: ^6.3.1
+  flutter_local_notifications: ^19.2.1
+  firebase_app_check: ^0.3.2+6
   cloud_functions: ^5.3.4
 
-  # Image picking
+  in_app_purchase: ^3.2.1
+  http: ^1.0.0
+  cupertino_icons: ^1.0.8
+  url_launcher: ^6.3.1
   image_picker: ^1.1.2
-
-  # UUID generation
   uuid: ^4.5.1
-
-  # Stripe Payment Integration
   flutter_stripe: ^11.4.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^5.0.0
-  firebase_core: ^3.9.0
-  firebase_auth: ^5.4.0
-  cloud_firestore: ^5.6.1
-  mockito: ^5.4.2
+  flutter_lints: ^5.0.0 # ✅ Downgraded to support Dart 3.6.0
+  mockito: ^5.4.5       # ✅ Compatible with Dart 3.6.0
 
 flutter:
   uses-material-design: true
