@@ -1,3 +1,4 @@
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -24,7 +25,6 @@ class _PostScreenState extends State<PostScreen> {
     isLiked = (widget.postData['likedBy'] ?? []).contains(currentUser?.uid);
   }
 
-  // ❤️ Toggle Like
   Future<void> _toggleLike() async {
     final postRef = FirebaseFirestore.instance.collection('posts').doc(widget.postData['id']);
     final userId = currentUser?.uid;
@@ -44,7 +44,6 @@ class _PostScreenState extends State<PostScreen> {
     });
   }
 
-  // 💬 Add Comment
   Future<void> _addComment() async {
     if (_commentController.text.trim().isEmpty) return;
 
@@ -60,24 +59,43 @@ class _PostScreenState extends State<PostScreen> {
 
   @override
   Widget build(BuildContext context) {
-    List<String> tags = (widget.postData['tags'] as List<dynamic>?)?.cast<String>() ?? [];
+    final post = widget.postData;
+    List<String> tags = (post['tags'] as List<dynamic>?)?.cast<String>() ?? [];
+    final String? imageUrl = post['imageUrl'];
+    final bool isProTip = post['isProTip'] ?? false;
 
     return Scaffold(
-      appBar: AppBar(title: Text(widget.postData['userName'] ?? 'Post Details')),
+      appBar: AppBar(title: Text(post['userName'] ?? 'Post Details')),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 📜 Post Content
+            if (isProTip)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text('💡 Pro Tip', style: TextStyle(color: Colors.orange)),
+              ),
+            const SizedBox(height: 8),
+
             Text(
-              widget.postData['content'] ?? 'No content available',
+              post['content'] ?? 'No content available',
               style: const TextStyle(fontSize: 16),
             ),
             const SizedBox(height: 16),
 
-            // 🏷️ Tags
-            if (tags.isNotEmpty)
+            if (imageUrl != null && imageUrl.isNotEmpty)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.network(imageUrl, height: 200, width: double.infinity, fit: BoxFit.cover),
+              ),
+
+            if (tags.isNotEmpty) ...[
+              const SizedBox(height: 16),
               Wrap(
                 spacing: 8.0,
                 children: tags.map((tag) {
@@ -87,9 +105,10 @@ class _PostScreenState extends State<PostScreen> {
                   );
                 }).toList(),
               ),
+            ],
+
             const SizedBox(height: 16),
 
-            // ❤️ Like Button
             Row(
               children: [
                 IconButton(
@@ -102,12 +121,11 @@ class _PostScreenState extends State<PostScreen> {
 
             const Divider(height: 32),
 
-            // 💬 Comment Section
             Expanded(
               child: StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collection('posts')
-                    .doc(widget.postData['id'])
+                    .doc(post['id'])
                     .collection('comments')
                     .orderBy('timestamp', descending: true)
                     .snapshots(),
@@ -120,7 +138,6 @@ class _PostScreenState extends State<PostScreen> {
                     itemCount: comments.length,
                     itemBuilder: (context, index) {
                       final commentData = comments[index].data() as Map<String, dynamic>;
-
                       return ListTile(
                         leading: const Icon(Icons.comment, color: Colors.grey),
                         title: Text(commentData['userName'] ?? 'Unknown User'),
@@ -134,7 +151,6 @@ class _PostScreenState extends State<PostScreen> {
 
             const Divider(height: 16),
 
-            // ➕ Add Comment
             Row(
               children: [
                 Expanded(

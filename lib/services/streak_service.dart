@@ -1,10 +1,10 @@
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
 class StreakService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  /// ✅ Check and update daily login/posting streaks
   Future<void> updateStreak(String userId) async {
     DocumentReference userRef = _firestore.collection('users').doc(userId);
 
@@ -13,7 +13,6 @@ class StreakService {
       if (!userDoc.exists) return;
 
       Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
-
       int currentStreak = (userData['streakDays'] ?? 0);
       Timestamp? lastPostDate = userData['lastPostDate'];
 
@@ -21,7 +20,6 @@ class StreakService {
         currentStreak++;
       }
 
-      // 🔹 Streak Badges
       List<String> updatedBadges = List<String>.from(userData['badges'] ?? []);
       if (currentStreak == 7 && !updatedBadges.contains('🔥 Streak Starter')) {
         updatedBadges.add('🔥 Streak Starter');
@@ -36,19 +34,22 @@ class StreakService {
         'badges': updatedBadges,
       });
 
-      if ([5, 10, 30].contains(currentStreak)) {
-        await FirebaseMessaging.instance.sendMessage(
-          to: userId,
-          data: {
-            'title': '🔥 Streak Alert!',
-            'body': 'You’re on a $currentStreak-day streak! Keep it up!',
-          },
-        );
+      if (Platform.isAndroid && [5, 10, 30].contains(currentStreak)) {
+        try {
+          await FirebaseMessaging.instance.sendMessage(
+            to: userId,
+            data: {
+              'title': '🔥 Streak Alert!',
+              'body': 'You’re on a $currentStreak-day streak! Keep it up!',
+            },
+          );
+        } catch (e) {
+          print('⚠ Android notification skipped or failed: $e');
+        }
       }
     });
   }
 
-  /// ✅ Check if it's a new day
   bool _isNewDay(Timestamp lastPostDate) {
     DateTime lastDate = lastPostDate.toDate();
     DateTime today = DateTime.now();
