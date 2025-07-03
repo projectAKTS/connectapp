@@ -1,3 +1,5 @@
+// lib/screens/posts/create_post_screen.dart
+
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -32,7 +34,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     'How-To': 'Break it down step-by-step.',
     'Looking For...': 'Describe your situation and the kind of people you’d like advice or insight from.',
   };
-
   final Map<String, String> typeDescriptions = {
     'Experience': 'Share what you’ve been through to help others',
     'Advice': 'Ask for tips or feedback on a challenge',
@@ -40,16 +41,25 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     'Looking For...': 'Find people who’ve been through a specific experience',
   };
 
+  bool get _canPost =>
+      !_isPosting && _contentController.text.trim().isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    _contentController.addListener(() => setState(() {}));
+  }
+
   Future<void> _pickImage() async {
-    final pickedFile = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1024, imageQuality: 85);
-    if (pickedFile != null) {
-      setState(() => _imageFile = File(pickedFile.path));
+    final picked = await ImagePicker()
+        .pickImage(source: ImageSource.gallery, maxWidth: 1024, imageQuality: 85);
+    if (picked != null) {
+      setState(() => _imageFile = File(picked.path));
     }
   }
 
   Future<void> _savePost() async {
     final content = _contentController.text.trim();
-
     if (content.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please write your post')),
@@ -57,13 +67,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       return;
     }
 
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in to post')),
+      );
+      return;
+    }
+
     setState(() => _isPosting = true);
-
+    String? imageUrl;
     try {
-      final User? currentUser = FirebaseAuth.instance.currentUser;
-      if (currentUser == null) return;
-
-      String? imageUrl;
       if (_imageFile != null) {
         final ref = FirebaseStorage.instance
             .ref()
@@ -73,20 +87,23 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         imageUrl = await ref.getDownloadURL();
       }
 
+      // Positional + named parameters now match
       await _postService.createPost(
         content,
-        [...selectedTags, selectedType],
+        selectedTags,
+        selectedType,
         imageUrl: imageUrl,
         isProTip: _isProTip,
       );
 
       await _streakService.updateStreak(currentUser.uid);
 
+      // reset form
       _contentController.clear();
       _tagController.clear();
       setState(() {
-        _imageFile = null;
         selectedTags.clear();
+        _imageFile = null;
         _isProTip = false;
         selectedType = 'Experience';
       });
@@ -94,14 +111,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('✅ Post created!')),
       );
-
-      if (mounted && Navigator.canPop(context)) {
+      if (Navigator.canPop(context)) {
         Navigator.pop(context);
       } else {
         Navigator.pushReplacementNamed(context, '/home');
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to post: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to post: $e')),
+      );
     } finally {
       setState(() => _isPosting = false);
     }
@@ -122,7 +140,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
-                children: ['Experience', 'Advice', 'How-To', 'Looking For...'].map((type) {
+                children: typePrompt.keys.map((type) {
                   return ChoiceChip(
                     label: Text(type),
                     selected: selectedType == type,
@@ -130,19 +148,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   );
                 }).toList(),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Text(
-                typeDescriptions[selectedType] ?? '',
+                typeDescriptions[selectedType]!,
                 style: TextStyle(fontSize: 13, color: Colors.grey[600]),
               ),
-
               const SizedBox(height: 20),
+
               const Text('Your Post', style: TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 6),
               TextField(
                 controller: _contentController,
                 maxLines: 6,
-                minLines: 5,
                 decoration: InputDecoration(
                   filled: true,
                   fillColor: Colors.grey[100],
@@ -169,9 +186,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 onSubmitted: (value) {
                   final tag = value.trim();
                   if (tag.isNotEmpty && !selectedTags.contains(tag)) {
-                    setState(() {
-                      selectedTags.add(tag.startsWith('#') ? tag : '#$tag');
-                    });
+                    setState(() => selectedTags.add(tag.startsWith('#') ? tag : '#$tag'));
                     _tagController.clear();
                   }
                 },
@@ -184,18 +199,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     label: Text(tag),
                     backgroundColor: Colors.blue.shade50,
                     deleteIcon: const Icon(Icons.close),
-                    onDeleted: () {
-                      setState(() => selectedTags.remove(tag));
-                    },
+                    onDeleted: () => setState(() => selectedTags.remove(tag)),
                   );
                 }).toList(),
               ),
 
               const Divider(height: 32),
-
               Row(
                 children: [
-                  Checkbox(value: _isProTip, onChanged: (val) => setState(() => _isProTip = val ?? false)),
+                  Checkbox(value: _isProTip, onChanged: (v) => setState(() => _isProTip = v!)),
                   const Text('Mark as Pro Tip'),
                 ],
               ),
@@ -210,14 +222,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               TextButton.icon(
                 icon: const Icon(Icons.image),
                 label: const Text("Add Image"),
-                onPressed: _pickImage,
+                onPressed: _isPosting ? null : _pickImage,
               ),
 
               const SizedBox(height: 24),
               ElevatedButton.icon(
-                icon: _isPosting ? const CircularProgressIndicator(color: Colors.white) : const Icon(Icons.send),
+                icon: _isPosting
+                    ? const SizedBox(
+                        width: 20, height: 20,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Icon(Icons.send),
                 label: Text(_isPosting ? 'Posting...' : 'Post'),
-                onPressed: _isPosting ? null : _savePost,
+                onPressed: _canPost ? _savePost : null,
                 style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
               ),
             ],

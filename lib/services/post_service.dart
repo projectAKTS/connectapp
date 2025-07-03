@@ -1,34 +1,39 @@
+// lib/services/post_service.dart
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:uuid/uuid.dart';
 import 'package:connect_app/services/gamification_service.dart';
 
 class PostService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final GamificationService _gamificationService = GamificationService();
 
+  /// Creates a new post with 3 positional arguments and 2 named options.
   Future<void> createPost(
     String content,
-    List<String> tags, {
+    List<String> tags,
+    String postType, {
     String? imageUrl,
     bool isProTip = false,
   }) async {
-    final User? user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) throw Exception('User must be logged in');
 
-    final String postId = const Uuid().v4();
-    final String userId = user.uid;
+    // Use Firestore-generated doc ID as the post ID
+    final docRef = _firestore.collection('posts').doc();
+    final String postId = docRef.id;
 
-    final DocumentSnapshot userDoc =
-        await _firestore.collection('users').doc(userId).get();
-    final String userName =
-        userDoc.exists ? (userDoc['fullName'] ?? 'Unknown User') : 'Unknown User';
+    // Fetch the user's display name
+    final userSnap = await _firestore.collection('users').doc(user.uid).get();
+    final String userName = userSnap.data()?['fullName'] ?? 'Unknown User';
 
+    // Build the post data map
     final Map<String, dynamic> postData = {
       'id': postId,
-      'userID': userId,
+      'userID': user.uid,
       'userName': userName,
       'content': content,
+      'postType': postType,
       'tags': tags,
       'timestamp': FieldValue.serverTimestamp(),
       'likes': 0,
@@ -38,144 +43,121 @@ class PostService {
       'isBoosted': false,
       'boostExpiresAt': null,
       'boostScore': 0,
-      'likedBy': [],
+      'likedBy': <String>[],
       'isProTip': isProTip,
+      'isFeatured': false,
       if (imageUrl != null && imageUrl.isNotEmpty) 'imageUrl': imageUrl,
     };
 
-    await _firestore.collection('posts').doc(postId).set(postData);
-    await _gamificationService.awardXP(userId, 10, isPost: true);
-    print('🎉 XP awarded for post!');
+    // Write to Firestore
+    await docRef.set(postData);
+
+    // Award XP for creating a post
+    await _gamificationService.awardXP(user.uid, 10, isPost: true);
   }
 
   Future<void> boostPost(String postId, int boostDurationHours) async {
-    final User? user = FirebaseAuth.instance.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    final String userId = user.uid;
-    final userRef = _firestore.collection('users').doc(userId);
+    final userRef = _firestore.collection('users').doc(user.uid);
     final postRef = _firestore.collection('posts').doc(postId);
 
-    await _firestore.runTransaction((transaction) async {
-      final userSnapshot = await transaction.get(userRef);
-      final postSnapshot = await transaction.get(postRef);
+    await _firestore.runTransaction((tx) async {
+      final uSnap = await tx.get(userRef);
+      final pSnap = await tx.get(postRef);
+      if (!uSnap.exists || !pSnap.exists) return;
 
-      if (!userSnapshot.exists || !postSnapshot.exists) return;
-
-      final userData = userSnapshot.data() as Map<String, dynamic>;
-      final String currentDate = DateTime.now().toString().substring(0, 10);
-      final String? lastBoostDate = userData['lastBoostDate'];
-
-      if (lastBoostDate != null && lastBoostDate == currentDate) {
-        throw Exception("You have already boosted a post today.");
+      final userData = uSnap.data()!;
+      final String today = DateTime.now().toString().substring(0, 10);
+      final String? lastBoost = userData['lastBoostDate'];
+      if (lastBoost == today) {
+        throw Exception("You've already boosted today.");
       }
 
-      final int currentXP = userData['xpPoints'] ?? 0;
-      if (currentXP < 50) {
-        throw Exception("Not enough XP to boost the post!");
+      final int xp = userData['xpPoints'] ?? 0;
+      if (xp < 50) {
+        throw Exception("Not enough XP to boost.");
       }
 
-      final boostExpiration = DateTime.now().add(Duration(hours: boostDurationHours));
-
-      transaction.update(postRef, {
+      final expireAt = DateTime.now().add(Duration(hours: boostDurationHours));
+      tx.update(postRef, {
         'isBoosted': true,
-        'boostExpiresAt': boostExpiration,
+        'boostExpiresAt': expireAt,
         'boostScore': 100,
       });
-
-      transaction.update(userRef, {
+      tx.update(userRef, {
         'xpPoints': FieldValue.increment(-50),
-        'lastBoostDate': currentDate,
+        'lastBoostDate': today,
       });
-
-      print('🚀 Post boosted successfully!');
     });
   }
 
   Future<void> removeExpiredBoosts() async {
-    final QuerySnapshot snapshot = await _firestore
+    final snap = await _firestore
         .collection('posts')
         .where('isBoosted', isEqualTo: true)
         .get();
-
-    for (final doc in snapshot.docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      if (data['boostExpiresAt'] != null) {
-        final DateTime boostEndTime = (data['boostExpiresAt'] as Timestamp).toDate();
-        if (boostEndTime.isBefore(DateTime.now())) {
-          await doc.reference.update({
-            'isBoosted': false,
-            'boostExpiresAt': null,
-            'boostScore': 0,
-          });
-        }
+    for (var doc in snap.docs) {
+      final data = doc.data();
+      final exp = data['boostExpiresAt'] as Timestamp?;
+      if (exp != null && exp.toDate().isBefore(DateTime.now())) {
+        await doc.reference.update({
+          'isBoosted': false,
+          'boostExpiresAt': null,
+          'boostScore': 0,
+        });
       }
     }
   }
 
-  /// ✅ Now returns `true` if vote added or removed, `false` if limit reached
-  Future<bool> markPostHelpful(String postId, String postOwnerId) async {
-    final User? user = FirebaseAuth.instance.currentUser;
+  Future<bool> markPostHelpful(String postId, String ownerId) async {
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) return false;
 
-    final String userId = user.uid;
-    final userRef = _firestore.collection('users').doc(userId);
+    final userRef = _firestore.collection('users').doc(user.uid);
     final postRef = _firestore.collection('posts').doc(postId);
-    final ownerRef = _firestore.collection('users').doc(postOwnerId);
+    final ownerRef = _firestore.collection('users').doc(ownerId);
 
-    return await _firestore.runTransaction((transaction) async {
-      final userSnapshot = await transaction.get(userRef);
-      final postSnapshot = await transaction.get(postRef);
+    return await _firestore.runTransaction((tx) async {
+      final uSnap = await tx.get(userRef);
+      final pSnap = await tx.get(postRef);
+      if (!uSnap.exists || !pSnap.exists) return false;
 
-      if (!userSnapshot.exists || !postSnapshot.exists) return false;
-
-      final userData = userSnapshot.data() as Map<String, dynamic>;
-      final postData = postSnapshot.data() as Map<String, dynamic>;
-
-      final List userHelpfulVotes = userData['helpfulVotesGiven'] ?? [];
-      final bool hasVoted = userHelpfulVotes.any((vote) => vote['postId'] == postId);
+      final uData = uSnap.data()!;
+      final List votesGiven = uData['helpfulVotesGiven'] ?? [];
       final String today = DateTime.now().toString().substring(0, 10);
 
-      if (hasVoted) {
-        transaction.update(userRef, {
+      final already = votesGiven.any((v) => v['postId'] == postId);
+      if (already) {
+        tx.update(userRef, {
           'helpfulVotesGiven': FieldValue.arrayRemove([
             {'postId': postId, 'date': today}
-          ]),
+          ])
         });
-        transaction.update(postRef, {
-          'helpfulVotes': FieldValue.increment(-1),
-        });
-        transaction.update(ownerRef, {
-          'xpPoints': FieldValue.increment(-10),
+        tx.update(postRef, {'helpfulVotes': FieldValue.increment(-1)});
+        tx.update(ownerRef, {
           'helpfulMarks': FieldValue.increment(-1),
+          'xpPoints': FieldValue.increment(-10),
         });
-        print('❌ Helpful vote removed.');
-        return true;
-      } else {
-        final int helpfulVotesToday = userHelpfulVotes
-            .where((vote) => vote['date'] == today)
-            .length;
-
-        if (helpfulVotesToday >= 5) {
-          print('⚠ You can only mark 5 posts as helpful per day.');
-          return false;
-        }
-
-        transaction.update(userRef, {
-          'helpfulVotesGiven': FieldValue.arrayUnion([
-            {'postId': postId, 'date': today}
-          ]),
-        });
-        transaction.update(postRef, {
-          'helpfulVotes': FieldValue.increment(1),
-        });
-        transaction.update(ownerRef, {
-          'xpPoints': FieldValue.increment(10),
-          'helpfulMarks': FieldValue.increment(1),
-        });
-        print('✅ Post marked as helpful!');
         return true;
       }
+
+      final todayCount =
+          votesGiven.where((v) => v['date'] == today).length;
+      if (todayCount >= 5) return false;
+
+      tx.update(userRef, {
+        'helpfulVotesGiven': FieldValue.arrayUnion([
+          {'postId': postId, 'date': today}
+        ])
+      });
+      tx.update(postRef, {'helpfulVotes': FieldValue.increment(1)});
+      tx.update(ownerRef, {
+        'helpfulMarks': FieldValue.increment(1),
+        'xpPoints': FieldValue.increment(10),
+      });
+      return true;
     });
   }
 }
