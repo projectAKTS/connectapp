@@ -9,7 +9,7 @@ import 'edit_profile_screen.dart';
 import '../consultation/consultation_booking_screen.dart';
 import '../credits_store_screen.dart';
 import '/services/boost_service.dart';
-import '../Agora_Call_Screen.dart'; // ← for video call
+import '../Agora_Call_Screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String userID;
@@ -20,27 +20,42 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  final ScrollController _scrollController = ScrollController();
+  late final Stream<QuerySnapshot> _featuredPostsStream;
+  late final PageController _pageController;
+
   Map<String, dynamic>? userData;
   bool isLoading = true;
   bool isCurrentUser = false;
   bool isFollowing = false;
 
-  // ── FILTER STATE ─────────────────────────────────────────
   String selectedFilter = 'all';
   final Map<String, String?> filterMap = {
     'all':        null,
     'experience': 'Experience',
     'advice':     'Advice',
     'how-to':     'How-To',
-    'lookingFor': 'Looking For...',  // exactly your Firestore tag
+    'lookingFor': 'Looking For...',
   };
-  // ──────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
     _checkIfCurrentUser();
     _loadUserData();
+    // Keep featured posts stream and page controller stable
+    _featuredPostsStream = FirebaseFirestore.instance
+        .collection('posts')
+        .where('userID', isEqualTo: widget.userID)
+        .snapshots();
+    _pageController = PageController(viewportFraction: 0.8);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _pageController.dispose();
+    super.dispose();
   }
 
   void _checkIfCurrentUser() {
@@ -57,7 +72,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       setState(() => isLoading = false);
       return;
     }
-    userData = snap.data()!;
+    userData = snap.data();
     setState(() => isLoading = false);
 
     if (!isCurrentUser) {
@@ -113,11 +128,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
       body: SingleChildScrollView(
+        key: const PageStorageKey('profileScroll'),
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // 1) Header
+            // 1) Profile header + boost badge
             Center(
               child: Stack(
                 alignment: Alignment.topRight,
@@ -156,28 +172,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 _buildStatColumn(
-                  Icons.whatshot,
-                  'Streak',
-                  '${userData!['streakDays'] ?? 0} days',
-                ),
-                _buildStatColumn(
-                  Icons.emoji_events,
-                  'XP',
-                  '${userData!['xpPoints'] ?? 0}',
-                ),
-                _buildStatColumn(
-                  Icons.thumb_up,
-                  'Helpful',
-                  '${userData!['helpfulMarks'] ?? 0}',
-                ),
+                    Icons.whatshot, 'Streak', '${userData!['streakDays'] ?? 0} days'),
+                _buildStatColumn(Icons.emoji_events, 'XP',
+                    '${userData!['xpPoints'] ?? 0}'),
+                _buildStatColumn(Icons.thumb_up, 'Helpful',
+                    '${userData!['helpfulMarks'] ?? 0}'),
               ],
             ),
             const SizedBox(height: 16),
 
-            // 3) Badges (only if your userData has a non-empty badges list)
-            if (userData!.containsKey('badges') &&
-                userData!['badges'] is List &&
-                (userData!['badges'] as List).isNotEmpty) ...[
+            // 3) Badges
+            if ((userData!['badges'] as List?)?.isNotEmpty ?? false) ...[
               const Text('Badges:',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
@@ -185,16 +190,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 spacing: 8,
                 runSpacing: 4,
                 children: [
-                  // show up to 3
-                  for (var i = 0;
-                      i < (userData!['badges'] as List).length && i < 3;
-                      i++)
+                  for (var i = 0; i < (userData!['badges'] as List).length && i < 3; i++)
                     Chip(
-                      label:
-                          Text((userData!['badges'] as List)[i].toString()),
+                      label: Text((userData!['badges'] as List)[i].toString()),
                       backgroundColor: Colors.grey.shade100,
                     ),
-                  // "+N more" tappable
                   if ((userData!['badges'] as List).length > 3)
                     ActionChip(
                       label: Text(
@@ -205,14 +205,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           context: context,
                           builder: (_) => ListView(
                             padding: const EdgeInsets.all(16),
-                            children:
-                                (userData!['badges'] as List<dynamic>)
-                                    .map((b) => ListTile(
-                                          leading:
-                                              const Icon(Icons.star_border),
-                                          title: Text(b.toString()),
-                                        ))
-                                    .toList(),
+                            children: (userData!['badges'] as List)
+                                .map((b) => ListTile(
+                                      leading: const Icon(Icons.star_border),
+                                      title: Text(b.toString()),
+                                    ))
+                                .toList(),
                           ),
                         );
                       },
@@ -222,52 +220,69 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 16),
             ],
 
-            // 4) Featured Posts
+            // 4) Featured Posts — uses stable stream & PageView
             const Text('Featured Posts',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             SizedBox(
-              height: 140,
+              height: 180,
               child: StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('posts')
-                    .where('userID', isEqualTo: widget.userID)
-                    .snapshots(),
+                stream: _featuredPostsStream,
                 builder: (ctx, snap) {
                   if (snap.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
                   final docs = snap.data?.docs ?? [];
                   docs.sort((a, b) {
-                    final tA = (a['timestamp'] as Timestamp?)?.toDate() ??
+                    final aTs = (a['timestamp'] as Timestamp?)?.toDate() ??
                         DateTime.fromMillisecondsSinceEpoch(0);
-                    final tB = (b['timestamp'] as Timestamp?)?.toDate() ??
+                    final bTs = (b['timestamp'] as Timestamp?)?.toDate() ??
                         DateTime.fromMillisecondsSinceEpoch(0);
-                    return tB.compareTo(tA);
+                    return bTs.compareTo(aTs);
                   });
                   final featured = docs.take(3).toList();
                   if (featured.isEmpty) {
                     return const Center(child: Text('No featured posts yet.'));
                   }
-                  return ListView.builder(
-                    scrollDirection: Axis.horizontal,
+                  return PageView.builder(
+                    controller: _pageController,
                     itemCount: featured.length,
+                    padEnds: false,
                     itemBuilder: (c, i) {
-                      final d =
-                          featured[i].data()! as Map<String, dynamic>;
-                      return Container(
-                        width: 200,
-                        margin: const EdgeInsets.only(right: 12),
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          border: Border.all(color: Colors.grey.shade300),
-                          borderRadius: BorderRadius.circular(8),
+                      final data = featured[i].data() as Map<String, dynamic>;
+                      final date = (data['timestamp'] as Timestamp?)?.toDate();
+                      return Padding(
+                        padding: EdgeInsets.only(
+                          left: i == 0 ? 0 : 12,
+                          right: i == featured.length - 1 ? 0 : 12,
                         ),
-                        child: Text(
-                          d['content'] ?? '',
-                          maxLines: 4,
-                          overflow: TextOverflow.ellipsis,
+                        child: Card(
+                          elevation: 3,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    data['content'] ?? '',
+                                    maxLines: 4,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 14),
+                                  ),
+                                ),
+                                if (date != null)
+                                  Text(
+                                    DateFormat.yMMMd().format(date),
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey.shade600),
+                                  ),
+                              ],
+                            ),
+                          ),
                         ),
                       );
                     },
@@ -277,19 +292,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             const SizedBox(height: 16),
 
-            // 5) Filter Chips
-            Wrap(
-              spacing: 8,
-              children: filterMap.keys.map((key) {
-                final isSel = key == selectedFilter;
-                final label = key == 'all' ? 'All' : filterMap[key]!;
-                return ChoiceChip(
-                  label: Text(label),
-                  selected: isSel,
-                  onSelected: (_) =>
-                      setState(() => selectedFilter = key),
-                );
-              }).toList(),
+            // 5) Filters
+            SizedBox(
+              height: 48,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                itemCount: filterMap.length,
+                itemBuilder: (ctx, i) {
+                  final key = filterMap.keys.elementAt(i);
+                  final label = key == 'all' ? 'All' : filterMap[key]!;
+                  final isSelected = key == selectedFilter;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      key: ValueKey(key),
+                      label: Text(label),
+                      selected: isSelected,
+                      onSelected: (_) => setState(() => selectedFilter = key),
+                      selectedColor: Colors.purple.shade100,
+                      backgroundColor: Colors.white,
+                      side: BorderSide(
+                          color: isSelected
+                              ? Colors.purple
+                              : Colors.grey.shade400),
+                    ),
+                  );
+                },
+              ),
             ),
             const SizedBox(height: 16),
 
@@ -297,58 +326,55 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const Text('Recent Activity',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('posts')
-                  .where('userID', isEqualTo: widget.userID)
-                  .snapshots(),
-              builder: (ctx, snap) {
-                if (snap.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                var docs = snap.data?.docs ?? [];
-                docs.sort((a, b) {
-                  final tA = (a['timestamp'] as Timestamp?)?.toDate() ??
-                      DateTime.fromMillisecondsSinceEpoch(0);
-                  final tB = (b['timestamp'] as Timestamp?)?.toDate() ??
-                      DateTime.fromMillisecondsSinceEpoch(0);
-                  return tB.compareTo(tA);
-                });
-
-                // filter safely on tags
-                final tag = filterMap[selectedFilter];
-                final filtered = docs.where((doc) {
-                  final data = doc.data()! as Map<String, dynamic>;
-                  final tagsList = data.containsKey('tags') &&
-                          data['tags'] is List
-                      ? List<String>.from(data['tags'])
-                      : <String>[];
-                  return tag == null || tagsList.contains(tag);
-                }).toList();
-
-                if (filtered.isEmpty) {
-                  return const Center(child: Text('No activity yet.'));
-                }
-                return ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: filtered.length,
-                  itemBuilder: (c, i) {
-                    final d = filtered[i].data()! as Map<String, dynamic>;
-                    final ts = d['timestamp'] as Timestamp?;
-                    final date = ts?.toDate();
-                    return Card(
-                      margin: const EdgeInsets.symmetric(vertical: 6),
-                      child: ListTile(
-                        title: Text(d['content'] ?? ''),
-                        subtitle: date != null
-                            ? Text(DateFormat.yMMMd().format(date))
-                            : null,
-                      ),
-                    );
-                  },
-                );
-              },
+            SizedBox(
+              height: 300,
+              child: StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('posts')
+                    .where('userID', isEqualTo: widget.userID)
+                    .snapshots(),
+                builder: (ctx, snap) {
+                  if (snap.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  var docs = snap.data?.docs ?? [];
+                  docs.sort((a, b) {
+                    final aTs = (a['timestamp'] as Timestamp?)?.toDate() ??
+                        DateTime.fromMillisecondsSinceEpoch(0);
+                    final bTs = (b['timestamp'] as Timestamp?)?.toDate() ??
+                        DateTime.fromMillisecondsSinceEpoch(0);
+                    return bTs.compareTo(aTs);
+                  });
+                  final tag = filterMap[selectedFilter];
+                  final filtered = docs.where((doc) {
+                    final map = doc.data() as Map<String, dynamic>;
+                    final tagsList = map['tags'] is List
+                        ? List<String>.from(map['tags'])
+                        : <String>[];
+                    return tag == null || tagsList.contains(tag);
+                  }).toList();
+                  if (filtered.isEmpty) {
+                    return const Center(child: Text('No activity yet.'));
+                  }
+                  return ListView.builder(
+                    itemCount: filtered.length,
+                    itemBuilder: (c, i) {
+                      final d = filtered[i].data() as Map<String, dynamic>;
+                      final ts = d['timestamp'] as Timestamp?;
+                      final date = ts?.toDate();
+                      return Card(
+                        margin: const EdgeInsets.symmetric(vertical: 6),
+                        child: ListTile(
+                          title: Text(d['content'] ?? ''),
+                          subtitle: date != null
+                              ? Text(DateFormat.yMMMd().format(date))
+                              : null,
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
             ),
 
             const SizedBox(height: 32),

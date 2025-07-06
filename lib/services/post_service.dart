@@ -8,7 +8,7 @@ class PostService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final GamificationService _gamificationService = GamificationService();
 
-  /// Creates a new post with 3 positional arguments and 2 named options.
+  /// Creates a new post and updates the user's streak.
   Future<void> createPost(
     String content,
     List<String> tags,
@@ -19,41 +19,67 @@ class PostService {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw Exception('User must be logged in');
 
-    // Use Firestore-generated doc ID as the post ID
+    // 1) Generate a new post ID and build data
     final docRef = _firestore.collection('posts').doc();
     final String postId = docRef.id;
-
-    // Fetch the user's display name
     final userSnap = await _firestore.collection('users').doc(user.uid).get();
     final String userName = userSnap.data()?['fullName'] ?? 'Unknown User';
 
-    // Build the post data map
-    final Map<String, dynamic> postData = {
-      'id': postId,
-      'userID': user.uid,
-      'userName': userName,
-      'content': content,
-      'postType': postType,
-      'tags': tags,
-      'timestamp': FieldValue.serverTimestamp(),
-      'likes': 0,
-      'commentsCount': 0,
+    final postData = <String, dynamic>{
+      'id':           postId,
+      'userID':       user.uid,
+      'userName':     userName,
+      'content':      content,
+      'postType':     postType,
+      'tags':         tags,
+      'timestamp':    FieldValue.serverTimestamp(),
+      'likes':        0,
+      'commentsCount':0,
       'helpfulVotes': 0,
       'engagementScore': 0,
-      'isBoosted': false,
+      'isBoosted':    false,
       'boostExpiresAt': null,
-      'boostScore': 0,
-      'likedBy': <String>[],
-      'isProTip': isProTip,
-      'isFeatured': false,
+      'boostScore':   0,
+      'likedBy':      <String>[],
+      'isProTip':     isProTip,
+      'isFeatured':   false,
       if (imageUrl != null && imageUrl.isNotEmpty) 'imageUrl': imageUrl,
     };
 
-    // Write to Firestore
+    // 2) Write the new post
     await docRef.set(postData);
 
-    // Award XP for creating a post
+    // 3) Award XP
     await _gamificationService.awardXP(user.uid, 10, isPost: true);
+
+    // 4) Update streak in the user's document
+    final userRef = _firestore.collection('users').doc(user.uid);
+    final uSnap = await userRef.get();
+    if (uSnap.exists) {
+      final data = uSnap.data()!;
+      final String today = DateTime.now().toIso8601String().substring(0,10);
+      final String? lastPostDate = data['lastPostDate'] as String?;
+      final int  currentStreak = data['streakDays'] as int? ?? 0;
+
+      int newStreak;
+      if (lastPostDate == today) {
+        // already posted today → leave streak unchanged
+        newStreak = currentStreak;
+      } else {
+        final String yesterday = DateTime
+            .now()
+            .subtract(const Duration(days: 1))
+            .toIso8601String()
+            .substring(0,10);
+        // if they posted exactly yesterday → +1, otherwise reset to 1
+        newStreak = (lastPostDate == yesterday) ? currentStreak + 1 : 1;
+      }
+
+      await userRef.update({
+        'streakDays':   newStreak,
+        'lastPostDate': today,
+      });
+    }
   }
 
   Future<void> boostPost(String postId, int boostDurationHours) async {
@@ -68,14 +94,14 @@ class PostService {
       final pSnap = await tx.get(postRef);
       if (!uSnap.exists || !pSnap.exists) return;
 
-      final userData = uSnap.data()!;
-      final String today = DateTime.now().toString().substring(0, 10);
-      final String? lastBoost = userData['lastBoostDate'];
+      final uData = uSnap.data()!;
+      final String today = DateTime.now().toIso8601String().substring(0,10);
+      final String? lastBoost = uData['lastBoostDate'] as String?;
       if (lastBoost == today) {
         throw Exception("You've already boosted today.");
       }
 
-      final int xp = userData['xpPoints'] ?? 0;
+      final int xp = uData['xpPoints'] as int? ?? 0;
       if (xp < 50) {
         throw Exception("Not enough XP to boost.");
       }
@@ -99,9 +125,8 @@ class PostService {
         .where('isBoosted', isEqualTo: true)
         .get();
     for (var doc in snap.docs) {
-      final data = doc.data();
-      final exp = data['boostExpiresAt'] as Timestamp?;
-      if (exp != null && exp.toDate().isBefore(DateTime.now())) {
+      final exp = (doc.data()['boostExpiresAt'] as Timestamp?)?.toDate();
+      if (exp != null && exp.isBefore(DateTime.now())) {
         await doc.reference.update({
           'isBoosted': false,
           'boostExpiresAt': null,
@@ -125,11 +150,11 @@ class PostService {
       if (!uSnap.exists || !pSnap.exists) return false;
 
       final uData = uSnap.data()!;
-      final List votesGiven = uData['helpfulVotesGiven'] ?? [];
-      final String today = DateTime.now().toString().substring(0, 10);
+      final votesGiven = uData['helpfulVotesGiven'] as List<dynamic>? ?? [];
+      final String today = DateTime.now().toIso8601String().substring(0,10);
 
-      final already = votesGiven.any((v) => v['postId'] == postId);
-      if (already) {
+      final hasVoted = votesGiven.any((v) => v['postId'] == postId);
+      if (hasVoted) {
         tx.update(userRef, {
           'helpfulVotesGiven': FieldValue.arrayRemove([
             {'postId': postId, 'date': today}
@@ -143,9 +168,8 @@ class PostService {
         return true;
       }
 
-      final todayCount =
-          votesGiven.where((v) => v['date'] == today).length;
-      if (todayCount >= 5) return false;
+      final usedToday = votesGiven.where((v) => v['date'] == today).length;
+      if (usedToday >= 5) return false;
 
       tx.update(userRef, {
         'helpfulVotesGiven': FieldValue.arrayUnion([
