@@ -4,6 +4,7 @@
   },
   "functions": {
     "source": "connect_functions",
+    "runtime": "nodejs20",          
     "ignore": [
       "node_modules",
       ".git",

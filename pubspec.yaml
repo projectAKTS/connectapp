@@ -35,6 +35,8 @@ dependencies:
   uuid: ^4.5.1
   flutter_stripe: ^11.4.0
 
+  shimmer: ^3.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

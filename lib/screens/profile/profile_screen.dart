@@ -43,7 +43,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.initState();
     _checkIfCurrentUser();
     _loadUserData();
-    // Keep featured posts stream and page controller stable
     _featuredPostsStream = FirebaseFirestore.instance
         .collection('posts')
         .where('userID', isEqualTo: widget.userID)
@@ -60,7 +59,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _checkIfCurrentUser() {
     final cur = FirebaseAuth.instance.currentUser;
-    if (cur != null) isCurrentUser = cur.uid == widget.userID;
+    if (cur != null && cur.uid == widget.userID) {
+      isCurrentUser = true;
+    }
   }
 
   Future<void> _loadUserData() async {
@@ -106,6 +107,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _signOut() async {
+    await FirebaseAuth.instance.signOut();
+    // main.dart’s auth listener will redirect to login screen
+  }
+
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
@@ -126,13 +132,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
         boostedUntil != null && boostedUntil.isAfter(DateTime.now());
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Profile')),
+      appBar: AppBar(
+        title: const Text('Profile'),
+        actions: [
+          if (isCurrentUser)
+            IconButton(
+              icon: const Icon(Icons.logout),
+              tooltip: 'Log out',
+              onPressed: _signOut,
+            ),
+        ],
+      ),
       body: SingleChildScrollView(
         key: const PageStorageKey('profileScroll'),
+        controller: _scrollController,
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // ... [the rest of your existing widgets unmodified] ...
             // 1) Profile header + boost badge
             Center(
               child: Stack(
@@ -171,8 +189,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _buildStatColumn(
-                    Icons.whatshot, 'Streak', '${userData!['streakDays'] ?? 0} days'),
+                _buildStatColumn(Icons.whatshot, 'Streak',
+                    '${userData!['streakDays'] ?? 0} days'),
                 _buildStatColumn(Icons.emoji_events, 'XP',
                     '${userData!['xpPoints'] ?? 0}'),
                 _buildStatColumn(Icons.thumb_up, 'Helpful',
@@ -190,9 +208,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 spacing: 8,
                 runSpacing: 4,
                 children: [
-                  for (var i = 0; i < (userData!['badges'] as List).length && i < 3; i++)
+                  for (var i = 0;
+                      i < (userData!['badges'] as List).length && i < 3;
+                      i++)
                     Chip(
-                      label: Text((userData!['badges'] as List)[i].toString()),
+                      label:
+                          Text((userData!['badges'] as List)[i].toString()),
                       backgroundColor: Colors.grey.shade100,
                     ),
                   if ((userData!['badges'] as List).length > 3)
@@ -220,7 +241,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 16),
             ],
 
-            // 4) Featured Posts — uses stable stream & PageView
+            // 4) Featured Posts — stable stream & PageView
             const Text('Featured Posts',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
@@ -249,8 +270,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     itemCount: featured.length,
                     padEnds: false,
                     itemBuilder: (c, i) {
-                      final data = featured[i].data() as Map<String, dynamic>;
-                      final date = (data['timestamp'] as Timestamp?)?.toDate();
+                      final data =
+                          featured[i].data() as Map<String, dynamic>;
+                      final date =
+                          (data['timestamp'] as Timestamp?)?.toDate();
                       return Padding(
                         padding: EdgeInsets.only(
                           left: i == 0 ? 0 : 12,
@@ -308,7 +331,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       key: ValueKey(key),
                       label: Text(label),
                       selected: isSelected,
-                      onSelected: (_) => setState(() => selectedFilter = key),
+                      onSelected: (_) =>
+                          setState(() => selectedFilter = key),
                       selectedColor: Colors.purple.shade100,
                       backgroundColor: Colors.white,
                       side: BorderSide(

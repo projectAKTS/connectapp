@@ -46,6 +46,9 @@ class PostService {
       if (imageUrl != null && imageUrl.isNotEmpty) 'imageUrl': imageUrl,
     };
 
+    print('POST DEBUG: ${postData.map((k, v) => MapEntry(k, v.runtimeType.toString()))}');
+    print('POST FULL: $postData');
+
     // 2) Write the new post
     await docRef.set(postData);
 

@@ -3,13 +3,14 @@
 // v2 HTTPS entrypoints + Scheduler
 const { onRequest, onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule }               = require("firebase-functions/v2/scheduler");
-
-const admin = require("firebase-admin");
+const admin                         = require("firebase-admin");
 admin.initializeApp();
 
 // Helper to get Stripe client inside handlers
 function getStripeClient() {
-  const secret = process.env.STRIPE_SECRET || require("firebase-functions").config().stripe.secret;
+  const secret =
+    process.env.STRIPE_SECRET ||
+    require("firebase-functions").config().stripe.secret;
   if (!secret) {
     console.error("Stripe secret missing in environment or functions config");
     throw new Error("Stripe secret is not configured");
@@ -18,7 +19,7 @@ function getStripeClient() {
 }
 
 // ────────────────────────────────────────────
-// 1) Add Default Fields to Users (HTTPS trigger)
+// 1) Add Default Fields to Users (HTTP trigger)
 // ────────────────────────────────────────────
 exports.addDefaultFieldsToUsers = onRequest(
   { cpu: 1, memory: "256Mi" },
@@ -79,7 +80,7 @@ exports.scheduledConsultationReminder = onSchedule(
       const startTime = scheduledAt.toDate().toLocaleTimeString();
 
       participants.forEach(async uid => {
-        const userDoc = await admin.firestore().collection("users").doc(uid).get();
+        const userDoc = await admin.firestore().collection('users').doc(uid).get();
         if (!userDoc.exists) return;
         const token = userDoc.data().fcmToken;
         if (!token) return;
@@ -105,7 +106,10 @@ exports.scheduledConsultationReminder = onSchedule(
 // 3) Create Stripe Checkout Session (onCall)
 // ────────────────────────────────────────────
 exports.createStripeCheckoutSession = onCall(
-  { cpu: 1 },
+  {
+    cpu: 1,
+    invoker: ["public"]
+  },
   async (data, context) => {
     const stripe = getStripeClient();
     const { consultationId, cost, currency, successUrl, cancelUrl } = data;
@@ -140,12 +144,15 @@ exports.createStripeCheckoutSession = onCall(
 // 4) Create Stripe Customer (onCall)
 // ────────────────────────────────────────────
 exports.createStripeCustomer = onCall(
-  { cpu: 1 },
+  {
+    cpu: 1,
+    invoker: ["public"]
+  },
   async (data, context) => {
-    const stripe = getStripeClient();
     if (!context.auth) {
       throw new HttpsError("unauthenticated", "Not authenticated.");
     }
+    const stripe = getStripeClient();
     const uid     = context.auth.uid;
     const userRef = admin.firestore().collection("users").doc(uid);
     const userDoc = await userRef.get();
@@ -174,12 +181,15 @@ exports.createStripeCustomer = onCall(
 // 5) Create SetupIntent (onCall)
 // ────────────────────────────────────────────
 exports.createSetupIntent = onCall(
-  { cpu: 1 },
+  {
+    cpu: 1,
+    invoker: ["public"]
+  },
   async (data, context) => {
-    const stripe = getStripeClient();
     if (!context.auth) {
       throw new HttpsError("unauthenticated", "Not authenticated.");
     }
+    const stripe = getStripeClient();
     const uid     = context.auth.uid;
     const userRef = admin.firestore().collection("users").doc(uid);
     const userDoc = await userRef.get();
@@ -207,12 +217,15 @@ exports.createSetupIntent = onCall(
 // 6) Charge Stored Payment Method (onCall)
 // ────────────────────────────────────────────
 exports.chargeStoredPaymentMethod = onCall(
-  { cpu: 1 },
+  {
+    cpu: 1,
+    invoker: ["public"]
+  },
   async (data, context) => {
-    const stripe = getStripeClient();
     if (!context.auth) {
       throw new HttpsError("unauthenticated", "Not authenticated.");
     }
+    const stripe = getStripeClient();
     const { userId, amount, currency } = data;
     if (!userId || amount == null) {
       throw new HttpsError("invalid-argument", "Missing userId or amount");
@@ -227,12 +240,12 @@ exports.chargeStoredPaymentMethod = onCall(
     }
     try {
       const pi = await stripe.paymentIntents.create({
-        amount:       Math.round(amount * 100),
-        currency:     currency || "usd",
-        customer:     stripeCustomerId,
+        amount:        Math.round(amount * 100),
+        currency:      currency || "usd",
+        customer:      stripeCustomerId,
         payment_method: defaultPaymentMethodId,
-        off_session:  true,
-        confirm:      true
+        off_session:   true,
+        confirm:       true
       });
       return { success: true, paymentIntentId: pi.id };
     } catch (error) {
@@ -243,10 +256,10 @@ exports.chargeStoredPaymentMethod = onCall(
 );
 
 // ────────────────────────────────────────────
-// 7) Health Check (HTTPS trigger)
+// 7) Health Check (HTTP trigger)
 // ────────────────────────────────────────────
 exports.healthCheck = onRequest(
-  { cpu: 1 },
+  { cpu: 1, memory: "128Mi" },
   (req, res) => {
     res.status(200).send("OK");
   }

@@ -1,85 +1,85 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import '../../services/firebase_auth_service.dart';
-import '../profile/payment_setup_screen.dart';
 
-class RegisterScreen extends StatefulWidget {
-  const RegisterScreen({super.key});
+class SignupScreen extends StatefulWidget {
+  const SignupScreen({Key? key}) : super(key: key);
 
   @override
-  State<RegisterScreen> createState() => _RegisterScreenState();
+  State<SignupScreen> createState() => _SignupScreenState();
 }
 
-class _RegisterScreenState extends State<RegisterScreen> {
-  final FirebaseAuthService _authService = FirebaseAuthService();
-  final TextEditingController _firstNameController = TextEditingController();
-  final TextEditingController _lastNameController = TextEditingController();
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  bool _isLoading = false;
+class _SignupScreenState extends State<SignupScreen> {
+  final _authService   = FirebaseAuthService();
+  final _firstNameCtrl = TextEditingController();
+  final _lastNameCtrl  = TextEditingController();
+  final _emailCtrl     = TextEditingController();
+  final _passwordCtrl  = TextEditingController();
 
-  // Point at your Cloud Functions region
-  final _functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+  bool _isLoading = false;
+  final _functions  = FirebaseFunctions.instanceFor(region: 'us-central1');
 
   Future<void> _register() async {
-    if (_firstNameController.text.trim().isEmpty) {
+    if (_firstNameCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('First Name is required!')),
+        const SnackBar(content: Text('First name is required')),
       );
       return;
     }
 
     setState(() => _isLoading = true);
-
     try {
-      final fullName =
-          "${_firstNameController.text.trim()} ${_lastNameController.text.trim()}";
+      final fullName = '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}';
 
-      // 1) Sign up the user
+      // 1) register the user with email/password
       final user = await _authService.registerWithEmail(
-        _emailController.text.trim(),
-        _passwordController.text.trim(),
+        _emailCtrl.text.trim(),
+        _passwordCtrl.text.trim(),
         fullName,
       );
+      if (user == null) throw Exception('Registration failed');
 
-      if (user == null) {
-        throw Exception('Registration failed—no user returned.');
-      }
-
-      // 2) Force-refresh the ID token so the function sees them as signed in
+      // force-refresh their auth token so Firestore sees them as signed in
       await user.getIdToken(true);
 
-      // 3) Call your createStripeCustomer onCall function
-      final callable =
-          _functions.httpsCallable('createStripeCustomer');
-      final response = await callable();
-      final stripeCustomerId = response.data['stripeCustomerId'] as String;
+      // 1.5) now seed their Firestore profile doc
+      final userData = {
+        'fullName':        fullName,
+        'badges':          <String>[],
+        'location':        '',
+        'skills':          <String>[],
+        'interestTags':    <String>[],
+        'streakDays':      0,
+        'lastPostDate':    '',
+        'xpPoints':        0,
+        'helpfulVotesGiven': <Map<String, dynamic>>[],
+        'helpfulMarks':    0,
+      };
+      print('DEBUG USER WRITE (signup): ${user.uid} DATA: $userData');
 
-      // 4) Success: navigate to payment setup
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content:
-                Text('Registered! Now please set up your payment method.')),
-      );
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => const PaymentSetupScreen(),
-        ),
-      );
-    } on FirebaseFunctionsException catch (e) {
-      if (e.code == 'unauthenticated') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Auth failed. Please log in and try again.')),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Function error: ${e.message}')),
-        );
+      await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .set(userData, SetOptions(merge: true));
+
+      await user.getIdToken(true);
+
+      // optional: create Stripe customer
+      try {
+        final callable = _functions.httpsCallable('createStripeCustomer');
+        await callable();
+      } catch (_) {
+        // ignore CF errors
       }
-    } catch (e) {
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Registered! Let’s finish onboarding.')),
+      );
+      Navigator.pushReplacementNamed(context, '/onboarding');
+
+    } catch (e, st) {
+      debugPrint('Signup error: $e\n$st');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );
@@ -89,61 +89,76 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   @override
+  void dispose() {
+    _firstNameCtrl.dispose();
+    _lastNameCtrl.dispose();
+    _emailCtrl.dispose();
+    _passwordCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Register')),
+      appBar: AppBar(title: const Text('Sign Up')),
       body: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16),
         child: SingleChildScrollView(
           child: Column(
             children: [
               TextField(
-                controller: _firstNameController,
-                decoration:
-                    const InputDecoration(labelText: 'First Name *'),
+                controller: _firstNameCtrl,
+                decoration: const InputDecoration(labelText: 'First Name *'),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               TextField(
-                controller: _lastNameController,
-                decoration:
-                    const InputDecoration(labelText: 'Last Name (Optional)'),
+                controller: _lastNameCtrl,
+                decoration: const InputDecoration(labelText: 'Last Name (optional)'),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               TextField(
-                controller: _emailController,
+                controller: _emailCtrl,
                 decoration: const InputDecoration(labelText: 'Email'),
+                keyboardType: TextInputType.emailAddress,
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               TextField(
-                controller: _passwordController,
-                obscureText: true,
+                controller: _passwordCtrl,
                 decoration: const InputDecoration(labelText: 'Password'),
+                obscureText: true,
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 24),
               _isLoading
-                  ? const CircularProgressIndicator()
-                  : ElevatedButton(
+                ? const CircularProgressIndicator()
+                : SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
                       onPressed: _register,
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(50),
-                      ),
-                      child: const Text('Register'),
+                      child: const Text('Sign Up'),
                     ),
-              const SizedBox(height: 20),
+                  ),
+              const SizedBox(height: 16),
               ElevatedButton.icon(
                 icon: const Icon(Icons.login),
                 label: const Text('Sign Up with Google'),
                 onPressed: () async {
-                  await _authService.signInWithGoogle();
+                  final u = await _authService.signInWithGoogle();
+                  if (u != null) Navigator.pushReplacementNamed(context, '/home');
                 },
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               ElevatedButton.icon(
                 icon: const Icon(Icons.apple),
                 label: const Text('Sign Up with Apple'),
                 onPressed: () async {
-                  await _authService.signInWithApple();
+                  final u = await _authService.signInWithApple();
+                  if (u != null) Navigator.pushReplacementNamed(context, '/home');
                 },
+              ),
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: () => Navigator.pushReplacementNamed(context, '/login'),
+                child: const Text('Already have an account? Log in'),
               ),
             ],
           ),

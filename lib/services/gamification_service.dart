@@ -38,9 +38,12 @@ class GamificationService {
         helpfulVotesGiven.add({
           'date': DateTime.now().toString().substring(0, 10),
         });
+        // 🔵 DEBUG PRINT: Show the fields about to be updated (helpful)
+        print('GAMIFY DEBUG UPDATE helpfulVotesGiven: $helpfulVotesGiven');
         transaction.update(userRef, {'helpfulVotesGiven': helpfulVotesGiven});
       }
 
+      // Badge logic (unchanged)
       if (newPostCount == 2 && !updatedBadges.contains('🏅 First Contributor')) {
         updatedBadges.add('🏅 First Contributor');
       }
@@ -89,6 +92,8 @@ class GamificationService {
         if (!hasUsedTrial &&
             (premiumStatus == null || premiumStatus.isEmpty || premiumStatus == 'none')) {
           DateTime expiration = DateTime.now().add(const Duration(days: 3));
+          // 🔵 DEBUG PRINT: Show the fields about to be updated (trial)
+          print('GAMIFY DEBUG UPDATE TRIAL: {premiumStatus: trial, premiumExpiresAt: $expiration, trialUsed: true}');
           transaction.update(userRef, {
             'premiumStatus': 'trial',
             'premiumExpiresAt': expiration,
@@ -101,17 +106,20 @@ class GamificationService {
         }
       }
 
-      transaction.update(userRef, {
+      // 🔵 DEBUG PRINT: Show the fields about to be updated (main update)
+      final updateMap = {
         'xpPoints': newXP,
         'postCount': newPostCount,
         'commentCount': newCommentCount,
         'helpfulMarks': helpfulMarks,
         'badges': updatedBadges,
-      });
+      };
+      print('GAMIFY DEBUG UPDATE MAP: $updateMap');
+      transaction.update(userRef, updateMap);
     });
   }
 
-  /// 🚀 Spend XP for Boosting a Post (unchanged)
+  /// 🚀 Spend XP for Boosting a Post
   Future<bool> spendXPForBoost(String userId, int xpCost) async {
     DocumentReference userRef = _firestore.collection('users').doc(userId);
 
@@ -124,6 +132,8 @@ class GamificationService {
 
       if (currentXP < xpCost) return false;
 
+      // 🔵 DEBUG PRINT: Show the fields about to be updated (boost)
+      print('GAMIFY DEBUG UPDATE BOOST: {xpPoints: FieldValue.increment(-$xpCost)}');
       transaction.update(userRef, {
         'xpPoints': FieldValue.increment(-xpCost),
       });

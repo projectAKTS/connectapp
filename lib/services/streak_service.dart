@@ -28,11 +28,15 @@ class StreakService {
         updatedBadges.add('💪 Dedicated Contributor');
       }
 
-      transaction.update(userRef, {
+      // 🔵 DEBUG PRINT: Show the fields about to be updated
+      final updateMap = {
         'streakDays': currentStreak,
         'lastPostDate': FieldValue.serverTimestamp(),
         'badges': updatedBadges,
-      });
+      };
+      print('STREAK DEBUG UPDATE MAP: $updateMap');
+
+      transaction.update(userRef, updateMap);
 
       if (Platform.isAndroid && [5, 10, 30].contains(currentStreak)) {
         try {

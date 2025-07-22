@@ -1,4 +1,5 @@
 // lib/main.dart
+
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
@@ -8,15 +9,17 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 
 import 'screens/search/search_screen.dart';
 import 'screens/auth/login_screen.dart';
-import 'screens/auth/signup_screen.dart';
+import 'screens/auth/signup_screen.dart';          // ← SignupScreen here
 import 'screens/posts/create_post_screen.dart';
 import 'screens/posts/edit_post_screen.dart';
 import 'screens/posts/boost_post_screen.dart';
+import 'screens/posts/post_detail_screen.dart';
 import 'screens/consultation/consultation_booking_screen.dart';
 import 'screens/consultation/my_consultation_screen.dart';
 import 'screens/credits_store_screen.dart';
 import 'screens/Agora_Call_Screen.dart';
 import 'screens/profile/profile_screen.dart';
+import 'screens/onboarding_screen.dart';
 
 import 'services/firebase_options.dart';
 import 'services/notification_service.dart';
@@ -25,7 +28,9 @@ import 'widgets/main_scaffold.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   await FirebaseAppCheck.instance.activate(
     androidProvider: AndroidProvider.debug,
     appleProvider: AppleProvider.debug,
@@ -42,15 +47,21 @@ Future<void> main() async {
 
 void _handlePurchaseUpdates(List<PurchaseDetails> details) {
   for (final pd in details) {
-    if (pd.status == PurchaseStatus.purchased || pd.status == PurchaseStatus.restored) {
+    if (pd.status == PurchaseStatus.purchased ||
+        pd.status == PurchaseStatus.restored) {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) continue;
-      final doc = FirebaseFirestore.instance.collection('users').doc(user.uid);
+      final doc = FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid);
 
-      if (pd.productID == 'premium_monthly' || pd.productID == 'premium_yearly') {
+      if (pd.productID == 'premium_monthly' ||
+          pd.productID == 'premium_yearly') {
         final isMonthly = pd.productID == 'premium_monthly';
         final expires = DateTime.now().add(
-          isMonthly ? const Duration(days: 30) : const Duration(days: 365),
+          isMonthly
+              ? const Duration(days: 30)
+              : const Duration(days: 365),
         );
         doc.set({
           'premiumStatus': isMonthly ? 'Monthly' : 'Yearly',
@@ -62,7 +73,9 @@ void _handlePurchaseUpdates(List<PurchaseDetails> details) {
             : pd.productID == 'credits_30min'
                 ? 30
                 : 60;
-        doc.update({'freeConsultationMinutes': FieldValue.increment(minutes)});
+        doc.update({
+          'freeConsultationMinutes': FieldValue.increment(minutes)
+        });
       }
     }
   }
@@ -77,68 +90,101 @@ class MyApp extends StatelessWidget {
       title: 'Connect App',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(primarySwatch: Colors.blue),
+
+      // Decide start screen based on auth state:
       home: StreamBuilder<User?>(
         stream: FirebaseAuth.instance.authStateChanges(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Scaffold(body: Center(child: CircularProgressIndicator()));
-          } else if (snapshot.hasData) {
+        builder: (context, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          } else if (snap.hasData) {
             return const MainScaffold();
           } else {
             return const LoginScreen();
           }
         },
       ),
+
+      // Static named routes:
       routes: {
-        '/login': (_) => const LoginScreen(),
-        '/register': (_) => const RegisterScreen(),
-        '/home': (_) => const MainScaffold(), // ✅ FIX ADDED HERE
+        '/login':       (_) => const LoginScreen(),
+        '/register':    (_) => const SignupScreen(),      // ← here
+        '/home':        (_) => const MainScaffold(),
         '/create_post': (_) => const CreatePostScreen(),
-        '/search': (_) => const SearchScreen(),
-        '/edit_post': (_) => const EditPostScreen(),
+        '/search':      (_) => const SearchScreen(),
+        '/edit_post':   (_) => const EditPostScreen(),
         '/my_consultations': (_) => const MyConsultationsScreen(),
-        '/credits': (_) => const CreditsStoreScreen(),
-        '/video_call': (_) => const AgoraCallScreen(),
+        '/credits':     (_) => const CreditsStoreScreen(),
+        '/video_call':  (_) => const AgoraCallScreen(),
+        '/onboarding':  (_) => const OnboardingScreen(),
       },
+
+      // Dynamic routes (profile, post detail, boost, consultation):
       onGenerateRoute: (settings) {
+        final uri = Uri.parse(settings.name!);
+
+        // /profile/:userID
+        if (uri.pathSegments.length == 2 &&
+            uri.pathSegments[0] == 'profile') {
+          final userId = uri.pathSegments[1];
+          return MaterialPageRoute(
+            builder: (_) => ProfileScreen(userID: userId),
+            settings: settings,
+          );
+        }
+
+        // /post/:postId
+        if (uri.pathSegments.length == 2 &&
+            uri.pathSegments[0] == 'post') {
+          final postId = uri.pathSegments[1];
+          return MaterialPageRoute(
+            builder: (_) => PostDetailScreen(postId: postId),
+            settings: settings,
+          );
+        }
+
+        // /boostPost?postId=...
         if (settings.name == '/boostPost') {
           final args = settings.arguments as Map<String, dynamic>?;
           final postId = args?['postId'] as String?;
           return MaterialPageRoute(
             builder: (_) => postId == null
-                ? const Scaffold(body: Center(child: Text('Invalid Post ID')))
+                ? const Scaffold(
+                    body: Center(child: Text('Invalid Post ID')),
+                  )
                 : BoostPostScreen(postId: postId),
+            settings: settings,
           );
         }
 
+        // /consultation?targetUserId=...&targetUserName=...&ratePerMinute=...
         if (settings.name == '/consultation') {
           final args = settings.arguments as Map<String, dynamic>?;
-          final id = args?['targetUserId'] as String?;
+          final id   = args?['targetUserId']   as String?;
           final name = args?['targetUserName'] as String?;
           final rate = (args?['ratePerMinute'] as num?)?.toInt() ?? 0;
           return MaterialPageRoute(
-            builder: (_) => id == null || name == null
-                ? const Scaffold(body: Center(child: Text('Invalid args')))
+            builder: (_) => (id == null || name == null)
+                ? const Scaffold(
+                    body: Center(child: Text('Invalid args')),
+                  )
                 : ConsultationBookingScreen(
                     targetUserId: id,
                     targetUserName: name,
                     ratePerMinute: rate,
                   ),
-          );
-        }
-
-        if (settings.name == '/profile') {
-          final args = settings.arguments as Map<String, dynamic>?;
-          final userId = args?['userID'] as String?;
-          return MaterialPageRoute(
-            builder: (_) => userId == null
-                ? const Scaffold(body: Center(child: Text('Missing userID')))
-                : ProfileScreen(userID: userId),
+            settings: settings,
           );
         }
 
         return null;
       },
+
+      // Fallback to home:
+      onUnknownRoute: (_) =>
+          MaterialPageRoute(builder: (_) => const MainScaffold()),
     );
   }
 }
