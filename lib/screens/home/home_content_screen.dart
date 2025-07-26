@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
-import '../posts/comment_bottom_sheet.dart'; // If you still need it
+import '../posts/comment_bottom_sheet.dart';
 import 'package:connect_app/services/post_service.dart';
-import 'package:connect_app/services/gamification_service.dart'; // If needed for direct calls
+import 'package:connect_app/services/gamification_service.dart';
+import 'package:connect_app/utils/time_utils.dart';
 
 class HomeContentScreen extends StatefulWidget {
   const HomeContentScreen({Key? key}) : super(key: key);
@@ -14,10 +15,9 @@ class HomeContentScreen extends StatefulWidget {
 }
 
 class _HomeContentScreenState extends State<HomeContentScreen> {
-  final Map<String, int> helpfulVotesMap = {}; // Store Helpful Votes in State
+  final Map<String, int> helpfulVotesMap = {};
   final PostService _postService = PostService();
 
-  /// A safe helper to show a SnackBar if the widget is still mounted
   void _safeShowSnackBar(String message) {
     if (!mounted) return;
     final messenger = ScaffoldMessenger.maybeOf(context);
@@ -25,7 +25,6 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
     messenger.showSnackBar(SnackBar(content: Text(message)));
   }
 
-  /// Function to report a post
   Future<void> _reportPost(BuildContext context, String postId) async {
     final User? currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
@@ -63,14 +62,12 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
     }
   }
 
-  /// Toggle the "like" status of a post
   Future<void> _toggleLike(BuildContext context, String postId, List<String> likedBy) async {
     final User? currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
       _safeShowSnackBar('You need to be logged in to like posts.');
       return;
     }
-
     final String userId = currentUser.uid;
     final postRef = FirebaseFirestore.instance.collection('posts').doc(postId);
 
@@ -100,14 +97,12 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
     }
   }
 
-  /// Mark Post as Helpful
   Future<void> _markHelpful(BuildContext context, String postId, String postOwnerId) async {
     final User? currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
       _safeShowSnackBar('You need to be logged in to mark as helpful.');
       return;
     }
-
     final String userId = currentUser.uid;
     final userRef = FirebaseFirestore.instance.collection('users').doc(userId);
     final postRef = FirebaseFirestore.instance.collection('posts').doc(postId);
@@ -119,7 +114,6 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
         _safeShowSnackBar('User document not found.');
         return;
       }
-
       List<dynamic> userHelpfulVotes = userSnapshot['helpfulVotesGiven'] ?? [];
       bool hasVoted = userHelpfulVotes.any((vote) => vote['postId'] == postId);
 
@@ -150,7 +144,6 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
             'helpfulMarks': FieldValue.increment(-1),
           });
         });
-
         _safeShowSnackBar('Helpful vote removed.');
       } else {
         int helpfulVotesToday = userHelpfulVotes.where((vote) {
@@ -163,7 +156,6 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
             currentLocal = (currentLocal > 0) ? currentLocal - 1 : 0;
             helpfulVotesMap[postId] = currentLocal;
           });
-
           _safeShowSnackBar('You can only mark 5 posts as helpful per day.');
           return;
         }
@@ -185,7 +177,6 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
             'helpfulMarks': FieldValue.increment(1),
           });
         });
-
         _safeShowSnackBar('Post marked as helpful!');
       }
     } catch (e) {
@@ -199,7 +190,6 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
     }
   }
 
-  /// Boost a Post (6 hours, sets a boostScore)
   Future<void> _boostPost(BuildContext context, String postId) async {
     try {
       await _postService.boostPost(postId, 6);
@@ -227,13 +217,10 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
             return const Center(child: Text('No posts yet! Create one to get started.'));
           }
-
           final posts = snapshot.data!.docs;
-
           return ListView.builder(
             itemCount: posts.length,
             itemBuilder: (context, index) {
@@ -252,11 +239,14 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
               final int helpfulVotes = (localHelpful < 0) ? 0 : localHelpful;
               final String postOwnerId = data['userID'] ?? 'unknown_user';
               final bool isBoosted = data['isBoosted'] ?? false;
+              
+              // >>>>> TIMESTAMP FIX: centralized
               String formattedTime = 'Just now';
-              if (data.containsKey('timestamp') && data['timestamp'] is Timestamp) {
-                formattedTime = DateFormat('MMM d, yyyy - hh:mm a')
-                    .format((data['timestamp'] as Timestamp).toDate());
+              final dt = parseFirestoreTimestamp(data['timestamp']);
+              if (dt != null) {
+                formattedTime = DateFormat('MMM d, yyyy - hh:mm a').format(dt);
               }
+              // <<<<< TIMESTAMP FIX END
 
               return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -316,7 +306,6 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                               style: TextStyle(fontWeight: FontWeight.bold),
                             ),
                           ],
-                          // New Report Button
                           IconButton(
                             icon: const Icon(Icons.flag, color: Colors.red),
                             onPressed: () => _reportPost(context, postId),

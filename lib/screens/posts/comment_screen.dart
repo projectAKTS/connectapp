@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:connect_app/utils/time_utils.dart';
+import 'package:intl/intl.dart'; // Add this for date formatting
 
 class CommentScreen extends StatelessWidget {
   final String postId;
@@ -16,7 +18,7 @@ class CommentScreen extends StatelessWidget {
             .collection('posts')
             .doc(postId)
             .collection('comments')
-            .orderBy('timestamp', descending: true) // ✅ Ensure comments appear in order
+            .orderBy('timestamp', descending: true)
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -35,15 +37,21 @@ class CommentScreen extends StatelessWidget {
               final comment = comments[index];
               final data = comment.data() as Map<String, dynamic>? ?? {};
 
-              final String content = data['text'] ?? 'No content'; // ✅ Change 'content' to 'text'
+              final String content = data['text'] ?? 'No content';
               final String userId = data['userId'] ?? 'Unknown User';
               final int likes = data['likes'] ?? 0;
               final List<String> likedBy =
                   List<String>.from(data['likedBy'] ?? []);
 
+              // ⭐ Timestamp fix
+              final dt = parseFirestoreTimestamp(data['timestamp']);
+              final timeText = dt == null
+                  ? 'Just now'
+                  : DateFormat('MMM d, yyyy - hh:mm a').format(dt);
+
               return ListTile(
                 title: Text(content),
-                subtitle: Text('By: $userId'),
+                subtitle: Text('By: $userId\n$timeText'),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [

@@ -10,6 +10,7 @@ import '../consultation/consultation_booking_screen.dart';
 import '../credits_store_screen.dart';
 import '/services/boost_service.dart';
 import '../Agora_Call_Screen.dart';
+import 'package:connect_app/utils/time_utils.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String userID;
@@ -127,7 +128,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
     }
 
-    final boostedUntil = (userData!['boostedUntil'] as Timestamp?)?.toDate();
+    // Use the robust parser for timestamps
+    final boostedUntil = parseFirestoreTimestamp(userData!['boostedUntil']);
     final isBoosted =
         boostedUntil != null && boostedUntil.isAfter(DateTime.now());
 
@@ -150,8 +152,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // ... [the rest of your existing widgets unmodified] ...
-            // 1) Profile header + boost badge
+            // ... [rest of your profile header, unchanged] ...
             Center(
               child: Stack(
                 alignment: Alignment.topRight,
@@ -241,7 +242,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 16),
             ],
 
-            // 4) Featured Posts — stable stream & PageView
+            // 4) Featured Posts — use robust timestamp parsing
             const Text('Featured Posts',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
@@ -255,10 +256,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   }
                   final docs = snap.data?.docs ?? [];
                   docs.sort((a, b) {
-                    final aTs = (a['timestamp'] as Timestamp?)?.toDate() ??
-                        DateTime.fromMillisecondsSinceEpoch(0);
-                    final bTs = (b['timestamp'] as Timestamp?)?.toDate() ??
-                        DateTime.fromMillisecondsSinceEpoch(0);
+                    final aTs = parseFirestoreTimestamp(a['timestamp']) ?? DateTime.fromMillisecondsSinceEpoch(0);
+                    final bTs = parseFirestoreTimestamp(b['timestamp']) ?? DateTime.fromMillisecondsSinceEpoch(0);
                     return bTs.compareTo(aTs);
                   });
                   final featured = docs.take(3).toList();
@@ -272,8 +271,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     itemBuilder: (c, i) {
                       final data =
                           featured[i].data() as Map<String, dynamic>;
-                      final date =
-                          (data['timestamp'] as Timestamp?)?.toDate();
+                      final date = parseFirestoreTimestamp(data['timestamp']);
                       return Padding(
                         padding: EdgeInsets.only(
                           left: i == 0 ? 0 : 12,
@@ -363,10 +361,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   }
                   var docs = snap.data?.docs ?? [];
                   docs.sort((a, b) {
-                    final aTs = (a['timestamp'] as Timestamp?)?.toDate() ??
-                        DateTime.fromMillisecondsSinceEpoch(0);
-                    final bTs = (b['timestamp'] as Timestamp?)?.toDate() ??
-                        DateTime.fromMillisecondsSinceEpoch(0);
+                    final aTs = parseFirestoreTimestamp(a['timestamp']) ?? DateTime.fromMillisecondsSinceEpoch(0);
+                    final bTs = parseFirestoreTimestamp(b['timestamp']) ?? DateTime.fromMillisecondsSinceEpoch(0);
                     return bTs.compareTo(aTs);
                   });
                   final tag = filterMap[selectedFilter];
@@ -384,14 +380,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     itemCount: filtered.length,
                     itemBuilder: (c, i) {
                       final d = filtered[i].data() as Map<String, dynamic>;
-                      final ts = d['timestamp'] as Timestamp?;
-                      final date = ts?.toDate();
+                      final dt = parseFirestoreTimestamp(d['timestamp']);
                       return Card(
                         margin: const EdgeInsets.symmetric(vertical: 6),
                         child: ListTile(
                           title: Text(d['content'] ?? ''),
-                          subtitle: date != null
-                              ? Text(DateFormat.yMMMd().format(date))
+                          subtitle: dt != null
+                              ? Text(DateFormat.yMMMd().format(dt))
                               : null,
                         ),
                       );

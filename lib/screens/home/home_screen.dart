@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import '../../services/post_service.dart';
 import '../../widgets/zoomable_image.dart';
+import 'package:connect_app/utils/time_utils.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -153,7 +154,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   final userName = data['userName'] ?? 'User';
                   final content = data['content'] ?? '';
                   final imageUrl = data['imageUrl'] ?? '';
-                  final ts = data['timestamp'] as Timestamp;
+                  // >>> TIMESTAMP FIX
+                  final dt = parseFirestoreTimestamp(data['timestamp']);
+                  // <<<
                   final ownerId = data['userID'] ?? '';
                   final likedBy = data['likedBy'] as List? ?? [];
                   final tags = data['tags'] as List? ?? [];
@@ -217,8 +220,11 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ],
                           const SizedBox(height: 6),
-                          Text(DateFormat('MMM d, yyyy').format(ts.toDate()),
-                              style: const TextStyle(color: Colors.grey)),
+                          Text(
+                            dt == null
+                                ? 'Just now'
+                                : DateFormat('MMM d, yyyy').format(dt),
+                            style: const TextStyle(color: Colors.grey)),
                           const Divider(height: 20),
                           Row(children: [
                             IconButton(icon: Icon(Icons.favorite, color: isLiked ? Colors.red : Colors.grey),

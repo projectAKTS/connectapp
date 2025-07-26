@@ -1,7 +1,8 @@
-
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:connect_app/utils/time_utils.dart';
+import 'package:intl/intl.dart';
 
 class PostScreen extends StatefulWidget {
   final Map<String, dynamic> postData;
@@ -121,6 +122,7 @@ class _PostScreenState extends State<PostScreen> {
 
             const Divider(height: 32),
 
+            // COMMENTS
             Expanded(
               child: StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
@@ -138,10 +140,27 @@ class _PostScreenState extends State<PostScreen> {
                     itemCount: comments.length,
                     itemBuilder: (context, index) {
                       final commentData = comments[index].data() as Map<String, dynamic>;
+
+                      // Robust timestamp parsing
+                      final dt = parseFirestoreTimestamp(commentData['timestamp']);
+                      final formatted = dt != null
+                          ? DateFormat('MMM d, yyyy – hh:mm a').format(dt)
+                          : '';
+
                       return ListTile(
                         leading: const Icon(Icons.comment, color: Colors.grey),
                         title: Text(commentData['userName'] ?? 'Unknown User'),
-                        subtitle: Text(commentData['content'] ?? ''),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(commentData['content'] ?? ''),
+                            if (formatted.isNotEmpty)
+                              Text(
+                                formatted,
+                                style: const TextStyle(fontSize: 12, color: Colors.grey),
+                              ),
+                          ],
+                        ),
                       );
                     },
                   );

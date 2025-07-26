@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import '../../services/post_service.dart';
-
+import 'package:connect_app/utils/time_utils.dart';
 
 class HomeFeedInstagramStyle extends StatelessWidget {
   const HomeFeedInstagramStyle({Key? key}) : super(key: key);

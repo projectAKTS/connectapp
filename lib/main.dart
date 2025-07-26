@@ -25,6 +25,7 @@ import 'services/firebase_options.dart';
 import 'services/notification_service.dart';
 import 'services/subscription_service.dart';
 import 'widgets/main_scaffold.dart';
+import 'package:connect_app/utils/time_utils.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

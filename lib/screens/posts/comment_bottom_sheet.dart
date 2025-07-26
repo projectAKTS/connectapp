@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+import 'package:connect_app/utils/time_utils.dart';
 
 class CommentBottomSheet extends StatefulWidget {
   final String postId;
@@ -18,7 +19,6 @@ class _CommentBottomSheetState extends State<CommentBottomSheet> {
   final ScrollController _scrollController = ScrollController();
   bool _isPosting = false;
 
-  /// Fetches comments for the post
   Stream<QuerySnapshot> _fetchComments() {
     return _firestore
         .collection('posts')
@@ -28,7 +28,6 @@ class _CommentBottomSheetState extends State<CommentBottomSheet> {
         .snapshots();
   }
 
-  /// Posts a new comment and auto-scrolls to the top
   Future<void> _postComment() async {
     if (_commentController.text.trim().isEmpty || _isPosting) return;
 
@@ -39,7 +38,6 @@ class _CommentBottomSheetState extends State<CommentBottomSheet> {
     try {
       final String userId = FirebaseAuth.instance.currentUser!.uid;
 
-      // ✅ Fetch user name from Firestore
       DocumentSnapshot userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(userId)
@@ -60,12 +58,11 @@ class _CommentBottomSheetState extends State<CommentBottomSheet> {
 
       _commentController.clear();
 
-      // ✅ Auto-scroll to the top after posting a comment
-      Future.delayed(Duration(milliseconds: 300), () {
+      Future.delayed(const Duration(milliseconds: 300), () {
         if (_scrollController.hasClients) {
           _scrollController.animateTo(
             0.0,
-            duration: Duration(milliseconds: 500),
+            duration: const Duration(milliseconds: 500),
             curve: Curves.easeOut,
           );
         }
@@ -84,16 +81,16 @@ class _CommentBottomSheetState extends State<CommentBottomSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Container( // ✅ Removed DraggableScrollableSheet, replaced with Container
-      padding: const EdgeInsets.all(12), 
+    return Container(
+      padding: const EdgeInsets.all(12),
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min, // ✅ Auto-size based on content
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // 🔹 Comment Input Field
+          // Input Field
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Row(
@@ -119,9 +116,9 @@ class _CommentBottomSheetState extends State<CommentBottomSheet> {
           ),
           const SizedBox(height: 10),
 
-          // 🔹 Comments List
+          // Comments List
           SizedBox(
-            height: 300, // ✅ Adjusted height to fit content
+            height: 300,
             child: StreamBuilder<QuerySnapshot>(
               stream: _fetchComments(),
               builder: (context, snapshot) {
@@ -144,10 +141,10 @@ class _CommentBottomSheetState extends State<CommentBottomSheet> {
                     String commentText = commentData['text'] ?? 'No content';
                     String userName = commentData['userName'] ?? 'Anonymous';
 
-                    // ✅ Fix Timestamp Handling
-                    Timestamp? timestamp = commentData['timestamp'];
-                    String formattedTime = timestamp != null
-                        ? DateFormat('MMM d, yyyy - hh:mm a').format(timestamp.toDate())
+                    // ⭐ Robust Timestamp Fix
+                    final dt = parseFirestoreTimestamp(commentData['timestamp']);
+                    String formattedTime = dt != null
+                        ? DateFormat('MMM d, yyyy - hh:mm a').format(dt)
                         : 'Just now';
 
                     return ListTile(

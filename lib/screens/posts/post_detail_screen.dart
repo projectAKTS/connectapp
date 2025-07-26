@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:connect_app/utils/time_utils.dart';
 
 class PostDetailScreen extends StatelessWidget {
   final String postId;
@@ -24,10 +25,12 @@ class PostDetailScreen extends StatelessWidget {
           if (!snapshot.hasData || !snapshot.data!.exists) {
             return const Center(child: Text('Post not found.'));
           }
-          final data = snapshot.data!.data()! as Map<String, dynamic>;
-          final timestamp = data['timestamp'] as Timestamp?;
-          final date = timestamp != null
-              ? DateFormat.yMMMd().add_jm().format(timestamp.toDate())
+          final data = snapshot.data!.data() as Map<String, dynamic>;
+
+          // 👇 Robust timestamp handling
+          final dt = parseFirestoreTimestamp(data['timestamp']);
+          final date = dt != null
+              ? DateFormat.yMMMd().add_jm().format(dt)
               : 'Unknown date';
 
           return SingleChildScrollView(

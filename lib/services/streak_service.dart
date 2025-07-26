@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:connect_app/utils/time_utils.dart';
 
 class StreakService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -14,8 +15,9 @@ class StreakService {
 
       Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
       int currentStreak = (userData['streakDays'] ?? 0);
-      Timestamp? lastPostDate = userData['lastPostDate'];
 
+      // Robust timestamp parsing
+      dynamic lastPostDate = userData['lastPostDate'];
       if (lastPostDate == null || _isNewDay(lastPostDate)) {
         currentStreak++;
       }
@@ -28,7 +30,7 @@ class StreakService {
         updatedBadges.add('💪 Dedicated Contributor');
       }
 
-      // 🔵 DEBUG PRINT: Show the fields about to be updated
+      // Debug print
       final updateMap = {
         'streakDays': currentStreak,
         'lastPostDate': FieldValue.serverTimestamp(),
@@ -54,9 +56,11 @@ class StreakService {
     });
   }
 
-  bool _isNewDay(Timestamp lastPostDate) {
-    DateTime lastDate = lastPostDate.toDate();
-    DateTime today = DateTime.now();
+  /// Robust day check - accepts Timestamp, String, DateTime, or null
+  bool _isNewDay(dynamic lastPostDate) {
+    final lastDate = parseFirestoreTimestamp(lastPostDate);
+    if (lastDate == null) return true; // treat as new day if missing
+    final today = DateTime.now();
     return today.difference(lastDate).inDays >= 1;
   }
 }

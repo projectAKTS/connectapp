@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:connect_app/screens/consultation/consultation_call_screen.dart';
+import 'package:connect_app/utils/time_utils.dart';
 
 class MyConsultationsScreen extends StatelessWidget {
   const MyConsultationsScreen({Key? key}) : super(key: key);
@@ -37,9 +38,9 @@ class MyConsultationsScreen extends StatelessWidget {
           final allConsultations = snapshot.data!.docs;
           final upcomingConsultations = allConsultations.where((doc) {
             final data = doc.data() as Map<String, dynamic>;
-            final Timestamp? ts = data['scheduledAt'] as Timestamp?;
-            if (ts == null) return false;
-            return ts.toDate().isAfter(now);
+            final scheduledAt = parseFirestoreTimestamp(data['scheduledAt']);
+            if (scheduledAt == null) return false;
+            return scheduledAt.isAfter(now);
           }).toList();
 
           if (upcomingConsultations.isEmpty) {
@@ -52,8 +53,7 @@ class MyConsultationsScreen extends StatelessWidget {
               final doc = upcomingConsultations[index];
               final data = doc.data() as Map<String, dynamic>;
               final consultationId = data['consultationId'] ?? doc.id;
-              final Timestamp? ts = data['scheduledAt'] as Timestamp?;
-              final scheduledAt = ts?.toDate();
+              final scheduledAt = parseFirestoreTimestamp(data['scheduledAt']);
               final cost = data['cost'] ?? 0;
               final minutes = data['minutesRequested'] ?? 0;
               // Use roomId if stored, otherwise fall back to consultationId
