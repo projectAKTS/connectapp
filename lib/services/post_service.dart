@@ -62,8 +62,19 @@ class PostService {
     if (uSnap.exists) {
       final data = uSnap.data()!;
       final String today = DateTime.now().toIso8601String().substring(0,10);
-      final String? lastPostDate = data['lastPostDate'] as String?;
-      final int  currentStreak = data['streakDays'] as int? ?? 0;
+
+      // Robustly handle lastPostDate as String or Timestamp
+      String? lastPostDate;
+      final lpd = data['lastPostDate'];
+      if (lpd is String) {
+        lastPostDate = lpd;
+      } else if (lpd is Timestamp) {
+        lastPostDate = lpd.toDate().toIso8601String().substring(0, 10);
+      } else {
+        lastPostDate = null;
+      }
+
+      final int currentStreak = data['streakDays'] as int? ?? 0;
 
       int newStreak;
       if (lastPostDate == today) {

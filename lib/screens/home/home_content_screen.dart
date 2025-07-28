@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import '../posts/comment_bottom_sheet.dart';
+import '../posts/create_post_screen.dart';
 import 'package:connect_app/services/post_service.dart';
 import 'package:connect_app/services/gamification_service.dart';
 import 'package:connect_app/utils/time_utils.dart';
@@ -17,12 +18,29 @@ class HomeContentScreen extends StatefulWidget {
 class _HomeContentScreenState extends State<HomeContentScreen> {
   final Map<String, int> helpfulVotesMap = {};
   final PostService _postService = PostService();
+  final ScrollController _scrollController = ScrollController();
 
   void _safeShowSnackBar(String message) {
     if (!mounted) return;
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (messenger == null) return;
     messenger.showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _goToCreatePost() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const CreatePostScreen()),
+    );
+    if (result == 'posted') {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    }
   }
 
   Future<void> _reportPost(BuildContext context, String postId) async {
@@ -200,11 +218,21 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
   }
 
   @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final User? currentUser = FirebaseAuth.instance.currentUser;
     final String? currentUserId = currentUser?.uid;
 
     return Scaffold(
+      floatingActionButton: FloatingActionButton(
+        onPressed: _goToCreatePost,
+        child: const Icon(Icons.add),
+      ),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
             .collection('posts')
@@ -218,10 +246,11 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(child: Text('No posts yet! Create one to get started.'));
+          return const Center(child: Text('No posts yet! Create one to get started.'));
           }
           final posts = snapshot.data!.docs;
           return ListView.builder(
+            controller: _scrollController,
             itemCount: posts.length,
             itemBuilder: (context, index) {
               final post = posts[index];
@@ -239,14 +268,12 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
               final int helpfulVotes = (localHelpful < 0) ? 0 : localHelpful;
               final String postOwnerId = data['userID'] ?? 'unknown_user';
               final bool isBoosted = data['isBoosted'] ?? false;
-              
-              // >>>>> TIMESTAMP FIX: centralized
+
               String formattedTime = 'Just now';
               final dt = parseFirestoreTimestamp(data['timestamp']);
               if (dt != null) {
                 formattedTime = DateFormat('MMM d, yyyy - hh:mm a').format(dt);
               }
-              // <<<<< TIMESTAMP FIX END
 
               return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

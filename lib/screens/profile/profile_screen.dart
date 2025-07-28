@@ -32,11 +32,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   String selectedFilter = 'all';
   final Map<String, String?> filterMap = {
-    'all':        null,
-    'experience': 'Experience',
-    'advice':     'Advice',
-    'how-to':     'How-To',
-    'lookingFor': 'Looking For...',
+    'all': null,
+    'experience': 'experience',
+    'advice': 'advice',
+    'how-to': 'how-to',
+    'lookingFor': 'looking for...',
   };
 
   @override
@@ -110,7 +110,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _signOut() async {
     await FirebaseAuth.instance.signOut();
-    // main.dart’s auth listener will redirect to login screen
   }
 
   @override
@@ -128,7 +127,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
     }
 
-    // Use the robust parser for timestamps
     final boostedUntil = parseFirestoreTimestamp(userData!['boostedUntil']);
     final isBoosted =
         boostedUntil != null && boostedUntil.isAfter(DateTime.now());
@@ -152,15 +150,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // ... [rest of your profile header, unchanged] ...
             Center(
               child: Stack(
                 alignment: Alignment.topRight,
                 children: [
-                  CircleAvatar(
+                  const CircleAvatar(
                     radius: 60,
-                    backgroundImage:
-                        const AssetImage('assets/default_profile.png'),
+                    backgroundImage: AssetImage('assets/default_profile.png'),
                   ),
                   if (isBoosted)
                     const CircleAvatar(
@@ -186,7 +182,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             const SizedBox(height: 16),
 
-            // 2) Stats row
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
@@ -200,7 +195,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             const SizedBox(height: 16),
 
-            // 3) Badges
             if ((userData!['badges'] as List?)?.isNotEmpty ?? false) ...[
               const Text('Badges:',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -242,7 +236,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 16),
             ],
 
-            // 4) Featured Posts — use robust timestamp parsing
             const Text('Featured Posts',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
@@ -256,8 +249,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   }
                   final docs = snap.data?.docs ?? [];
                   docs.sort((a, b) {
-                    final aTs = parseFirestoreTimestamp(a['timestamp']) ?? DateTime.fromMillisecondsSinceEpoch(0);
-                    final bTs = parseFirestoreTimestamp(b['timestamp']) ?? DateTime.fromMillisecondsSinceEpoch(0);
+                    final aTs = parseFirestoreTimestamp(a['timestamp']) ??
+                        DateTime.fromMillisecondsSinceEpoch(0);
+                    final bTs = parseFirestoreTimestamp(b['timestamp']) ??
+                        DateTime.fromMillisecondsSinceEpoch(0);
                     return bTs.compareTo(aTs);
                   });
                   final featured = docs.take(3).toList();
@@ -313,7 +308,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             const SizedBox(height: 16),
 
-            // 5) Filters
             SizedBox(
               height: 48,
               child: ListView.builder(
@@ -344,7 +338,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             const SizedBox(height: 16),
 
-            // 6) Recent Activity
             const Text('Recent Activity',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
@@ -361,17 +354,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   }
                   var docs = snap.data?.docs ?? [];
                   docs.sort((a, b) {
-                    final aTs = parseFirestoreTimestamp(a['timestamp']) ?? DateTime.fromMillisecondsSinceEpoch(0);
-                    final bTs = parseFirestoreTimestamp(b['timestamp']) ?? DateTime.fromMillisecondsSinceEpoch(0);
+                    final aTs = parseFirestoreTimestamp(a['timestamp']) ??
+                        DateTime.fromMillisecondsSinceEpoch(0);
+                    final bTs = parseFirestoreTimestamp(b['timestamp']) ??
+                        DateTime.fromMillisecondsSinceEpoch(0);
                     return bTs.compareTo(aTs);
                   });
                   final tag = filterMap[selectedFilter];
                   final filtered = docs.where((doc) {
                     final map = doc.data() as Map<String, dynamic>;
-                    final tagsList = map['tags'] is List
-                        ? List<String>.from(map['tags'])
+                    final rawTags = map['tags'];
+                    final tagsList = rawTags is List
+                        ? rawTags.map((e) => e.toString().toLowerCase()).toList()
                         : <String>[];
-                    return tag == null || tagsList.contains(tag);
+                    return tag == null || tagsList.contains(tag.toLowerCase());
                   }).toList();
                   if (filtered.isEmpty) {
                     return const Center(child: Text('No activity yet.'));
@@ -395,7 +391,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 },
               ),
             ),
-
             const SizedBox(height: 32),
           ],
         ),

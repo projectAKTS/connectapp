@@ -1,5 +1,3 @@
-// lib/screens/posts/create_post_screen.dart
-
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -87,7 +85,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         imageUrl = await ref.getDownloadURL();
       }
 
-      // Positional + named parameters now match
       await _postService.createPost(
         content,
         selectedTags,
@@ -98,7 +95,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
       await _streakService.updateStreak(currentUser.uid);
 
-      // reset form
       _contentController.clear();
       _tagController.clear();
       setState(() {
@@ -111,8 +107,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('✅ Post created!')),
       );
+
       if (Navigator.canPop(context)) {
-        Navigator.pop(context);
+        Navigator.pop(context, 'posted'); // <-- important
       } else {
         Navigator.pushReplacementNamed(context, '/home');
       }
