@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shimmer/shimmer.dart';
-import 'package:connect_app/utils/time_utils.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({Key? key}) : super(key: key);
@@ -16,14 +15,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   int _currentStep = 0;
   final _formKey = GlobalKey<FormState>();
 
-  final _nameCtrl = TextEditingController();
-  final _emailCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
   String? _country;
   String? _language;
-
   String _role = 'seeker'; // seeker | helper | both
-
   final List<String> _allTopics = [
     'Immigration',
     'Moving to Canada',
@@ -36,92 +30,167 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     'Language learning'
   ];
   final Set<String> _selectedTopics = {};
-
   final _bioCtrl = TextEditingController();
+  final _skillsCtrl = TextEditingController();
+  final _expCtrl = TextEditingController();
   List<String> _journeys = [];
   TimeOfDay? _startTime;
   TimeOfDay? _endTime;
   String _mode = 'chat';
+  bool _loading = true;
+  String? _profilePhotoUrl; // For optional profile pic
 
-  bool _loading = false;
+  @override
+  void initState() {
+    super.initState();
+    _loadOnboardingData();
+  }
 
   @override
   void dispose() {
-    _nameCtrl.dispose();
-    _emailCtrl.dispose();
-    _passCtrl.dispose();
     _bioCtrl.dispose();
+    _skillsCtrl.dispose();
+    _expCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _completeOnboarding() async {
+  // 1. LOAD PREVIOUS DATA IF EXISTS
+  Future<void> _loadOnboardingData() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
+    final snap = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+    if (snap.exists) {
+      final d = snap.data()!;
+      // If neither country nor language is present, treat as new user
+      final bool isNewUser = !(d.containsKey('country') || d.containsKey('language'));
+      setState(() {
+        _country = d['country']?.isNotEmpty == true ? d['country'] : null;
+        _language = d['language']?.isNotEmpty == true ? d['language'] : null;
+        _role = d['role'] ?? 'seeker';
+        _selectedTopics.clear();
+        if (d['interestTags'] is List) {
+          _selectedTopics.addAll(List<String>.from(d['interestTags']));
+        }
+        _bioCtrl.text = (d['bio'] == null || d['bio'] == 'No bio available yet.') ? '' : d['bio'];
+        _skillsCtrl.text = (d['skills'] is List)
+            ? (d['skills'] as List).join(', ')
+            : (d['skills'] ?? '');
+        _expCtrl.text = d['experience'] ?? '';
+        _journeys = d['journeys'] is List
+            ? List<String>.from(d['journeys'])
+            : [];
+        if (d['availability'] != null && d['availability'].contains('–')) {
+          final parts = d['availability'].split('–');
+          if (parts.length == 2) {
+            _startTime = _parseTimeOfDay(parts[0].trim());
+            _endTime = _parseTimeOfDay(parts[1].trim());
+          }
+        }
+        _mode = d['mode'] ?? 'chat';
+        _profilePhotoUrl = d['profilePicture']?.isNotEmpty == true ? d['profilePicture'] : null;
 
+        if (isNewUser) {
+          _currentStep = 0; // Always start at first step for new users
+        } else {
+          // Resume at first incomplete step for returning users
+          _currentStep = 0;
+          if (_country != null && _language != null) _currentStep = 1;
+          if (_role.isNotEmpty) _currentStep = 2;
+          if (_selectedTopics.isNotEmpty || _bioCtrl.text.isNotEmpty) _currentStep = 3;
+        }
+        _loading = false;
+      });
+    } else {
+      setState(() => _loading = false);
+    }
+  }
+
+  // 2. SAVE STEP DATA ON CONTINUE
+  Future<void> _saveStepData() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
     final onboardingData = {
-      // Required fields (from your rules)
-      'activePerks': {},
-      'badges': [],
-      'bio': _bioCtrl.text.trim(),
-      'categoryPosts': {},
-      'Career': 0,
-      'Finance': 0,
-      'Health': 0,
-      'Technology': 0,
-      'Travel': 0,
-      'commentBoost': null,
-      'commentCount': 0,
       'country': _country ?? '',
-      'createdAt': FieldValue.serverTimestamp(),
-      'dailyLoginStreak': 0,
-      'email': _emailCtrl.text.trim(),
-      'followers': [],
-      'following': [],
-      'fullName': _nameCtrl.text.trim(),
-      'helpfulMarks': 0,
-      'interestTags': _selectedTopics.toList(),
-      'journeys': _journeys,
-      'lastLoginDate': null,
-      'lastPostDate': null,
-      'location': '',
-      'mode': _mode,
-      'name': _nameCtrl.text.trim(),
-      'postCount': 0,
-      'postingStreak': 0,
-      'postsCount': 0,
-      'premiumStatus': 'none',
-      'priorityPostBoost': null,
-      'profileHighlight': null,
-      'profilePicture': '',
-      'referralCount': 0,
+      'language': _language ?? '',
       'role': _role,
-      'skills': [],
-      'streakDays': 0,
-      'trialUsed': false,
-      'xpPoints': 0,
-      'helpfulVotesGiven': [],
-      'premiumExpiresAt': null,
-      'lastBoostDate': null,
+      'interestTags': _selectedTopics.toList(),
+      'bio': _bioCtrl.text.trim(),
+      'skills': (_role == 'helper' || _role == 'both')
+          ? _skillsCtrl.text.trim().split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList()
+          : [],
+      'experience': (_role == 'helper' || _role == 'both')
+          ? _expCtrl.text.trim()
+          : '',
+      'journeys': _journeys,
       'availability': (_startTime != null && _endTime != null)
           ? '${_startTime!.format(context)}–${_endTime!.format(context)}'
           : '',
+      'mode': _mode,
+      'profilePicture': (_profilePhotoUrl != null && _profilePhotoUrl!.isNotEmpty)
+          ? _profilePhotoUrl
+          : '',
+      'onboardingComplete': false,
     };
-
-    // Defensive: remove accidental nulls if any
-    onboardingData.removeWhere((key, value) => value == null);
-
-    print('DEBUG USER WRITE (onboarding): ${user.uid} DATA: $onboardingData');
-
+    onboardingData.removeWhere((k, v) => v == null);
     await FirebaseFirestore.instance
         .collection('users')
         .doc(user.uid)
         .set(onboardingData, SetOptions(merge: true));
   }
 
+  // 3. COMPLETE ONBOARDING OR SKIP
+  Future<void> _completeOnboarding({bool onboardingSkipped = false}) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final onboardingData = {
+      'country': _country ?? '',
+      'language': _language ?? '',
+      'role': _role,
+      'interestTags': _selectedTopics.toList(),
+      'bio': _bioCtrl.text.trim(),
+      'skills': (_role == 'helper' || _role == 'both')
+          ? _skillsCtrl.text.trim().split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList()
+          : [],
+      'experience': (_role == 'helper' || _role == 'both')
+          ? _expCtrl.text.trim()
+          : '',
+      'journeys': _journeys,
+      'availability': (_startTime != null && _endTime != null)
+          ? '${_startTime!.format(context)}–${_endTime!.format(context)}'
+          : '',
+      'mode': _mode,
+      'profilePicture': (_profilePhotoUrl != null && _profilePhotoUrl!.isNotEmpty)
+          ? _profilePhotoUrl
+          : '',
+      'onboardingComplete': !onboardingSkipped,
+    };
+    onboardingData.removeWhere((k, v) => v == null);
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .set(onboardingData, SetOptions(merge: true));
+  }
+
+  // 4. BUILD UI
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Sign Up & Onboarding')),
+      appBar: AppBar(
+        title: const Text('Onboarding'),
+        actions: [
+          TextButton(
+            onPressed: _loading
+                ? null
+                : () async {
+                    setState(() => _loading = true);
+                    await _completeOnboarding(onboardingSkipped: true);
+                    if (!mounted) return;
+                    Navigator.of(context).pushReplacementNamed('/home');
+                  },
+            child: const Text('Skip for now'),
+          ),
+        ],
+      ),
       body: _loading
           ? _buildSkeleton()
           : Stepper(
@@ -146,36 +215,32 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               },
               steps: [
                 Step(
-                  title: const Text('Basic Info'),
+                  title: const Text('Your Profile'),
                   isActive: _currentStep >= 0,
                   content: Form(
                     key: _formKey,
                     child: Column(
                       children: [
-                        TextFormField(
-                          controller: _nameCtrl,
-                          decoration: const InputDecoration(labelText: 'Name'),
-                          validator: (v) => v!.isEmpty ? 'Required' : null,
-                        ),
-                        TextFormField(
-                          controller: _emailCtrl,
-                          decoration: const InputDecoration(labelText: 'Email'),
-                          keyboardType: TextInputType.emailAddress,
-                          validator: (v) => v!.isEmpty ? 'Required' : null,
-                        ),
-                        TextFormField(
-                          controller: _passCtrl,
-                          decoration: const InputDecoration(labelText: 'Password'),
-                          obscureText: true,
-                          validator: (v) => v!.length < 6 ? 'Min 6 chars' : null,
+                        GestureDetector(
+                          onTap: () {
+                            // TODO: Implement photo picker
+                          },
+                          child: CircleAvatar(
+                            radius: 40,
+                            backgroundImage: (_profilePhotoUrl != null && _profilePhotoUrl!.isNotEmpty)
+                                ? NetworkImage(_profilePhotoUrl!)
+                                : null,
+                            child: (_profilePhotoUrl == null || _profilePhotoUrl!.isEmpty)
+                                ? const Icon(Icons.camera_alt, size: 40)
+                                : null,
+                          ),
                         ),
                         const SizedBox(height: 16),
                         DropdownButtonFormField<String>(
                           value: _country,
                           hint: const Text('Country of residence'),
                           items: ['Canada', 'USA', 'Other']
-                              .map((c) =>
-                                  DropdownMenuItem(value: c, child: Text(c)))
+                              .map((c) => DropdownMenuItem(value: c, child: Text(c)))
                               .toList(),
                           onChanged: (v) => setState(() => _country = v),
                           validator: (v) => v == null ? 'Required' : null,
@@ -185,8 +250,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           value: _language,
                           hint: const Text('Language(s) spoken'),
                           items: ['English', 'French', 'Other']
-                              .map((l) =>
-                                  DropdownMenuItem(value: l, child: Text(l)))
+                              .map((l) => DropdownMenuItem(value: l, child: Text(l)))
                               .toList(),
                           onChanged: (v) => setState(() => _language = v),
                           validator: (v) => v == null ? 'Required' : null,
@@ -230,15 +294,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   ),
                 ),
                 Step(
-                  title: const Text('Helper Profile Info'),
+                  title: const Text('About You'),
                   isActive: _currentStep >= 3,
                   content: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       TextFormField(
                         controller: _bioCtrl,
-                        decoration:
-                            const InputDecoration(labelText: 'Short bio'),
+                        decoration: const InputDecoration(
+                          labelText: 'Short bio',
+                          hintText: 'Describe yourself briefly (optional)',
+                        ),
                         maxLines: 3,
                       ),
                       const SizedBox(height: 12),
@@ -303,6 +369,23 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           );
                         }).toList(),
                       ),
+                      if (_role == 'helper' || _role == 'both') ...[
+                        const SizedBox(height: 18),
+                        TextFormField(
+                          controller: _skillsCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Skills (comma separated, e.g. "law, taxes, ESL")',
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: _expCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Relevant experience (help users trust your advice)',
+                          ),
+                          maxLines: 3,
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -329,23 +412,43 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
-  void _next() {
+  void _next() async {
     if (_currentStep == 0) {
       if ((_formKey.currentState?.validate() ?? false)) {
+        await _saveStepData();
         setState(() => _currentStep++);
       }
     } else if (_currentStep < 3) {
+      await _saveStepData();
       setState(() => _currentStep++);
     } else {
-      // Onboarding complete — write to Firestore
-      _completeOnboarding().then((_) {
-        Navigator.of(context).pushReplacementNamed('/home');
-      });
+      setState(() => _loading = true);
+      await _completeOnboarding(onboardingSkipped: false);
+      if (!mounted) return;
+      Navigator.of(context).pushReplacementNamed('/home');
     }
   }
 
   void _back() {
     if (_currentStep > 0) setState(() => _currentStep--);
+  }
+
+  // Parse "09:00 AM" -> TimeOfDay
+  TimeOfDay? _parseTimeOfDay(String time) {
+    try {
+      final now = TimeOfDay.now();
+      if (time.contains(':')) {
+        final parts = time.split(':');
+        int hour = int.parse(parts[0]);
+        int minute = int.parse(parts[1].replaceAll(RegExp(r'[^0-9]'), ''));
+        if (time.toLowerCase().contains('pm') && hour < 12) hour += 12;
+        if (time.toLowerCase().contains('am') && hour == 12) hour = 0;
+        return TimeOfDay(hour: hour, minute: minute);
+      }
+      return now;
+    } catch (_) {
+      return null;
+    }
   }
 
   Widget _buildSkeleton() {
