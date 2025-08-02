@@ -45,5 +45,12 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+
+	<!-- Privacy Usage Descriptions required by Apple -->
+	<key>NSCameraUsageDescription</key>
+	<string>We use the camera for video calls and photo sharing.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>We use the microphone for voice and video calls.</string>
+
 </dict>
 </plist>
