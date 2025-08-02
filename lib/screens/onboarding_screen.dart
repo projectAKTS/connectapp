@@ -61,7 +61,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final snap = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
     if (snap.exists) {
       final d = snap.data()!;
-      // If neither country nor language is present, treat as new user
       final bool isNewUser = !(d.containsKey('country') || d.containsKey('language'));
       setState(() {
         _country = d['country']?.isNotEmpty == true ? d['country'] : null;
@@ -198,6 +197,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               currentStep: _currentStep,
               onStepContinue: _next,
               onStepCancel: _back,
+              // Allow users to tap any step to jump to it!
+              onStepTapped: (step) => setState(() => _currentStep = step),
               controlsBuilder: (ctx, details) {
                 return Row(
                   children: [

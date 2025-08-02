@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import '../../services/firebase_auth_service.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // <-- Add this import
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({Key? key}) : super(key: key);
@@ -78,6 +79,24 @@ class _SignupScreenState extends State<SignupScreen> {
       );
       Navigator.pushReplacementNamed(context, '/onboarding');
 
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'email-already-in-use') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('That email is already registered. Please log in or use another email.')),
+        );
+      } else if (e.code == 'invalid-email') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Invalid email address.')),
+        );
+      } else if (e.code == 'weak-password') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Password is too weak. Try something stronger.')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Registration failed: ${e.message}')),
+        );
+      }
     } catch (e, st) {
       debugPrint('Signup error: $e\n$st');
       ScaffoldMessenger.of(context).showSnackBar(

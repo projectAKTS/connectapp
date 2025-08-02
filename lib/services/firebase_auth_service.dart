@@ -50,62 +50,48 @@ class FirebaseAuthService {
         },
         'premiumStatus': 'none',
         'trialUsed': false,
-      });
+      }, SetOptions(merge: true)); // <-- make merge explicit just in case
     } catch (e) {
       print('Error initializing user in Firestore: $e');
+      rethrow;
     }
   }
 
-  /// Sign in with email & password.
+  /// Sign in with email & password. Let exceptions bubble up.
   Future<User?> signInWithEmail(String email, String password) async {
-    try {
-      final creds = await _auth.signInWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-      return creds.user;
-    } on FirebaseAuthException catch (e) {
-      print('Error during sign‑in: ${e.code} ${e.message}');
-      return null;
-    } catch (e) {
-      print('Unknown error during sign‑in: $e');
-      return null;
-    }
+    final creds = await _auth.signInWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+    return creds.user;
   }
 
   /// Register with email & password, set displayName, and write Firestore user.
+  /// Let all exceptions bubble up!
   Future<User?> registerWithEmail(
     String email,
     String password,
     String fullName,
   ) async {
-    try {
-      // 1) Create the user in Firebase Auth
-      final creds = await _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-      final user = creds.user;
-      if (user == null) {
-        return null;
-      }
-
-      // 2) Update their displayName in Auth
-      await user.updateDisplayName(fullName);
-      await user.reload(); // refresh the User object
-
-      // 3) Create the Firestore document
-      await initializeUserInFirestore(user, fullName, email);
-
-      // 4) Return the signed‑up user
-      return _auth.currentUser;
-    } on FirebaseAuthException catch (e) {
-      print('Error during registration: ${e.code} ${e.message}');
-      return null;
-    } catch (e) {
-      print('Unexpected error during registration: $e');
-      return null;
+    // 1) Create the user in Firebase Auth
+    final creds = await _auth.createUserWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+    final user = creds.user;
+    if (user == null) {
+      throw Exception('Failed to create user');
     }
+
+    // 2) Update their displayName in Auth
+    await user.updateDisplayName(fullName);
+    await user.reload();
+
+    // 3) Create the Firestore document (if not exists, merge: true)
+    await initializeUserInFirestore(user, fullName, email);
+
+    // 4) Return the signed‑up user
+    return _auth.currentUser;
   }
 
   /// Sign in with Google.
@@ -132,7 +118,7 @@ class FirebaseAuthService {
       return user;
     } catch (e) {
       print('Error during Google sign‑in: $e');
-      return null;
+      rethrow; // Let the error propagate
     }
   }
 
@@ -164,7 +150,7 @@ class FirebaseAuthService {
       return user;
     } catch (e) {
       print('Error during Apple sign‑in: $e');
-      return null;
+      rethrow;
     }
   }
 
