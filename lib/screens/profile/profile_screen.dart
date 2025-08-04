@@ -9,7 +9,8 @@ import '../credits_store_screen.dart';
 import '/services/boost_service.dart';
 import '../Agora_Call_Screen.dart';
 import 'package:connect_app/utils/time_utils.dart';
-import '../onboarding_screen.dart'; // <--- Import your onboarding screen
+import '../onboarding_screen.dart';
+import '../chat/chat_screen.dart';  // <-- Import the chat screen
 
 class ProfileScreen extends StatefulWidget {
   final String userID;
@@ -108,11 +109,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _signOut() async {
-  await FirebaseAuth.instance.signOut();
-  if (!mounted) return;
-  Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+    await FirebaseAuth.instance.signOut();
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -211,6 +211,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 onPressed: () {
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+
+            // ---- Chat Button (if not current user) ----
+            if (!isCurrentUser) ...[
+              const SizedBox(height: 8),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.chat_bubble_outline),
+                label: const Text("Chat"),
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size(0, 40),
+                  backgroundColor: Colors.blue[50],
+                  foregroundColor: Colors.black87,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ChatScreen(otherUserId: widget.userID),
+                    ),
                   );
                 },
               ),
