@@ -3,9 +3,31 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
-// Bring in your App ID and token from your Agora setup
-import '../call/agora_call_screen.dart' show appId, token;
+const String appId = 'dac900a04a87460c87c3d18b63cac65d';
+
+Future<String> fetchAgoraToken(String channelName, int uid) async {
+  final url = Uri.parse('https://agora-token-server-production-2a8c.up.railway.app/getToken');
+  final response = await http.post(
+    url,
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({
+      'tokenType': 'rtc',
+      'channel': channelName,
+      'role': 'publisher',
+      'uid': uid.toString(),
+      'expire': 3600,
+    }),
+  );
+  if (response.statusCode == 200) {
+    final body = jsonDecode(response.body);
+    return body['token'] ?? '';
+  } else {
+    throw Exception('Failed to get token: ${response.body}');
+  }
+}
 
 class ConsultationCallScreen extends StatefulWidget {
   final String roomId;
@@ -25,25 +47,39 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
   late final RtcEngine _engine;
   bool _joined = false;
   int? _remoteUid;
+  bool _isError = false;
+  String? _errorMessage;
+  bool _isLoadingToken = true;
+  String? _token;
 
   @override
   void initState() {
     super.initState();
-    _initAgora();
+    _fetchTokenAndInitAgora();
   }
 
-  Future<void> _initAgora() async {
-    // 1. Ask for camera and mic permissions
-    await [Permission.camera, Permission.microphone].request();
+  Future<void> _fetchTokenAndInitAgora() async {
+    try {
+      final token = await fetchAgoraToken(widget.roomId, 0);
+      setState(() {
+        _token = token;
+        _isLoadingToken = false;
+      });
+      await _initAgora(token);
+    } catch (e) {
+      setState(() {
+        _isError = true;
+        _errorMessage = 'Token fetch/setup error: $e';
+        _isLoadingToken = false;
+      });
+    }
+  }
 
-    // 2. Create and initialize the Agora engine
+  Future<void> _initAgora(String token) async {
+    await [Permission.camera, Permission.microphone].request();
     _engine = createAgoraRtcEngine();
     await _engine.initialize(RtcEngineContext(appId: appId));
-
-    // 3. Enable video
     await _engine.enableVideo();
-
-    // 4. Set up event handlers
     _engine.registerEventHandler(
       RtcEngineEventHandler(
         onJoinChannelSuccess: (connection, elapsed) {
@@ -61,10 +97,14 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
             _remoteUid = null;
           });
         },
+        onError: (err, msg) {
+          setState(() {
+            _isError = true;
+            _errorMessage = 'Agora error: $err - $msg';
+          });
+        },
       ),
     );
-
-    // 5. Join the channel using dynamic roomId
     await _engine.joinChannel(
       token: token,
       channelId: widget.roomId,
@@ -75,15 +115,47 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
 
   @override
   void dispose() {
-    // 1. Leave channel
     _engine.leaveChannel();
-    // 2. Release resources
     _engine.release();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoadingToken) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text('Consultation: ${widget.roomId}'),
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_isError) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text('Consultation: ${widget.roomId}'),
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error, color: Colors.red, size: 50),
+              const SizedBox(height: 16),
+              Text(
+                _errorMessage ?? "Unknown error.",
+                style: const TextStyle(fontSize: 16, color: Colors.redAccent),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text("Close"),
+              )
+            ],
+          ),
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(
         title: Text('Consultation: ${widget.roomId}'),

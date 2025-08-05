@@ -240,7 +240,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           builder: (_) => AgoraCallScreen(
                             channelName: channel,
                             isVideo: false,
-                            otherUserId: widget.userID,
+                            otherUserName: userData?['fullName'] ?? 'Unknown',
                           ),
                         ),
                       );
@@ -261,7 +261,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           builder: (_) => AgoraCallScreen(
                             channelName: channel,
                             isVideo: true,
-                            otherUserId: widget.userID,
+                            otherUserName: userData?['fullName'] ?? 'Unknown',
                           ),
                         ),
                       );
