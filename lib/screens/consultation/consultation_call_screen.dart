@@ -5,7 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 
 // Bring in your App ID and token from your Agora setup
-import '../Agora_Call_Screen.dart' show appId, token;
+import '../call/agora_call_screen.dart' show appId, token;
 
 class ConsultationCallScreen extends StatefulWidget {
   final String roomId;

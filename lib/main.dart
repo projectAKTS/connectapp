@@ -1,5 +1,3 @@
-// lib/main.dart
-
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
@@ -9,7 +7,7 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 
 import 'screens/search/search_screen.dart';
 import 'screens/auth/login_screen.dart';
-import 'screens/auth/signup_screen.dart';          // ← SignupScreen here
+import 'screens/auth/signup_screen.dart';
 import 'screens/posts/create_post_screen.dart';
 import 'screens/posts/edit_post_screen.dart';
 import 'screens/posts/boost_post_screen.dart';
@@ -17,7 +15,8 @@ import 'screens/posts/post_detail_screen.dart';
 import 'screens/consultation/consultation_booking_screen.dart';
 import 'screens/consultation/my_consultation_screen.dart';
 import 'screens/credits_store_screen.dart';
-import 'screens/Agora_Call_Screen.dart';
+// REMOVE the broken import below:
+// import 'screens/call/agora_call_screen.dart';   // <-- REMOVE THIS LINE
 import 'screens/profile/profile_screen.dart';
 import 'screens/onboarding_screen.dart';
 
@@ -111,18 +110,18 @@ class MyApp extends StatelessWidget {
       // Static named routes:
       routes: {
         '/login':       (_) => const LoginScreen(),
-        '/register':    (_) => const SignupScreen(),      // ← here
+        '/register':    (_) => const SignupScreen(),
         '/home':        (_) => const MainScaffold(),
         '/create_post': (_) => const CreatePostScreen(),
         '/search':      (_) => const SearchScreen(),
         '/edit_post':   (_) => const EditPostScreen(),
         '/my_consultations': (_) => const MyConsultationsScreen(),
         '/credits':     (_) => const CreditsStoreScreen(),
-        '/video_call':  (_) => const AgoraCallScreen(),
+        // '/video_call':  (_) => const AgoraCallScreen(),   // REMOVE THIS LINE
         '/onboarding':  (_) => const OnboardingScreen(),
       },
 
-      // Dynamic routes (profile, post detail, boost, consultation):
+      // Dynamic routes (profile, post detail, boost, consultation, video call):
       onGenerateRoute: (settings) {
         final uri = Uri.parse(settings.name!);
 
@@ -179,6 +178,16 @@ class MyApp extends StatelessWidget {
             settings: settings,
           );
         }
+
+        // Video call screen (handled via code, NOT by route string)
+        // Example use:
+        // Navigator.of(context).push(MaterialPageRoute(
+        //   builder: (_) => AgoraCallScreen(
+        //     channelName: "call_abc_xyz",
+        //     isVideo: true,
+        //     otherUserId: "xyz",
+        //   ),
+        // ));
 
         return null;
       },
