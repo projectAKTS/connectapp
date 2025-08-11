@@ -1,9 +1,11 @@
+// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'screens/search/search_screen.dart';
 import 'screens/auth/login_screen.dart';
@@ -15,8 +17,6 @@ import 'screens/posts/post_detail_screen.dart';
 import 'screens/consultation/consultation_booking_screen.dart';
 import 'screens/consultation/my_consultation_screen.dart';
 import 'screens/credits_store_screen.dart';
-// REMOVE the broken import below:
-// import 'screens/call/agora_call_screen.dart';   // <-- REMOVE THIS LINE
 import 'screens/profile/profile_screen.dart';
 import 'screens/onboarding_screen.dart';
 
@@ -24,18 +24,38 @@ import 'services/firebase_options.dart';
 import 'services/notification_service.dart';
 import 'services/subscription_service.dart';
 import 'widgets/main_scaffold.dart';
-import 'package:connect_app/utils/time_utils.dart';
+
+// Global navigator key so NotificationService can navigate from background taps
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // No-op; app will navigate on tap via NotificationService
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // ✅ iOS: show alert/sound/badge for notifications in foreground
+  await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+    alert: true,
+    badge: true,
+    sound: true,
+  );
+
   await FirebaseAppCheck.instance.activate(
     androidProvider: AndroidProvider.debug,
     appleProvider: AppleProvider.debug,
   );
-  await NotificationService().initialize();
+
+  // Pass navigatorKey so incoming call taps can open the call screen
+  await NotificationService(navigatorKey: navigatorKey).initialize();
 
   final iapAvailable = await SubscriptionService.init();
   if (iapAvailable) {
@@ -47,35 +67,21 @@ Future<void> main() async {
 
 void _handlePurchaseUpdates(List<PurchaseDetails> details) {
   for (final pd in details) {
-    if (pd.status == PurchaseStatus.purchased ||
-        pd.status == PurchaseStatus.restored) {
+    if (pd.status == PurchaseStatus.purchased || pd.status == PurchaseStatus.restored) {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) continue;
-      final doc = FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid);
+      final doc = FirebaseFirestore.instance.collection('users').doc(user.uid);
 
-      if (pd.productID == 'premium_monthly' ||
-          pd.productID == 'premium_yearly') {
+      if (pd.productID == 'premium_monthly' || pd.productID == 'premium_yearly') {
         final isMonthly = pd.productID == 'premium_monthly';
-        final expires = DateTime.now().add(
-          isMonthly
-              ? const Duration(days: 30)
-              : const Duration(days: 365),
-        );
+        final expires = DateTime.now().add(isMonthly ? const Duration(days: 30) : const Duration(days: 365));
         doc.set({
           'premiumStatus': isMonthly ? 'Monthly' : 'Yearly',
           'premiumExpiresAt': Timestamp.fromDate(expires),
         }, SetOptions(merge: true));
       } else if (pd.productID.startsWith('credits_')) {
-        final minutes = pd.productID == 'credits_5min'
-            ? 5
-            : pd.productID == 'credits_30min'
-                ? 30
-                : 60;
-        doc.update({
-          'freeConsultationMinutes': FieldValue.increment(minutes)
-        });
+        final minutes = pd.productID == 'credits_5min' ? 5 : pd.productID == 'credits_30min' ? 30 : 60;
+        doc.update({'freeConsultationMinutes': FieldValue.increment(minutes)});
       }
     }
   }
@@ -87,18 +93,16 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey,
       title: 'Connect App',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(primarySwatch: Colors.blue),
 
-      // Decide start screen based on auth state:
       home: StreamBuilder<User?>(
         stream: FirebaseAuth.instance.authStateChanges(),
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
-            return const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            );
+            return const Scaffold(body: Center(child: CircularProgressIndicator()));
           } else if (snap.hasData) {
             return const MainScaffold();
           } else {
@@ -107,27 +111,23 @@ class MyApp extends StatelessWidget {
         },
       ),
 
-      // Static named routes:
       routes: {
-        '/login':       (_) => const LoginScreen(),
-        '/register':    (_) => const SignupScreen(),
-        '/home':        (_) => const MainScaffold(),
+        '/login': (_) => const LoginScreen(),
+        '/register': (_) => const SignupScreen(),
+        '/home': (_) => const MainScaffold(),
         '/create_post': (_) => const CreatePostScreen(),
-        '/search':      (_) => const SearchScreen(),
-        '/edit_post':   (_) => const EditPostScreen(),
+        '/search': (_) => const SearchScreen(),
+        '/edit_post': (_) => const EditPostScreen(),
         '/my_consultations': (_) => const MyConsultationsScreen(),
-        '/credits':     (_) => const CreditsStoreScreen(),
-        // '/video_call':  (_) => const AgoraCallScreen(),   // REMOVE THIS LINE
-        '/onboarding':  (_) => const OnboardingScreen(),
+        '/credits': (_) => const CreditsStoreScreen(),
+        '/onboarding': (_) => const OnboardingScreen(),
       },
 
-      // Dynamic routes (profile, post detail, boost, consultation, video call):
       onGenerateRoute: (settings) {
         final uri = Uri.parse(settings.name!);
 
         // /profile/:userID
-        if (uri.pathSegments.length == 2 &&
-            uri.pathSegments[0] == 'profile') {
+        if (uri.pathSegments.length == 2 && uri.pathSegments[0] == 'profile') {
           final userId = uri.pathSegments[1];
           return MaterialPageRoute(
             builder: (_) => ProfileScreen(userID: userId),
@@ -136,8 +136,7 @@ class MyApp extends StatelessWidget {
         }
 
         // /post/:postId
-        if (uri.pathSegments.length == 2 &&
-            uri.pathSegments[0] == 'post') {
+        if (uri.pathSegments.length == 2 && uri.pathSegments[0] == 'post') {
           final postId = uri.pathSegments[1];
           return MaterialPageRoute(
             builder: (_) => PostDetailScreen(postId: postId),
@@ -151,9 +150,7 @@ class MyApp extends StatelessWidget {
           final postId = args?['postId'] as String?;
           return MaterialPageRoute(
             builder: (_) => postId == null
-                ? const Scaffold(
-                    body: Center(child: Text('Invalid Post ID')),
-                  )
+                ? const Scaffold(body: Center(child: Text('Invalid Post ID')))
                 : BoostPostScreen(postId: postId),
             settings: settings,
           );
@@ -162,14 +159,12 @@ class MyApp extends StatelessWidget {
         // /consultation?targetUserId=...&targetUserName=...&ratePerMinute=...
         if (settings.name == '/consultation') {
           final args = settings.arguments as Map<String, dynamic>?;
-          final id   = args?['targetUserId']   as String?;
+          final id = args?['targetUserId'] as String?;
           final name = args?['targetUserName'] as String?;
           final rate = (args?['ratePerMinute'] as num?)?.toInt() ?? 0;
           return MaterialPageRoute(
             builder: (_) => (id == null || name == null)
-                ? const Scaffold(
-                    body: Center(child: Text('Invalid args')),
-                  )
+                ? const Scaffold(body: Center(child: Text('Invalid args')))
                 : ConsultationBookingScreen(
                     targetUserId: id,
                     targetUserName: name,
@@ -179,22 +174,10 @@ class MyApp extends StatelessWidget {
           );
         }
 
-        // Video call screen (handled via code, NOT by route string)
-        // Example use:
-        // Navigator.of(context).push(MaterialPageRoute(
-        //   builder: (_) => AgoraCallScreen(
-        //     channelName: "call_abc_xyz",
-        //     isVideo: true,
-        //     otherUserId: "xyz",
-        //   ),
-        // ));
-
         return null;
       },
 
-      // Fallback to home:
-      onUnknownRoute: (_) =>
-          MaterialPageRoute(builder: (_) => const MainScaffold()),
+      onUnknownRoute: (_) => MaterialPageRoute(builder: (_) => const MainScaffold()),
     );
   }
 }

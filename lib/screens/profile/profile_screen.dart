@@ -1,21 +1,19 @@
+// lib/screens/profile/profile_screen.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+
 import 'edit_profile_screen.dart';
 import '../consultation/consultation_booking_screen.dart';
 import '../credits_store_screen.dart';
 import '/services/boost_service.dart';
-import '../call/agora_call_screen.dart';
 import 'package:connect_app/utils/time_utils.dart';
 import '../onboarding_screen.dart';
 import '../chat/chat_screen.dart';
 
-// Utility function to generate unique channel names
-String generateChannelName(String uid1, String uid2) {
-  final sorted = [uid1, uid2]..sort();
-  return 'call_${sorted[0]}_${sorted[1]}';
-}
+// ✅ use the service to create calls & generate channel names
+import 'package:connect_app/services/call_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String userID;
@@ -113,6 +111,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _startCall({required bool isVideo}) async {
+    final otherName = (userData?['fullName'] as String?) ?? 'Unknown';
+    await CallService().startCall(
+      context,
+      toUid: widget.userID,
+      toName: otherName,
+      isVideo: isVideo,
+    );
+  }
+
   Future<void> _signOut() async {
     await FirebaseAuth.instance.signOut();
     if (!mounted) return;
@@ -197,13 +205,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               style: TextStyle(fontSize: 16, color: Colors.grey[700]),
             ),
 
-            // ---- Chat, Audio, Video Call Buttons (if not current user) ----
             if (!isCurrentUser) ...[
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  // Chat Button
                   ElevatedButton.icon(
                     icon: const Icon(Icons.chat_bubble_outline),
                     label: const Text("Chat"),
@@ -219,60 +225,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     onPressed: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) =>
-                              ChatScreen(otherUserId: widget.userID),
+                          builder: (_) => ChatScreen(otherUserId: widget.userID),
                         ),
                       );
                     },
                   ),
-                  // Audio Call Button
                   IconButton(
                     icon: const Icon(Icons.call, color: Colors.green),
                     tooltip: 'Audio Call',
-                    onPressed: () {
-                      final channel = generateChannelName(
-                        FirebaseAuth.instance.currentUser!.uid,
-                        widget.userID,
-                      );
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => AgoraCallScreen(
-                            channelName: channel,
-                            isVideo: false,
-                            otherUserName: userData?['fullName'] ?? 'Unknown',
-                          ),
-                        ),
-                      );
-                    },
+                    onPressed: () => _startCall(isVideo: false),
                   ),
-                  // Video Call Button
                   IconButton(
                     icon: const Icon(Icons.videocam, color: Colors.purple),
                     tooltip: 'Video Call',
-                    onPressed: () {
-                      final channel = generateChannelName(
-                        FirebaseAuth.instance.currentUser!.uid,
-                        widget.userID,
-                      );
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => AgoraCallScreen(
-                            channelName: channel,
-                            isVideo: true,
-                            otherUserName: userData?['fullName'] ?? 'Unknown',
-                          ),
-                        ),
-                      );
-                    },
+                    onPressed: () => _startCall(isVideo: true),
                   ),
                 ],
               ),
               const SizedBox(height: 8),
             ],
 
-            // ---- Other profile details (no changes below) ----
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
@@ -419,9 +391,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       selectedColor: Colors.purple.shade100,
                       backgroundColor: Colors.white,
                       side: BorderSide(
-                          color: isSelected
-                              ? Colors.purple
-                              : Colors.grey.shade400),
+                        color: isSelected
+                            ? Colors.purple
+                            : Colors.grey.shade400,
+                      ),
                     ),
                   );
                 },
