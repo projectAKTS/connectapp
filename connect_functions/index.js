@@ -39,7 +39,7 @@ async function getUserTokens(uid) {
 async function sendToTokens(tokens, payload) {
   const deduped = Array.from(new Set((tokens || []).filter(Boolean)));
   if (deduped.length === 0) return;
-  await fcm.sendEachForMulticast({ tokens: deduped, ...payload });
+  return fcm.sendEachForMulticast({ tokens: deduped, ...payload });
 }
 
 /** 1) Add default fields to users (HTTP) */
@@ -112,9 +112,16 @@ exports.scheduledConsultationReminder = onSchedule(
               body: `Your consultation starts at ${startTime}.`,
             },
             data: { type: "consultation_reminder", consultationId: doc.id },
-            android: { priority: "high" },
+            android: {
+              priority: "high",
+              notification: {
+                sound: "default",
+                channelId: "high_importance_channel",
+                visibility: "PUBLIC",
+              },
+            },
             apns: {
-              headers: { "apns-priority": "10" },
+              headers: { "apns-priority": "10", "apns-push-type": "alert" },
               payload: { aps: { sound: "default" } },
             },
           })
@@ -260,72 +267,151 @@ exports.healthCheck = onRequest({ cpu: 1, memory: "128Mi" }, (_req, res) => {
   res.status(200).send("OK");
 });
 
-/** 8) PUSH: when a new call invite is created -> notify callee
- *  Collection: callInvites
- */
-exports.onCallInviteCreated = onDocumentCreated("callInvites/{inviteId}", async (event) => {
-  const invite = event.data?.data() || {};
-  const { fromUid, fromName, toUid, channel, isVideo } = invite;
+/** 8) PUSH: when a new call invite is created -> notify callee */
+exports.onCallInviteCreated = onDocumentCreated(
+  {
+    document: "callInvites/{inviteId}",
+    database: "(default)",
+    region: "us-central1",
+  },
+  async (event) => {
+    const inviteId = event.params.inviteId;
+    const invite = event.data?.data() || {};
+    console.log("[onCallInviteCreated] NEW:", inviteId, invite);
 
-  if (!toUid || !channel) return;
+    const { fromUid, fromName, toUid, channel, isVideo } = invite;
+    if (!toUid || !channel) {
+      console.log("[onCallInviteCreated] missing toUid/channel");
+      return;
+    }
 
-  const tokens = await getUserTokens(toUid);
-  if (tokens.length === 0) return;
+    const tokens = await getUserTokens(toUid);
+    console.log("[onCallInviteCreated] token count:", tokens.length, "toUid:", toUid);
+    if (tokens.length === 0) return;
 
-  const payload = {
-    notification: {
-      title: isVideo ? "Incoming Video Call" : "Incoming Audio Call",
-      body: `From ${fromName || "Someone"}`,
-    },
-    data: {
-      action: "incoming_call",     // <-- matches app handler
-      channel: String(channel),
-      isVideo: String(!!isVideo),
-      fromName: String(fromName || "Caller"),
-    },
-    android: { priority: "high", notification: { sound: "default" } },
-    apns: {
-      headers: { "apns-priority": "10" },
-      payload: { aps: { sound: "default", contentAvailable: 1 } },
-    },
-  };
+    const payload = {
+      notification: {
+        title: isVideo ? "Incoming Video Call" : "Incoming Audio Call",
+        body: `From ${fromName || "Someone"}`,
+      },
+      data: {
+        type: "call_invite",          // NEW: stable type for client
+        action: "incoming_call",
+        channel: String(channel),
+        isVideo: String(!!isVideo),
+        fromName: String(fromName || "Caller"),
+      },
+      android: {
+        priority: "high",
+        notification: {
+          sound: "default",
+          channelId: "high_importance_channel",
+          visibility: "PUBLIC",
+        },
+      },
+      apns: {
+        headers: {
+          "apns-priority": "10",
+          "apns-push-type": "alert",
+        },
+        payload: {
+          aps: {
+            sound: "default",
+            "content-available": 1,
+            category: "INCOMING_CALL", // NEW: enables iOS actions
+          },
+        },
+      },
+    };
 
-  await sendToTokens(tokens, payload);
-});
-
-/** 9) PUSH: chat message -> notify other participant(s) */
-exports.onChatMessageCreated = onDocumentCreated("chats/{chatId}/messages/{messageId}", async (event) => {
-  const message = event.data?.data() || {};
-  const chatId = event.params.chatId;
-  const { authorId, text } = message;
-
-  const chatDoc = await db.collection("chats").doc(chatId).get();
-  const participants = chatDoc.get("participants") || [];
-  const targets = participants.filter((uid) => uid !== authorId);
-
-  let allTokens = [];
-  for (const uid of targets) {
-    const tokens = await getUserTokens(uid);
-    allTokens = allTokens.concat(tokens);
+    await sendToTokens(tokens, payload);
+    console.log("[onCallInviteCreated] push sent to", tokens.length, "tokens");
   }
-  allTokens = Array.from(new Set(allTokens.filter(Boolean)));
-  if (allTokens.length === 0) return;
+);
 
-  const payload = {
-    notification: {
-      title: "New Message",
-      body: text ? String(text).slice(0, 140) : "You have a new message",
-    },
-    data: {
-      type: "chat_message",
-      chatId: String(chatId || ""),
-    },
-    android: { priority: "high", notification: { sound: "default" } },
-    apns: {
-      headers: { "apns-priority": "10" },
-      payload: { aps: { sound: "default" } },
-    },
-  };
+/** 9) PUSH: chat message -> notify the other user (no participants array needed) */
+exports.onChatMessageCreated = onDocumentCreated(
+  {
+    document: "chats/{chatId}/messages/{messageId}",
+    database: "(default)",
+    region: "us-central1",
+  },
+  async (event) => {
+    const message = event.data?.data() || {};
+    const chatId = event.params.chatId;           // "<uidA>_<uidB>" (sorted)
+    const { authorId, text } = message;
 
-  await sendToTokens(allTokens, payload);
-});
+    if (!chatId || !authorId) return;
+
+    // Figure out the recipient from the chatId (other uid in "<a>_<b>")
+    const parts = String(chatId).split("_");
+    if (parts.length !== 2) return;
+    const [uidA, uidB] = parts;
+    const recipients = [uidA, uidB].filter((u) => u && u !== authorId);
+
+    // Load optional sender name for nicer push (fallback to "New message")
+    let fromName = "New message";
+    try {
+      const senderDoc = await db.collection("users").doc(authorId).get();
+      const d = senderDoc.data() || {};
+      fromName = d.fullName || d.name || "New message";
+    } catch {}
+
+    // Send to each recipient device
+    for (const toUid of recipients) {
+      const tokens = await getUserTokens(toUid);
+      if (!tokens.length) continue;
+
+      const payload = {
+        notification: {
+          title: fromName,
+          body: text ? String(text).slice(0, 140) : "Sent you a message",
+        },
+        data: {
+          type: "chat_message",
+          chatId: String(chatId),
+          // For the recipient, the "other user" is the author
+          otherUserId: String(authorId),
+        },
+        android: {
+          priority: "high",
+          notification: {
+            sound: "default",
+            channelId: "high_importance_channel",
+            visibility: "PUBLIC",
+          },
+        },
+        apns: {
+          headers: { "apns-priority": "10", "apns-push-type": "alert" },
+          payload: { aps: { sound: "default" } },
+        },
+      };
+
+      await sendToTokens(tokens, payload);
+    }
+  }
+);
+
+
+/** 10) TEST endpoint: create a callInvite to trigger the function */
+exports.testCreateInvite = onRequest(
+  { cpu: 1, memory: "128Mi" },
+  async (req, res) => {
+    try {
+      const toUid = req.query.toUid || "MISSING";
+      const ref = await db.collection("callInvites").add({
+        channel: "test_" + Date.now(),
+        fromUid: "TEST",
+        fromName: "Tester",
+        toUid,
+        isVideo: true,
+        status: "ringing",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      res.status(200).send("created " + ref.id);
+    } catch (e) {
+      console.error(e);
+      res.status(500).send(String(e));
+    }
+  }
+);

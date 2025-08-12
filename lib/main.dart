@@ -1,4 +1,3 @@
-// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
@@ -19,18 +18,19 @@ import 'screens/consultation/my_consultation_screen.dart';
 import 'screens/credits_store_screen.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/onboarding_screen.dart';
+import 'screens/chat/chat_screen.dart'; // <-- added
 
 import 'services/firebase_options.dart';
 import 'services/notification_service.dart';
 import 'services/subscription_service.dart';
 import 'widgets/main_scaffold.dart';
 
-// Global navigator key so NotificationService can navigate from background taps
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+late final NotificationService notificationService;
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // No-op; app will navigate on tap via NotificationService
+  // no-op; navigation happens on tap via NotificationService
 }
 
 Future<void> main() async {
@@ -42,11 +42,8 @@ Future<void> main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // ✅ iOS: show alert/sound/badge for notifications in foreground
   await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
-    alert: true,
-    badge: true,
-    sound: true,
+    alert: true, badge: true, sound: true,
   );
 
   await FirebaseAppCheck.instance.activate(
@@ -54,8 +51,8 @@ Future<void> main() async {
     appleProvider: AppleProvider.debug,
   );
 
-  // Pass navigatorKey so incoming call taps can open the call screen
-  await NotificationService(navigatorKey: navigatorKey).initialize();
+  notificationService = NotificationService(navigatorKey: navigatorKey);
+  await notificationService.initialize();
 
   final iapAvailable = await SubscriptionService.init();
   if (iapAvailable) {
@@ -74,13 +71,19 @@ void _handlePurchaseUpdates(List<PurchaseDetails> details) {
 
       if (pd.productID == 'premium_monthly' || pd.productID == 'premium_yearly') {
         final isMonthly = pd.productID == 'premium_monthly';
-        final expires = DateTime.now().add(isMonthly ? const Duration(days: 30) : const Duration(days: 365));
+        final expires = DateTime.now().add(
+          isMonthly ? const Duration(days: 30) : const Duration(days: 365),
+        );
         doc.set({
           'premiumStatus': isMonthly ? 'Monthly' : 'Yearly',
           'premiumExpiresAt': Timestamp.fromDate(expires),
         }, SetOptions(merge: true));
       } else if (pd.productID.startsWith('credits_')) {
-        final minutes = pd.productID == 'credits_5min' ? 5 : pd.productID == 'credits_30min' ? 30 : 60;
+        final minutes = pd.productID == 'credits_5min'
+            ? 5
+            : pd.productID == 'credits_30min'
+                ? 30
+                : 60;
         doc.update({'freeConsultationMinutes': FieldValue.increment(minutes)});
       }
     }
@@ -121,12 +124,21 @@ class MyApp extends StatelessWidget {
         '/my_consultations': (_) => const MyConsultationsScreen(),
         '/credits': (_) => const CreditsStoreScreen(),
         '/onboarding': (_) => const OnboardingScreen(),
+
+        // Optional named route for chat (we also navigate via MaterialPageRoute)
+        '/chat': (ctx) {
+          final args = ModalRoute.of(ctx)!.settings.arguments as Map<String, dynamic>?;
+          final otherUserId = args?['otherUserId'] as String?;
+          if (otherUserId == null || otherUserId.isEmpty) {
+            return const Scaffold(body: Center(child: Text('Missing otherUserId')));
+          }
+          return ChatScreen(otherUserId: otherUserId);
+        },
       },
 
       onGenerateRoute: (settings) {
         final uri = Uri.parse(settings.name!);
 
-        // /profile/:userID
         if (uri.pathSegments.length == 2 && uri.pathSegments[0] == 'profile') {
           final userId = uri.pathSegments[1];
           return MaterialPageRoute(
@@ -135,7 +147,6 @@ class MyApp extends StatelessWidget {
           );
         }
 
-        // /post/:postId
         if (uri.pathSegments.length == 2 && uri.pathSegments[0] == 'post') {
           final postId = uri.pathSegments[1];
           return MaterialPageRoute(
@@ -144,7 +155,6 @@ class MyApp extends StatelessWidget {
           );
         }
 
-        // /boostPost?postId=...
         if (settings.name == '/boostPost') {
           final args = settings.arguments as Map<String, dynamic>?;
           final postId = args?['postId'] as String?;
@@ -156,7 +166,6 @@ class MyApp extends StatelessWidget {
           );
         }
 
-        // /consultation?targetUserId=...&targetUserName=...&ratePerMinute=...
         if (settings.name == '/consultation') {
           final args = settings.arguments as Map<String, dynamic>?;
           final id = args?['targetUserId'] as String?;
