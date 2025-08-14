@@ -1,4 +1,3 @@
-// lib/call/agora_call_screen.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -7,14 +6,11 @@ import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 
 const String appId = 'dac900a04a87460c87c3d18b63cac65d';
 
-/// ---- TOKEN FETCH (POST to your server) ----
 Future<String> fetchAgoraToken({
   required String channelName,
   required int uid,
 }) async {
-  final url = Uri.parse(
-    'https://agora-token-server-production-2a8c.up.railway.app/getToken',
-  );
+  final url = Uri.parse('https://agora-token-server-production-2a8c.up.railway.app/getToken');
 
   final resp = await http.post(
     url,
@@ -22,8 +18,8 @@ Future<String> fetchAgoraToken({
     body: jsonEncode({
       'tokenType': 'rtc',
       'channel': channelName,
-      'role': 'publisher', // caller is a broadcaster
-      'uid': uid.toString(), // must match joinChannel uid type/value
+      'role': 'publisher',
+      'uid': uid.toString(),
       'expire': 3600,
     }),
   );
@@ -64,7 +60,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
   bool _ended = false;
   bool _isLoading = true;
-  String? _fatalError; // show in UI
+  String? _fatalError;
 
   @override
   void initState() {
@@ -74,21 +70,15 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
   Future<void> _begin() async {
     try {
-      // 1) Validate channel name early
       final channel = widget.channelName;
-      debugPrint('👉 Joining channel: "$channel" (len: ${channel.length}) '
-          'isVideo=${widget.isVideo}');
       if (channel.isEmpty) throw Exception('Channel name is empty');
       if (channel.length > 64) {
-        throw Exception(
-          'Channel name is too long (${channel.length}). Must be ≤ 64 characters.',
-        );
+        throw Exception('Channel name too long (${channel.length}). ≤ 64 chars.');
       }
 
-      // 2) Permissions
+      // permissions
       if (widget.isVideo) {
-        final statuses =
-            await [Permission.microphone, Permission.camera].request();
+        final statuses = await [Permission.microphone, Permission.camera].request();
         if (statuses[Permission.microphone] != PermissionStatus.granted) {
           throw Exception('Microphone permission not granted');
         }
@@ -101,26 +91,20 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         }
       }
 
-      // 3) Get token (uid must match join)
-      const int uid = 0; // 0 lets SDK assign; token must also be for uid 0
+      const int uid = 0; // SDK assigns
       _token = await fetchAgoraToken(channelName: channel, uid: uid);
-      debugPrint('✅ Got token (len: ${_token!.length})');
 
-      // 4) Init engine & handlers
       _engine = createAgoraRtcEngine();
       await _engine.initialize(const RtcEngineContext(appId: appId));
 
-      await _engine.setChannelProfile(
-        ChannelProfileType.channelProfileCommunication,
-      );
-      await _engine.setClientRole(
-        role: ClientRoleType.clientRoleBroadcaster,
-      );
+      await _engine.setChannelProfile(ChannelProfileType.channelProfileCommunication);
+      await _engine.setClientRole(role: ClientRoleType.clientRoleBroadcaster);
       await _engine.enableAudio();
       await _engine.setDefaultAudioRouteToSpeakerphone(true);
 
       if (widget.isVideo) {
         await _engine.enableVideo();
+        await _engine.startPreview();
       } else {
         await _engine.disableVideo();
       }
@@ -128,27 +112,21 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       _engine.registerEventHandler(
         RtcEngineEventHandler(
           onError: (ErrorCodeType err, String msg) {
-            debugPrint('❌ Agora onError: $err - $msg');
             setState(() => _fatalError = 'Agora error: $err - $msg');
           },
           onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
-            debugPrint('✅ Local joined: ${connection.channelId}');
             setState(() => _joined = true);
           },
           onUserJoined: (RtcConnection connection, int uid, int elapsed) {
-            debugPrint('👋 Remote joined: $uid');
             setState(() => _remoteUid = uid);
           },
-          onUserOffline:
-              (RtcConnection connection, int uid, UserOfflineReasonType r) {
-            debugPrint('👋 Remote left: $uid reason=$r');
+          onUserOffline: (RtcConnection connection, int uid, UserOfflineReasonType r) {
             setState(() {
               _remoteUid = null;
               _ended = true;
             });
           },
           onLeaveChannel: (RtcConnection connection, RtcStats stats) {
-            debugPrint('👋 Local left channel');
             setState(() {
               _remoteUid = null;
               _ended = true;
@@ -157,7 +135,6 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         ),
       );
 
-      // 5) Join
       await _engine.joinChannel(
         token: _token!,
         channelId: channel,
@@ -172,7 +149,6 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         ),
       );
     } catch (e) {
-      debugPrint('❌ Call setup failed: $e');
       setState(() => _fatalError = e.toString());
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -195,8 +171,6 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     Navigator.of(context).pop();
   }
 
-  // ---------------- UI ----------------
-
   @override
   Widget build(BuildContext context) {
     final title = widget.isVideo ? 'Video Call' : 'Audio Call';
@@ -216,91 +190,85 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       return _EndedScreen(title: title, onClose: _endCall);
     }
 
-    if (_remoteUid != null) {
-      return _ConnectedScreen(
-        title: title,
-        otherUserName: widget.otherUserName,
-        onEnd: _endCall,
-      );
-    }
-
-    return _ConnectingScreen(
-      title: title,
-      otherUserName: widget.otherUserName,
-      joined: _joined,
-      onCancel: _endCall,
-    );
-  }
-}
-
-// ------- Simple screens -------
-
-class _ConnectingScreen extends StatelessWidget {
-  const _ConnectingScreen({
-    required this.title,
-    required this.otherUserName,
-    required this.joined,
-    required this.onCancel,
-  });
-
-  final String title;
-  final String otherUserName;
-  final bool joined;
-  final VoidCallback onCancel;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8F0F8),
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: BackButton(onPressed: onCancel),
-        title: Text(title),
-        centerTitle: true,
-      ),
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.call, size: 72, color: Colors.purple),
-            const SizedBox(height: 16),
-            Text('Calling $otherUserName...',
-                style: const TextStyle(fontSize: 18, color: Colors.grey)),
-            const SizedBox(height: 24),
-            const CircularProgressIndicator(),
-            const SizedBox(height: 16),
-            Text(
-              joined ? 'Waiting for user to join...' : 'Connecting...',
-              style: const TextStyle(fontSize: 16, color: Colors.grey),
+    // VIDEO UI
+    if (widget.isVideo) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          title: Text('Talking with ${widget.otherUserName}'),
+          actions: [
+            IconButton(
+              onPressed: _endCall,
+              icon: const Icon(Icons.call_end, color: Colors.redAccent),
             ),
-            const SizedBox(height: 32),
-            ElevatedButton.icon(
-              onPressed: onCancel,
-              icon: const Icon(Icons.call_end),
-              label: const Text('Cancel Call'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.redAccent,
-                foregroundColor: Colors.white,
-                minimumSize: const Size(220, 48),
+          ],
+        ),
+        body: Stack(
+          children: [
+            // remote (full screen)
+            Positioned.fill(
+              child: _remoteUid != null
+                  ? AgoraVideoView(
+                      controller: VideoViewController.remote(
+                        rtcEngine: _engine,
+                        canvas: VideoCanvas(uid: _remoteUid),
+                        connection: RtcConnection(channelId: widget.channelName),
+                      ),
+                    )
+                  : const Center(
+                      child: Text(
+                        'Waiting for the other user to join…',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                    ),
+            ),
+            // local (PiP)
+            Positioned(
+              right: 12,
+              bottom: 24,
+              width: 120,
+              height: 180,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(color: Colors.black.withOpacity(0.2)),
+                  child: AgoraVideoView(
+                    controller: VideoViewController(
+                      rtcEngine: _engine,
+                      canvas: const VideoCanvas(uid: 0),
+                    ),
+                  ),
+                ),
               ),
             ),
           ],
         ),
-      ),
+      );
+    }
+
+    // AUDIO UI
+    return _ConnectingOrConnectedAudio(
+      title: title,
+      otherUserName: widget.otherUserName,
+      joined: _joined,
+      onEnd: _endCall,
     );
   }
 }
 
-class _ConnectedScreen extends StatelessWidget {
-  const _ConnectedScreen({
+class _ConnectingOrConnectedAudio extends StatelessWidget {
+  const _ConnectingOrConnectedAudio({
     required this.title,
     required this.otherUserName,
+    required this.joined,
     required this.onEnd,
   });
 
   final String title;
   final String otherUserName;
+  final bool joined;
   final VoidCallback onEnd;
 
   @override
@@ -310,31 +278,27 @@ class _ConnectedScreen extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        leading: BackButton(onPressed: onEnd),
         title: Text(title),
         centerTitle: true,
+        actions: [
+          IconButton(
+            onPressed: onEnd,
+            icon: const Icon(Icons.call_end, color: Colors.redAccent),
+          ),
+        ],
       ),
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.check_circle, color: Colors.green, size: 72),
-            const SizedBox(height: 12),
-            const Text('Connected!',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text('You are talking with: $otherUserName'),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: onEnd,
-              icon: const Icon(Icons.call_end),
-              label: const Text('End Call'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.redAccent,
-                foregroundColor: Colors.white,
-                minimumSize: const Size(180, 48),
-              ),
+            const Icon(Icons.call, size: 72, color: Colors.purple),
+            const SizedBox(height: 16),
+            Text(
+              joined ? 'Connected to $otherUserName' : 'Calling $otherUserName…',
+              style: const TextStyle(fontSize: 18, color: Colors.grey),
             ),
+            const SizedBox(height: 24),
+            if (!joined) const CircularProgressIndicator(),
           ],
         ),
       ),
