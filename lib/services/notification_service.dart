@@ -6,7 +6,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../screens/call/agora_call_screen.dart';
 import '../screens/call/incoming_call_screen.dart';
-import '../screens/chat/chat_screen.dart'; // make sure this path is correct
+import '../screens/chat/chat_screen.dart';
+import 'current_chat.dart'; // <-- NEW: used to suppress chat banners when already in that chat
 
 class NotificationService {
   NotificationService({this.navigatorKey});
@@ -26,25 +27,35 @@ class NotificationService {
   );
 
   Future<void> initialize() async {
+    // Ask permission
     final settings = await _fcm.requestPermission(
-      alert: true, badge: true, sound: true, provisional: false,
+      alert: true,
+      badge: true,
+      sound: true,
+      provisional: false,
     );
     if (settings.authorizationStatus != AuthorizationStatus.authorized) {
       debugPrint('❌ Notification permission not granted');
       return;
     }
+
+    // iOS: show banners even when app is foregrounded
     await _fcm.setForegroundNotificationPresentationOptions(
-      alert: true, badge: true, sound: true,
+      alert: true,
+      badge: true,
+      sound: true,
     );
 
-    final iosSettings = DarwinInitializationSettings(
+    // iOS categories for action buttons on local notifs
+    const iosInit = DarwinInitializationSettings(
       notificationCategories: [
         DarwinNotificationCategory(
           'INCOMING_CALL',
           actions: <DarwinNotificationAction>[
             DarwinNotificationAction.plain('ACCEPT_CALL', 'Accept'),
             DarwinNotificationAction.plain(
-              'DECLINE_CALL', 'Decline',
+              'DECLINE_CALL',
+              'Decline',
               options: {DarwinNotificationActionOption.destructive},
             ),
           ],
@@ -55,16 +66,16 @@ class NotificationService {
 
     final initSettings = InitializationSettings(
       android: const AndroidInitializationSettings('@mipmap/ic_launcher'),
-      iOS: iosSettings,
+      iOS: iosInit,
     );
 
     await _local.initialize(
       initSettings,
       onDidReceiveNotificationResponse: (resp) async {
         final payload = resp.payload ?? '';
-        final actionId = resp.actionId;
+        final actionId = resp.actionId; // 'ACCEPT_CALL', 'DECLINE_CALL', or ''
 
-        // Accept/Decline from a *local* notification we showed
+        // Local call notification actions
         if (payload.startsWith('incoming_call|')) {
           final parts = payload.split('|'); // incoming_call|channel|isVideo|fromName
           if (parts.length >= 4) {
@@ -73,7 +84,7 @@ class NotificationService {
             final fromName = parts[3];
 
             if (actionId == 'DECLINE_CALL') {
-              debugPrint('📞 Call declined');
+              debugPrint('📞 Call declined (local action)');
               return;
             }
             _pushCallScreen(channel: channel, isVideo: isVideo, fromName: fromName);
@@ -81,6 +92,7 @@ class NotificationService {
           }
         }
 
+        // Local chat notification tap
         if (payload.startsWith('open_chat|')) {
           final otherUserId = payload.split('|').elementAt(1);
           _openChat(otherUserId);
@@ -88,25 +100,27 @@ class NotificationService {
       },
     );
 
+    // Android channel
     await _local
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(_androidChannel);
 
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
-      await _handleMessage(message, showLocal: true);
-    });
+    // FCM listeners
+    FirebaseMessaging.onMessage.listen(
+      (RemoteMessage message) => _handleMessage(message, showLocal: true),
+    );
+    FirebaseMessaging.onMessageOpenedApp.listen(
+      (RemoteMessage message) => _handleMessage(message, showLocal: false),
+    );
 
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) async {
-      await _handleMessage(message, showLocal: false);
-    });
-
+    // If app was launched from a terminated push
     final initial = await _fcm.getInitialMessage();
     if (initial != null) {
       await _handleMessage(initial, showLocal: false);
     }
 
-    // (iOS) wait for APNs token so FCM is reliable
+    // iOS: ensure APNs token (stabilizes FCM delivery)
     String? apnsToken;
     int retries = 0;
     while (apnsToken == null && retries < 10) {
@@ -115,9 +129,8 @@ class NotificationService {
       retries++;
     }
 
+    // Save FCM token to user doc
     final fcmToken = await _fcm.getToken();
-    debugPrint('🔥 FCM Token: $fcmToken');
-
     final user = FirebaseAuth.instance.currentUser;
     if (user != null && fcmToken != null) {
       await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
@@ -129,6 +142,7 @@ class NotificationService {
       );
     }
 
+    // Token refresh
     _fcm.onTokenRefresh.listen((newToken) async {
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser != null) {
@@ -157,7 +171,7 @@ class NotificationService {
       final payload = 'incoming_call|$channel|$isVideo|$fromName';
 
       if (showLocal) {
-        // app is in foreground -> show local notif with actions
+        // App in foreground → show local with actions
         await _local.show(
           0,
           isVideo ? 'Incoming Video Call' : 'Incoming Audio Call',
@@ -170,9 +184,13 @@ class NotificationService {
               importance: Importance.max,
               priority: Priority.high,
               actions: <AndroidNotificationAction>[
-                AndroidNotificationAction('ACCEPT_CALL', 'Accept', showsUserInterface: true),
-                AndroidNotificationAction('DECLINE_CALL', 'Decline',
-                    showsUserInterface: false, cancelNotification: true),
+                const AndroidNotificationAction('ACCEPT_CALL', 'Accept', showsUserInterface: true),
+                const AndroidNotificationAction(
+                  'DECLINE_CALL',
+                  'Decline',
+                  showsUserInterface: false,
+                  cancelNotification: true,
+                ),
               ],
             ),
             iOS: const DarwinNotificationDetails(
@@ -182,7 +200,7 @@ class NotificationService {
           payload: payload,
         );
       } else {
-        // tapped a system banner (background/terminated) → show Accept/Decline screen
+        // Tapped the system banner (background/terminated) → show Accept/Decline screen
         final nav = navigatorKey?.currentState;
         if (nav != null) {
           nav.push(MaterialPageRoute(
@@ -200,10 +218,14 @@ class NotificationService {
 
     // ===== CHAT MESSAGE =====
     if (data['type'] == 'chat_message') {
+      // IMPORTANT: Cloud Function should include otherUserId (the *sender* id relative to the current user)
       final otherUserId = (data['otherUserId'] ?? '') as String;
 
-      // If FCM already carries a system 'notification' (and iOS foreground presentation is enabled),
-      // avoid duplicating with a local.
+      // 🔕 Suppress banner if we’re already viewing that chat
+      if (CurrentChat.otherUserId == otherUserId) return;
+
+      // If the FCM already includes a system notification (common on Android),
+      // don’t show a duplicate local banner.
       final systemAlreadyShowing = message.notification != null;
 
       if (showLocal && !systemAlreadyShowing) {
@@ -213,8 +235,10 @@ class NotificationService {
           message.notification?.body ?? '',
           const NotificationDetails(
             android: AndroidNotificationDetails(
-              'high_importance_channel', 'High Importance Notifications',
-              importance: Importance.max, priority: Priority.high,
+              'high_importance_channel',
+              'High Importance Notifications',
+              importance: Importance.max,
+              priority: Priority.high,
             ),
             iOS: DarwinNotificationDetails(),
           ),
@@ -226,7 +250,7 @@ class NotificationService {
       return;
     }
 
-    // Generic fallback
+    // ===== Generic fallback =====
     if (showLocal && message.notification != null) {
       await _local.show(
         3,
@@ -234,8 +258,10 @@ class NotificationService {
         message.notification?.body ?? '',
         const NotificationDetails(
           android: AndroidNotificationDetails(
-            'high_importance_channel', 'High Importance Notifications',
-            importance: Importance.max, priority: Priority.high,
+            'high_importance_channel',
+            'High Importance Notifications',
+            importance: Importance.max,
+            priority: Priority.high,
           ),
           iOS: DarwinNotificationDetails(),
         ),
@@ -263,8 +289,6 @@ class NotificationService {
   void _openChat(String otherUserId) {
     final nav = navigatorKey?.currentState;
     if (nav == null || otherUserId.isEmpty) return;
-    nav.push(MaterialPageRoute(
-      builder: (_) => ChatScreen(otherUserId: otherUserId),
-    ));
+    nav.push(MaterialPageRoute(builder: (_) => ChatScreen(otherUserId: otherUserId)));
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
@@ -11,7 +12,6 @@ Future<String> fetchAgoraToken({
   required int uid,
 }) async {
   final url = Uri.parse('https://agora-token-server-production-2a8c.up.railway.app/getToken');
-
   final resp = await http.post(
     url,
     headers: {'Content-Type': 'application/json'},
@@ -23,7 +23,6 @@ Future<String> fetchAgoraToken({
       'expire': 3600,
     }),
   );
-
   if (resp.statusCode != 200) {
     throw Exception('Token server error (${resp.statusCode}): ${resp.body}');
   }
@@ -57,10 +56,20 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
   bool _joined = false;
   int? _remoteUid;
-
   bool _ended = false;
   bool _isLoading = true;
   String? _fatalError;
+
+  // controls
+  bool _muted = false;
+  bool _speakerOn = true;
+  bool _frontCamera = true;
+
+  // video layout
+  bool _localIsBig = false; // tap to swap
+  Offset _pipOffset = const Offset(12, 24); // draggable PiP
+
+  Timer? _ringTimeout;
 
   @override
   void initState() {
@@ -72,11 +81,8 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     try {
       final channel = widget.channelName;
       if (channel.isEmpty) throw Exception('Channel name is empty');
-      if (channel.length > 64) {
-        throw Exception('Channel name too long (${channel.length}). ≤ 64 chars.');
-      }
+      if (channel.length > 64) throw Exception('Channel name too long');
 
-      // permissions
       if (widget.isVideo) {
         final statuses = await [Permission.microphone, Permission.camera].request();
         if (statuses[Permission.microphone] != PermissionStatus.granted) {
@@ -91,7 +97,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         }
       }
 
-      const int uid = 0; // SDK assigns
+      const int uid = 0;
       _token = await fetchAgoraToken(channelName: channel, uid: uid);
 
       _engine = createAgoraRtcEngine();
@@ -116,14 +122,25 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           },
           onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
             setState(() => _joined = true);
+            // if callee doesn't join within 35s → unavailable
+            _ringTimeout?.cancel();
+            _ringTimeout = Timer(const Duration(seconds: 35), () {
+              if (mounted && _remoteUid == null && !_ended) {
+                setState(() {
+                  _fatalError = 'User unavailable';
+                });
+              }
+            });
           },
           onUserJoined: (RtcConnection connection, int uid, int elapsed) {
+            _ringTimeout?.cancel();
             setState(() => _remoteUid = uid);
           },
           onUserOffline: (RtcConnection connection, int uid, UserOfflineReasonType r) {
+            // if user leaves/declines after joining
             setState(() {
               _remoteUid = null;
-              _ended = true;
+              _fatalError = 'User unavailable';
             });
           },
           onLeaveChannel: (RtcConnection connection, RtcStats stats) {
@@ -157,19 +174,35 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
   @override
   void dispose() {
-    try {
-      _engine.leaveChannel();
-      _engine.release();
-    } catch (_) {}
+    _ringTimeout?.cancel();
+    try { _engine.leaveChannel(); _engine.release(); } catch (_) {}
     super.dispose();
   }
 
+  Future<void> _toggleMute() async {
+    _muted = !_muted;
+    await _engine.muteLocalAudioStream(_muted);
+    setState(() {});
+  }
+
+  Future<void> _toggleSpeaker() async {
+    _speakerOn = !_speakerOn;
+    await _engine.setEnableSpeakerphone(_speakerOn);
+    setState(() {});
+  }
+
+  Future<void> _switchCamera() async {
+    _frontCamera = !_frontCamera;
+    await _engine.switchCamera();
+    setState(() {});
+  }
+
   void _endCall() {
-    try {
-      _engine.leaveChannel();
-    } catch (_) {}
+    try { _engine.leaveChannel(); } catch (_) {}
     Navigator.of(context).pop();
   }
+
+  // ---------- UI ----------
 
   @override
   Widget build(BuildContext context) {
@@ -190,102 +223,24 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       return _EndedScreen(title: title, onClose: _endCall);
     }
 
-    // VIDEO UI
     if (widget.isVideo) {
-      return Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          title: Text('Talking with ${widget.otherUserName}'),
-          actions: [
-            IconButton(
-              onPressed: _endCall,
-              icon: const Icon(Icons.call_end, color: Colors.redAccent),
-            ),
-          ],
-        ),
-        body: Stack(
-          children: [
-            // remote (full screen)
-            Positioned.fill(
-              child: _remoteUid != null
-                  ? AgoraVideoView(
-                      controller: VideoViewController.remote(
-                        rtcEngine: _engine,
-                        canvas: VideoCanvas(uid: _remoteUid),
-                        connection: RtcConnection(channelId: widget.channelName),
-                      ),
-                    )
-                  : const Center(
-                      child: Text(
-                        'Waiting for the other user to join…',
-                        style: TextStyle(color: Colors.white70),
-                      ),
-                    ),
-            ),
-            // local (PiP)
-            Positioned(
-              right: 12,
-              bottom: 24,
-              width: 120,
-              height: 180,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(color: Colors.black.withOpacity(0.2)),
-                  child: AgoraVideoView(
-                    controller: VideoViewController(
-                      rtcEngine: _engine,
-                      canvas: const VideoCanvas(uid: 0),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
+      return _videoLayout();
     }
-
-    // AUDIO UI
-    return _ConnectingOrConnectedAudio(
-      title: title,
-      otherUserName: widget.otherUserName,
-      joined: _joined,
-      onEnd: _endCall,
-    );
+    return _audioLayout();
   }
-}
 
-class _ConnectingOrConnectedAudio extends StatelessWidget {
-  const _ConnectingOrConnectedAudio({
-    required this.title,
-    required this.otherUserName,
-    required this.joined,
-    required this.onEnd,
-  });
+  Widget _audioLayout() {
+    final status = (_remoteUid != null)
+        ? 'Connected to ${widget.otherUserName}'
+        : 'Ringing…';
 
-  final String title;
-  final String otherUserName;
-  final bool joined;
-  final VoidCallback onEnd;
-
-  @override
-  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF8F0F8),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Text(title),
+        title: const Text('Audio Call'),
         centerTitle: true,
-        actions: [
-          IconButton(
-            onPressed: onEnd,
-            icon: const Icon(Icons.call_end, color: Colors.redAccent),
-          ),
-        ],
       ),
       body: Center(
         child: Column(
@@ -293,18 +248,144 @@ class _ConnectingOrConnectedAudio extends StatelessWidget {
           children: [
             const Icon(Icons.call, size: 72, color: Colors.purple),
             const SizedBox(height: 16),
-            Text(
-              joined ? 'Connected to $otherUserName' : 'Calling $otherUserName…',
-              style: const TextStyle(fontSize: 18, color: Colors.grey),
+            Text(status, style: const TextStyle(fontSize: 18, color: Colors.grey)),
+          ],
+        ),
+      ),
+      bottomNavigationBar: _controlsBar(),
+    );
+  }
+
+  Widget _videoLayout() {
+    final remote = (_remoteUid != null)
+        ? AgoraVideoView(
+            controller: VideoViewController.remote(
+              rtcEngine: _engine,
+              canvas: VideoCanvas(uid: _remoteUid),
+              connection: RtcConnection(channelId: widget.channelName),
             ),
-            const SizedBox(height: 24),
-            if (!joined) const CircularProgressIndicator(),
+          )
+        : const Center(
+            child: Text('Waiting for the other user to join…',
+                style: TextStyle(color: Colors.white70)),
+          );
+
+    final local = AgoraVideoView(
+      controller: VideoViewController(
+        rtcEngine: _engine,
+        canvas: const VideoCanvas(uid: 0),
+      ),
+    );
+
+    final big = ClipRRect(
+      borderRadius: BorderRadius.circular(0),
+      child: _localIsBig ? local : remote,
+    );
+
+    final pip = GestureDetector(
+      onTap: () => setState(() => _localIsBig = !_localIsBig),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox(width: 120, height: 180, child: _localIsBig ? remote : local),
+      ),
+    );
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          Positioned.fill(child: big),
+          // draggable PiP
+          Positioned(
+            right: _pipOffset.dx,
+            bottom: _pipOffset.dy + 72, // leave space for bottom bar
+            child: Draggable(
+              feedback: Material(type: MaterialType.transparency, child: pip),
+              childWhenDragging: const SizedBox.shrink(),
+              onDragEnd: (d) {
+                final size = MediaQuery.of(context).size;
+                final x = (size.width - d.offset.dx - 120).clamp(12, size.width - 132);
+                final y = (size.height - d.offset.dy - 180).clamp(12, size.height - 252);
+                setState(() => _pipOffset = Offset(x.toDouble(), y.toDouble()));
+              },
+              child: pip,
+            ),
+          ),
+        ],
+      ),
+      bottomNavigationBar: _controlsBar(video: true),
+    );
+  }
+
+  Widget _controlsBar({bool video = false}) {
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        color: video ? Colors.black.withOpacity(0.25) : Colors.white,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _roundButton(
+              icon: _muted ? Icons.mic_off : Icons.mic,
+              onTap: _toggleMute,
+              isActive: !_muted,
+            ),
+            if (video)
+              _roundButton(
+                icon: Icons.cameraswitch,
+                onTap: _switchCamera,
+                isActive: _frontCamera,
+              ),
+            _hangupButton(),
+            _roundButton(
+              icon: Icons.volume_up,
+              onTap: _toggleSpeaker,
+              isActive: _speakerOn,
+            ),
           ],
         ),
       ),
     );
   }
+
+  Widget _roundButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    bool isActive = true,
+  }) {
+    return InkResponse(
+      onTap: onTap,
+      child: Container(
+        width: 58,
+        height: 58,
+        decoration: BoxDecoration(
+          color: isActive ? Colors.white : Colors.grey.shade300,
+          shape: BoxShape.circle,
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 6)],
+        ),
+        child: Icon(icon, color: Colors.black87),
+      ),
+    );
+  }
+
+  Widget _hangupButton() {
+    return InkResponse(
+      onTap: _endCall,
+      child: Container(
+        width: 76,
+        height: 76,
+        decoration: const BoxDecoration(
+          color: Colors.redAccent,
+          shape: BoxShape.circle,
+        ),
+        child: const Icon(Icons.call_end, color: Colors.white, size: 32),
+      ),
+    );
+  }
 }
+
+// ------- End/Errors -------
 
 class _EndedScreen extends StatelessWidget {
   const _EndedScreen({required this.title, required this.onClose});
@@ -358,11 +439,9 @@ class _ErrorScreen extends StatelessWidget {
               const Text('Something went wrong.',
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 14, color: Colors.redAccent),
-              ),
+              Text(message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 14, color: Colors.redAccent)),
               const SizedBox(height: 16),
               ElevatedButton(onPressed: onClose, child: const Text('Close')),
             ],
