@@ -7,7 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../screens/call/agora_call_screen.dart';
 import '../screens/call/incoming_call_screen.dart';
 import '../screens/chat/chat_screen.dart';
-import 'current_chat.dart'; // <-- NEW: used to suppress chat banners when already in that chat
+import 'current_chat.dart'; // used to suppress chat banners when already in that chat
 
 class NotificationService {
   NotificationService({this.navigatorKey});
@@ -47,7 +47,7 @@ class NotificationService {
     );
 
     // iOS categories for action buttons on local notifs
-    const iosInit = DarwinInitializationSettings(
+    final iosInit = DarwinInitializationSettings(
       notificationCategories: [
         DarwinNotificationCategory(
           'INCOMING_CALL',
@@ -65,7 +65,7 @@ class NotificationService {
     );
 
     final initSettings = InitializationSettings(
-      android: const AndroidInitializationSettings('@mipmap/ic_launcher'),
+      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       iOS: iosInit,
     );
 
@@ -184,8 +184,8 @@ class NotificationService {
               importance: Importance.max,
               priority: Priority.high,
               actions: <AndroidNotificationAction>[
-                const AndroidNotificationAction('ACCEPT_CALL', 'Accept', showsUserInterface: true),
-                const AndroidNotificationAction(
+                AndroidNotificationAction('ACCEPT_CALL', 'Accept', showsUserInterface: true),
+                AndroidNotificationAction(
                   'DECLINE_CALL',
                   'Decline',
                   showsUserInterface: false,
@@ -193,7 +193,7 @@ class NotificationService {
                 ),
               ],
             ),
-            iOS: const DarwinNotificationDetails(
+            iOS: DarwinNotificationDetails(
               categoryIdentifier: 'INCOMING_CALL',
             ),
           ),
@@ -224,8 +224,7 @@ class NotificationService {
       // 🔕 Suppress banner if we’re already viewing that chat
       if (CurrentChat.otherUserId == otherUserId) return;
 
-      // If the FCM already includes a system notification (common on Android),
-      // don’t show a duplicate local banner.
+      // If the FCM already includes a system notification, don’t show a duplicate local banner.
       final systemAlreadyShowing = message.notification != null;
 
       if (showLocal && !systemAlreadyShowing) {
@@ -233,7 +232,7 @@ class NotificationService {
           2,
           message.notification?.title ?? 'New Message',
           message.notification?.body ?? '',
-          const NotificationDetails(
+          NotificationDetails(
             android: AndroidNotificationDetails(
               'high_importance_channel',
               'High Importance Notifications',
@@ -256,7 +255,7 @@ class NotificationService {
         3,
         message.notification?.title ?? 'Notification',
         message.notification?.body ?? '',
-        const NotificationDetails(
+        NotificationDetails(
           android: AndroidNotificationDetails(
             'high_importance_channel',
             'High Importance Notifications',
