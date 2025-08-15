@@ -4,6 +4,7 @@ import 'package:flutter_chat_types/flutter_chat_types.dart' as types;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 import '../../services/current_chat.dart';
 
@@ -25,33 +26,46 @@ class _ChatScreenState extends State<ChatScreen> {
     super.initState();
     currentUserId = FirebaseAuth.instance.currentUser!.uid;
 
-    // Deterministic chat id: uidA_uidB (alphabetical)
     final ids = [currentUserId, widget.otherUserId]..sort();
     chatId = ids.join('_');
 
-    // Suppress push banners for this peer while this screen is visible
+    // Tell NotificationService we’re in this chat
     CurrentChat.otherUserId = widget.otherUserId;
+
+    // iOS: while this screen is visible, do NOT show foreground banners
+    FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+      alert: false, // 🔕 disable banner while in-chat
+      badge: true,
+      sound: true,
+    );
   }
 
   @override
   void dispose() {
-    // Re-enable chat banners when leaving this screen
     if (CurrentChat.otherUserId == widget.otherUserId) {
       CurrentChat.otherUserId = null;
     }
+    // Restore iOS foreground banners when we leave this chat
+    FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+      alert: true, // 🔔 re-enable banners
+      badge: true,
+      sound: true,
+    );
     super.dispose();
   }
 
   Future<void> _leave() async {
-    // Clear and pop
     if (CurrentChat.otherUserId == widget.otherUserId) {
       CurrentChat.otherUserId = null;
     }
+    // Also restore banners if user leaves via back button
+    FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+      alert: true, badge: true, sound: true,
+    );
     if (mounted) Navigator.of(context).pop();
   }
 
   List<types.Message> _messagesFromSnapshots(List<QueryDocumentSnapshot> docs) {
-    // Mapping Firestore -> flutter_chat_types (keep newest-first order from the query)
     return docs.map((doc) {
       final data = doc.data() as Map<String, dynamic>;
       return types.TextMessage(
@@ -75,13 +89,6 @@ class _ChatScreenState extends State<ChatScreen> {
       'createdAt': Timestamp.now(),
       'text': message.text,
     });
-
-    // (Optional) write lightweight chat doc for listing/lastMessage, etc.
-    // await FirebaseFirestore.instance.collection('chats').doc(chatId).set({
-    //   'participants': [currentUserId, widget.otherUserId],
-    //   'lastMessage': message.text,
-    //   'lastMessageAt': FieldValue.serverTimestamp(),
-    // }, SetOptions(merge: true));
   }
 
   @override
@@ -99,7 +106,7 @@ class _ChatScreenState extends State<ChatScreen> {
             .collection('chats')
             .doc(chatId)
             .collection('messages')
-            .orderBy('createdAt', descending: true) // newest first
+            .orderBy('createdAt', descending: true)
             .snapshots(),
         builder: (context, snapshot) {
           final messages = snapshot.hasData
@@ -112,9 +119,6 @@ class _ChatScreenState extends State<ChatScreen> {
             user: types.User(id: currentUserId),
             showUserAvatars: true,
             showUserNames: true,
-            // Keeps keyboard from covering the composer on iOS
-            useTopSafeAreaInset: false,
-            disableImageGallery: true,
             theme: const DefaultChatTheme(
               primaryColor: Color(0xFF7367F0),
               sentMessageBodyTextStyle: TextStyle(

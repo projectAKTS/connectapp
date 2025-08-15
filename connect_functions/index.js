@@ -295,7 +295,7 @@ exports.onCallInviteCreated = onDocumentCreated(
         body: `From ${fromName || "Someone"}`,
       },
       data: {
-        type: "call_invite",          // NEW: stable type for client
+        type: "call_invite",          // stable type for client
         action: "incoming_call",
         channel: String(channel),
         isVideo: String(!!isVideo),
@@ -318,7 +318,7 @@ exports.onCallInviteCreated = onDocumentCreated(
           aps: {
             sound: "default",
             "content-available": 1,
-            category: "INCOMING_CALL", // NEW: enables iOS actions
+            category: "INCOMING_CALL", // iOS shows Accept/Decline using this category
           },
         },
       },
@@ -329,7 +329,7 @@ exports.onCallInviteCreated = onDocumentCreated(
   }
 );
 
-/** 9) PUSH: chat message -> notify the other user (no participants array needed) */
+/** 9) PUSH: chat message -> notify the other user */
 exports.onChatMessageCreated = onDocumentCreated(
   {
     document: "chats/{chatId}/messages/{messageId}",
@@ -343,13 +343,13 @@ exports.onChatMessageCreated = onDocumentCreated(
 
     if (!chatId || !authorId) return;
 
-    // Figure out the recipient from the chatId (other uid in "<a>_<b>")
+    // Figure out recipient from chatId (other uid)
     const parts = String(chatId).split("_");
     if (parts.length !== 2) return;
     const [uidA, uidB] = parts;
     const recipients = [uidA, uidB].filter((u) => u && u !== authorId);
 
-    // Load optional sender name for nicer push (fallback to "New message")
+    // Sender name for nicer push
     let fromName = "New message";
     try {
       const senderDoc = await db.collection("users").doc(authorId).get();
@@ -357,7 +357,6 @@ exports.onChatMessageCreated = onDocumentCreated(
       fromName = d.fullName || d.name || "New message";
     } catch {}
 
-    // Send to each recipient device
     for (const toUid of recipients) {
       const tokens = await getUserTokens(toUid);
       if (!tokens.length) continue;
@@ -370,8 +369,7 @@ exports.onChatMessageCreated = onDocumentCreated(
         data: {
           type: "chat_message",
           chatId: String(chatId),
-          // For the recipient, the "other user" is the author
-          otherUserId: String(authorId),
+          otherUserId: String(authorId), // recipient sees the author as "other"
         },
         android: {
           priority: "high",
@@ -391,7 +389,6 @@ exports.onChatMessageCreated = onDocumentCreated(
     }
   }
 );
-
 
 /** 10) TEST endpoint: create a callInvite to trigger the function */
 exports.testCreateInvite = onRequest(
