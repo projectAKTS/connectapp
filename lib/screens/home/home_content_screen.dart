@@ -4,7 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 
-import '../posts/comment_bottom_sheet.dart';
+// import '../posts/comment_bottom_sheet.dart'; // not used anymore
 import '../posts/create_post_screen.dart';
 import 'package:connect_app/services/post_service.dart';
 import 'package:connect_app/utils/time_utils.dart';
@@ -32,6 +32,29 @@ class AppColors {
   static const canvas = Color(0xFFFAFAFB);
 }
 
+enum AskAction { chat, commentSheet }
+
+/// =====================
+/// Time helpers (short like IG/Twitter)
+/// =====================
+String _timeAgoShort(DateTime dt) {
+  final now = DateTime.now();
+  final diff = now.difference(dt);
+  if (diff.inSeconds < 60) return '${diff.inSeconds}s';
+  if (diff.inMinutes < 60) return '${diff.inMinutes}m';
+  if (diff.inHours < 24) return '${diff.inHours}h';
+  if (diff.inDays < 7) return '${diff.inDays}d';
+  if (diff.inDays < 30) return '${(diff.inDays / 7).floor()}w';
+  if (diff.inDays < 365) return '${(diff.inDays / 30).floor()}mo';
+  return '${(diff.inDays / 365).floor()}y';
+}
+
+String _timeAgoFromTs(dynamic ts) {
+  final dt = parseFirestoreTimestamp(ts);
+  if (dt == null) return 'now';
+  return _timeAgoShort(dt);
+}
+
 class HomeContentScreen extends StatefulWidget {
   const HomeContentScreen({Key? key}) : super(key: key);
 
@@ -47,6 +70,9 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
   // Helpers cache (for person suggestions)
   List<_HelperUser> _helpers = [];
   bool _loadingHelpers = true;
+
+  // Primary CTA behavior (tap)
+  final AskAction _askAction = AskAction.chat;
 
   @override
   void initState() {
@@ -84,9 +110,46 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
       MaterialPageRoute(builder: (_) => const CreatePostScreen()),
     );
     if (result == 'posted' && _scrollController.hasClients) {
-      _scrollController.animateTo(0,
-          duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
     }
+  }
+
+  // ===== Primary CTA router =====
+  void _handleAskAction(String postId, String postOwnerId, String authorName) {
+    HapticFeedback.lightImpact();
+    if (_askAction == AskAction.commentSheet) {
+      _openComments(postId, authorName);
+    } else {
+      _openChatWithContext(postOwnerId, postId, authorName);
+    }
+  }
+
+  void _openChatWithContext(String otherUserId, String postId, String authorName) {
+    Navigator.of(context).pushNamed(
+      '/chat',
+      arguments: {
+        'otherUserId': otherUserId,
+        'fromPostId': postId,
+        'prefill': 'Hey $authorName — I saw your post and had a question.',
+      },
+    );
+  }
+
+  void _openComments(String postId, String authorName) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (_) => _CommentsSheet(postId: postId, authorName: authorName),
+    );
   }
 
   // ===== Post actions =====
@@ -195,9 +258,8 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
         });
         _safeShowSnackBar('Helpful vote removed.');
       } else {
-        final todayCount = (votes as List)
-            .where((v) => v['date'] == DateTime.now().toString().substring(0, 10))
-            .length;
+        final todayCount =
+            (votes as List).where((v) => v['date'] == DateTime.now().toString().substring(0, 10)).length;
         if (todayCount >= 5) {
           setState(() {
             final current = helpfulVotesMap[postId] ?? 1;
@@ -377,38 +439,35 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
             final helpfulVotes = (localHelpful < 0) ? 0 : localHelpful;
             final isBoosted = data['isBoosted'] ?? false;
 
-            String formattedTime = 'Just now';
-            final dt = parseFirestoreTimestamp(data['timestamp']);
-            if (dt != null) {
-              formattedTime = DateFormat('MMM d, yyyy · hh:mm a').format(dt);
-            }
+            // Optional stored count; live widget below will override it anyway
+            final storedComments = (data['commentsCount'] ?? 0) is int
+                ? data['commentsCount'] as int
+                : int.tryParse('${data['commentsCount']}') ?? 0;
+
+            // NEW: relative time like "3h", "2d", etc.
+            final timeRight = _timeAgoFromTs(data['timestamp']);
 
             final isLiked = likedBy.contains(currentUserId);
 
-            if ((imageUrl).toString().isNotEmpty) {
+            if (imageUrl.toString().isNotEmpty) {
               // Image post card
               feed.add(
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
                   child: _PostCardEvergreen(
+                    postId: postId,
                     authorName: userName,
                     authorSubtitle: data['authorRole'] ?? data['location'] ?? '',
                     title: content,
                     summary: '',
-                    timeRight: formattedTime,
+                    timeRight: timeRight,
                     boosted: isBoosted,
                     likes: likes,
                     helpfulCount: helpfulVotes,
                     isLiked: isLiked,
                     imageUrl: imageUrl,
-                    onAskAuthor: () {
-                      HapticFeedback.lightImpact();
-                      showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        builder: (_) => CommentBottomSheet(postId: postId),
-                      );
-                    },
+                    onAskAuthor: () => _handleAskAction(postId, postOwnerId, userName),
+                    onComment: () => _openComments(postId, userName),
                     onViewProfile: () => Navigator.of(context).pushNamed('/profile/$postOwnerId'),
                     onLike: () => _toggleLike(context, postId, likedBy),
                     onHelpful: () => _markHelpful(context, postId, postOwnerId),
@@ -416,6 +475,7 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                     onBoost: (currentUserId == postOwnerId && !isBoosted)
                         ? () => _boostPost(context, postId)
                         : null,
+                    storedComments: storedComments,
                   ),
                 ),
               );
@@ -425,22 +485,17 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
                   child: _PostCardSimpleFocus(
+                    postId: postId,
                     authorName: userName,
                     authorSubtitle: data['authorRole'] ?? data['location'] ?? '',
                     body: content,
                     boosted: isBoosted,
-                    timeRight: formattedTime,
+                    timeRight: timeRight,
                     likes: likes,
                     helpfulCount: helpfulVotes,
                     isLiked: isLiked,
-                    onAskAuthor: () {
-                      HapticFeedback.lightImpact();
-                      showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        builder: (_) => CommentBottomSheet(postId: postId),
-                      );
-                    },
+                    onAskAuthor: () => _handleAskAction(postId, postOwnerId, userName),
+                    onComment: () => _openComments(postId, userName),
                     onViewProfile: () => Navigator.of(context).pushNamed('/profile/$postOwnerId'),
                     onLike: () => _toggleLike(context, postId, likedBy),
                     onHelpful: () => _markHelpful(context, postId, postOwnerId),
@@ -448,6 +503,7 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                     onBoost: (currentUserId == postOwnerId && !isBoosted)
                         ? () => _boostPost(context, postId)
                         : null,
+                    storedComments: storedComments,
                   ),
                 ),
               );
@@ -531,9 +587,10 @@ class _SearchHeader extends StatelessWidget {
 }
 
 /// =====================
-/// Evergreen Post Card — image posts (no full-screen)
+/// Evergreen Post Card — image posts
 /// =====================
 class _PostCardEvergreen extends StatelessWidget {
+  final String postId;
   final String authorName;
   final String authorSubtitle;
   final String title;
@@ -544,6 +601,7 @@ class _PostCardEvergreen extends StatelessWidget {
   final int helpfulCount;
   final bool isLiked;
   final String imageUrl;
+  final int storedComments;
 
   final VoidCallback onAskAuthor;
   final VoidCallback onLike;
@@ -551,9 +609,11 @@ class _PostCardEvergreen extends StatelessWidget {
   final VoidCallback onReport;
   final VoidCallback? onBoost;
   final VoidCallback onViewProfile;
+  final VoidCallback? onComment;
 
   const _PostCardEvergreen({
     Key? key,
+    required this.postId,
     required this.authorName,
     required this.authorSubtitle,
     required this.title,
@@ -569,7 +629,9 @@ class _PostCardEvergreen extends StatelessWidget {
     required this.onHelpful,
     required this.onReport,
     required this.onViewProfile,
+    required this.storedComments,
     this.onBoost,
+    this.onComment,
   }) : super(key: key);
 
   @override
@@ -590,7 +652,7 @@ class _PostCardEvergreen extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Header with capped Boosted tag and date
+          // Header with capped Boosted tag and relative time
           Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
             const CircleAvatar(radius: 18, child: Icon(Icons.person_outline, color: AppColors.primary)),
             const SizedBox(width: 10),
@@ -614,30 +676,21 @@ class _PostCardEvergreen extends StatelessWidget {
               ]),
             ),
             const SizedBox(width: 8),
-            Flexible(
-              fit: FlexFit.loose,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (boosted) const _BoostedTag(),
-                  if (boosted) const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      timeRight,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.right,
-                      style: const TextStyle(fontSize: 12, color: AppColors.muted),
-                    ),
-                  ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (boosted) ...[
+                  const _BoostedTag(),
+                  const SizedBox(width: 8),
                 ],
-              ),
+                Text(timeRight, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+              ],
             ),
           ]),
 
           const SizedBox(height: 12),
 
-          // Image hero (non-interactive)
+          // Image hero
           if (imageUrl.isNotEmpty)
             ClipRRect(
               borderRadius: BorderRadius.circular(16),
@@ -678,28 +731,26 @@ class _PostCardEvergreen extends StatelessWidget {
 
           const SizedBox(height: 12),
 
-          // Primary CTA
+          // Primary CTA (tap = chat, long-press = comments)
           SizedBox(
             height: 48,
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: () {
-                HapticFeedback.lightImpact();
-                onAskAuthor();
-              },
+              onPressed: onAskAuthor,
+              onLongPress: onComment,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
               ),
-              child: Text('Ask $authorName about this'),
+              child: Text('Chat with $authorName'),
             ),
           ),
 
           const SizedBox(height: 10),
 
-          // Meta row
+          // Meta row — live comments link
           Row(children: [
             TextButton(
               onPressed: onViewProfile,
@@ -712,8 +763,9 @@ class _PostCardEvergreen extends StatelessWidget {
               ),
               child: const Text('View profile'),
             ),
+            const SizedBox(width: 8),
+            _CommentsLink(postId: postId, fallback: storedComments, onTap: onComment),
             const Spacer(),
-            Text(timeRight, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
           ]),
 
           const SizedBox(height: 6),
@@ -764,6 +816,7 @@ class _PostCardEvergreen extends StatelessWidget {
 /// Simple Focus Card — text-only posts (auto-height, “More”)
 /// =====================
 class _PostCardSimpleFocus extends StatefulWidget {
+  final String postId;
   final String authorName;
   final String authorSubtitle;
   final String body;
@@ -772,6 +825,7 @@ class _PostCardSimpleFocus extends StatefulWidget {
   final int likes;
   final int helpfulCount;
   final bool isLiked;
+  final int storedComments;
 
   final VoidCallback onAskAuthor;
   final VoidCallback onLike;
@@ -779,9 +833,11 @@ class _PostCardSimpleFocus extends StatefulWidget {
   final VoidCallback onReport;
   final VoidCallback? onBoost;
   final VoidCallback onViewProfile;
+  final VoidCallback? onComment;
 
   const _PostCardSimpleFocus({
     Key? key,
+    required this.postId,
     required this.authorName,
     required this.authorSubtitle,
     required this.body,
@@ -795,7 +851,9 @@ class _PostCardSimpleFocus extends StatefulWidget {
     required this.onHelpful,
     required this.onReport,
     required this.onViewProfile,
+    required this.storedComments,
     this.onBoost,
+    this.onComment,
   }) : super(key: key);
 
   @override
@@ -859,24 +917,15 @@ class _PostCardSimpleFocusState extends State<_PostCardSimpleFocus> {
                 ]),
               ),
               const SizedBox(width: 8),
-              Flexible(
-                fit: FlexFit.loose,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (widget.boosted) const _BoostedTag(),
-                    if (widget.boosted) const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        widget.timeRight,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.right,
-                        style: const TextStyle(fontSize: 12, color: AppColors.muted),
-                      ),
-                    ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (widget.boosted) ...[
+                    const _BoostedTag(),
+                    const SizedBox(width: 8),
                   ],
-                ),
+                  Text(widget.timeRight, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+                ],
               ),
             ]),
 
@@ -915,7 +964,7 @@ class _PostCardSimpleFocusState extends State<_PostCardSimpleFocus> {
 
             const SizedBox(height: 16),
 
-            // Primary CTA
+            // Primary CTA (tap = chat, long-press = comments)
             SizedBox(
               height: 52,
               width: double.infinity,
@@ -924,19 +973,20 @@ class _PostCardSimpleFocusState extends State<_PostCardSimpleFocus> {
                   HapticFeedback.lightImpact();
                   widget.onAskAuthor();
                 },
+                onLongPress: widget.onComment,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
                 ),
-                child: Text('Ask ${widget.authorName} about this'),
+                child: Text('Chat with ${widget.authorName}'),
               ),
             ),
 
             const SizedBox(height: 10),
 
-            // Meta + actions (hide zero labels)
+            // Meta + actions (with live comment count)
             Row(children: [
               TextButton(
                 onPressed: widget.onViewProfile,
@@ -948,8 +998,14 @@ class _PostCardSimpleFocusState extends State<_PostCardSimpleFocus> {
                 ),
                 child: const Text('View profile'),
               ),
+              const SizedBox(width: 8),
+              _CommentsLink(postId: widget.postId, fallback: widget.storedComments, onTap: widget.onComment),
               const Spacer(),
+            ]),
 
+            const SizedBox(height: 6),
+
+            Row(children: [
               IconButton(
                 icon: Icon(
                   widget.isLiked ? Icons.favorite : Icons.favorite_border,
@@ -961,7 +1017,6 @@ class _PostCardSimpleFocusState extends State<_PostCardSimpleFocus> {
               if (widget.likes > 0)
                 Text('${widget.likes}', style: TextStyle(color: AppColors.muted.withOpacity(0.85))),
               const SizedBox(width: 8),
-
               IconButton(
                 icon: Icon(
                   widget.helpfulCount > 0 ? Icons.thumb_up_alt : Icons.thumb_up_alt_outlined,
@@ -972,16 +1027,15 @@ class _PostCardSimpleFocusState extends State<_PostCardSimpleFocus> {
               ),
               if (widget.helpfulCount > 0)
                 Text('${widget.helpfulCount}', style: TextStyle(color: AppColors.muted.withOpacity(0.85))),
-
               if (widget.onBoost != null) ...[
-                const SizedBox(width: 8),
+                const Spacer(),
                 IconButton(
                   icon: const Icon(Icons.rocket_launch, color: AppColors.boosted),
                   onPressed: widget.onBoost,
                   tooltip: 'Boost',
                 ),
-              ],
-              const SizedBox(width: 2),
+              ] else
+                const Spacer(),
               IconButton(
                 icon: const Icon(Icons.flag, color: AppColors.danger),
                 onPressed: widget.onReport,
@@ -996,7 +1050,51 @@ class _PostCardSimpleFocusState extends State<_PostCardSimpleFocus> {
 }
 
 /// =====================
-/// Boosted Tag (capped width, compact)
+/// LIVE "Comments (N)" link used on cards
+/// =====================
+class _CommentsLink extends StatelessWidget {
+  final String postId;
+  final int fallback; // used until stream returns
+  final VoidCallback? onTap;
+
+  const _CommentsLink({
+    Key? key,
+    required this.postId,
+    required this.fallback,
+    this.onTap,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('posts')
+          .doc(postId)
+          .collection('comments')
+          .snapshots(),
+      builder: (context, snap) {
+        int count = fallback;
+        if (snap.hasData) count = snap.data!.docs.length;
+        return TextButton.icon(
+          onPressed: onTap,
+          icon: const Icon(Icons.mode_comment_outlined, size: 16, color: AppColors.muted),
+          label: Text(
+            count > 0 ? 'Comments ($count)' : 'Comments',
+            style: const TextStyle(color: AppColors.muted),
+          ),
+          style: TextButton.styleFrom(
+            padding: EdgeInsets.zero,
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// =====================
+/// Compact Boosted Tag
 /// =====================
 class _BoostedTag extends StatelessWidget {
   const _BoostedTag({super.key});
@@ -1032,28 +1130,199 @@ class _BoostedTag extends StatelessWidget {
 }
 
 /// =====================
-/// Small pieces
+/// Comments Sheet (Instagram-ish)
 /// =====================
-class _StatButton extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String label;
-  final VoidCallback onTap;
-  const _StatButton({Key? key, required this.icon, required this.color, required this.label, required this.onTap})
-      : super(key: key);
+class _CommentsSheet extends StatefulWidget {
+  final String postId;
+  final String authorName;
+
+  const _CommentsSheet({Key? key, required this.postId, required this.authorName}) : super(key: key);
+
+  @override
+  State<_CommentsSheet> createState() => _CommentsSheetState();
+}
+
+class _CommentsSheetState extends State<_CommentsSheet> {
+  final TextEditingController _controller = TextEditingController();
+  bool _sending = false;
+  String? _myName;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMyName();
+  }
+
+  Future<void> _loadMyName() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final snap = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final d = snap.data() ?? {};
+      setState(() {
+        _myName = d['fullName'] ?? d['name'] ?? FirebaseAuth.instance.currentUser?.email ?? 'Someone';
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _send() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final text = _controller.text.trim();
+    if (uid == null || text.isEmpty || _sending) return;
+
+    setState(() => _sending = true);
+    try {
+      final postRef = FirebaseFirestore.instance.collection('posts').doc(widget.postId);
+      await postRef.collection('comments').add({
+        'text': text,
+        'userId': uid,
+        'userName': _myName ?? 'Someone',
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+      // keep a denormalized counter up-to-date
+      await postRef.update({'commentsCount': FieldValue.increment(1)});
+      _controller.clear();
+      HapticFeedback.selectionClick();
+    } catch (e) {
+      HapticFeedback.heavyImpact();
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(8),
-      onTap: onTap,
-      child: Row(children: [
-        Icon(icon, size: 20, color: color),
-        if (label.isNotEmpty) ...[
-          const SizedBox(width: 6),
-          Text(label, style: const TextStyle(fontSize: 14, color: AppColors.text)),
-        ],
-      ]),
+    final pad = MediaQuery.of(context).viewInsets.bottom;
+
+    return FractionallySizedBox(
+      heightFactor: 0.92, // higher, IG-style
+      child: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            // Title row
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: Row(
+                children: [
+                  Text('Comments', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  const SizedBox(width: 8),
+                  Text('on ${widget.authorName}’s post',
+                      style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+                  const Spacer(),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+
+            // List
+            Expanded(
+              child: StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('posts')
+                    .doc(widget.postId)
+                    .collection('comments')
+                    .orderBy('timestamp', descending: true)
+                    .snapshots(),
+                builder: (context, snap) {
+                  if (!snap.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final docs = snap.data!.docs;
+                  if (docs.isEmpty) {
+                    return const Center(
+                      child: Text('No comments yet.', style: TextStyle(color: AppColors.muted)),
+                    );
+                  }
+                  return ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                    itemBuilder: (_, i) {
+                      final d = docs[i].data() as Map<String, dynamic>? ?? {};
+                      final name = d['userName'] ?? 'User';
+                      final text = d['text'] ?? '';
+                      String when = _timeAgoFromTs(d['timestamp']);
+
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          CircleAvatar(
+                            radius: 18,
+                            backgroundColor: AppColors.primaryTonal,
+                            child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
+                                style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w700)),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                const SizedBox(height: 4),
+                                Text(text, style: const TextStyle(fontSize: 15, height: 1.3)),
+                                const SizedBox(height: 6),
+                                Text(when, style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                    separatorBuilder: (_, __) => const SizedBox(height: 14),
+                    itemCount: docs.length,
+                  );
+                },
+              ),
+            ),
+
+            // Composer (sticky bottom)
+            Padding(
+              padding: EdgeInsets.fromLTRB(16, 8, 16, 10 + pad),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _controller,
+                      minLines: 1,
+                      maxLines: 4,
+                      textInputAction: TextInputAction.newline,
+                      decoration: InputDecoration(
+                        hintText: 'Write a comment…',
+                        filled: true,
+                        fillColor: AppColors.canvas,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: AppColors.border),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: AppColors.border),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Material(
+                    color: AppColors.primary,
+                    borderRadius: BorderRadius.circular(12),
+                    child: InkWell(
+                      onTap: _sending ? null : _send,
+                      borderRadius: BorderRadius.circular(12),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: _sending
+                            ? const SizedBox(
+                                width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.send, color: Colors.white),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
