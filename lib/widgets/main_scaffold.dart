@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:connect_app/screens/home/home_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+
+import 'package:connect_app/screens/home/home_content_screen.dart';
 import 'package:connect_app/screens/posts/create_post_screen.dart';
 import 'package:connect_app/screens/search/search_screen.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 
 class MainScaffold extends StatefulWidget {
   const MainScaffold({Key? key}) : super(key: key);
@@ -15,12 +16,15 @@ class MainScaffold extends StatefulWidget {
 class _MainScaffoldState extends State<MainScaffold> {
   int _selectedIndex = 0;
 
-  final List<Widget> _screens = [
-    const HomeScreen(),
-    const SearchScreen(),
-    const CreatePostScreen(),
-    ProfileScreen(userID: FirebaseAuth.instance.currentUser?.uid ?? ''),
-  ];
+  List<Widget> _buildScreens() {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    return [
+      const HomeContentScreen(),
+      const SearchScreen(),
+      const CreatePostScreen(),
+      ProfileScreen(userID: uid),
+    ];
+  }
 
   void _onItemTapped(int index) {
     setState(() => _selectedIndex = index);
@@ -28,11 +32,15 @@ class _MainScaffoldState extends State<MainScaffold> {
 
   @override
   Widget build(BuildContext context) {
+    final screens = _buildScreens();
+    final primary = Theme.of(context).colorScheme.primary;
+
     return Scaffold(
-      body: _screens[_selectedIndex],
+      body: IndexedStack(index: _selectedIndex, children: screens),
       bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed,
         currentIndex: _selectedIndex,
-        selectedItemColor: Colors.blue,
+        selectedItemColor: primary,
         unselectedItemColor: Colors.grey,
         onTap: _onItemTapped,
         items: const [

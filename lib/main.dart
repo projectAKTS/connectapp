@@ -18,7 +18,7 @@ import 'screens/consultation/my_consultation_screen.dart';
 import 'screens/credits_store_screen.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/onboarding_screen.dart';
-import 'screens/chat/chat_screen.dart'; // <-- added
+import 'screens/chat/chat_screen.dart';
 
 import 'services/firebase_options.dart';
 import 'services/notification_service.dart';
@@ -28,9 +28,10 @@ import 'widgets/main_scaffold.dart';
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 late final NotificationService notificationService;
 
+// Background handler (don’t navigate here)
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // no-op; navigation happens on tap via NotificationService
+  // no-op
 }
 
 Future<void> main() async {
@@ -38,9 +39,7 @@ Future<void> main() async {
 
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
     alert: true, badge: true, sound: true,
@@ -52,14 +51,28 @@ Future<void> main() async {
   );
 
   notificationService = NotificationService(navigatorKey: navigatorKey);
-  await notificationService.initialize();
 
+  // In-app purchases
   final iapAvailable = await SubscriptionService.init();
   if (iapAvailable) {
     SubscriptionService.setupListener(_handlePurchaseUpdates);
   }
 
+  // Run the app first
   runApp(const MyApp());
+
+  // Initialize notifications AFTER auth, and only once
+  bool _notifInitDone = false;
+  FirebaseAuth.instance.authStateChanges().listen((user) async {
+    if (user != null && !_notifInitDone) {
+      _notifInitDone = true;
+      try {
+        await notificationService.initialize(); // safe if called once
+      } catch (e, st) {
+        debugPrint('Notification init failed: $e\n$st');
+      }
+    }
+  });
 }
 
 void _handlePurchaseUpdates(List<PurchaseDetails> details) {
@@ -84,7 +97,8 @@ void _handlePurchaseUpdates(List<PurchaseDetails> details) {
             : pd.productID == 'credits_30min'
                 ? 30
                 : 60;
-        doc.update({'freeConsultationMinutes': FieldValue.increment(minutes)});
+        // ⬇ ensure rules allow this field (added to allowedUserKeys)
+        doc.set({'freeConsultationMinutes': FieldValue.increment(minutes)}, SetOptions(merge: true));
       }
     }
   }
@@ -125,7 +139,6 @@ class MyApp extends StatelessWidget {
         '/credits': (_) => const CreditsStoreScreen(),
         '/onboarding': (_) => const OnboardingScreen(),
 
-        // Optional named route for chat (we also navigate via MaterialPageRoute)
         '/chat': (ctx) {
           final args = ModalRoute.of(ctx)!.settings.arguments as Map<String, dynamic>?;
           final otherUserId = args?['otherUserId'] as String?;

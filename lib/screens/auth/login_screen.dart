@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../services/firebase_auth_service.dart';
-import '../home/home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -16,18 +15,64 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
 
   Future<void> _login() async {
+    FocusScope.of(context).unfocus();
     setState(() => _isLoading = true);
-    final user = await _authService.signInWithEmail(
-      _emailController.text.trim(),
-      _passwordController.text.trim(),
-    );
-    setState(() => _isLoading = false);
+    try {
+      final user = await _authService.signInWithEmail(
+        _emailController.text.trim(),
+        _passwordController.text.trim(),
+      );
+      if (!mounted) return;
+      setState(() => _isLoading = false);
 
-    if (user != null) {
-      Navigator.pushReplacementNamed(context, '/home');
-    } else {
+      if (user != null) {
+        Navigator.pushReplacementNamed(context, '/home');
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Login failed. Please try again.')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Login failed. Please try again.')),
+        SnackBar(content: Text('Error: $e')),
+      );
+    }
+  }
+
+  Future<void> _loginWithGoogle() async {
+    setState(() => _isLoading = true);
+    try {
+      final user = await _authService.signInWithGoogle();
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      if (user != null) {
+        Navigator.pushReplacementNamed(context, '/home');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Google sign-in failed: $e')),
+      );
+    }
+  }
+
+  Future<void> _loginWithApple() async {
+    setState(() => _isLoading = true);
+    try {
+      final user = await _authService.signInWithApple();
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      if (user != null) {
+        Navigator.pushReplacementNamed(context, '/home');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Apple sign-in failed: $e')),
       );
     }
   }
@@ -41,31 +86,40 @@ class _LoginScreenState extends State<LoginScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            TextField(controller: _emailController, decoration: const InputDecoration(labelText: 'Email')),
+            TextField(
+              controller: _emailController,
+              keyboardType: TextInputType.emailAddress,
+              autofillHints: const [AutofillHints.email],
+              decoration: const InputDecoration(labelText: 'Email'),
+            ),
             const SizedBox(height: 10),
-            TextField(controller: _passwordController, obscureText: true, decoration: const InputDecoration(labelText: 'Password')),
+            TextField(
+              controller: _passwordController,
+              obscureText: true,
+              autofillHints: const [AutofillHints.password],
+              decoration: const InputDecoration(labelText: 'Password'),
+            ),
             const SizedBox(height: 20),
 
             _isLoading
                 ? const CircularProgressIndicator()
-                : ElevatedButton(onPressed: _login, child: const Text('Login')),
+                : ElevatedButton(
+                    onPressed: _login,
+                    child: const Text('Login'),
+                  ),
             const SizedBox(height: 10),
 
-            // 🔹 Google & Apple Sign-In
+            // Google & Apple Sign-In
             ElevatedButton.icon(
               icon: const Icon(Icons.login),
               label: const Text('Sign In with Google'),
-              onPressed: () async {
-                await _authService.signInWithGoogle();
-              },
+              onPressed: _isLoading ? null : _loginWithGoogle,
             ),
             const SizedBox(height: 10),
             ElevatedButton.icon(
               icon: const Icon(Icons.apple),
               label: const Text('Sign In with Apple'),
-              onPressed: () async {
-                await _authService.signInWithApple();
-              },
+              onPressed: _isLoading ? null : _loginWithApple,
             ),
 
             TextButton(
