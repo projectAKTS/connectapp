@@ -25,10 +25,13 @@ import 'services/notification_service.dart';
 import 'services/subscription_service.dart';
 import 'widgets/main_scaffold.dart';
 
+// Warm UI theme
+import 'theme/theme.dart';
+
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 late final NotificationService notificationService;
 
-// Background handler (don’t navigate here)
+// Background FCM handler
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // no-op
@@ -42,7 +45,9 @@ Future<void> main() async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
-    alert: true, badge: true, sound: true,
+    alert: true,
+    badge: true,
+    sound: true,
   );
 
   await FirebaseAppCheck.instance.activate(
@@ -58,31 +63,20 @@ Future<void> main() async {
     SubscriptionService.setupListener(_handlePurchaseUpdates);
   }
 
-  // Run the app first
   runApp(const MyApp());
-
-  // Initialize notifications AFTER auth, and only once
-  bool _notifInitDone = false;
-  FirebaseAuth.instance.authStateChanges().listen((user) async {
-    if (user != null && !_notifInitDone) {
-      _notifInitDone = true;
-      try {
-        await notificationService.initialize(); // safe if called once
-      } catch (e, st) {
-        debugPrint('Notification init failed: $e\n$st');
-      }
-    }
-  });
 }
 
 void _handlePurchaseUpdates(List<PurchaseDetails> details) {
   for (final pd in details) {
-    if (pd.status == PurchaseStatus.purchased || pd.status == PurchaseStatus.restored) {
+    if (pd.status == PurchaseStatus.purchased ||
+        pd.status == PurchaseStatus.restored) {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) continue;
-      final doc = FirebaseFirestore.instance.collection('users').doc(user.uid);
+      final doc =
+          FirebaseFirestore.instance.collection('users').doc(user.uid);
 
-      if (pd.productID == 'premium_monthly' || pd.productID == 'premium_yearly') {
+      if (pd.productID == 'premium_monthly' ||
+          pd.productID == 'premium_yearly') {
         final isMonthly = pd.productID == 'premium_monthly';
         final expires = DateTime.now().add(
           isMonthly ? const Duration(days: 30) : const Duration(days: 365),
@@ -97,8 +91,9 @@ void _handlePurchaseUpdates(List<PurchaseDetails> details) {
             : pd.productID == 'credits_30min'
                 ? 30
                 : 60;
-        // ⬇ ensure rules allow this field (added to allowedUserKeys)
-        doc.set({'freeConsultationMinutes': FieldValue.increment(minutes)}, SetOptions(merge: true));
+        doc.set({
+          'freeConsultationMinutes': FieldValue.increment(minutes)
+        }, SetOptions(merge: true));
       }
     }
   }
@@ -113,20 +108,10 @@ class MyApp extends StatelessWidget {
       navigatorKey: navigatorKey,
       title: 'Connect App',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(primarySwatch: Colors.blue),
+      theme: buildAppTheme(),
 
-      home: StreamBuilder<User?>(
-        stream: FirebaseAuth.instance.authStateChanges(),
-        builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const Scaffold(body: Center(child: CircularProgressIndicator()));
-          } else if (snap.hasData) {
-            return const MainScaffold();
-          } else {
-            return const LoginScreen();
-          }
-        },
-      ),
+      // Use a dedicated gate instead of a StreamBuilder at root
+      home: const AuthGate(),
 
       routes: {
         '/login': (_) => const LoginScreen(),
@@ -138,12 +123,13 @@ class MyApp extends StatelessWidget {
         '/my_consultations': (_) => const MyConsultationsScreen(),
         '/credits': (_) => const CreditsStoreScreen(),
         '/onboarding': (_) => const OnboardingScreen(),
-
         '/chat': (ctx) {
-          final args = ModalRoute.of(ctx)!.settings.arguments as Map<String, dynamic>?;
+          final args =
+              ModalRoute.of(ctx)!.settings.arguments as Map<String, dynamic>?;
           final otherUserId = args?['otherUserId'] as String?;
           if (otherUserId == null || otherUserId.isEmpty) {
-            return const Scaffold(body: Center(child: Text('Missing otherUserId')));
+            return const Scaffold(
+                body: Center(child: Text('Missing otherUserId')));
           }
           return ChatScreen(otherUserId: otherUserId);
         },
@@ -173,7 +159,8 @@ class MyApp extends StatelessWidget {
           final postId = args?['postId'] as String?;
           return MaterialPageRoute(
             builder: (_) => postId == null
-                ? const Scaffold(body: Center(child: Text('Invalid Post ID')))
+                ? const Scaffold(
+                    body: Center(child: Text('Invalid Post ID')))
                 : BoostPostScreen(postId: postId),
             settings: settings,
           );
@@ -186,7 +173,8 @@ class MyApp extends StatelessWidget {
           final rate = (args?['ratePerMinute'] as num?)?.toInt() ?? 0;
           return MaterialPageRoute(
             builder: (_) => (id == null || name == null)
-                ? const Scaffold(body: Center(child: Text('Invalid args')))
+                ? const Scaffold(
+                    body: Center(child: Text('Invalid args')))
                 : ConsultationBookingScreen(
                     targetUserId: id,
                     targetUserName: name,
@@ -199,7 +187,58 @@ class MyApp extends StatelessWidget {
         return null;
       },
 
-      onUnknownRoute: (_) => MaterialPageRoute(builder: (_) => const MainScaffold()),
+      onUnknownRoute: (_) =>
+          MaterialPageRoute(builder: (_) => const MainScaffold()),
+    );
+  }
+}
+
+/// Keeps the root clean and avoids mutate-during-build issues
+class AuthGate extends StatefulWidget {
+  const AuthGate({super.key});
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  bool _notifInitDone = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Initialize notifications only once & after first frame
+    FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (user != null && !_notifInitDone) {
+        _notifInitDone = true;
+        // Defer to next frame to avoid build-scope assertions
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          try {
+            await notificationService.initialize();
+          } catch (e, st) {
+            debugPrint('Notification init failed: $e\n$st');
+          }
+        });
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snap.hasData) {
+          return const MainScaffold();
+        }
+        return const LoginScreen();
+      },
     );
   }
 }
