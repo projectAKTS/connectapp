@@ -1,3 +1,4 @@
+// lib/screens/home/home_content_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -5,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/theme/tokens.dart';
+import 'package:connect_app/screens/consultation/select_consultant_screen.dart';
 
 String _timeAgoShort(DateTime dt) {
   final now = DateTime.now();
@@ -34,6 +36,88 @@ class HomeContentScreen extends StatefulWidget {
 class _HomeContentScreenState extends State<HomeContentScreen> {
   final ScrollController _scroll = ScrollController();
 
+  void _openConnectSheet({
+    required String otherUserId,
+    required String otherUserName,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (_) {
+        Widget _item(IconData icon, String label, VoidCallback onTap) {
+          return ListTile(
+            leading: CircleAvatar(
+              backgroundColor: AppColors.avatarBg,
+              child: Icon(icon, color: AppColors.avatarFg),
+            ),
+            title: Text(label, style: const TextStyle(color: AppColors.text)),
+            onTap: () {
+              Navigator.pop(context);
+              onTap();
+            },
+          );
+        }
+
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 6),
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+              const SizedBox(height: 10),
+              _item(Icons.phone_in_talk_rounded, 'Audio call', () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Audio call — coming soon')),
+                );
+              }),
+              _item(Icons.videocam_rounded, 'Video call', () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Video call — coming soon')),
+                );
+              }),
+              _item(Icons.chat_bubble_outline_rounded, 'Message', () {
+                Navigator.of(context).pushNamed(
+                  '/chat',
+                  arguments: {'otherUserId': otherUserId},
+                );
+              }),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // Try to read the author's uid from multiple possible shapes/fields
+  String _extractUserId(Map<String, dynamic> m) {
+    // common string fields
+    for (final k in ['userId', 'userID', 'uid', 'authorId']) {
+      final v = m[k];
+      if (v is String && v.isNotEmpty) return v;
+    }
+    // Firestore DocumentReference in 'userRef'
+    final ref = m['userRef'];
+    try {
+      final path = (ref?.path as String?);
+      if (path != null && path.isNotEmpty) {
+        final id = path.split('/').last;
+        if (id.isNotEmpty) return id;
+      }
+    } catch (_) {}
+    return '';
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -46,7 +130,17 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
           controller: _scroll,
           slivers: [
             const SliverToBoxAdapter(child: _HomeTopBar()),
-            SliverToBoxAdapter(child: _WelcomeCard(name: firstName)),
+            SliverToBoxAdapter(
+              child: _WelcomeCard(
+                name: firstName,
+                onFindHelper: () => Navigator.of(context).pushNamed('/search'),
+                onBookConsultation: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SelectConsultantScreen()),
+                  );
+                },
+              ),
+            ),
             const SliverToBoxAdapter(child: _SectionTitle('Recent posts')),
             SliverToBoxAdapter(
               child: StreamBuilder<QuerySnapshot>(
@@ -80,23 +174,29 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                     itemCount: posts.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 14),
                     itemBuilder: (_, i) {
-                      final d = posts[i].data() as Map<String, dynamic>? ?? {};
-                      final author = d['userName'] ?? 'User';
-                      final avatar = d['userAvatar'] ?? '';
-                      final body = (d['content'] ?? '').toString();
-                      final right = _shortFromTs(d['timestamp']);
+                      final raw = posts[i].data() as Map<String, dynamic>? ?? {};
+                      final authorName = (raw['userName'] ?? 'User') as String;
+                      final authorId = _extractUserId(raw);
+                      final avatar = (raw['userAvatar'] ?? '') as String;
+                      final body = (raw['content'] ?? '').toString();
+                      final right = _shortFromTs(raw['timestamp']);
                       final subtitle = '${right} ago';
 
                       return _PostCell(
-                        authorName: author,
+                        authorName: authorName,
                         authorAvatarUrl: avatar,
                         subtitle: subtitle,
                         rightTime: right,
                         body: body,
-                        onConnect: () {
-                          HapticFeedback.lightImpact();
-                          // TODO: open chat or your connect flow
-                        },
+                        onConnect: authorId.isEmpty
+                            ? null
+                            : () {
+                                HapticFeedback.lightImpact();
+                                _openConnectSheet(
+                                  otherUserId: authorId,
+                                  otherUserName: authorName,
+                                );
+                              },
                       );
                     },
                   );
@@ -110,6 +210,7 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
   }
 }
 
+/// ===== Top bar with “Home” + profile chip =====
 class _HomeTopBar extends StatelessWidget {
   const _HomeTopBar({Key? key}) : super(key: key);
 
@@ -140,16 +241,21 @@ class _HomeTopBar extends StatelessWidget {
   }
 }
 
+/// ===== Welcome card with two pills =====
 class _WelcomeCard extends StatelessWidget {
   final String name;
-  const _WelcomeCard({Key? key, required this.name}) : super(key: key);
+  final VoidCallback onFindHelper;
+  final VoidCallback onBookConsultation;
+
+  const _WelcomeCard({
+    Key? key,
+    required this.name,
+    required this.onFindHelper,
+    required this.onBookConsultation,
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    // Softer inner panel (closer to the mock)
-    final innerColor = Colors.white.withOpacity(0.92);
-    final innerBorder = AppColors.border.withOpacity(0.55);
-
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       padding: const EdgeInsets.all(10),
@@ -161,7 +267,7 @@ class _WelcomeCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.fromLTRB(14, 16, 14, 14),
         decoration: BoxDecoration(
-          color: AppColors.canvas, // ✅ same pure white as background
+          color: AppColors.canvas,
           borderRadius: BorderRadius.circular(AppRadius.lg),
           border: Border.all(color: AppColors.border.withOpacity(0.5), width: 1),
         ),
@@ -170,11 +276,16 @@ class _WelcomeCard extends StatelessWidget {
           children: [
             Text('Welcome, $name', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 14),
-            const _TaupePill(icon: Icons.search, label: 'Find a helper'),
+            _TaupePill(
+              icon: Icons.search,
+              label: 'Find a helper',
+              onTap: onFindHelper,
+            ),
             const SizedBox(height: 12),
-            const _TaupePill(
+            _TaupePill(
               icon: Icons.event_available_outlined,
               label: 'Book a consultation',
+              onTap: onBookConsultation,
             ),
           ],
         ),
@@ -186,31 +297,40 @@ class _WelcomeCard extends StatelessWidget {
 class _TaupePill extends StatelessWidget {
   final IconData icon;
   final String label;
-  const _TaupePill({Key? key, required this.icon, required this.label})
-      : super(key: key);
+  final VoidCallback onTap;
+  const _TaupePill({
+    Key? key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 56,
-      decoration: BoxDecoration(
-        color: AppColors.surface,
+    return Material(
+      color: AppColors.button, // softer near-white for pills
+      borderRadius: BorderRadius.circular(28),
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(28),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          Icon(icon, color: AppColors.muted, size: 22),
-          const SizedBox(width: 12),
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: AppColors.text,
-            ),
+        child: Container(
+          height: 56,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Icon(icon, color: AppColors.muted, size: 22),
+              const SizedBox(width: 12),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.text,
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -235,7 +355,7 @@ class _PostCell extends StatelessWidget {
   final String subtitle;   // “2h ago”
   final String rightTime;  // “2h”
   final String body;
-  final VoidCallback onConnect;
+  final VoidCallback? onConnect; // nullable to allow disabled state
 
   const _PostCell({
     Key? key,
@@ -299,11 +419,13 @@ class _PostCell extends StatelessWidget {
           const SizedBox(height: 12),
 
           TextButton(
-            onPressed: onConnect,
+            onPressed: onConnect, // will be disabled when null
             style: TextButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              backgroundColor: AppColors.surface, // now lighter
-              foregroundColor: AppColors.text,
+              backgroundColor: AppColors.button, // softer
+              foregroundColor: onConnect == null
+                  ? AppColors.text.withOpacity(0.45)
+                  : AppColors.text,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(AppRadius.sm),
               ),
@@ -312,8 +434,10 @@ class _PostCell extends StatelessWidget {
                 fontSize: 14,
               ),
             ).copyWith(
-              overlayColor:
-                  MaterialStateProperty.all(AppColors.surface.withOpacity(0.7)),
+              overlayColor: MaterialStateProperty.resolveWith((states) {
+                if (onConnect == null) return Colors.transparent;
+                return AppColors.surface.withOpacity(0.35);
+              }),
             ),
             child: const Text('Connect'),
           ),
@@ -333,8 +457,8 @@ class _Avatar extends StatelessWidget {
     if (url.isEmpty) {
       return CircleAvatar(
         radius: radius,
-        backgroundColor: AppColors.canvas,
-        child: const Icon(Icons.person_outline, color: AppColors.primary),
+        backgroundColor: AppColors.avatarBg,
+        child: Icon(Icons.person_outline, color: AppColors.avatarFg),
       );
     }
     return CircleAvatar(radius: radius, backgroundImage: NetworkImage(url));

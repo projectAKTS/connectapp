@@ -110,6 +110,13 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
 
+      // ⛳ Global: tap anywhere to dismiss keyboard on every screen
+      builder: (context, child) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+        child: child,
+      ),
+
       // Use a dedicated gate instead of a StreamBuilder at root
       home: const AuthGate(),
 

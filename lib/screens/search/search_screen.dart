@@ -1,7 +1,6 @@
-// lib/screens/search/search_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:connect_app/theme/tokens.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({Key? key}) : super(key: key);
@@ -17,12 +16,6 @@ class _SearchScreenState extends State<SearchScreen> {
   List<Map<String, dynamic>> userResults = [];
   List<Map<String, dynamic>> postResults = [];
 
-  final _suggestedCategories = [
-    '🎓 Study Permit',
-    '🏠 Housing',
-    '💬 Talk to a Refugee',
-  ];
-
   @override
   void dispose() {
     _searchController.dispose();
@@ -30,6 +23,8 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _search(String rawQuery) async {
+    FocusScope.of(context).unfocus();
+
     final query = rawQuery.trim();
     setState(() {
       userResults.clear();
@@ -42,38 +37,49 @@ class _SearchScreenState extends State<SearchScreen> {
     }
 
     try {
-      // ─── POSTS ──────────────────────────────────────
+      // POSTS
       final contentSnap = await FirebaseFirestore.instance
           .collection('posts')
           .where('content', isGreaterThanOrEqualTo: query)
-          .where('content', isLessThanOrEqualTo: query + '\uf8ff')
+          .where('content', isLessThanOrEqualTo: '$query\uf8ff')
           .get();
+
       final tagSnap = await FirebaseFirestore.instance
           .collection('posts')
           .where('tags', arrayContains: query)
           .get();
 
       final posts = <Map<String, dynamic>>[];
-      for (var d in contentSnap.docs) {
+      for (final d in contentSnap.docs) {
         final m = Map<String, dynamic>.from(d.data() as Map<String, dynamic>);
         m['id'] = d.id;
         posts.add(m);
       }
-      for (var d in tagSnap.docs) {
+      for (final d in tagSnap.docs) {
         final m = Map<String, dynamic>.from(d.data() as Map<String, dynamic>);
         m['id'] = d.id;
         if (!posts.any((p) => p['id'] == m['id'])) posts.add(m);
       }
 
-      // ─── USERS ──────────────────────────────────────
+      // USERS
       final users = <Map<String, dynamic>>[];
+
       Future<QuerySnapshot> byField(String field) {
         return FirebaseFirestore.instance
             .collection('users')
             .where(field, isGreaterThanOrEqualTo: query)
-            .where(field, isLessThanOrEqualTo: query + '\uf8ff')
+            .where(field, isLessThanOrEqualTo: '$query\uf8ff')
             .get();
       }
+
+      void addUsers(QuerySnapshot snap) {
+        for (final d in snap.docs) {
+          final m = Map<String, dynamic>.from(d.data() as Map<String, dynamic>);
+          m['id'] = d.id;
+          if (!users.any((u) => u['id'] == m['id'])) users.add(m);
+        }
+      }
+
       final nameSnap = await byField('fullName');
       final bioSnap = await byField('bio');
       final journeySnap = await byField('journey');
@@ -82,167 +88,263 @@ class _SearchScreenState extends State<SearchScreen> {
           .where('interestTags', arrayContains: query)
           .get();
 
-      void addUsers(QuerySnapshot snap) {
-        for (var d in snap.docs) {
-          final m = Map<String, dynamic>.from(d.data() as Map<String, dynamic>);
-          m['id'] = d.id;
-          if (!users.any((u) => u['id'] == m['id'])) users.add(m);
-        }
-      }
-
       addUsers(nameSnap);
       addUsers(bioSnap);
       addUsers(journeySnap);
       addUsers(tagUserSnap);
 
+      if (!mounted) return;
       setState(() {
         postResults = posts;
         userResults = users;
         isLoading = false;
       });
+
+      FocusScope.of(context).unfocus();
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         postResults.clear();
         userResults.clear();
         isLoading = false;
       });
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Search failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Search failed: $e')),
+      );
     }
   }
 
-  Widget _buildPlaceholder(String title, String subtitle) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(title,
-                style:
-                    const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text(subtitle,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey[600])),
-          ],
+  // ---- UI helpers ------------------------------------------------------------
+
+  Widget _pillSearchField() {
+    return TextField(
+      controller: _searchController,
+      textInputAction: TextInputAction.search,
+      onSubmitted: _search,
+      decoration: InputDecoration(
+        hintText: 'Search users or posts…',
+        filled: true,
+        fillColor: AppColors.button, // soft near-white
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        suffixIcon: IconButton(
+          icon: const Icon(Icons.search, color: AppColors.muted),
+          onPressed: () => _search(_searchController.text),
+        ),
+        border: OutlineInputBorder(
+          borderSide: BorderSide.none,
+          borderRadius: BorderRadius.circular(28),
         ),
       ),
     );
   }
 
-  List<Widget> _buildFeedItems() {
-    final items = <Widget>[];
+  Widget _sectionTitle(String text) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 22,
+          fontWeight: FontWeight.w700,
+          color: AppColors.text,
+          letterSpacing: -0.2,
+        ),
+      ),
+    );
+  }
 
-    if (userResults.isNotEmpty) {
-      items.add(const Padding(
-        padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
-        child: Text('Users',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-      ));
-      for (var u in userResults) {
-        items.add(Card(
-          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
-          child: ListTile(
-            leading: CircleAvatar(
-              backgroundImage:
-                  u['photoUrl'] != null ? NetworkImage(u['photoUrl']) : null,
-            ),
-            title: Text(u['fullName'] ?? 'Unknown'),
-            subtitle: Text(u['bio'] ?? ''),
-            onTap: () => Navigator.pushNamed(context, '/profile/${u['id']}'),
+  Widget _softCard({required Widget child}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(AppRadius.xl),
+        border: Border.all(color: AppColors.border.withOpacity(0.65), width: 1),
+        boxShadow: const [AppShadows.soft],
+      ),
+      child: child,
+    );
+  }
+
+  Widget _userTile(Map<String, dynamic> u) {
+    return _softCard(
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        leading: _avatar(url: u['photoUrl'] as String?),
+        title: Text(
+          (u['fullName'] ?? 'Unknown') as String,
+          style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.text),
+        ),
+        subtitle: (u['bio'] != null && (u['bio'] as String).isNotEmpty)
+            ? Text(
+                u['bio'],
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: AppColors.muted),
+              )
+            : null,
+        onTap: () => Navigator.pushNamed(context, '/profile/${u['id']}'),
+      ),
+    );
+  }
+
+  Widget _postTile(Map<String, dynamic> p) {
+    final userName = (p['userName'] ?? 'Anonymous') as String;
+    final tags = (p['tags'] as List<dynamic>?)?.cast<String>() ?? const [];
+
+    return _softCard(
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        leading: CircleAvatar(
+          backgroundColor: AppColors.avatarBg,
+          child: Text(
+            userName.isNotEmpty ? userName[0].toUpperCase() : 'U',
+            style: const TextStyle(color: AppColors.text, fontWeight: FontWeight.w700),
           ),
-        ));
-      }
-      items.add(const Divider(height: 32));
-    }
+        ),
+        title: Text(
+          userName,
+          style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.text),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if ((p['content'] as String?)?.isNotEmpty ?? false)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  p['content'],
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: AppColors.text),
+                ),
+              ),
+            if (tags.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: -4,
+                  children: tags
+                      .map((t) => Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              borderRadius: BorderRadius.circular(AppRadius.sm),
+                            ),
+                            child: Text(
+                              t,
+                              style: const TextStyle(
+                                color: AppColors.text,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ))
+                      .toList(),
+                ),
+              ),
+          ],
+        ),
+        onTap: () => Navigator.pushNamed(context, '/post/${p['id']}'),
+      ),
+    );
+  }
 
-    if (postResults.isNotEmpty) {
-      items.add(const Padding(
-        padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
-        child: Text('Posts',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-      ));
-      for (var p in postResults) {
-        final tags = (p['tags'] as List<dynamic>?)?.cast<String>() ?? [];
-        items.add(Card(
-          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
-          child: ListTile(
-            leading: CircleAvatar(
-              child:
-                  Text((p['userName'] as String?)?.substring(0, 1) ?? 'U'),
+  Widget _avatar({String? url}) {
+    if (url == null || url.isEmpty) {
+      return const CircleAvatar(
+        backgroundColor: AppColors.avatarBg,
+        child: Icon(Icons.person_outline, color: AppColors.avatarFg),
+      );
+    }
+    return CircleAvatar(backgroundImage: NetworkImage(url));
+  }
+
+  Widget _placeholder() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: const [
+          Text(
+            'Suggested categories',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+              color: AppColors.text,
+              letterSpacing: -0.2,
             ),
-            title: Text(p['userName'] ?? 'Anonymous'),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(p['content'] ?? ''),
-                if (tags.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Wrap(
-                      spacing: 6,
-                      children: tags
-                          .map((t) => Chip(
-                                label: Text(t),
-                                backgroundColor: Colors.blue.shade50,
-                              ))
-                          .toList(),
-                    ),
-                  ),
-              ],
-            ),
-            onTap: () => Navigator.pushNamed(context, '/post/${p['id']}'),
           ),
-        ));
-      }
-    }
-
-    return items;
+          SizedBox(height: 8),
+          Text(
+            'Try searching for things like “Study Permit”, “Housing”, or “Talk to a Refugee”.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppColors.muted),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final query = _searchController.text.trim();
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Search')),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: TextField(
-              controller: _searchController,
-              textInputAction: TextInputAction.search,
-              decoration: InputDecoration(
-                hintText: 'Search users or posts…',
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.search),
-                  onPressed: () => _search(_searchController.text),
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              onSubmitted: (val) => _search(val),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: Scaffold(
+        backgroundColor: AppColors.canvas,
+        appBar: AppBar(
+          backgroundColor: AppColors.canvas,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          title: const Text('Search', style: TextStyle(color: AppColors.text)),
+          centerTitle: true,
+        ),
+        body: Column(
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: _pillSearchField(),
             ),
-          ),
-          Expanded(
-            child: isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : query.isEmpty
-                    ? _buildPlaceholder(
-                        'Suggested categories',
-                        _suggestedCategories.join('   '),
-                      )
-                    : (userResults.isEmpty && postResults.isEmpty)
-                        ? _buildPlaceholder(
-                            "No results for '$query'",
-                            "Try another keyword or check suggestions.",
-                          )
-                        : ListView(children: _buildFeedItems()),
-          ),
-        ],
+            Expanded(
+              child: isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : (query.isEmpty)
+                      ? _placeholder()
+                      : (userResults.isEmpty && postResults.isEmpty)
+                          ? const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+                              child: Text(
+                                'No results. Try another keyword.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: AppColors.muted),
+                              ),
+                            )
+                          : ListView(
+                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                              children: <Widget>[
+                                if (userResults.isNotEmpty) _sectionTitle('Users'),
+                                ...userResults
+                                    .map((u) => Padding(
+                                          padding: const EdgeInsets.only(bottom: 12),
+                                          child: _userTile(u),
+                                        ))
+                                    .toList(),
+                                if (userResults.isNotEmpty && postResults.isNotEmpty)
+                                  const SizedBox(height: 8),
+                                if (postResults.isNotEmpty) _sectionTitle('Posts'),
+                                ...postResults
+                                    .map((p) => Padding(
+                                          padding: const EdgeInsets.only(bottom: 12),
+                                          child: _postTile(p),
+                                        ))
+                                    .toList(),
+                              ],
+                            ),
+            ),
+          ],
+        ),
       ),
     );
   }
