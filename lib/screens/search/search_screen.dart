@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connect_app/theme/tokens.dart';
 
+// Direct screen imports (avoid named-route issues through nested navigators)
+import 'package:connect_app/screens/profile/profile_screen.dart';
+import 'package:connect_app/screens/posts/post_detail_screen.dart';
+
 class SearchScreen extends StatefulWidget {
   const SearchScreen({Key? key}) : super(key: key);
 
@@ -114,7 +118,7 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
-  // ---- UI helpers ------------------------------------------------------------
+  // UI helpers
 
   Widget _pillSearchField() {
     return TextField(
@@ -124,7 +128,7 @@ class _SearchScreenState extends State<SearchScreen> {
       decoration: InputDecoration(
         hintText: 'Search users or posts…',
         filled: true,
-        fillColor: AppColors.button, // soft near-white
+        fillColor: AppColors.button,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         suffixIcon: IconButton(
           icon: const Icon(Icons.search, color: AppColors.muted),
@@ -182,7 +186,19 @@ class _SearchScreenState extends State<SearchScreen> {
                 style: const TextStyle(color: AppColors.muted),
               )
             : null,
-        onTap: () => Navigator.pushNamed(context, '/profile/${u['id']}'),
+        onTap: () {
+          final id = (u['id'] as String?) ?? '';
+          if (id.isEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Missing user id')),
+            );
+            return;
+          }
+          // ✅ push on the ROOT navigator
+          Navigator.of(context, rootNavigator: true).push(
+            MaterialPageRoute(builder: (_) => ProfileScreen(userID: id)),
+          );
+        },
       ),
     );
   }
@@ -244,7 +260,19 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
           ],
         ),
-        onTap: () => Navigator.pushNamed(context, '/post/${p['id']}'),
+        onTap: () {
+          final id = (p['id'] as String?) ?? '';
+          if (id.isEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Missing post id')),
+            );
+            return;
+          }
+          // Direct push is fine here; use root to be consistent
+          Navigator.of(context, rootNavigator: true).push(
+            MaterialPageRoute(builder: (_) => PostDetailScreen(postId: id)),
+          );
+        },
       ),
     );
   }

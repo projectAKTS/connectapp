@@ -1,3 +1,4 @@
+// lib/services/notification_service.dart
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
@@ -41,7 +42,7 @@ class NotificationService {
       alert: true, badge: true, sound: true,
     );
 
-    // 🔧 iOS init: NO `const` around the categories list or its elements
+    // iOS categories (no const)
     final iosInit = DarwinInitializationSettings(
       notificationCategories: [
         DarwinNotificationCategory(
@@ -130,6 +131,12 @@ class NotificationService {
       final token = forceToken ?? await _fcm.getToken();
       if (token == null || token.isEmpty) return;
 
+      final app = FirebaseFirestore.instance.app;
+      debugPrint('📡 registerFcmToken() project=${app.options.projectId}, appId=${app.options.appId}');
+
+      final before = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      debugPrint('📡 user doc exists=${before.exists} keys=${before.data()?.keys.toList()}');
+
       await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
         {
           'fcmToken': token,
@@ -137,11 +144,13 @@ class NotificationService {
         },
         SetOptions(merge: true),
       );
+      debugPrint('✅ FCM token write OK for uid=${user.uid}');
     } on FirebaseException catch (e) {
       if (e.code == 'permission-denied') {
-        debugPrint('⚠️ Skipping FCM token write (permission denied). Check user rules whitelist.');
+        debugPrint('⚠️ Skipping FCM token write (permission denied). Check /users keys whitelist and project.');
         return;
       }
+      debugPrint('❌ FCM token write failed: code=${e.code} message=${e.message}');
       rethrow;
     }
   }
@@ -149,7 +158,7 @@ class NotificationService {
   Future<void> _handleMessage(RemoteMessage message, {required bool showLocal}) async {
     final data = message.data;
 
-    // ===== CALL INVITE =====
+    // CALL INVITE
     final isCallInvite = (data['type'] == 'call_invite') || (data['action'] == 'incoming_call');
 
     if (isCallInvite) {
@@ -175,7 +184,7 @@ class NotificationService {
                 AndroidNotificationAction('DECLINE_CALL', 'Decline', showsUserInterface: false, cancelNotification: true),
               ],
             ),
-            iOS: DarwinNotificationDetails(
+            iOS: const DarwinNotificationDetails(
               categoryIdentifier: 'INCOMING_CALL',
             ),
           ),
@@ -197,7 +206,7 @@ class NotificationService {
       return;
     }
 
-    // ===== CHAT MESSAGE =====
+    // CHAT MESSAGE
     if (data['type'] == 'chat_message') {
       final otherUserId = (data['otherUserId'] ?? '') as String;
 
@@ -216,7 +225,7 @@ class NotificationService {
               'High Importance Notifications',
               importance: Importance.max, priority: Priority.high,
             ),
-            iOS: DarwinNotificationDetails(),
+            iOS: const DarwinNotificationDetails(),
           ),
           payload: 'open_chat|$otherUserId',
         );
@@ -226,7 +235,7 @@ class NotificationService {
       return;
     }
 
-    // ===== Generic fallback =====
+    // Generic
     if (showLocal && message.notification != null) {
       await _local.show(
         3,
@@ -238,7 +247,7 @@ class NotificationService {
             'High Importance Notifications',
             importance: Importance.max, priority: Priority.high,
           ),
-          iOS: DarwinNotificationDetails(),
+          iOS: const DarwinNotificationDetails(),
         ),
       );
     }

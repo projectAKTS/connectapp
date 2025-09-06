@@ -1,4 +1,3 @@
-// lib/screens/home/home_content_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/theme/tokens.dart';
 import 'package:connect_app/screens/consultation/select_consultant_screen.dart';
+import 'package:connect_app/screens/profile/profile_screen.dart'; // direct import
 
 String _timeAgoShort(DateTime dt) {
   final now = DateTime.now();
@@ -99,14 +99,13 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
     );
   }
 
-  // Try to read the author's uid from multiple possible shapes/fields
+  /// Robustly get the author uid from many possible shapes/fields.
   String _extractUserId(Map<String, dynamic> m) {
-    // common string fields
     for (final k in ['userId', 'userID', 'uid', 'authorId']) {
       final v = m[k];
       if (v is String && v.isNotEmpty) return v;
     }
-    // Firestore DocumentReference in 'userRef'
+    // If a DocumentReference is stored at 'userRef'
     final ref = m['userRef'];
     try {
       final path = (ref?.path as String?);
@@ -133,9 +132,9 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
             SliverToBoxAdapter(
               child: _WelcomeCard(
                 name: firstName,
-                onFindHelper: () => Navigator.of(context).pushNamed('/search'),
+                onFindHelper: () => Navigator.of(context, rootNavigator: true).pushNamed('/search'),
                 onBookConsultation: () async {
-                  await Navigator.of(context).push(
+                  await Navigator.of(context, rootNavigator: true).push(
                     MaterialPageRoute(builder: (_) => const SelectConsultantScreen()),
                   );
                 },
@@ -188,6 +187,16 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                         subtitle: subtitle,
                         rightTime: right,
                         body: body,
+                        onOpenProfile: authorId.isEmpty
+                            ? null
+                            : () {
+                                // ✅ push on ROOT navigator to avoid nested-navigator blank screens
+                                Navigator.of(context, rootNavigator: true).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => ProfileScreen(userID: authorId),
+                                  ),
+                                );
+                              },
                         onConnect: authorId.isEmpty
                             ? null
                             : () {
@@ -231,7 +240,7 @@ class _HomeTopBar extends StatelessWidget {
             ),
             child: IconButton(
               icon: const Icon(Icons.person_outline, color: AppColors.primary),
-              onPressed: () => Navigator.of(context).pushNamed('/profile/me'),
+              onPressed: () => Navigator.of(context, rootNavigator: true).pushNamed('/profile/me'),
               tooltip: 'Profile',
             ),
           ),
@@ -308,7 +317,7 @@ class _TaupePill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: AppColors.button, // softer near-white for pills
+      color: AppColors.button,
       borderRadius: BorderRadius.circular(28),
       child: InkWell(
         onTap: onTap,
@@ -355,7 +364,8 @@ class _PostCell extends StatelessWidget {
   final String subtitle;   // “2h ago”
   final String rightTime;  // “2h”
   final String body;
-  final VoidCallback? onConnect; // nullable to allow disabled state
+  final VoidCallback? onOpenProfile; // tap header -> profile
+  final VoidCallback? onConnect;     // connect button (nullable)
 
   const _PostCell({
     Key? key,
@@ -364,6 +374,7 @@ class _PostCell extends StatelessWidget {
     required this.subtitle,
     required this.rightTime,
     required this.body,
+    required this.onOpenProfile,
     required this.onConnect,
   }) : super(key: key);
 
@@ -371,21 +382,16 @@ class _PostCell extends StatelessWidget {
   Widget build(BuildContext context) {
     final borderColor = AppColors.border.withOpacity(0.65);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(AppRadius.xl),
-        boxShadow: const [AppShadows.soft],
-        border: Border.all(color: borderColor, width: 1),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-            _Avatar(url: authorAvatarUrl, radius: 20),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Widget header() {
+      final row = Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          _Avatar(url: authorAvatarUrl, radius: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 Text(
                   authorName,
                   maxLines: 1,
@@ -403,45 +409,69 @@ class _PostCell extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 14, color: AppColors.muted),
                 ),
-              ]),
+              ],
             ),
-            const SizedBox(width: 8),
-            Text(rightTime, style: const TextStyle(fontSize: 14, color: AppColors.muted)),
-          ]),
-
-          const SizedBox(height: 12),
-
-          Text(
-            body,
-            style: const TextStyle(fontSize: 16, height: 1.4, color: AppColors.text),
           ),
+          const SizedBox(width: 8),
+          Text(rightTime, style: const TextStyle(fontSize: 14, color: AppColors.muted)),
+        ],
+      );
 
-          const SizedBox(height: 12),
+      if (onOpenProfile == null) return row;
+      return InkWell(
+        onTap: onOpenProfile,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: row,
+        ),
+      );
+    }
 
-          TextButton(
-            onPressed: onConnect, // will be disabled when null
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              backgroundColor: AppColors.button, // softer
-              foregroundColor: onConnect == null
-                  ? AppColors.text.withOpacity(0.45)
-                  : AppColors.text,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.sm),
-              ),
-              textStyle: const TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: 14,
-              ),
-            ).copyWith(
-              overlayColor: MaterialStateProperty.resolveWith((states) {
-                if (onConnect == null) return Colors.transparent;
-                return AppColors.surface.withOpacity(0.35);
-              }),
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(AppRadius.xl),
+        boxShadow: const [AppShadows.soft],
+        border: Border.all(color: borderColor, width: 1),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            header(),
+            const SizedBox(height: 12),
+            Text(
+              body,
+              style: const TextStyle(fontSize: 16, height: 1.4, color: AppColors.text),
             ),
-            child: const Text('Connect'),
-          ),
-        ]),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: onConnect, // disabled when null
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                backgroundColor: AppColors.button,
+                foregroundColor: onConnect == null
+                    ? AppColors.text.withOpacity(0.45)
+                    : AppColors.text,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                ),
+                textStyle: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
+              ).copyWith(
+                overlayColor: MaterialStateProperty.resolveWith((states) {
+                  if (onConnect == null) return Colors.transparent;
+                  return AppColors.surface.withOpacity(0.35);
+                }),
+              ),
+              child: const Text('Connect'),
+            ),
+          ],
+        ),
       ),
     );
   }
