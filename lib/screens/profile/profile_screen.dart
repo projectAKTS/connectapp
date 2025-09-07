@@ -162,6 +162,72 @@ class _ProfileScreenState extends State<ProfileScreen> {
     Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
   }
 
+  // ---------- Connect sheet ----------
+  void _openConnectSheet() {
+    final otherName = (userData?['fullName'] as String?) ?? 'Unknown';
+    final ratePerMinute =
+        (userData?['ratePerMinute'] is num) ? (userData!['ratePerMinute'] as num).toInt() : 0;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (_) {
+        Widget item(IconData icon, String label, VoidCallback onTap) {
+          return ListTile(
+            leading: CircleAvatar(
+              backgroundColor: const Color(0xFFE9E9EF),
+              child: Icon(icon, color: Colors.black87),
+            ),
+            title: Text(label, style: const TextStyle(color: Colors.black87)),
+            onTap: () {
+              Navigator.pop(context);
+              onTap();
+            },
+          );
+        }
+
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 6),
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.black12,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+              const SizedBox(height: 10),
+              item(Icons.event_available_outlined, 'Book a call', () {
+                Navigator.of(context).pushNamed(
+                  '/consultation',
+                  arguments: {
+                    'targetUserId': widget.userID,
+                    'targetUserName': otherName,
+                    'ratePerMinute': ratePerMinute,
+                  },
+                );
+              }),
+              item(Icons.chat_bubble_outline, 'Message', () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => ChatScreen(otherUserId: widget.userID)),
+                );
+              }),
+              item(Icons.call, 'Audio call', () => _startCall(isVideo: false)),
+              item(Icons.videocam, 'Video call', () => _startCall(isVideo: true)),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   // ---------- UI helpers (hard-contrast) ----------
   static const _bg = Colors.white;
   static const _text = Colors.black87;
@@ -345,9 +411,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              Text(fullName,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+              Text(
+                fullName,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
+              ),
               if (bio.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Text(bio, textAlign: TextAlign.center, style: const TextStyle(color: _muted)),
@@ -371,110 +439,50 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ],
 
+              // ---------- Connect (single button) ----------
               if (!isCurrentUser) ...[
                 const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _pillButton(
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => ChatScreen(otherUserId: widget.userID),
-                          ),
-                        );
-                      },
-                      child: Row(children: const [
-                        Icon(Icons.chat_bubble_outline, size: 18, color: _text),
-                        SizedBox(width: 8),
-                        Text("Message"),
-                      ]),
-                    ),
-                    const SizedBox(width: 10),
-                    _pillButton(
-                      onTap: () => _startCall(isVideo: false),
-                      child: Row(children: const [
-                        Icon(Icons.call, size: 18, color: _text),
-                        SizedBox(width: 8),
-                        Text("Audio Call"),
-                      ]),
-                    ),
-                    const SizedBox(width: 10),
-                    _pillButton(
-                      onTap: () => _startCall(isVideo: true),
-                      child: Row(children: const [
-                        Icon(Icons.videocam, size: 18, color: _text),
-                        SizedBox(width: 8),
-                        Text("Video Call"),
-                      ]),
-                    ),
-                  ],
+                Center(
+                  child: _pillButton(
+                    onTap: _openConnectSheet,
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: const [
+                      Icon(Icons.flash_on_outlined, size: 18, color: _text),
+                      SizedBox(width: 8),
+                      Text('Connect'),
+                    ]),
+                  ),
                 ),
               ],
 
               const SizedBox(height: 16),
-              // Stats
+
+              // ---------- Stats (merged cards) ----------
               Row(
                 children: [
                   Expanded(
-                    child: _softCard(
-                      child: Column(
-                        children: const [
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.local_fire_department_rounded, color: _text),
-                              SizedBox(width: 6),
-                              Text('Streak', style: TextStyle(color: _muted)),
-                            ],
-                          ),
-                        ],
-                      ),
+                    child: _StatCard(
+                      icon: Icons.local_fire_department_rounded,
+                      label: 'Streak',
+                      value: '$streakDays days',
                     ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: _softCard(
-                      child: Column(
-                        children: const [
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.emoji_events_outlined, color: _text),
-                              SizedBox(width: 6),
-                              Text('XP', style: TextStyle(color: _muted)),
-                            ],
-                          ),
-                        ],
-                      ),
+                    child: _StatCard(
+                      icon: Icons.emoji_events_outlined,
+                      label: 'XP',
+                      value: '$xpPoints',
                     ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: _softCard(
-                      child: Column(
-                        children: const [
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.thumb_up_alt_outlined, color: _text),
-                              SizedBox(width: 6),
-                              Text('Helpful', style: TextStyle(color: _muted)),
-                            ],
-                          ),
-                        ],
-                      ),
+                    child: _StatCard(
+                      icon: Icons.thumb_up_alt_outlined,
+                      label: 'Helpful',
+                      value: '$helpfulMarks',
                     ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  Text('$streakDays days', style: const TextStyle(fontWeight: FontWeight.w700)),
-                  Text('$xpPoints', style: const TextStyle(fontWeight: FontWeight.w700)),
-                  Text('$helpfulMarks', style: const TextStyle(fontWeight: FontWeight.w700)),
                 ],
               ),
 
@@ -599,11 +607,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       padding: const EdgeInsets.only(right: 8),
                       child: ChoiceChip(
                         key: ValueKey(key),
-                        label: Text(label,
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: isSelected ? _text : _text.withOpacity(0.85),
-                            )),
+                        label: Text(
+                          label,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: isSelected ? _text : _text.withOpacity(0.85),
+                          ),
+                        ),
                         selected: isSelected,
                         onSelected: (_) => setState(() => selectedFilter = key),
                         selectedColor: _pill,
@@ -707,6 +717,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               )
             : null,
+      ),
+    );
+  }
+}
+
+// ---------- Small stat card used above ----------
+class _StatCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  const _StatCard({required this.icon, required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE6E2DD)),
+        boxShadow: const [
+          BoxShadow(color: Color(0x14000000), blurRadius: 12, offset: Offset(0, 4)),
+        ],
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, color: Colors.black87),
+            const SizedBox(width: 8),
+            const Text(''),
+            Text(label, style: const TextStyle(color: Colors.black54)),
+          ]),
+          const SizedBox(height: 8),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+        ],
       ),
     );
   }
