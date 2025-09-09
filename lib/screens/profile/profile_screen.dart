@@ -8,8 +8,6 @@ import 'package:connect_app/utils/time_utils.dart';
 import '../onboarding_screen.dart';
 import '../chat/chat_screen.dart';
 import 'package:connect_app/services/call_service.dart';
-
-// 🔶 use shared tokens so colors match Home/Search
 import 'package:connect_app/theme/tokens.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -22,7 +20,7 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   final ScrollController _scrollController = ScrollController();
-  late final Stream<QuerySnapshot> _postsStream; // all user posts
+  late final Stream<QuerySnapshot> _postsStream;
   late final PageController _pageController;
 
   Map<String, dynamic>? userData;
@@ -40,8 +38,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     'lookingFor': 'looking for...',
   };
 
-  // ---- tiny helpers
-  void _log(String m) => debugPrint('👤 Profile[${widget.userID}] $m');
+  bool _bioExpanded = false;
+
+  // helpers
   String _s(dynamic v, [String fallback = '']) => v == null ? fallback : v.toString();
   int _i(dynamic v, [int fallback = 0]) {
     if (v is int) return v;
@@ -104,7 +103,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       });
     } catch (e) {
       setState(() => isLoading = false);
-      _snack('Failed to load profile: $e');
+      _snack('Failed to load profile.');
     }
   }
 
@@ -230,7 +229,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // ---------- UI helpers using shared tokens ----------
+  // ---------- UI helpers ----------
   Widget _softCard({required Widget child, EdgeInsets padding = const EdgeInsets.all(16)}) {
     return Container(
       decoration: BoxDecoration(
@@ -408,74 +407,64 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
               ),
+
               if (bio.isNotEmpty) ...[
                 const SizedBox(height: 6),
-                Text(bio, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.muted)),
-              ],
-
-              if (isCurrentUser) ...[
-                const SizedBox(height: 12),
-                Center(
-                  child: _pillButton(
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const OnboardingScreen()),
-                      );
-                    },
-                    child: Row(mainAxisSize: MainAxisSize.min, children: const [
-                      Icon(Icons.edit_outlined, size: 18, color: AppColors.text),
-                      SizedBox(width: 8),
-                      Text('Edit profile'),
-                    ]),
-                  ),
+                _ExpandableBio(
+                  text: bio,
+                  expanded: _bioExpanded,
+                  onToggle: () => setState(() => _bioExpanded = !_bioExpanded),
                 ),
               ],
 
-              // ---------- Connect (single button) ----------
+              // ===== Action row (Follow / Connect) =====
               if (!isCurrentUser) ...[
-                const SizedBox(height: 12),
-                Center(
-                  child: _pillButton(
-                    onTap: _openConnectSheet,
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: const [
-                      Icon(Icons.flash_on_outlined, size: 18, color: AppColors.text),
-                      SizedBox(width: 8),
-                      Text('Connect'),
-                    ]),
-                  ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: AbsorbPointer(
+                        absorbing: _followBusy,
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 160),
+                          child: isFollowing
+                              ? _OutlinedActionButton(
+                                  key: const ValueKey('following-pill'),
+                                  icon: Icons.check_circle,
+                                  label: 'Following',
+                                  onTap: _toggleFollow,
+                                )
+                              : _FilledActionButton(
+                                  key: const ValueKey('follow-pill'),
+                                  icon: Icons.person_add_alt_1,
+                                  label: 'Follow',
+                                  onTap: _toggleFollow,
+                                ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _OutlinedActionButton(
+                        icon: Icons.flash_on_outlined,
+                        label: 'Connect',
+                        onTap: _openConnectSheet,
+                      ),
+                    ),
+                  ],
                 ),
               ],
 
               const SizedBox(height: 16),
 
-              // ---------- Stats ----------
-              Row(
-                children: [
-                  Expanded(
-                    child: _StatCard(
-                      icon: Icons.local_fire_department_rounded,
-                      label: 'Streak',
-                      value: '$streakDays days',
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _StatCard(
-                      icon: Icons.emoji_events_outlined,
-                      label: 'XP',
-                      value: '$xpPoints',
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _StatCard(
-                      icon: Icons.thumb_up_alt_outlined,
-                      label: 'Helpful',
-                      value: '$helpfulMarks',
-                    ),
-                  ),
-                ],
+              // ===== Compact stats strip (one card with 3 columns) =====
+              _softCard(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: _StatsStrip(
+                  streakText: '$streakDays days',
+                  xpText: '$xpPoints',
+                  helpfulText: '$helpfulMarks',
+                ),
               ),
 
               if (badges.isNotEmpty) ...[
@@ -685,62 +674,171 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ],
           ),
         ),
-
-        // Follow button (bottom) — keep as strong CTA (brand/black is OK)
-        bottomNavigationBar: !isCurrentUser
-            ? SafeArea(
-                minimum: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                child: AbsorbPointer(
-                  absorbing: _followBusy,
-                  child: Opacity(
-                    opacity: _followBusy ? 0.6 : 1,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.black,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      ),
-                      onPressed: _toggleFollow,
-                      child: Text(isFollowing ? 'UNFOLLOW' : 'FOLLOW'),
-                    ),
-                  ),
-                ),
-              )
-            : null,
       ),
     );
   }
 }
 
-// ---------- Small stat card used above ----------
-class _StatCard extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  const _StatCard({required this.icon, required this.label, required this.value});
+// ---------- Compact stats strip ----------
+class _StatsStrip extends StatelessWidget {
+  final String streakText;
+  final String xpText;
+  final String helpfulText;
+  const _StatsStrip({
+    required this.streakText,
+    required this.xpText,
+    required this.helpfulText,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(16),
-        border: const Border.fromBorderSide(BorderSide(color: AppColors.border)),
-        boxShadow: const [AppShadows.soft],
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      child: Column(
+    Widget cell(IconData icon, String label, String value) {
+      return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, color: AppColors.text),
-            const SizedBox(width: 8),
-            const Text(''),
+            Icon(icon, size: 18, color: AppColors.text),
+            const SizedBox(width: 6),
             Text(label, style: const TextStyle(color: AppColors.muted)),
           ]),
-          const SizedBox(height: 8),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+          const SizedBox(height: 6),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
+        ],
+      );
+    }
+
+    Widget divider() => Container(
+          width: 1,
+          height: 30,
+          margin: const EdgeInsets.symmetric(horizontal: 6),
+          color: AppColors.border,
+        );
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        Expanded(child: Center(child: cell(Icons.local_fire_department_rounded, 'Streak', streakText))),
+        divider(),
+        Expanded(child: Center(child: cell(Icons.emoji_events_outlined, 'XP', xpText))),
+        divider(),
+        Expanded(child: Center(child: cell(Icons.thumb_up_alt_outlined, 'Helpful', helpfulText))),
+      ],
+    );
+  }
+}
+
+// ---------- Collapsible bio ----------
+class _ExpandableBio extends StatelessWidget {
+  final String text;
+  final bool expanded;
+  final VoidCallback onToggle;
+  const _ExpandableBio({
+    required this.text,
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final maxLines = expanded ? null : 2;
+    final overflow = expanded ? TextOverflow.visible : TextOverflow.ellipsis;
+    final showToggle = text.trim().length > 80;
+
+    return Column(
+      children: [
+        Text(
+          text,
+          textAlign: TextAlign.center,
+          maxLines: maxLines,
+          overflow: overflow,
+          style: const TextStyle(color: AppColors.muted),
+        ),
+        if (showToggle) ...[
+          const SizedBox(height: 6),
+          GestureDetector(
+            onTap: onToggle,
+            child: Text(
+              expanded ? 'Show less' : 'More',
+              style: const TextStyle(
+                color: AppColors.text,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// ===== Small shared buttons for the top action row =====
+
+class _FilledActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _FilledActionButton({
+    Key? key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton(
+      onPressed: onTap,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
+        minimumSize: const Size.fromHeight(48),
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        textStyle: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 18),
+          const SizedBox(width: 8),
+          Text(label),
+        ],
+      ),
+    );
+  }
+}
+
+class _OutlinedActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _OutlinedActionButton({
+    Key? key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(48),
+        backgroundColor: AppColors.button,
+        foregroundColor: AppColors.text,
+        side: const BorderSide(color: AppColors.border),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        textStyle: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 18, color: AppColors.text),
+          const SizedBox(width: 8),
+          Text(label),
         ],
       ),
     );

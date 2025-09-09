@@ -1,3 +1,4 @@
+// lib/theme/theme.dart
 import 'package:flutter/material.dart';
 import 'tokens.dart';
 
@@ -70,6 +71,7 @@ ThemeData buildAppTheme() {
       ),
     ),
 
+    // Primary elevated buttons
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
         backgroundColor: AppColors.primary,
@@ -82,7 +84,7 @@ ThemeData buildAppTheme() {
       ),
     ),
 
-    // Cards: off-white with faint warm stroke
+    // ✅ Card theme must be CardThemeData for your SDK
     cardTheme: CardThemeData(
       color: AppColors.card,
       elevation: 0,
