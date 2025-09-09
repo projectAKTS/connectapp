@@ -1,13 +1,16 @@
+// lib/screens/consultation/consultation_booking_screen.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+
+import 'package:connect_app/theme/tokens.dart';
 import '/services/consultation_service.dart';
 import '/services/payment_service.dart';
 
 class ConsultationBookingScreen extends StatefulWidget {
   final String targetUserId;
   final String targetUserName;
-  final int? ratePerMinute;
+  final int? ratePerMinute; // dollars
 
   const ConsultationBookingScreen({
     Key? key,
@@ -24,45 +27,31 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
   final ConsultationService _consultationService = ConsultationService();
   final PaymentService _paymentService = PaymentService();
 
-  // Selected duration in minutes
-  int _selectedDuration = 15;
-  bool _isProcessing = false;
+  // Duration selection
   final List<int> _durationOptions = [15, 30, 45, 60];
+  int _selectedDuration = 15;
 
-  // For scheduling
+  // Scheduling
   DateTime? _selectedDate;
   TimeOfDay? _selectedTime;
 
-  // Pick a date
-  Future<void> _pickDate() async {
-    final DateTime? pickedDate = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now().add(const Duration(days: 1)),
-      firstDate: DateTime.now(),
-      lastDate: DateTime(2100),
-    );
-    if (pickedDate != null) {
-      setState(() {
-        _selectedDate = pickedDate;
-      });
-    }
-  }
+  // Audio / Video
+  String _callType = 'video'; // 'audio' | 'video'
 
-  // Pick a time
-  Future<void> _pickTime() async {
-    final TimeOfDay? pickedTime = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.now(),
-    );
-    if (pickedTime != null) {
-      setState(() {
-        _selectedTime = pickedTime;
-      });
-    }
-  }
+  bool _isProcessing = false;
 
-  // Combine date + time into a single DateTime
-  DateTime? getScheduledDateTime() {
+  // ===== Palette helpers (keeps style consistent) =====
+  static const _evergreen = Color(0xFF0F4C46);
+  static const _evergreenPressed = Color(0xFF0C3D39);
+
+  // ===== Derived labels / numbers =====
+  int get _ratePerMinute => widget.ratePerMinute ?? 0;
+  int get _totalCost => _ratePerMinute * _selectedDuration;
+
+  String get _rateLabel => _ratePerMinute > 0 ? '\$$_ratePerMinute / min' : 'Free';
+  String get _totalLabel => _ratePerMinute > 0 ? '\$$_totalCost' : 'Free';
+
+  DateTime? get _scheduledAt {
     if (_selectedDate == null || _selectedTime == null) return null;
     return DateTime(
       _selectedDate!.year,
@@ -73,121 +62,428 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
     );
   }
 
-  Future<void> _bookConsultation() async {
-    setState(() => _isProcessing = true);
+  // ===== Pickers =====
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: now.add(const Duration(days: 1)),
+      firstDate: now,
+      lastDate: DateTime(now.year + 2),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: AppColors.primary,
+              onPrimary: Colors.white,
+              surface: AppColors.card,
+              onSurface: AppColors.text,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) setState(() => _selectedDate = picked);
+  }
 
-    // Get current user
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('User not logged in.')));
-      setState(() => _isProcessing = false);
+  Future<void> _pickTime() async {
+    final TimeOfDay? picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: AppColors.primary,
+              onPrimary: Colors.white,
+              surface: AppColors.card,
+              onSurface: AppColors.text,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) setState(() => _selectedTime = picked);
+  }
+
+  // ===== Actions =====
+  Future<void> _bookConsultation() async {
+    if (_scheduledAt == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please pick a date and time.')),
+      );
       return;
     }
-    final userId = currentUser.uid;
 
-    // Calculate cost using the rate per minute and selected duration.
-    final int ratePerMinute = widget.ratePerMinute ?? 0;
-    final int baseCost = ratePerMinute * _selectedDuration;
-    final int cost = baseCost; // For simplicity, we use the base cost
-
-    // If the cost is above zero, process the one-click payment.
-    bool paymentSuccess = true;
-    if (cost > 0) {
-      paymentSuccess = await _paymentService.processPayment(
-        amount: cost.toDouble(),
-        userId: userId,
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please sign in to continue.')),
       );
+      return;
     }
 
-    if (paymentSuccess) {
-      final DateTime scheduledAt = getScheduledDateTime() ?? DateTime.now();
+    setState(() => _isProcessing = true);
+
+    try {
+      // Charge if needed
+      var paid = true;
+      if (_totalCost > 0) {
+        paid = await _paymentService.processPayment(
+          amount: _totalCost.toDouble(),
+          userId: currentUser.uid,
+        );
+      }
+      if (!paid) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Payment failed. Try another card.')),
+        );
+        return;
+      }
+
+      // NOTE: add `callType` to your ConsultationService when you support it.
       await _consultationService.bookConsultation(
         widget.targetUserId,
         _selectedDuration,
-        scheduledAt: scheduledAt,
+        scheduledAt: _scheduledAt!,
+        // callType: _callType,
       );
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Consultation booked successfully.')));
-      Navigator.pop(context);
-    } else {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Payment failed.')));
-    }
 
-    setState(() => _isProcessing = false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Consultation booked successfully.')),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not book: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
+  // ===== UI helpers =====
+  Widget _card({required Widget child}) => Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.card,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          border: Border.all(color: AppColors.border),
+          boxShadow: const [AppShadows.soft],
+        ),
+        child: child,
+      );
+
+  Widget _pill({required Widget child, VoidCallback? onTap}) {
+    final c = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      decoration: BoxDecoration(
+        color: AppColors.button,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: DefaultTextStyle.merge(
+        style: const TextStyle(color: AppColors.text, fontWeight: FontWeight.w600),
+        child: child,
+      ),
+    );
+    if (onTap == null) return c;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      splashColor: _evergreen.withOpacity(0.12),
+      child: c,
+    );
+  }
+
+  Widget _choicePill({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+    IconData? icon,
+  }) {
+    final bg = selected ? _evergreen.withOpacity(0.10) : AppColors.button;
+    final border = selected ? _evergreen.withOpacity(0.45) : AppColors.border;
+    final fg = selected ? _evergreen : AppColors.muted;
+
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        splashColor: _evergreen.withOpacity(0.12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: border),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 18, color: fg),
+                const SizedBox(width: 8),
+              ],
+              Text(
+                label,
+                style: TextStyle(fontWeight: FontWeight.w600, color: fg),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  ButtonStyle _ctaStyle() {
+    return ButtonStyle(
+      minimumSize: MaterialStateProperty.all(const Size.fromHeight(52)),
+      backgroundColor: MaterialStateProperty.resolveWith((states) {
+        if (states.contains(MaterialState.disabled)) return _evergreen.withOpacity(0.45);
+        if (states.contains(MaterialState.pressed)) return _evergreenPressed;
+        return _evergreen;
+      }),
+      foregroundColor: MaterialStateProperty.all(Colors.white),
+      overlayColor: MaterialStateProperty.all(Colors.white.withOpacity(0.06)),
+      shape: MaterialStateProperty.all(
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+      elevation: MaterialStateProperty.resolveWith((states) {
+        if (states.contains(MaterialState.pressed)) return 1;
+        return 0;
+      }),
+      shadowColor: MaterialStateProperty.all(Colors.black.withOpacity(0.12)),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final DateTime? scheduledDateTime = getScheduledDateTime();
-    final String scheduledDateString = scheduledDateTime == null
-        ? 'Not set'
-        : DateFormat('MMM d, yyyy - hh:mm a').format(scheduledDateTime);
+    final dt = _scheduledAt;
+    final scheduledText =
+        dt == null ? 'Not set' : DateFormat('EEE, MMM d • h:mm a').format(dt);
 
     return Scaffold(
+      backgroundColor: AppColors.canvas,
       appBar: AppBar(
-        title: Text('Book Consultation with ${widget.targetUserName}'),
+        backgroundColor: AppColors.canvas,
+        title: const Text('Book a consultation'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: _isProcessing
-            ? const Center(child: CircularProgressIndicator())
-            : Column(
+      body: SafeArea(
+        child: Stack(
+          children: [
+            SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Consultation Details', style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 16),
-                  Text('Expert: ${widget.targetUserName}'),
-                  if (widget.ratePerMinute != null)
-                    Text('Rate: \$${widget.ratePerMinute} per minute'),
-                  const SizedBox(height: 16),
-                  Text('Select Duration (minutes):', style: Theme.of(context).textTheme.titleMedium),
-                  DropdownButton<int>(
-                    value: _selectedDuration,
-                    items: _durationOptions
-                        .map((duration) => DropdownMenuItem<int>(
-                              value: duration,
-                              child: Text('$duration minutes'),
-                            ))
-                        .toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() {
-                          _selectedDuration = value;
-                        });
-                      }
-                    },
+                  // Expert summary
+                  _card(
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 22,
+                          backgroundColor: AppColors.avatarBg,
+                          child:
+                              const Icon(Icons.person_outline, color: AppColors.avatarFg),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                widget.targetUserName,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.text,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(_rateLabel,
+                                  style: const TextStyle(color: AppColors.muted)),
+                            ],
+                          ),
+                        ),
+                        _pill(child: Text('$_selectedDuration min')),
+                      ],
+                    ),
                   ),
+
                   const SizedBox(height: 16),
+
+                  // Duration
+                  Text('Select duration',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _durationOptions.map((m) {
+                      final sel = m == _selectedDuration;
+                      return ChoiceChip(
+                        label: Text('$m min'),
+                        selected: sel,
+                        onSelected: (_) => setState(() => _selectedDuration = m),
+                        selectedColor: AppColors.button,
+                        backgroundColor: AppColors.card,
+                        side: const BorderSide(color: AppColors.border),
+                        labelStyle: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: sel
+                              ? AppColors.text
+                              : AppColors.text.withOpacity(0.9),
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Call type
+                  Text('Call type', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
                   Row(
                     children: [
-                      ElevatedButton(
-                        onPressed: _pickDate,
-                        child: Text(
-                          _selectedDate == null
-                              ? 'Pick Date'
-                              : DateFormat('MMM d, yyyy').format(_selectedDate!),
+                      Expanded(
+                        child: _choicePill(
+                          label: 'Audio',
+                          icon: Icons.call_outlined,
+                          selected: _callType == 'audio',
+                          onTap: () => setState(() => _callType = 'audio'),
                         ),
                       ),
                       const SizedBox(width: 10),
-                      ElevatedButton(
-                        onPressed: _pickTime,
-                        child: Text(
-                          _selectedTime == null ? 'Pick Time' : _selectedTime!.format(context),
+                      Expanded(
+                        child: _choicePill(
+                          label: 'Video',
+                          icon: Icons.videocam_outlined,
+                          selected: _callType == 'video',
+                          onTap: () => setState(() => _callType = 'video'),
                         ),
                       ),
                     ],
                   ),
+
+                  const SizedBox(height: 20),
+
+                  // Schedule
+                  Text('Pick a time', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  Text('Scheduled At: $scheduledDateString'),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: _bookConsultation,
-                    child: const Text('Book Consultation'),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _pill(
+                          onTap: _pickDate,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(_selectedDate == null
+                                  ? 'Pick date'
+                                  : DateFormat('MMM d, yyyy').format(_selectedDate!)),
+                              const Icon(Icons.calendar_today_outlined,
+                                  size: 18, color: AppColors.muted),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _pill(
+                          onTap: _pickTime,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(_selectedTime == null
+                                  ? 'Pick time'
+                                  : _selectedTime!.format(context)),
+                              const Icon(Icons.schedule,
+                                  size: 18, color: AppColors.muted),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text('Scheduled: $scheduledText',
+                      style: const TextStyle(color: AppColors.muted)),
+
+                  const SizedBox(height: 20),
+
+                  // Cost summary
+                  _card(
+                    child: Row(
+                      children: [
+                        const Icon(Icons.receipt_long, color: AppColors.muted),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Summary',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.text)),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Rate: $_rateLabel • Duration: $_selectedDuration min • ${_callType.toUpperCase()}',
+                                style: const TextStyle(color: AppColors.muted),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Text(
+                          _totalLabel,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                            color: AppColors.text,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
+            ),
+
+            // Sticky bottom CTA
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 16,
+              child: SafeArea(
+                top: false,
+                child: ElevatedButton(
+                  onPressed: _isProcessing ? null : _bookConsultation,
+                  style: _ctaStyle(),
+                  child: _isProcessing
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text('Book consultation'),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
