@@ -9,6 +9,9 @@ import '../onboarding_screen.dart';
 import '../chat/chat_screen.dart';
 import 'package:connect_app/services/call_service.dart';
 
+// 🔶 use shared tokens so colors match Home/Search
+import 'package:connect_app/theme/tokens.dart';
+
 class ProfileScreen extends StatefulWidget {
   final String userID;
   const ProfileScreen({Key? key, required this.userID}) : super(key: key);
@@ -55,7 +58,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     isCurrentUser = (cur != null && cur.uid == widget.userID);
     _loadUserData();
 
-    // NOTE: no orderBy in query (avoids composite index); we sort in code.
     _postsStream = FirebaseFirestore.instance
         .collection('posts')
         .where('userID', isEqualTo: widget.userID)
@@ -162,7 +164,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
   }
 
-  // ---------- Connect sheet ----------
   void _openConnectSheet() {
     final otherName = (userData?['fullName'] as String?) ?? 'Unknown';
     final ratePerMinute =
@@ -170,7 +171,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
@@ -178,10 +179,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         Widget item(IconData icon, String label, VoidCallback onTap) {
           return ListTile(
             leading: CircleAvatar(
-              backgroundColor: const Color(0xFFE9E9EF),
-              child: Icon(icon, color: Colors.black87),
+              backgroundColor: AppColors.button,
+              foregroundColor: AppColors.text,
+              child: Icon(icon),
             ),
-            title: Text(label, style: const TextStyle(color: Colors.black87)),
+            title: Text(label, style: const TextStyle(color: AppColors.text)),
             onTap: () {
               Navigator.pop(context);
               onTap();
@@ -198,7 +200,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 width: 36,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.black12,
+                  color: AppColors.border,
                   borderRadius: BorderRadius.circular(99),
                 ),
               ),
@@ -228,27 +230,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // ---------- UI helpers (hard-contrast) ----------
-  static const _bg = Colors.white;
-  static const _text = Colors.black87;
-  static const _muted = Colors.black54;
-  static const _card = Colors.white;
-  static const _pill = Color(0xFFF1F1F3);
-  static const _border = Color(0xFFE6E2DD);
-
+  // ---------- UI helpers using shared tokens ----------
   Widget _softCard({required Widget child, EdgeInsets padding = const EdgeInsets.all(16)}) {
     return Container(
       decoration: BoxDecoration(
-        color: _card,
+        color: AppColors.card,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _border),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x11000000),
-            blurRadius: 14,
-            offset: Offset(0, 6),
-          )
-        ],
+        border: const Border.fromBorderSide(BorderSide(color: AppColors.border)),
+        boxShadow: const [AppShadows.soft],
       ),
       child: Padding(padding: padding, child: child),
     );
@@ -260,16 +249,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     EdgeInsets padding = const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
   }) {
     return Material(
-      color: _pill,
-      borderRadius: BorderRadius.circular(10),
+      color: AppColors.button,
+      borderRadius: BorderRadius.circular(12),
       child: InkWell(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Padding(
           padding: padding,
           child: DefaultTextStyle.merge(
             style: const TextStyle(
-              color: _text,
+              color: AppColors.text,
               fontWeight: FontWeight.w600,
               fontSize: 14,
             ),
@@ -284,11 +273,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: _pill,
+        color: AppColors.button,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _border),
+        border: const Border.fromBorderSide(BorderSide(color: AppColors.border)),
       ),
-      child: Text(text, style: const TextStyle(fontWeight: FontWeight.w600, color: _text)),
+      child: Text(text, style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.text)),
     );
   }
 
@@ -300,22 +289,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final debugTheme = Theme.of(context).copyWith(
-      scaffoldBackgroundColor: _bg,
+    final theme = Theme.of(context).copyWith(
+      scaffoldBackgroundColor: AppColors.canvas,
       appBarTheme: const AppBarTheme(
-        backgroundColor: _bg,
+        backgroundColor: AppColors.canvas,
         elevation: 0,
-        foregroundColor: _text,
-        iconTheme: IconThemeData(color: _text),
-        titleTextStyle: TextStyle(color: _text, fontSize: 20, fontWeight: FontWeight.w700),
+        foregroundColor: AppColors.text,
+        iconTheme: IconThemeData(color: AppColors.text),
+        titleTextStyle: TextStyle(color: AppColors.text, fontSize: 20, fontWeight: FontWeight.w700),
       ),
-      textTheme: Theme.of(context).textTheme.apply(bodyColor: _text, displayColor: _text),
+      textTheme: Theme.of(context).textTheme.apply(
+            bodyColor: AppColors.text,
+            displayColor: AppColors.text,
+          ),
       snackBarTheme: const SnackBarThemeData(contentTextStyle: TextStyle(color: Colors.white)),
     );
 
     if (isLoading) {
       return Theme(
-        data: debugTheme,
+        data: theme,
         child: Scaffold(
           appBar: AppBar(
             title: const Text('Profile'),
@@ -328,14 +320,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     if (userData == null) {
       return Theme(
-        data: debugTheme,
+        data: theme,
         child: Scaffold(
           appBar: AppBar(
             title: const Text('Profile'),
             leading: BackButton(onPressed: () => Navigator.of(context).maybePop()),
           ),
           body: const Center(
-            child: Text('User not found!', style: TextStyle(color: _muted)),
+            child: Text('User not found!', style: TextStyle(color: AppColors.muted)),
           ),
         ),
       );
@@ -352,7 +344,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final helpfulMarks = _i(userData!['helpfulMarks']);
 
     return Theme(
-      data: debugTheme,
+      data: theme,
       child: Scaffold(
         appBar: AppBar(
           leading: BackButton(onPressed: () => Navigator.of(context).maybePop()),
@@ -390,15 +382,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   children: [
                     CircleAvatar(
                       radius: 56,
-                      backgroundColor: const Color(0xFFE9E9EF),
-                      foregroundColor: Colors.black54,
+                      backgroundColor: AppColors.avatarBg,
+                      foregroundColor: AppColors.avatarFg,
                       backgroundImage: _avatarProvider(userData!),
                     ),
                     if (isBoosted)
                       Container(
                         margin: const EdgeInsets.only(right: 6, top: 6),
                         decoration: const BoxDecoration(
-                          color: _pill,
+                          color: AppColors.button,
                           shape: BoxShape.circle,
                         ),
                         child: const CircleAvatar(
@@ -418,7 +410,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               if (bio.isNotEmpty) ...[
                 const SizedBox(height: 6),
-                Text(bio, textAlign: TextAlign.center, style: const TextStyle(color: _muted)),
+                Text(bio, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.muted)),
               ],
 
               if (isCurrentUser) ...[
@@ -431,7 +423,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       );
                     },
                     child: Row(mainAxisSize: MainAxisSize.min, children: const [
-                      Icon(Icons.edit_outlined, size: 18, color: _text),
+                      Icon(Icons.edit_outlined, size: 18, color: AppColors.text),
                       SizedBox(width: 8),
                       Text('Edit profile'),
                     ]),
@@ -447,7 +439,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     onTap: _openConnectSheet,
                     padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                     child: Row(mainAxisSize: MainAxisSize.min, children: const [
-                      Icon(Icons.flash_on_outlined, size: 18, color: _text),
+                      Icon(Icons.flash_on_outlined, size: 18, color: AppColors.text),
                       SizedBox(width: 8),
                       Text('Connect'),
                     ]),
@@ -457,7 +449,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
               const SizedBox(height: 16),
 
-              // ---------- Stats (merged cards) ----------
+              // ---------- Stats ----------
               Row(
                 children: [
                   Expanded(
@@ -501,7 +493,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         onTap: () {
                           showModalBottomSheet(
                             context: context,
-                            backgroundColor: _card,
+                            backgroundColor: AppColors.card,
                             shape: const RoundedRectangleBorder(
                               borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
                             ),
@@ -509,8 +501,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               padding: const EdgeInsets.all(16),
                               children: badges
                                   .map((b) => ListTile(
-                                        leading: const Icon(Icons.star_border, color: _text),
-                                        title: Text(b, style: const TextStyle(color: _text)),
+                                        leading: const Icon(Icons.star_border, color: AppColors.text),
+                                        title: Text(b, style: const TextStyle(color: AppColors.text)),
                                       ))
                                   .toList(),
                             ),
@@ -540,7 +532,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       );
                     }
                     final all = (snap.data?.docs ?? []).toList();
-                    // sort by timestamp desc
                     all.sort((a, b) {
                       final aTs = parseFirestoreTimestamp(a['timestamp']) ??
                           DateTime.fromMillisecondsSinceEpoch(0);
@@ -551,7 +542,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     final featured = all.take(3).toList();
                     if (featured.isEmpty) {
                       return const Center(
-                        child: Text('No featured posts yet.', style: TextStyle(color: _muted)),
+                        child: Text('No featured posts yet.', style: TextStyle(color: AppColors.muted)),
                       );
                     }
                     return PageView.builder(
@@ -581,7 +572,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 if (date != null)
                                   Text(
                                     DateFormat.yMMMd().format(date),
-                                    style: const TextStyle(fontSize: 12, color: _muted),
+                                    style: const TextStyle(fontSize: 12, color: AppColors.muted),
                                   ),
                               ],
                             ),
@@ -611,14 +602,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           label,
                           style: TextStyle(
                             fontWeight: FontWeight.w600,
-                            color: isSelected ? _text : _text.withOpacity(0.85),
+                            color: isSelected ? AppColors.text : AppColors.text.withOpacity(0.85),
                           ),
                         ),
                         selected: isSelected,
                         onSelected: (_) => setState(() => selectedFilter = key),
-                        selectedColor: _pill,
-                        backgroundColor: _card,
-                        side: const BorderSide(color: _border),
+                        selectedColor: AppColors.button,
+                        backgroundColor: AppColors.card,
+                        side: const BorderSide(color: AppColors.border),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
                     );
@@ -663,7 +654,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                     if (filtered.isEmpty) {
                       return const Center(
-                        child: Text('No activity yet.', style: TextStyle(color: _muted)),
+                        child: Text('No activity yet.', style: TextStyle(color: AppColors.muted)),
                       );
                     }
 
@@ -680,7 +671,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               title: Text(_s(d['content'])),
                               subtitle: dt != null
                                   ? Text(DateFormat.yMMMd().format(dt),
-                                      style: const TextStyle(color: _muted))
+                                      style: const TextStyle(color: AppColors.muted))
                                   : null,
                             ),
                           ),
@@ -695,7 +686,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
 
-        // Follow button (bottom)
+        // Follow button (bottom) — keep as strong CTA (brand/black is OK)
         bottomNavigationBar: !isCurrentUser
             ? SafeArea(
                 minimum: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -733,22 +724,20 @@ class _StatCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.card,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE6E2DD)),
-        boxShadow: const [
-          BoxShadow(color: Color(0x14000000), blurRadius: 12, offset: Offset(0, 4)),
-        ],
+        border: const Border.fromBorderSide(BorderSide(color: AppColors.border)),
+        boxShadow: const [AppShadows.soft],
       ),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, color: Colors.black87),
+            Icon(icon, color: AppColors.text),
             const SizedBox(width: 8),
             const Text(''),
-            Text(label, style: const TextStyle(color: Colors.black54)),
+            Text(label, style: const TextStyle(color: AppColors.muted)),
           ]),
           const SizedBox(height: 8),
           Text(value, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),

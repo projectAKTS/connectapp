@@ -1,3 +1,4 @@
+// lib/screens/home/home_content_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -6,7 +7,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/theme/tokens.dart';
 import 'package:connect_app/screens/consultation/select_consultant_screen.dart';
-import 'package:connect_app/screens/profile/profile_screen.dart'; // direct import
+import 'package:connect_app/screens/profile/profile_screen.dart';
+
+// Fullscreen viewers
+import 'package:connect_app/screens/posts/post_video_player.dart';
+import 'package:connect_app/screens/posts/post_image_viewer.dart';
 
 String _timeAgoShort(DateTime dt) {
   final now = DateTime.now();
@@ -99,13 +104,11 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
     );
   }
 
-  /// Robustly get the author uid from many possible shapes/fields.
   String _extractUserId(Map<String, dynamic> m) {
     for (final k in ['userId', 'userID', 'uid', 'authorId']) {
       final v = m[k];
       if (v is String && v.isNotEmpty) return v;
     }
-    // If a DocumentReference is stored at 'userRef'
     final ref = m['userRef'];
     try {
       final path = (ref?.path as String?);
@@ -181,20 +184,32 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                       final right = _shortFromTs(raw['timestamp']);
                       final subtitle = '${right} ago';
 
+                      // media fields
+                      final imageUrl = (raw['imageUrl'] ?? '').toString();
+                      final videoUrl = (raw['videoUrl'] ?? '').toString();
+                      final videoThumbUrl = (raw['videoThumbUrl'] ?? '').toString();
+                      final aspect = (() {
+                        final v = raw['mediaAspectRatio'];
+                        if (v is num && v > 0) return v.toDouble();
+                        // fallback: images 16:9, videos square
+                        return imageUrl.isNotEmpty ? (16 / 9) : 1.0;
+                      })();
+
                       return _PostCell(
                         authorName: authorName,
                         authorAvatarUrl: avatar,
                         subtitle: subtitle,
                         rightTime: right,
                         body: body,
+                        imageUrl: imageUrl,
+                        videoUrl: videoUrl,
+                        videoThumbUrl: videoThumbUrl,
+                        mediaAspect: aspect,
                         onOpenProfile: authorId.isEmpty
                             ? null
                             : () {
-                                // ✅ push on ROOT navigator to avoid nested-navigator blank screens
                                 Navigator.of(context, rootNavigator: true).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => ProfileScreen(userID: authorId),
-                                  ),
+                                  MaterialPageRoute(builder: (_) => ProfileScreen(userID: authorId)),
                                 );
                               },
                         onConnect: authorId.isEmpty
@@ -204,6 +219,20 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                                 _openConnectSheet(
                                   otherUserId: authorId,
                                   otherUserName: authorName,
+                                );
+                              },
+                        onOpenImage: imageUrl.isEmpty
+                            ? null
+                            : () {
+                                Navigator.of(context, rootNavigator: true).push(
+                                  MaterialPageRoute(builder: (_) => PostImageViewer(url: imageUrl)),
+                                );
+                              },
+                        onOpenVideo: videoUrl.isEmpty
+                            ? null
+                            : () {
+                                Navigator.of(context, rootNavigator: true).push(
+                                  MaterialPageRoute(builder: (_) => PostVideoPlayer(url: videoUrl)),
                                 );
                               },
                       );
@@ -285,17 +314,9 @@ class _WelcomeCard extends StatelessWidget {
           children: [
             Text('Welcome, $name', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 14),
-            _TaupePill(
-              icon: Icons.search,
-              label: 'Find a helper',
-              onTap: onFindHelper,
-            ),
+            _TaupePill(icon: Icons.search, label: 'Find a helper', onTap: onFindHelper),
             const SizedBox(height: 12),
-            _TaupePill(
-              icon: Icons.event_available_outlined,
-              label: 'Book a consultation',
-              onTap: onBookConsultation,
-            ),
+            _TaupePill(icon: Icons.event_available_outlined, label: 'Book a consultation', onTap: onBookConsultation),
           ],
         ),
       ),
@@ -307,12 +328,7 @@ class _TaupePill extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
-  const _TaupePill({
-    Key? key,
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  }) : super(key: key);
+  const _TaupePill({Key? key, required this.icon, required this.label, required this.onTap}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -329,14 +345,7 @@ class _TaupePill extends StatelessWidget {
             children: [
               Icon(icon, color: AppColors.muted, size: 22),
               const SizedBox(width: 12),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.text,
-                ),
-              ),
+              Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.text)),
             ],
           ),
         ),
@@ -358,14 +367,24 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-class _PostCell extends StatelessWidget {
+/// ===== Post cell with text + media + “Show more / Show less” =====
+class _PostCell extends StatefulWidget {
   final String authorName;
   final String authorAvatarUrl;
   final String subtitle;   // “2h ago”
   final String rightTime;  // “2h”
   final String body;
+
+  // media
+  final String imageUrl;
+  final String videoUrl;
+  final String videoThumbUrl;
+  final double mediaAspect;
+
   final VoidCallback? onOpenProfile; // tap header -> profile
   final VoidCallback? onConnect;     // connect button (nullable)
+  final VoidCallback? onOpenImage;   // view image fullscreen
+  final VoidCallback? onOpenVideo;   // play video
 
   const _PostCell({
     Key? key,
@@ -374,9 +393,23 @@ class _PostCell extends StatelessWidget {
     required this.subtitle,
     required this.rightTime,
     required this.body,
+    required this.imageUrl,
+    required this.videoUrl,
+    required this.videoThumbUrl,
+    required this.mediaAspect,
     required this.onOpenProfile,
     required this.onConnect,
+    required this.onOpenImage,
+    required this.onOpenVideo,
   }) : super(key: key);
+
+  @override
+  State<_PostCell> createState() => _PostCellState();
+}
+
+class _PostCellState extends State<_PostCell> {
+  static const _collapsedLines = 5;
+  bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {
@@ -386,47 +419,52 @@ class _PostCell extends StatelessWidget {
       final row = Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          _Avatar(url: authorAvatarUrl, radius: 20),
+          _Avatar(url: widget.authorAvatarUrl, radius: 20),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  authorName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
-                    color: AppColors.text,
-                  ),
-                ),
+                Text(widget.authorName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.text)),
                 const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 14, color: AppColors.muted),
-                ),
+                Text(widget.subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 14, color: AppColors.muted)),
               ],
             ),
           ),
           const SizedBox(width: 8),
-          Text(rightTime, style: const TextStyle(fontSize: 14, color: AppColors.muted)),
+          Text(widget.rightTime, style: const TextStyle(fontSize: 14, color: AppColors.muted)),
         ],
       );
 
-      if (onOpenProfile == null) return row;
+      if (widget.onOpenProfile == null) return row;
       return InkWell(
-        onTap: onOpenProfile,
+        onTap: widget.onOpenProfile,
         borderRadius: BorderRadius.circular(AppRadius.sm),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 2),
-          child: row,
-        ),
+        child: Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: row),
       );
     }
+
+    Widget? media() {
+      if (widget.imageUrl.isNotEmpty) {
+        return _MediaImage(url: widget.imageUrl, aspect: widget.mediaAspect, onTap: widget.onOpenImage);
+      }
+      if (widget.videoUrl.isNotEmpty) {
+        return _MediaVideoThumb(
+          thumbUrl: widget.videoThumbUrl,
+          aspect: widget.mediaAspect,
+          onPlay: widget.onOpenVideo,
+        );
+      }
+      return null;
+    }
+
+    final mediaWidget = media();
 
     return Container(
       decoration: BoxDecoration(
@@ -437,41 +475,202 @@ class _PostCell extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          header(),
+          if (widget.body.isNotEmpty) const SizedBox(height: 12),
+
+          if (widget.body.isNotEmpty)
+            _ExpandableText(
+              content: widget.body,
+              expanded: _expanded,
+              maxLinesWhenCollapsed: _collapsedLines,
+              onToggle: () => setState(() => _expanded = !_expanded),
+            ),
+
+          if (mediaWidget != null) const SizedBox(height: 10),
+          if (mediaWidget != null) mediaWidget,
+
+          const SizedBox(height: 12),
+          TextButton(
+            onPressed: widget.onConnect,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              backgroundColor: AppColors.button,
+              foregroundColor: widget.onConnect == null ? AppColors.text.withOpacity(0.45) : AppColors.text,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.sm)),
+              textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+            ).copyWith(
+              overlayColor: MaterialStateProperty.resolveWith((states) {
+                if (widget.onConnect == null) return Colors.transparent;
+                return AppColors.surface.withOpacity(0.35);
+              }),
+            ),
+            child: const Text('Connect'),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Expandable text with gradient scrim + Show more / Show less
+class _ExpandableText extends StatelessWidget {
+  final String content;
+  final bool expanded;
+  final int maxLinesWhenCollapsed;
+  final VoidCallback onToggle;
+
+  const _ExpandableText({
+    required this.content,
+    required this.expanded,
+    required this.maxLinesWhenCollapsed,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const style = TextStyle(fontSize: 16, height: 1.4, color: AppColors.text);
+
+    return LayoutBuilder(builder: (ctx, constraints) {
+      final tp = TextPainter(
+        text: TextSpan(text: content, style: style),
+        textDirection: TextDirection.ltr,
+        maxLines: maxLinesWhenCollapsed,
+      )..layout(maxWidth: constraints.maxWidth);
+
+      final hasOverflow = tp.didExceedMaxLines;
+
+      if (!hasOverflow) {
+        return Text(content, style: style);
+      }
+
+      if (expanded) {
+        return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            header(),
-            const SizedBox(height: 12),
-            Text(
-              body,
-              style: const TextStyle(fontSize: 16, height: 1.4, color: AppColors.text),
-            ),
-            const SizedBox(height: 12),
-            TextButton(
-              onPressed: onConnect, // disabled when null
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                backgroundColor: AppColors.button,
-                foregroundColor: onConnect == null
-                    ? AppColors.text.withOpacity(0.45)
-                    : AppColors.text,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppRadius.sm),
-                ),
-                textStyle: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                ),
-              ).copyWith(
-                overlayColor: MaterialStateProperty.resolveWith((states) {
-                  if (onConnect == null) return Colors.transparent;
-                  return AppColors.surface.withOpacity(0.35);
-                }),
-              ),
-              child: const Text('Connect'),
-            ),
+            Text(content, style: style),
+            const SizedBox(height: 6),
+            _ShowMoreButton(expanded: true, onTap: onToggle),
           ],
+        );
+      }
+
+      return Stack(
+        children: [
+          Text(content, style: style, maxLines: maxLinesWhenCollapsed, overflow: TextOverflow.clip),
+          Positioned(
+            left: 0, right: 0, bottom: 28,
+            child: IgnorePointer(
+              child: Container(
+                height: 38,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      AppColors.card.withOpacity(0.0),
+                      AppColors.card.withOpacity(0.95),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(bottom: 0, left: 0, child: _ShowMoreButton(expanded: false, onTap: onToggle)),
+        ],
+      );
+    });
+  }
+}
+
+class _ShowMoreButton extends StatelessWidget {
+  final bool expanded;
+  final VoidCallback onTap;
+  const _ShowMoreButton({required this.expanded, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.button,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Text(
+            expanded ? 'Show less' : 'Show more',
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.text),
+          ),
         ),
+      ),
+    );
+  }
+}
+
+class _MediaImage extends StatelessWidget {
+  final String url;
+  final double aspect;
+  final VoidCallback? onTap;
+  const _MediaImage({required this.url, required this.aspect, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: AspectRatio(
+        aspectRatio: aspect,
+        child: InkWell(
+          onTap: onTap,
+          child: Image.network(
+            url,
+            fit: BoxFit.cover,
+            loadingBuilder: (c, w, p) => p == null ? w : Container(color: AppColors.button),
+            errorBuilder: (_, __, ___) =>
+                Container(color: AppColors.button, alignment: Alignment.center,
+                  child: const Icon(Icons.broken_image, color: AppColors.muted)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MediaVideoThumb extends StatelessWidget {
+  final String thumbUrl;
+  final double aspect;
+  final VoidCallback? onPlay;
+  const _MediaVideoThumb({required this.thumbUrl, required this.aspect, this.onPlay});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: AspectRatio(
+        aspectRatio: aspect,
+        child: Stack(fit: StackFit.expand, children: [
+          if (thumbUrl.isNotEmpty)
+            Image.network(
+              thumbUrl, fit: BoxFit.cover,
+              loadingBuilder: (c, w, p) => p == null ? w : Container(color: AppColors.button),
+              errorBuilder: (_, __, ___) => Container(color: AppColors.button),
+            )
+          else
+            Container(color: AppColors.button),
+          Center(
+            child: InkWell(
+              onTap: onPlay,
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.45),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.play_arrow, color: Colors.white, size: 36),
+              ),
+            ),
+          ),
+        ]),
       ),
     );
   }
@@ -488,7 +687,7 @@ class _Avatar extends StatelessWidget {
       return CircleAvatar(
         radius: radius,
         backgroundColor: AppColors.avatarBg,
-        child: Icon(Icons.person_outline, color: AppColors.avatarFg),
+        child: const Icon(Icons.person_outline, color: AppColors.avatarFg),
       );
     }
     return CircleAvatar(radius: radius, backgroundImage: NetworkImage(url));

@@ -1,39 +1,25 @@
 import 'package:flutter/material.dart';
 import 'tokens.dart';
 
-/// Global theme tuned to match the mock with softer warmth.
+/// Global theme tuned to the soft, warm palette.
 ThemeData buildAppTheme() {
   const family = 'SF Pro';
 
   final baseText = const TextTheme(
-    // "Home" — slightly lighter than before
     displaySmall: TextStyle(
-      fontSize: 32,
-      height: 1.15,
-      fontWeight: FontWeight.w700, // was 800
-      color: AppColors.text,
-      letterSpacing: -0.2,
+      fontSize: 32, height: 1.15, fontWeight: FontWeight.w700,
+      color: AppColors.text, letterSpacing: -0.2,
     ),
-    // "Welcome, Maria" / section titles
     titleMedium: TextStyle(
-      fontSize: 22,
-      height: 1.25,
-      fontWeight: FontWeight.w700,
-      color: AppColors.text,
-      letterSpacing: -0.2,
+      fontSize: 22, height: 1.25, fontWeight: FontWeight.w700,
+      color: AppColors.text, letterSpacing: -0.2,
     ),
-    // Post body
     bodyLarge: TextStyle(
-      fontSize: 16,
-      height: 1.40,
-      fontWeight: FontWeight.w500,
+      fontSize: 16, height: 1.40, fontWeight: FontWeight.w500,
       color: AppColors.text,
     ),
-    // Secondary info (timestamps)
     bodyMedium: TextStyle(
-      fontSize: 14,
-      height: 1.30,
-      fontWeight: FontWeight.w500,
+      fontSize: 14, height: 1.30, fontWeight: FontWeight.w500,
       color: AppColors.muted,
     ),
   );
@@ -47,7 +33,6 @@ ThemeData buildAppTheme() {
     canvasColor: AppColors.canvas,
     cardColor: AppColors.card,
 
-    // Calm interactions (no splash)
     splashColor: Colors.transparent,
     highlightColor: Colors.transparent,
 
@@ -58,10 +43,10 @@ ThemeData buildAppTheme() {
       foregroundColor: AppColors.text,
     ),
 
-    // Taupe input pills
+    // Inputs / search pill
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: AppColors.surface,
+      fillColor: AppColors.button, // Soft Surface
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       border: OutlineInputBorder(
         borderSide: BorderSide.none,
@@ -69,10 +54,10 @@ ThemeData buildAppTheme() {
       ),
     ),
 
-    // “Connect” buttons (same taupe, lighter)
+    // “Connect” style text buttons (taupe fill)
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
-        backgroundColor: AppColors.surface,
+        backgroundColor: AppColors.button,
         foregroundColor: AppColors.text,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
@@ -81,7 +66,7 @@ ThemeData buildAppTheme() {
         ),
       ).copyWith(
         overlayColor:
-            MaterialStateProperty.all(AppColors.surface.withOpacity(0.65)),
+            MaterialStateProperty.all(AppColors.button.withOpacity(0.65)),
       ),
     ),
 
@@ -97,7 +82,7 @@ ThemeData buildAppTheme() {
       ),
     ),
 
-    // Cards look off-white with a faint warm stroke
+    // Cards: off-white with faint warm stroke
     cardTheme: CardThemeData(
       color: AppColors.card,
       elevation: 0,
@@ -126,7 +111,7 @@ ThemeData buildAppTheme() {
     colorScheme: const ColorScheme.light(
       primary: AppColors.primary,
       onPrimary: Colors.white,
-      secondary: AppColors.surface,
+      secondary: AppColors.button,
       onSecondary: AppColors.text,
       surface: AppColors.card,
       onSurface: AppColors.text,
