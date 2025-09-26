@@ -27,10 +27,12 @@ class NotificationService {
 
   bool _initialized = false;
 
+  /// Call once after Firebase is initialized and user signed in.
   Future<void> initialize() async {
     if (_initialized) return;
     _initialized = true;
 
+    // Ask permission (iOS)
     final settings = await _fcm.requestPermission(
       alert: true, badge: true, sound: true, provisional: false,
     );
@@ -38,11 +40,12 @@ class NotificationService {
       debugPrint('❌ Notification permission not granted');
     }
 
+    // iOS foreground behavior (show alerts while app is open)
     await _fcm.setForegroundNotificationPresentationOptions(
       alert: true, badge: true, sound: true,
     );
 
-    // iOS categories (no const)
+    // iOS categories (for call actions)
     final iosInit = DarwinInitializationSettings(
       notificationCategories: [
         DarwinNotificationCategory(
@@ -71,6 +74,7 @@ class NotificationService {
         final payload = resp.payload ?? '';
         final actionId = resp.actionId;
 
+        // Deep-link: incoming call banner tapped
         if (payload.startsWith('incoming_call|')) {
           final parts = payload.split('|'); // incoming_call|channel|isVideo|fromName
           if (parts.length >= 4) {
@@ -84,6 +88,7 @@ class NotificationService {
           }
         }
 
+        // Deep-link: open chat
         if (payload.startsWith('open_chat|')) {
           final otherUserId = payload.split('|').elementAt(1);
           _openChat(otherUserId);
@@ -91,10 +96,12 @@ class NotificationService {
       },
     );
 
+    // Android channel
     await _local
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(_androidChannel);
 
+    // Foreground + tap handlers
     FirebaseMessaging.onMessage.listen(
       (RemoteMessage message) => _handleMessage(message, showLocal: true),
     );
@@ -102,12 +109,13 @@ class NotificationService {
       (RemoteMessage message) => _handleMessage(message, showLocal: false),
     );
 
+    // App opened from terminated via push
     final initial = await _fcm.getInitialMessage();
     if (initial != null) {
       await _handleMessage(initial, showLocal: false);
     }
 
-    // APNs stabilization loop (iOS)
+    // Try to stabilize APNs token (iOS) – optional loop
     String? apnsToken;
     int retries = 0;
     while (apnsToken == null && retries < 10) {
@@ -116,8 +124,10 @@ class NotificationService {
       retries++;
     }
 
+    // Register FCM token on user doc
     await _registerFcmToken();
 
+    // Keep user doc in sync on token refresh
     _fcm.onTokenRefresh.listen((newToken) async {
       await _registerFcmToken(forceToken: newToken);
     });
@@ -147,7 +157,7 @@ class NotificationService {
       debugPrint('✅ FCM token write OK for uid=${user.uid}');
     } on FirebaseException catch (e) {
       if (e.code == 'permission-denied') {
-        debugPrint('⚠️ Skipping FCM token write (permission denied). Check /users keys whitelist and project.');
+        debugPrint('⚠️ Skipping FCM token write (permission denied). Check /users keys allowlist.');
         return;
       }
       debugPrint('❌ FCM token write failed: code=${e.code} message=${e.message}');
@@ -155,12 +165,14 @@ class NotificationService {
     }
   }
 
+  /// Central handler for all incoming FCMs.
+  /// - Suppresses **self** chat notifications (authorId == my uid)
+  /// - Suppresses notifications when the chat with that user is already open
   Future<void> _handleMessage(RemoteMessage message, {required bool showLocal}) async {
     final data = message.data;
 
-    // CALL INVITE
+    // ===== CALL INVITE ======================================================
     final isCallInvite = (data['type'] == 'call_invite') || (data['action'] == 'incoming_call');
-
     if (isCallInvite) {
       final channel = (data['channel'] ?? '') as String;
       final isVideo = (data['isVideo'] ?? 'false').toString() == 'true';
@@ -180,38 +192,36 @@ class NotificationService {
               importance: Importance.max,
               priority: Priority.high,
               actions: <AndroidNotificationAction>[
-                AndroidNotificationAction('ACCEPT_CALL', 'Accept', showsUserInterface: true),
-                AndroidNotificationAction('DECLINE_CALL', 'Decline', showsUserInterface: false, cancelNotification: true),
+                const AndroidNotificationAction('ACCEPT_CALL', 'Accept', showsUserInterface: true),
+                const AndroidNotificationAction('DECLINE_CALL', 'Decline', showsUserInterface: false, cancelNotification: true),
               ],
             ),
-            iOS: const DarwinNotificationDetails(
-              categoryIdentifier: 'INCOMING_CALL',
-            ),
+            iOS: const DarwinNotificationDetails(categoryIdentifier: 'INCOMING_CALL'),
           ),
           payload: payload,
         );
       } else {
-        final nav = navigatorKey?.currentState;
-        if (nav != null) {
-          nav.push(MaterialPageRoute(
-            fullscreenDialog: true,
-            builder: (_) => IncomingCallScreen(
-              channel: channel,
-              isVideo: isVideo,
-              fromName: fromName,
-            ),
-          ));
-        }
+        _pushCallScreen(channel: channel, isVideo: isVideo, fromName: fromName);
       }
       return;
     }
 
-    // CHAT MESSAGE
+    // ===== CHAT MESSAGE =====================================================
     if (data['type'] == 'chat_message') {
+      // 👇 REQUIRE your server payload to include authorId of the sender
+      final me = FirebaseAuth.instance.currentUser?.uid;
+      final authorId = (data['authorId'] ?? '') as String;
+      if (me != null && authorId.isNotEmpty && authorId == me) {
+        // 🛑 Don't notify for my own messages
+        return;
+      }
+
       final otherUserId = (data['otherUserId'] ?? '') as String;
 
+      // If user is already inside this chat, don't show a banner
       if (CurrentChat.otherUserId == otherUserId) return;
 
+      // If system push already shows a foreground banner (iOS), avoid double banner
       final systemAlreadyShowing = message.notification != null;
 
       if (showLocal && !systemAlreadyShowing) {
@@ -219,13 +229,14 @@ class NotificationService {
           2,
           message.notification?.title ?? 'New Message',
           message.notification?.body ?? '',
-          NotificationDetails(
-            android: const AndroidNotificationDetails(
+          const NotificationDetails(
+            android: AndroidNotificationDetails(
               'high_importance_channel',
               'High Importance Notifications',
-              importance: Importance.max, priority: Priority.high,
+              importance: Importance.max,
+              priority: Priority.high,
             ),
-            iOS: const DarwinNotificationDetails(),
+            iOS: DarwinNotificationDetails(),
           ),
           payload: 'open_chat|$otherUserId',
         );
@@ -235,19 +246,20 @@ class NotificationService {
       return;
     }
 
-    // Generic
+    // ===== GENERIC FCM WITH NOTIFICATION PAYLOAD ============================
     if (showLocal && message.notification != null) {
       await _local.show(
         3,
         message.notification?.title ?? 'Notification',
         message.notification?.body ?? '',
-        NotificationDetails(
-          android: const AndroidNotificationDetails(
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
             'high_importance_channel',
             'High Importance Notifications',
-            importance: Importance.max, priority: Priority.high,
+            importance: Importance.max,
+            priority: Priority.high,
           ),
-          iOS: const DarwinNotificationDetails(),
+          iOS: DarwinNotificationDetails(),
         ),
       );
     }

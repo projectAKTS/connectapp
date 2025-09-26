@@ -329,7 +329,7 @@ exports.onCallInviteCreated = onDocumentCreated(
   }
 );
 
-/** 9) PUSH: chat message -> notify the other user */
+/** 9) PUSH: chat message -> notify the other user (data-only; no self banner) */
 exports.onChatMessageCreated = onDocumentCreated(
   {
     document: "chats/{chatId}/messages/{messageId}",
@@ -338,18 +338,21 @@ exports.onChatMessageCreated = onDocumentCreated(
   },
   async (event) => {
     const message = event.data?.data() || {};
-    const chatId = event.params.chatId;           // "<uidA>_<uidB>" (sorted)
-    const { authorId, text } = message;
+    const chatId = String(event.params.chatId || "");
+    const authorId = String(message.authorId || "");
 
     if (!chatId || !authorId) return;
 
-    // Figure out recipient from chatId (other uid)
-    const parts = String(chatId).split("_");
-    if (parts.length !== 2) return;
-    const [uidA, uidB] = parts;
-    const recipients = [uidA, uidB].filter((u) => u && u !== authorId);
+    // Read chat doc to find participants robustly
+    const chatSnap = await db.doc(`chats/${chatId}`).get();
+    const users =
+      (chatSnap.get("users") || chatSnap.get("participants") || []).filter(Boolean);
 
-    // Sender name for nicer push
+    // recipients = everyone except the author
+    const recipients = users.filter((u) => u !== authorId);
+    if (!recipients.length) return;
+
+    // Sender label
     let fromName = "New message";
     try {
       const senderDoc = await db.collection("users").doc(authorId).get();
@@ -357,32 +360,39 @@ exports.onChatMessageCreated = onDocumentCreated(
       fromName = d.fullName || d.name || "New message";
     } catch {}
 
+    const body = message.text
+      ? String(message.text).slice(0, 140)
+      : message.name
+      ? String(message.name)
+      : "Sent you a message";
+
+    // Collect and send to each recipient (excluding sender)
     for (const toUid of recipients) {
       const tokens = await getUserTokens(toUid);
       if (!tokens.length) continue;
 
+      // Data-only payload -> client decides whether to show local notification.
       const payload = {
-        notification: {
-          title: fromName,
-          body: text ? String(text).slice(0, 140) : "Sent you a message",
-        },
         data: {
           type: "chat_message",
-          chatId: String(chatId),
-          otherUserId: String(authorId), // recipient sees the author as "other"
+          authorId,            // who sent it
+          otherUserId: authorId,
+          chatId,
+          title: fromName,
+          body,
         },
-        android: {
-          priority: "high",
-          notification: {
-            sound: "default",
-            channelId: "high_importance_channel",
-            visibility: "PUBLIC",
-          },
-        },
+        android: { priority: "high" },
         apns: {
-          headers: { "apns-priority": "10", "apns-push-type": "alert" },
-          payload: { aps: { sound: "default" } },
-        },
+          headers: {
+            "apns-priority": "5",          // background
+            "apns-push-type": "background" // data only
+          },
+          payload: {
+            aps: { "content-available": 1 }
+          }
+        }
+        // 🚫 No top-level "notification" — prevents iOS from showing
+        // a system banner while app is foregrounded.
       };
 
       await sendToTokens(tokens, payload);
