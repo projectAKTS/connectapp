@@ -10,6 +10,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'screens/search/search_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/signup_screen.dart';
+import 'screens/auth/forgot_password_screen.dart'; // ← added
 import 'screens/posts/create_post_screen.dart';
 import 'screens/posts/edit_post_screen.dart';
 import 'screens/posts/boost_post_screen.dart';
@@ -124,6 +125,7 @@ class MyApp extends StatelessWidget {
       routes: {
         '/login': (_) => const LoginScreen(),
         '/register': (_) => const SignupScreen(),
+        '/forgot-password': (_) => const ForgotPasswordScreen(), // ← added
         '/home': (_) => const MainScaffold(),
         '/create_post': (_) => const CreatePostScreen(),
         '/search': (_) => const SearchScreen(),
@@ -134,10 +136,16 @@ class MyApp extends StatelessWidget {
         '/chat': (ctx) {
           final args = ModalRoute.of(ctx)!.settings.arguments as Map<String, dynamic>?;
           final otherUserId = args?['otherUserId'] as String?;
+          final otherUserName = args?['otherUserName'] as String?;
+          final otherUserAvatar = args?['otherUserAvatar'] as String?;
           if (otherUserId == null || otherUserId.isEmpty) {
             return const Scaffold(body: Center(child: Text('Missing otherUserId')));
           }
-          return ChatScreen(otherUserId: otherUserId);
+          return ChatScreen(
+            otherUserId: otherUserId,
+            otherUserName: otherUserName,
+            otherUserAvatar: otherUserAvatar,
+          );
         },
       },
 

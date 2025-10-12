@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CLIENT_ID</key>
-	<string>33757728932-n9l0igc1l3alqon1u3pb7jn38bq6n8p2.apps.googleusercontent.com</string>
+	<string>33757728932-4tif62vov47uhc7mgjg050vpv4hou40b.apps.googleusercontent.com</string>
 	<key>REVERSED_CLIENT_ID</key>
-	<string>com.googleusercontent.apps.33757728932-n9l0igc1l3alqon1u3pb7jn38bq6n8p2</string>
+	<string>com.googleusercontent.apps.33757728932-4tif62vov47uhc7mgjg050vpv4hou40b</string>
 	<key>ANDROID_CLIENT_ID</key>
 	<string>33757728932-agn4s0cfeq062akresa8rlm1eh73cls1.apps.googleusercontent.com</string>
 	<key>API_KEY</key>
@@ -15,7 +15,7 @@
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>com.yakup.akonnct</string>
+	<string>com.yakup.helperly</string>
 	<key>PROJECT_ID</key>
 	<string>connectapp-278b4</string>
 	<key>STORAGE_BUCKET</key>
@@ -31,6 +31,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:33757728932:ios:a175a0c5e0a1b1839a1631</string>
+	<string>1:33757728932:ios:1d2395488ecbdb029a1631</string>
 </dict>
 </plist>
