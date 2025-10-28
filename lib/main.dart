@@ -1,4 +1,5 @@
 // lib/main.dart
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
@@ -6,11 +7,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_stripe/flutter_stripe.dart';
+import 'package:firebase_dynamic_links/firebase_dynamic_links.dart';
 
 import 'screens/search/search_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/signup_screen.dart';
-import 'screens/auth/forgot_password_screen.dart'; // ← added
+import 'screens/auth/forgot_password_screen.dart';
 import 'screens/posts/create_post_screen.dart';
 import 'screens/posts/edit_post_screen.dart';
 import 'screens/posts/boost_post_screen.dart';
@@ -21,14 +24,13 @@ import 'screens/credits_store_screen.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/chat/chat_screen.dart';
+import 'screens/payment/payment_setup_screen.dart';
 
 import 'services/firebase_options.dart';
 import 'services/notification_service.dart';
 import 'services/subscription_service.dart';
 import 'widgets/main_scaffold.dart';
 import 'theme/theme.dart';
-
-// 🔎 add the probe
 import 'debug/firestore_probe.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -36,32 +38,41 @@ late final NotificationService notificationService;
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // no-op
+  // Handle background FCM messages if needed
 }
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-
+  // --- 1️⃣ Firebase Initialization ---
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // 🔎 Print the connected Firebase project/app IDs
-  final app = Firebase.app();
-  final opts = app.options;
-  debugPrint('🔥 Firebase projectId=${opts.projectId} appId=${opts.appId}');
+  // --- 2️⃣ Firebase App Check (PRODUCTION / TESTFLIGHT MODE) ---
+  try {
+    await FirebaseAppCheck.instance.activate(
+      appleProvider: AppleProvider.appAttestWithDeviceCheckFallback,
+      androidProvider: AndroidProvider.playIntegrity,
+    );
+    debugPrint('✅ Firebase App Check activated (App Attest + DeviceCheck)');
+  } catch (e, st) {
+    debugPrint('⚠️ Firebase App Check init failed → $e\n$st');
+  }
 
+  // --- 3️⃣ Stripe Initialization ---
+  Stripe.publishableKey = 'pk_live_xxxxxxxxxxxxxxxxxxxxx'; // replace with your live or test key
+  Stripe.merchantIdentifier = 'merchant.com.connectapp';
+  Stripe.urlScheme = 'connectapp';
+  await Stripe.instance.applySettings();
+
+  // --- 4️⃣ Firebase Cloud Messaging ---
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
     alert: true,
     badge: true,
     sound: true,
   );
 
-  await FirebaseAppCheck.instance.activate(
-    androidProvider: AndroidProvider.debug,
-    appleProvider: AppleProvider.debug,
-  );
-
+  // --- 5️⃣ Notifications & Subscriptions ---
   notificationService = NotificationService(navigatorKey: navigatorKey);
 
   final iapAvailable = await SubscriptionService.init();
@@ -69,6 +80,7 @@ Future<void> main() async {
     SubscriptionService.setupListener(_handlePurchaseUpdates);
   }
 
+  // --- 6️⃣ Launch App ---
   runApp(const MyApp());
 }
 
@@ -80,7 +92,8 @@ void _handlePurchaseUpdates(List<PurchaseDetails> details) {
       if (user == null) continue;
       final doc = FirebaseFirestore.instance.collection('users').doc(user.uid);
 
-      if (pd.productID == 'premium_monthly' || pd.productID == 'premium_yearly') {
+      if (pd.productID == 'premium_monthly' ||
+          pd.productID == 'premium_yearly') {
         final isMonthly = pd.productID == 'premium_monthly';
         final expires = DateTime.now().add(
           isMonthly ? const Duration(days: 30) : const Duration(days: 365),
@@ -103,8 +116,45 @@ void _handlePurchaseUpdates(List<PurchaseDetails> details) {
   }
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  @override
+  void initState() {
+    super.initState();
+    _initDynamicLinks();
+  }
+
+  Future<void> _initDynamicLinks() async {
+    FirebaseDynamicLinks.instance.onLink.listen((PendingDynamicLinkData data) {
+      final uri = data.link;
+      if (uri.path == '/success') {
+        ScaffoldMessenger.of(navigatorKey.currentContext!)
+            .showSnackBar(const SnackBar(content: Text('✅ Payment successful!')));
+      } else if (uri.path == '/cancel') {
+        ScaffoldMessenger.of(navigatorKey.currentContext!)
+            .showSnackBar(const SnackBar(content: Text('❌ Payment canceled.')));
+      }
+    }).onError((e) {
+      debugPrint('Dynamic link error: $e');
+    });
+
+    final initialLink = await FirebaseDynamicLinks.instance.getInitialLink();
+    if (initialLink != null) {
+      final uri = initialLink.link;
+      if (uri.path == '/success') {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          ScaffoldMessenger.of(navigatorKey.currentContext!)
+              .showSnackBar(const SnackBar(content: Text('✅ Payment successful!')));
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -112,20 +162,16 @@ class MyApp extends StatelessWidget {
       title: 'Connect App',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
-
-      // global keyboard dismiss
       builder: (context, child) => GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
         child: child,
       ),
-
       home: const AuthGate(),
-
       routes: {
         '/login': (_) => const LoginScreen(),
         '/register': (_) => const SignupScreen(),
-        '/forgot-password': (_) => const ForgotPasswordScreen(), // ← added
+        '/forgot-password': (_) => const ForgotPasswordScreen(),
         '/home': (_) => const MainScaffold(),
         '/create_post': (_) => const CreatePostScreen(),
         '/search': (_) => const SearchScreen(),
@@ -133,13 +179,16 @@ class MyApp extends StatelessWidget {
         '/my_consultations': (_) => const MyConsultationsScreen(),
         '/credits': (_) => const CreditsStoreScreen(),
         '/onboarding': (_) => const OnboardingScreen(),
+        '/paymentSetup': (_) => const PaymentSetupScreen(),
         '/chat': (ctx) {
-          final args = ModalRoute.of(ctx)!.settings.arguments as Map<String, dynamic>?;
+          final args =
+              ModalRoute.of(ctx)!.settings.arguments as Map<String, dynamic>?;
           final otherUserId = args?['otherUserId'] as String?;
           final otherUserName = args?['otherUserName'] as String?;
           final otherUserAvatar = args?['otherUserAvatar'] as String?;
           if (otherUserId == null || otherUserId.isEmpty) {
-            return const Scaffold(body: Center(child: Text('Missing otherUserId')));
+            return const Scaffold(
+                body: Center(child: Text('Missing otherUserId')));
           }
           return ChatScreen(
             otherUserId: otherUserId,
@@ -148,10 +197,8 @@ class MyApp extends StatelessWidget {
           );
         },
       },
-
       onGenerateRoute: (settings) {
         final uri = Uri.parse(settings.name!);
-
         if (uri.pathSegments.length == 2 && uri.pathSegments[0] == 'profile') {
           final userId = uri.pathSegments[1];
           return MaterialPageRoute(
@@ -159,7 +206,6 @@ class MyApp extends StatelessWidget {
             settings: settings,
           );
         }
-
         if (uri.pathSegments.length == 2 && uri.pathSegments[0] == 'post') {
           final postId = uri.pathSegments[1];
           return MaterialPageRoute(
@@ -167,28 +213,30 @@ class MyApp extends StatelessWidget {
             settings: settings,
           );
         }
-
         if (settings.name == '/consultation') {
           final args = settings.arguments as Map<String, dynamic>?;
           final id = args?['targetUserId'] as String?;
           final name = args?['targetUserName'] as String?;
-          final rate = (args?['ratePerMinute'] as num?)?.toInt() ?? 0;
+          if (id == null || name == null) {
+            return MaterialPageRoute(
+              builder: (_) => const Scaffold(
+                body: Center(child: Text('Invalid consultation arguments')),
+              ),
+              settings: settings,
+            );
+          }
           return MaterialPageRoute(
-            builder: (_) => (id == null || name == null)
-                ? const Scaffold(body: Center(child: Text('Invalid args')))
-                : ConsultationBookingScreen(
-                    targetUserId: id,
-                    targetUserName: name,
-                    ratePerMinute: rate,
-                  ),
+            builder: (_) => ConsultationBookingScreen(
+              targetUserId: id,
+              targetUserName: name,
+            ),
             settings: settings,
           );
         }
-
         return null;
       },
-
-      onUnknownRoute: (_) => MaterialPageRoute(builder: (_) => const MainScaffold()),
+      onUnknownRoute: (_) =>
+          MaterialPageRoute(builder: (_) => const MainScaffold()),
     );
   }
 }
@@ -214,7 +262,7 @@ class _AuthGateState extends State<AuthGate> {
           } catch (e, st) {
             debugPrint('Notification init failed: $e\n$st');
           }
-          // 🔎 Run our one-time Firestore probe after notifications init
+
           try {
             await FirestoreProbe.run();
           } catch (e) {
@@ -231,7 +279,9 @@ class _AuthGateState extends State<AuthGate> {
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
         if (snap.hasData) return const MainScaffold();
         return const LoginScreen();

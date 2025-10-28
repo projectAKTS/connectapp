@@ -23,7 +23,7 @@
 	<key>CFBundleSignature</key>
 	<string>????</string>
 
-	<!-- ✅ GOOGLE & APPLE SIGN-IN CALLBACKS -->
+	<!-- ✅ GOOGLE & APPLE SIGN-IN + STRIPE CALLBACKS -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -36,12 +36,21 @@
 			</array>
 		</dict>
 		<dict>
-			<!-- Apple Sign-In scheme (MUST match your bundle identifier) -->
+			<!-- Apple Sign-In scheme -->
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>com.yakup.helperly</string>
+			</array>
+		</dict>
+		<dict>
+			<!-- ✅ Stripe PaymentSheet callback -->
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>connectapp</string>
 			</array>
 		</dict>
 	</array>
@@ -55,6 +64,7 @@
 		<string>google</string>
 		<string>com.googleusercontent.apps.33757728932-4tif62vov47uhc7mgjg050vpv4hou40b</string>
 		<string>com.yakup.helperly</string>
+		<string>connectapp</string> <!-- ✅ added -->
 	</array>
 
 	<key>LSRequiresIPhoneOS</key>
@@ -100,7 +110,7 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 
-	<!-- ✅ ASSOCIATED DOMAINS (IMPORTANT FOR APPLE SIGN-IN ON iOS) -->
+	<!-- ✅ ASSOCIATED DOMAINS -->
 	<key>com.apple.developer.associated-domains</key>
 	<array>
 		<string>webcredentials:connectapp-278b4.firebaseapp.com</string>

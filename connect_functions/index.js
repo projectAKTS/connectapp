@@ -1,32 +1,27 @@
-// functions/index.js
+// ============================================================
+// 🔥 ConnectApp Firebase Functions (Stripe + Notifications)
+// ============================================================
 
-// V2 entrypoints
 const { onRequest, onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
-
+const functions = require("firebase-functions"); // legacy compat
 const admin = require("firebase-admin");
 admin.initializeApp();
 
 const db = admin.firestore();
 const fcm = admin.messaging();
 
-/** Helpers */
-
-// Stripe client
+// --- Stripe Client Helper ---
 function getStripeClient() {
   const secret =
     process.env.STRIPE_SECRET ||
-    (require("firebase-functions").config().stripe &&
-      require("firebase-functions").config().stripe.secret);
-  if (!secret) {
-    console.error("Stripe secret missing in env or functions config");
-    throw new Error("Stripe secret is not configured");
-  }
+    (functions.config().stripe && functions.config().stripe.secret);
+  if (!secret) throw new Error("Stripe secret missing");
   return require("stripe")(secret);
 }
 
-// Read tokens from users doc: supports fcmTokens[] and legacy fcmToken
+// --- Get User Tokens ---
 async function getUserTokens(uid) {
   const snap = await db.collection("users").doc(uid).get();
   if (!snap.exists) return [];
@@ -36,48 +31,38 @@ async function getUserTokens(uid) {
   return Array.from(new Set([...arr, ...single].filter(Boolean)));
 }
 
+// --- Send Notification ---
 async function sendToTokens(tokens, payload) {
-  const deduped = Array.from(new Set((tokens || []).filter(Boolean)));
-  if (deduped.length === 0) return;
+  const deduped = Array.from(new Set(tokens.filter(Boolean)));
+  if (!deduped.length) return;
   return fcm.sendEachForMulticast({ tokens: deduped, ...payload });
 }
 
-/** 1) Add default fields to users (HTTP) */
-exports.addDefaultFieldsToUsers = onRequest(
-  { cpu: 1, memory: "256Mi" },
-  async (_req, res) => {
-    try {
-      const snapshot = await db.collection("users").get();
-      const batch = db.batch();
-      snapshot.forEach((doc) => {
-        const data = doc.data() || {};
-        batch.set(
-          doc.ref,
-          {
-            bio: data.bio || "No bio available yet.",
-            name: data.name || "",
-            lastName: data.lastName || "",
-            profilePicture: data.profilePicture || "",
-            userName: data.userName || "",
-            postsCount: data.postsCount || 0,
-            followers: data.followers || [],
-            following: data.following || [],
-          },
-          { merge: true }
-        );
-      });
-      await batch.commit();
-      res.status(200).send("All users updated successfully with default fields.");
-    } catch (err) {
-      console.error("Error updating users:", err);
-      res.status(500).send("Error updating users.");
-    }
-  }
-);
+// --- Ensure Stripe Customer ---
+async function getOrCreateCustomer(uid) {
+  const ref = db.collection("users").doc(uid);
+  const doc = await ref.get();
+  if (!doc.exists) throw new HttpsError("not-found", "User not found");
+  const data = doc.data() || {};
+  if (data.stripeCustomerId) return data.stripeCustomerId;
 
-/** 2) Scheduled consultation reminder (every 5 minutes) */
+  const stripe = getStripeClient();
+  const customer = await stripe.customers.create({
+    email: data.email || undefined,
+    name: data.fullName || data.name || undefined,
+    metadata: { firebaseUID: uid },
+  });
+
+  await ref.update({ stripeCustomerId: customer.id });
+  return customer.id;
+}
+
+/* ============================================================
+   🔔 REMINDERS & UTILITIES
+   ============================================================ */
+
 exports.scheduledConsultationReminder = onSchedule(
-  { cpu: 1, memory: "512Mi", schedule: "every 5 minutes" },
+  { schedule: "every 5 minutes", region: "us-central1" },
   async () => {
     const now = admin.firestore.Timestamp.now();
     const later = admin.firestore.Timestamp.fromDate(
@@ -90,40 +75,25 @@ exports.scheduledConsultationReminder = onSchedule(
       .where("scheduledAt", "<=", later)
       .get();
 
-    if (snap.empty) {
-      console.log("No consultations within next 5 minutes.");
-      return null;
-    }
+    if (snap.empty) return console.log("No consultations soon.");
 
     const sends = [];
     for (const doc of snap.docs) {
-      const data = doc.data() || {};
-      const participants = Array.isArray(data.participants) ? data.participants : [];
-      const startTime = data.scheduledAt?.toDate?.().toLocaleTimeString?.() || "";
-
+      const data = doc.data();
+      const participants = Array.isArray(data.participants)
+        ? data.participants
+        : [];
+      const time = data.scheduledAt?.toDate?.()?.toLocaleTimeString?.() || "";
       for (const uid of participants) {
         const tokens = await getUserTokens(uid);
-        if (tokens.length === 0) continue;
-
+        if (!tokens.length) continue;
         sends.push(
           sendToTokens(tokens, {
             notification: {
               title: "Upcoming Consultation",
-              body: `Your consultation starts at ${startTime}.`,
+              body: `Starts at ${time}`,
             },
-            data: { type: "consultation_reminder", consultationId: doc.id },
-            android: {
-              priority: "high",
-              notification: {
-                sound: "default",
-                channelId: "high_importance_channel",
-                visibility: "PUBLIC",
-              },
-            },
-            apns: {
-              headers: { "apns-priority": "10", "apns-push-type": "alert" },
-              payload: { aps: { sound: "default" } },
-            },
+            data: { type: "consultation_reminder", id: doc.id },
           })
         );
       }
@@ -132,293 +102,230 @@ exports.scheduledConsultationReminder = onSchedule(
   }
 );
 
-/** 3) Stripe: create checkout session (onCall) */
-exports.createStripeCheckoutSession = onCall(
-  { cpu: 1, invoker: ["public"] },
-  async (data, _context) => {
-    const stripe = getStripeClient();
-    const { consultationId, cost, currency, successUrl, cancelUrl } = data;
-    if (!consultationId || cost == null) {
-      throw new HttpsError("invalid-argument", "Missing consultationId or cost");
-    }
-    try {
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ["card"],
-        line_items: [
-          {
-            price_data: {
-              currency: currency || "usd",
-              product_data: { name: `Consultation Booking (${consultationId})` },
-              unit_amount: Math.round(cost * 100),
-            },
-            quantity: 1,
-          },
-        ],
-        mode: "payment",
-        success_url: successUrl,
-        cancel_url: cancelUrl,
-        metadata: { consultationId },
-      });
-      return { sessionId: session.id, checkoutUrl: session.url };
-    } catch (err) {
-      console.error("Error creating Stripe session:", err);
-      throw new HttpsError("internal", "Unable to create checkout session");
-    }
-  }
-);
+/* ============================================================
+   💳 STRIPE CALLABLE FUNCTIONS
+   ============================================================ */
 
-/** 4) Stripe: create customer (onCall) */
+// 1️⃣ Create Stripe Customer
 exports.createStripeCustomer = onCall(
-  { cpu: 1, invoker: ["public"] },
+  { region: "us-central1" },
   async (_data, context) => {
-    if (!context.auth) throw new HttpsError("unauthenticated", "Not authenticated.");
-    const stripe = getStripeClient();
-    const uid = context.auth.uid;
-
-    const userRef = db.collection("users").doc(uid);
-    const userDoc = await userRef.get();
-    if (!userDoc.exists) throw new HttpsError("not-found", "User not found.");
-    const userData = userDoc.data() || {};
-
-    if (userData.stripeCustomerId) {
-      return { stripeCustomerId: userData.stripeCustomerId };
-    }
-
-    try {
-      const customer = await stripe.customers.create({
-        email: userData.email,
-        name: userData.name,
-      });
-      await userRef.update({ stripeCustomerId: customer.id });
-      return { stripeCustomerId: customer.id };
-    } catch (err) {
-      console.error("Error creating Stripe customer:", err);
-      throw new HttpsError("internal", "Unable to create Stripe customer");
-    }
+    if (!context.auth) throw new HttpsError("unauthenticated");
+    const id = await getOrCreateCustomer(context.auth.uid);
+    return { stripeCustomerId: id };
   }
 );
 
-/** 5) Stripe: setup intent (onCall) */
+// 2️⃣ Create Setup Intent
 exports.createSetupIntent = onCall(
-  { cpu: 1, invoker: ["public"] },
+  { region: "us-central1" },
   async (_data, context) => {
-    if (!context.auth) throw new HttpsError("unauthenticated", "Not authenticated.");
+    if (!context.auth) throw new HttpsError("unauthenticated");
     const stripe = getStripeClient();
     const uid = context.auth.uid;
-
-    const userRef = db.collection("users").doc(uid);
-    const userDoc = await userRef.get();
-    if (!userDoc.exists) throw new HttpsError("not-found", "User not found.");
-    const userData = userDoc.data() || {};
-    if (!userData.stripeCustomerId) {
-      throw new HttpsError("failed-precondition", "No Stripe customer.");
-    }
-
-    try {
-      const si = await stripe.setupIntents.create({
-        customer: userData.stripeCustomerId,
-        payment_method_types: ["card"],
-      });
-      return { clientSecret: si.client_secret };
-    } catch (err) {
-      console.error("Error creating setup intent:", err);
-      throw new HttpsError("internal", "Unable to create setup intent");
-    }
+    const customerId = await getOrCreateCustomer(uid);
+    const si = await stripe.setupIntents.create({
+      customer: customerId,
+      payment_method_types: ["card"],
+    });
+    return { clientSecret: si.client_secret };
   }
 );
 
-/** 6) Stripe: charge stored payment method (onCall) */
+// 3️⃣ Charge Stored Payment Method
 exports.chargeStoredPaymentMethod = onCall(
-  { cpu: 1, invoker: ["public"] },
+  { region: "us-central1" },
   async (data, context) => {
-    if (!context.auth) throw new HttpsError("unauthenticated", "Not authenticated.");
+    if (!context.auth) throw new HttpsError("unauthenticated");
     const stripe = getStripeClient();
-    const { userId, amount, currency } = data;
-    if (!userId || amount == null) {
-      throw new HttpsError("invalid-argument", "Missing userId or amount");
-    }
+    const uid = context.auth.uid;
+    const { amount, currency = "cad" } = data;
 
-    const userDoc = await db.collection("users").doc(userId).get();
-    if (!userDoc.exists) throw new HttpsError("not-found", "User not found");
-    const { stripeCustomerId, defaultPaymentMethodId } = userDoc.data() || {};
-    if (!stripeCustomerId || !defaultPaymentMethodId) {
+    if (!amount || amount <= 0)
+      throw new HttpsError("invalid-argument", "Invalid amount");
+
+    const doc = await db.collection("users").doc(uid).get();
+    const u = doc.data() || {};
+    if (!u.stripeCustomerId || !u.defaultPaymentMethodId)
       throw new HttpsError("failed-precondition", "No stored payment method");
-    }
 
     try {
       const pi = await stripe.paymentIntents.create({
         amount: Math.round(amount * 100),
-        currency: currency || "usd",
-        customer: stripeCustomerId,
-        payment_method: defaultPaymentMethodId,
+        currency,
+        customer: u.stripeCustomerId,
+        payment_method: u.defaultPaymentMethodId,
         off_session: true,
         confirm: true,
       });
-      return { success: true, paymentIntentId: pi.id };
-    } catch (err) {
-      console.error("Error charging payment method:", err);
-      return { success: false, error: err.message };
+      return { success: true, id: pi.id };
+    } catch (e) {
+      console.error("Charge error:", e);
+      throw new HttpsError("internal", e.message);
     }
   }
 );
 
-/** 7) Health check (HTTP) */
-exports.healthCheck = onRequest({ cpu: 1, memory: "128Mi" }, (_req, res) => {
-  res.status(200).send("OK");
-});
+// 4️⃣ Create Express Account for Helpers
+exports.createExpressAccountLink = onCall(
+  { region: "us-central1" },
+  async (_data, context) => {
+    if (!context.auth) throw new HttpsError("unauthenticated");
+    const stripe = getStripeClient();
+    const uid = context.auth.uid;
+    const ref = db.collection("users").doc(uid);
+    const data = (await ref.get()).data() || {};
 
-/** 8) PUSH: when a new call invite is created -> notify callee */
-exports.onCallInviteCreated = onDocumentCreated(
-  {
-    document: "callInvites/{inviteId}",
-    database: "(default)",
-    region: "us-central1",
-  },
-  async (event) => {
-    const inviteId = event.params.inviteId;
-    const invite = event.data?.data() || {};
-    console.log("[onCallInviteCreated] NEW:", inviteId, invite);
-
-    const { fromUid, fromName, toUid, channel, isVideo } = invite;
-    if (!toUid || !channel) {
-      console.log("[onCallInviteCreated] missing toUid/channel");
-      return;
+    let accountId = data.stripeAccountId;
+    if (!accountId) {
+      const acct = await stripe.accounts.create({
+        type: "express",
+        country: "CA",
+        email: data.email,
+        capabilities: { transfers: { requested: true } },
+      });
+      accountId = acct.id;
+      await ref.update({ stripeAccountId: acct.id });
     }
 
-    const tokens = await getUserTokens(toUid);
-    console.log("[onCallInviteCreated] token count:", tokens.length, "toUid:", toUid);
-    if (tokens.length === 0) return;
+    const link = await stripe.accountLinks.create({
+      account: accountId,
+      refresh_url: "https://yourapp.page.link/onboarding_refresh",
+      return_url: "https://yourapp.page.link/onboarding_success",
+      type: "account_onboarding",
+    });
+    return { url: link.url, stripeAccountId: accountId };
+  }
+);
 
-    const payload = {
+// 5️⃣ Create Stripe Checkout Session
+exports.createStripeCheckoutSession = onCall(
+  { region: "us-central1" },
+  async (data, context) => {
+    if (!context.auth) throw new HttpsError("unauthenticated");
+    const stripe = getStripeClient();
+    const uid = context.auth.uid;
+    const {
+      consultationId,
+      cost,
+      helperStripeAccountId,
+      currency = "cad",
+      successUrl,
+      cancelUrl,
+    } = data;
+
+    if (!consultationId || !cost || !helperStripeAccountId)
+      throw new HttpsError("invalid-argument", "Missing required fields");
+
+    const platformFee = Math.round(cost * 100 * 0.15);
+    const customerId = await getOrCreateCustomer(uid);
+
+    const session = await stripe.checkout.sessions.create({
+      customer: customerId,
+      payment_method_types: ["card"],
+      line_items: [
+        {
+          price_data: {
+            currency,
+            product_data: { name: `Consultation (${consultationId})` },
+            unit_amount: Math.round(cost * 100),
+          },
+          quantity: 1,
+        },
+      ],
+      mode: "payment",
+      success_url: successUrl || "https://yourapp.page.link/success",
+      cancel_url: cancelUrl || "https://yourapp.page.link/cancel",
+      payment_intent_data: {
+        application_fee_amount: platformFee,
+        transfer_data: { destination: helperStripeAccountId },
+        metadata: { consultationId, uid },
+      },
+    });
+
+    return { sessionId: session.id, checkoutUrl: session.url };
+  }
+);
+
+// 6️⃣ Stripe Webhook
+exports.handleStripeWebhook = onRequest(
+  { region: "us-central1" },
+  async (req, res) => {
+    const stripe = getStripeClient();
+    const sig = req.headers["stripe-signature"];
+    const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    let event;
+    try {
+      event = stripe.webhooks.constructEvent(req.rawBody, sig, endpointSecret);
+    } catch (e) {
+      console.error("Webhook signature failed:", e.message);
+      return res.status(400).send(`Webhook Error: ${e.message}`);
+    }
+
+    if (event.type === "payment_intent.succeeded") {
+      const pi = event.data.object;
+      const consultationId = pi.metadata?.consultationId;
+      if (consultationId) {
+        await db.collection("consultations").doc(consultationId).update({
+          status: "paid",
+          paidAt: admin.firestore.FieldValue.serverTimestamp(),
+          paymentIntentId: pi.id,
+        });
+      }
+    }
+    res.json({ received: true });
+  }
+);
+
+/* ============================================================
+   🔔 FIRESTORE TRIGGERS
+   ============================================================ */
+
+exports.onCallInviteCreated = onDocumentCreated(
+  { document: "callInvites/{inviteId}", region: "us-central1" },
+  async (event) => {
+    const d = event.data?.data() || {};
+    const { fromName, toUid, channel, isVideo } = d;
+    if (!toUid || !channel) return;
+    const tokens = await getUserTokens(toUid);
+    if (!tokens.length) return;
+    await sendToTokens(tokens, {
       notification: {
         title: isVideo ? "Incoming Video Call" : "Incoming Audio Call",
         body: `From ${fromName || "Someone"}`,
       },
-      data: {
-        type: "call_invite",          // stable type for client
-        action: "incoming_call",
-        channel: String(channel),
-        isVideo: String(!!isVideo),
-        fromName: String(fromName || "Caller"),
-      },
-      android: {
-        priority: "high",
-        notification: {
-          sound: "default",
-          channelId: "high_importance_channel",
-          visibility: "PUBLIC",
-        },
-      },
-      apns: {
-        headers: {
-          "apns-priority": "10",
-          "apns-push-type": "alert",
-        },
-        payload: {
-          aps: {
-            sound: "default",
-            "content-available": 1,
-            category: "INCOMING_CALL", // iOS shows Accept/Decline using this category
-          },
-        },
-      },
-    };
-
-    await sendToTokens(tokens, payload);
-    console.log("[onCallInviteCreated] push sent to", tokens.length, "tokens");
+      data: { type: "call_invite", channel },
+    });
   }
 );
 
-/** 9) PUSH: chat message -> notify the other user (data-only; no self banner) */
 exports.onChatMessageCreated = onDocumentCreated(
-  {
-    document: "chats/{chatId}/messages/{messageId}",
-    database: "(default)",
-    region: "us-central1",
-  },
+  { document: "chats/{chatId}/messages/{messageId}", region: "us-central1" },
   async (event) => {
-    const message = event.data?.data() || {};
-    const chatId = String(event.params.chatId || "");
-    const authorId = String(message.authorId || "");
-
+    const m = event.data?.data() || {};
+    const chatId = event.params.chatId;
+    const authorId = m.authorId;
     if (!chatId || !authorId) return;
-
-    // Read chat doc to find participants robustly
-    const chatSnap = await db.doc(`chats/${chatId}`).get();
-    const users =
-      (chatSnap.get("users") || chatSnap.get("participants") || []).filter(Boolean);
-
-    // recipients = everyone except the author
+    const chat = (await db.doc(`chats/${chatId}`).get()).data() || {};
+    const users = chat.users || chat.participants || [];
     const recipients = users.filter((u) => u !== authorId);
-    if (!recipients.length) return;
+    const sDoc = await db.collection("users").doc(authorId).get();
+    const s = sDoc.data() || {};
+    const fromName = s.fullName || s.name || "Someone";
+    const body = m.text ? m.text.slice(0, 120) : "Sent you a message";
 
-    // Sender label
-    let fromName = "New message";
-    try {
-      const senderDoc = await db.collection("users").doc(authorId).get();
-      const d = senderDoc.data() || {};
-      fromName = d.fullName || d.name || "New message";
-    } catch {}
-
-    const body = message.text
-      ? String(message.text).slice(0, 140)
-      : message.name
-      ? String(message.name)
-      : "Sent you a message";
-
-    // Collect and send to each recipient (excluding sender)
-    for (const toUid of recipients) {
-      const tokens = await getUserTokens(toUid);
+    for (const uid of recipients) {
+      const tokens = await getUserTokens(uid);
       if (!tokens.length) continue;
-
-      // Data-only payload -> client decides whether to show local notification.
-      const payload = {
-        data: {
-          type: "chat_message",
-          authorId,            // who sent it
-          otherUserId: authorId,
-          chatId,
-          title: fromName,
-          body,
-        },
-        android: { priority: "high" },
-        apns: {
-          headers: {
-            "apns-priority": "5",          // background
-            "apns-push-type": "background" // data only
-          },
-          payload: {
-            aps: { "content-available": 1 }
-          }
-        }
-        // 🚫 No top-level "notification" — prevents iOS from showing
-        // a system banner while app is foregrounded.
-      };
-
-      await sendToTokens(tokens, payload);
+      await sendToTokens(tokens, {
+        notification: { title: fromName, body },
+        data: { type: "chat_message", chatId },
+      });
     }
   }
 );
 
-/** 10) TEST endpoint: create a callInvite to trigger the function */
-exports.testCreateInvite = onRequest(
-  { cpu: 1, memory: "128Mi" },
-  async (req, res) => {
-    try {
-      const toUid = req.query.toUid || "MISSING";
-      const ref = await db.collection("callInvites").add({
-        channel: "test_" + Date.now(),
-        fromUid: "TEST",
-        fromName: "Tester",
-        toUid,
-        isVideo: true,
-        status: "ringing",
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-      res.status(200).send("created " + ref.id);
-    } catch (e) {
-      console.error(e);
-      res.status(500).send(String(e));
-    }
-  }
+exports.healthCheck = onRequest(
+  { region: "us-central1" },
+  (_req, res) => res.status(200).send("OK")
 );

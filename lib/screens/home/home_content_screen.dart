@@ -8,11 +8,13 @@ import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/theme/tokens.dart';
 import 'package:connect_app/screens/consultation/select_consultant_screen.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
+import 'package:connect_app/screens/messages/messages_screen.dart';
 
 // Fullscreen viewers
 import 'package:connect_app/screens/posts/post_video_player.dart';
 import 'package:connect_app/screens/posts/post_image_viewer.dart';
 
+// ===== Utility functions =====
 String _timeAgoShort(DateTime dt) {
   final now = DateTime.now();
   final diff = now.difference(dt);
@@ -31,6 +33,7 @@ String _shortFromTs(dynamic ts) {
   return _timeAgoShort(dt);
 }
 
+// ===== Main screen =====
 class HomeContentScreen extends StatefulWidget {
   const HomeContentScreen({Key? key}) : super(key: key);
 
@@ -45,6 +48,9 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
     required String otherUserId,
     required String otherUserName,
   }) {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (otherUserId == currentUser?.uid) return;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: AppColors.card,
@@ -124,6 +130,7 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     final firstName = (user?.displayName ?? 'Maria').split(' ').first;
+    final currentUid = user?.uid ?? '';
 
     return Scaffold(
       backgroundColor: AppColors.canvas,
@@ -135,7 +142,8 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
             SliverToBoxAdapter(
               child: _WelcomeCard(
                 name: firstName,
-                onFindHelper: () => Navigator.of(context, rootNavigator: true).pushNamed('/search'),
+                onFindHelper: () =>
+                    Navigator.of(context, rootNavigator: true).pushNamed('/search'),
                 onBookConsultation: () async {
                   await Navigator.of(context, rootNavigator: true).push(
                     MaterialPageRoute(builder: (_) => const SelectConsultantScreen()),
@@ -183,17 +191,16 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                       final body = (raw['content'] ?? '').toString();
                       final right = _shortFromTs(raw['timestamp']);
                       final subtitle = '${right} ago';
-
-                      // media fields
                       final imageUrl = (raw['imageUrl'] ?? '').toString();
                       final videoUrl = (raw['videoUrl'] ?? '').toString();
                       final videoThumbUrl = (raw['videoThumbUrl'] ?? '').toString();
                       final aspect = (() {
                         final v = raw['mediaAspectRatio'];
                         if (v is num && v > 0) return v.toDouble();
-                        // fallback: images 16:9, videos square
                         return imageUrl.isNotEmpty ? (16 / 9) : 1.0;
                       })();
+
+                      final isOwnPost = (authorId == currentUid);
 
                       return _PostCell(
                         authorName: authorName,
@@ -209,10 +216,12 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                             ? null
                             : () {
                                 Navigator.of(context, rootNavigator: true).push(
-                                  MaterialPageRoute(builder: (_) => ProfileScreen(userID: authorId)),
+                                  MaterialPageRoute(
+                                    builder: (_) => ProfileScreen(userID: authorId),
+                                  ),
                                 );
                               },
-                        onConnect: authorId.isEmpty
+                        onConnect: isOwnPost
                             ? null
                             : () {
                                 HapticFeedback.lightImpact();
@@ -225,16 +234,21 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                             ? null
                             : () {
                                 Navigator.of(context, rootNavigator: true).push(
-                                  MaterialPageRoute(builder: (_) => PostImageViewer(url: imageUrl)),
+                                  MaterialPageRoute(
+                                      builder: (_) =>
+                                          PostImageViewer(url: imageUrl)),
                                 );
                               },
                         onOpenVideo: videoUrl.isEmpty
                             ? null
                             : () {
                                 Navigator.of(context, rootNavigator: true).push(
-                                  MaterialPageRoute(builder: (_) => PostVideoPlayer(url: videoUrl)),
+                                  MaterialPageRoute(
+                                      builder: (_) =>
+                                          PostVideoPlayer(url: videoUrl)),
                                 );
                               },
+                        showConnect: !isOwnPost, // 👈 hide Connect for self
                       );
                     },
                   );
@@ -248,7 +262,7 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
   }
 }
 
-/// ===== Top bar with “Home” + profile chip =====
+// ===== Top bar =====
 class _HomeTopBar extends StatelessWidget {
   const _HomeTopBar({Key? key}) : super(key: key);
 
@@ -268,9 +282,14 @@ class _HomeTopBar extends StatelessWidget {
               borderRadius: BorderRadius.circular(AppRadius.md),
             ),
             child: IconButton(
-              icon: const Icon(Icons.person_outline, color: AppColors.primary),
-              onPressed: () => Navigator.of(context, rootNavigator: true).pushNamed('/profile/me'),
-              tooltip: 'Profile',
+              icon: const Icon(Icons.chat_bubble_outline_rounded,
+                  color: AppColors.primary),
+              tooltip: 'Messages',
+              onPressed: () {
+                Navigator.of(context, rootNavigator: true).push(
+                  MaterialPageRoute(builder: (_) => const MessagesScreen()),
+                );
+              },
             ),
           ),
         ],
@@ -279,18 +298,15 @@ class _HomeTopBar extends StatelessWidget {
   }
 }
 
-/// ===== Welcome card with two pills =====
+// ===== Welcome + Utility widgets =====
 class _WelcomeCard extends StatelessWidget {
   final String name;
   final VoidCallback onFindHelper;
   final VoidCallback onBookConsultation;
-
-  const _WelcomeCard({
-    Key? key,
-    required this.name,
-    required this.onFindHelper,
-    required this.onBookConsultation,
-  }) : super(key: key);
+  const _WelcomeCard(
+      {required this.name,
+      required this.onFindHelper,
+      required this.onBookConsultation});
 
   @override
   Widget build(BuildContext context) {
@@ -307,16 +323,24 @@ class _WelcomeCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppColors.canvas,
           borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(color: AppColors.border.withOpacity(0.5), width: 1),
+          border:
+              Border.all(color: AppColors.border.withOpacity(0.5), width: 1),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Welcome, $name', style: Theme.of(context).textTheme.titleMedium),
+            Text('Welcome, $name',
+                style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 14),
-            _TaupePill(icon: Icons.search, label: 'Find a helper', onTap: onFindHelper),
+            _TaupePill(
+                icon: Icons.search,
+                label: 'Find a helper',
+                onTap: onFindHelper),
             const SizedBox(height: 12),
-            _TaupePill(icon: Icons.event_available_outlined, label: 'Book a consultation', onTap: onBookConsultation),
+            _TaupePill(
+                icon: Icons.event_available_outlined,
+                label: 'Book a consultation',
+                onTap: onBookConsultation),
           ],
         ),
       ),
@@ -328,7 +352,8 @@ class _TaupePill extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
-  const _TaupePill({Key? key, required this.icon, required this.label, required this.onTap}) : super(key: key);
+  const _TaupePill(
+      {required this.icon, required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -345,7 +370,11 @@ class _TaupePill extends StatelessWidget {
             children: [
               Icon(icon, color: AppColors.muted, size: 22),
               const SizedBox(width: 12),
-              Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.text)),
+              Text(label,
+                  style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.text)),
             ],
           ),
         ),
@@ -356,38 +385,32 @@ class _TaupePill extends StatelessWidget {
 
 class _SectionTitle extends StatelessWidget {
   final String text;
-  const _SectionTitle(this.text, {Key? key}) : super(key: key);
-
+  const _SectionTitle(this.text);
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-      child: Text(text, style: Theme.of(context).textTheme.titleMedium),
-    );
-  }
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+        child: Text(text, style: Theme.of(context).textTheme.titleMedium),
+      );
 }
 
-/// ===== Post cell with text + media + “Show more / Show less” =====
+// ===== Post cell =====
 class _PostCell extends StatefulWidget {
   final String authorName;
   final String authorAvatarUrl;
-  final String subtitle;   // “2h ago”
-  final String rightTime;  // “2h”
+  final String subtitle;
+  final String rightTime;
   final String body;
-
-  // media
   final String imageUrl;
   final String videoUrl;
   final String videoThumbUrl;
   final double mediaAspect;
-
-  final VoidCallback? onOpenProfile; // tap header -> profile
-  final VoidCallback? onConnect;     // connect button (nullable)
-  final VoidCallback? onOpenImage;   // view image fullscreen
-  final VoidCallback? onOpenVideo;   // play video
+  final VoidCallback? onOpenProfile;
+  final VoidCallback? onConnect;
+  final VoidCallback? onOpenImage;
+  final VoidCallback? onOpenVideo;
+  final bool showConnect;
 
   const _PostCell({
-    Key? key,
     required this.authorName,
     required this.authorAvatarUrl,
     required this.subtitle,
@@ -401,7 +424,8 @@ class _PostCell extends StatefulWidget {
     required this.onConnect,
     required this.onOpenImage,
     required this.onOpenVideo,
-  }) : super(key: key);
+    required this.showConnect,
+  });
 
   @override
   State<_PostCell> createState() => _PostCellState();
@@ -414,45 +438,12 @@ class _PostCellState extends State<_PostCell> {
   @override
   Widget build(BuildContext context) {
     final borderColor = AppColors.border.withOpacity(0.65);
-
-    Widget header() {
-      final row = Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          _Avatar(url: widget.authorAvatarUrl, radius: 20),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(widget.authorName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.text)),
-                const SizedBox(height: 2),
-                Text(widget.subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 14, color: AppColors.muted)),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(widget.rightTime, style: const TextStyle(fontSize: 14, color: AppColors.muted)),
-        ],
-      );
-
-      if (widget.onOpenProfile == null) return row;
-      return InkWell(
-        onTap: widget.onOpenProfile,
-        borderRadius: BorderRadius.circular(AppRadius.sm),
-        child: Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: row),
-      );
-    }
-
     Widget? media() {
       if (widget.imageUrl.isNotEmpty) {
-        return _MediaImage(url: widget.imageUrl, aspect: widget.mediaAspect, onTap: widget.onOpenImage);
+        return _MediaImage(
+            url: widget.imageUrl,
+            aspect: widget.mediaAspect,
+            onTap: widget.onOpenImage);
       }
       if (widget.videoUrl.isNotEmpty) {
         return _MediaVideoThumb(
@@ -464,8 +455,6 @@ class _PostCellState extends State<_PostCell> {
       return null;
     }
 
-    final mediaWidget = media();
-
     return Container(
       decoration: BoxDecoration(
         color: AppColors.card,
@@ -476,9 +465,13 @@ class _PostCellState extends State<_PostCell> {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          header(),
+          _PostHeader(
+              authorName: widget.authorName,
+              subtitle: widget.subtitle,
+              rightTime: widget.rightTime,
+              avatarUrl: widget.authorAvatarUrl,
+              onTap: widget.onOpenProfile),
           if (widget.body.isNotEmpty) const SizedBox(height: 12),
-
           if (widget.body.isNotEmpty)
             _ExpandableText(
               content: widget.body,
@@ -486,64 +479,106 @@ class _PostCellState extends State<_PostCell> {
               maxLinesWhenCollapsed: _collapsedLines,
               onToggle: () => setState(() => _expanded = !_expanded),
             ),
-
-          if (mediaWidget != null) const SizedBox(height: 10),
-          if (mediaWidget != null) mediaWidget,
-
-          const SizedBox(height: 12),
-          TextButton(
-            onPressed: widget.onConnect,
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              backgroundColor: AppColors.button,
-              foregroundColor: widget.onConnect == null ? AppColors.text.withOpacity(0.45) : AppColors.text,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.sm)),
-              textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-            ).copyWith(
-              overlayColor: MaterialStateProperty.resolveWith((states) {
-                if (widget.onConnect == null) return Colors.transparent;
-                return AppColors.surface.withOpacity(0.35);
-              }),
+          if (media() != null) const SizedBox(height: 10),
+          if (media() != null) media()!,
+          if (widget.showConnect) ...[
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: widget.onConnect,
+              style: TextButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                backgroundColor: AppColors.button,
+                foregroundColor: AppColors.text,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadius.sm)),
+                textStyle:
+                    const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+              ),
+              child: const Text('Connect'),
             ),
-            child: const Text('Connect'),
-          ),
+          ],
         ]),
       ),
     );
   }
 }
 
-/// Expandable text with gradient scrim + Show more / Show less
+class _PostHeader extends StatelessWidget {
+  final String authorName;
+  final String subtitle;
+  final String rightTime;
+  final String avatarUrl;
+  final VoidCallback? onTap;
+  const _PostHeader(
+      {required this.authorName,
+      required this.subtitle,
+      required this.rightTime,
+      required this.avatarUrl,
+      this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final row = Row(children: [
+      _Avatar(url: avatarUrl, radius: 20),
+      const SizedBox(width: 10),
+      Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(authorName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                  color: AppColors.text)),
+          const SizedBox(height: 2),
+          Text(subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style:
+                  const TextStyle(fontSize: 14, color: AppColors.muted)),
+        ]),
+      ),
+      const SizedBox(width: 8),
+      Text(rightTime,
+          style: const TextStyle(fontSize: 14, color: AppColors.muted)),
+    ]);
+    return onTap == null
+        ? row
+        : InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: row,
+            ),
+          );
+  }
+}
+
+// ===== Shared widgets =====
 class _ExpandableText extends StatelessWidget {
   final String content;
   final bool expanded;
   final int maxLinesWhenCollapsed;
   final VoidCallback onToggle;
-
-  const _ExpandableText({
-    required this.content,
-    required this.expanded,
-    required this.maxLinesWhenCollapsed,
-    required this.onToggle,
-  });
+  const _ExpandableText(
+      {required this.content,
+      required this.expanded,
+      required this.maxLinesWhenCollapsed,
+      required this.onToggle});
 
   @override
   Widget build(BuildContext context) {
     const style = TextStyle(fontSize: 16, height: 1.4, color: AppColors.text);
-
     return LayoutBuilder(builder: (ctx, constraints) {
       final tp = TextPainter(
         text: TextSpan(text: content, style: style),
         textDirection: TextDirection.ltr,
         maxLines: maxLinesWhenCollapsed,
       )..layout(maxWidth: constraints.maxWidth);
-
       final hasOverflow = tp.didExceedMaxLines;
-
-      if (!hasOverflow) {
-        return Text(content, style: style);
-      }
-
+      if (!hasOverflow) return Text(content, style: style);
       if (expanded) {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -554,31 +589,36 @@ class _ExpandableText extends StatelessWidget {
           ],
         );
       }
-
-      return Stack(
-        children: [
-          Text(content, style: style, maxLines: maxLinesWhenCollapsed, overflow: TextOverflow.clip),
-          Positioned(
-            left: 0, right: 0, bottom: 28,
-            child: IgnorePointer(
-              child: Container(
-                height: 38,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      AppColors.card.withOpacity(0.0),
-                      AppColors.card.withOpacity(0.95),
-                    ],
-                  ),
+      return Stack(children: [
+        Text(content,
+            style: style,
+            maxLines: maxLinesWhenCollapsed,
+            overflow: TextOverflow.clip),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 28,
+          child: IgnorePointer(
+            child: Container(
+              height: 38,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    AppColors.card.withOpacity(0.0),
+                    AppColors.card.withOpacity(0.95),
+                  ],
                 ),
               ),
             ),
           ),
-          Positioned(bottom: 0, left: 0, child: _ShowMoreButton(expanded: false, onTap: onToggle)),
-        ],
-      );
+        ),
+        Positioned(
+            bottom: 0,
+            left: 0,
+            child: _ShowMoreButton(expanded: false, onTap: onToggle)),
+      ]);
     });
   }
 }
@@ -587,25 +627,23 @@ class _ShowMoreButton extends StatelessWidget {
   final bool expanded;
   final VoidCallback onTap;
   const _ShowMoreButton({required this.expanded, required this.onTap});
-
   @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.button,
-      borderRadius: BorderRadius.circular(10),
-      child: InkWell(
-        onTap: onTap,
+  Widget build(BuildContext context) => Material(
+        color: AppColors.button,
         borderRadius: BorderRadius.circular(10),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          child: Text(
-            expanded ? 'Show less' : 'Show more',
-            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.text),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: Text(expanded ? 'Show less' : 'Show more',
+                style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    color: AppColors.text)),
           ),
         ),
-      ),
-    );
-  }
+      );
 }
 
 class _MediaImage extends StatelessWidget {
@@ -613,83 +651,78 @@ class _MediaImage extends StatelessWidget {
   final double aspect;
   final VoidCallback? onTap;
   const _MediaImage({required this.url, required this.aspect, this.onTap});
-
   @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: AspectRatio(
-        aspectRatio: aspect,
-        child: InkWell(
-          onTap: onTap,
-          child: Image.network(
-            url,
-            fit: BoxFit.cover,
-            loadingBuilder: (c, w, p) => p == null ? w : Container(color: AppColors.button),
-            errorBuilder: (_, __, ___) =>
-                Container(color: AppColors.button, alignment: Alignment.center,
-                  child: const Icon(Icons.broken_image, color: AppColors.muted)),
+  Widget build(BuildContext context) => ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: AspectRatio(
+          aspectRatio: aspect,
+          child: InkWell(
+            onTap: onTap,
+            child: Image.network(url,
+                fit: BoxFit.cover,
+                loadingBuilder: (c, w, p) =>
+                    p == null ? w : Container(color: AppColors.button),
+                errorBuilder: (_, __, ___) => Container(
+                      color: AppColors.button,
+                      alignment: Alignment.center,
+                      child: const Icon(Icons.broken_image,
+                          color: AppColors.muted),
+                    )),
           ),
         ),
-      ),
-    );
-  }
+      );
 }
 
 class _MediaVideoThumb extends StatelessWidget {
   final String thumbUrl;
   final double aspect;
   final VoidCallback? onPlay;
-  const _MediaVideoThumb({required this.thumbUrl, required this.aspect, this.onPlay});
-
+  const _MediaVideoThumb(
+      {required this.thumbUrl, required this.aspect, this.onPlay});
   @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: AspectRatio(
-        aspectRatio: aspect,
-        child: Stack(fit: StackFit.expand, children: [
-          if (thumbUrl.isNotEmpty)
-            Image.network(
-              thumbUrl, fit: BoxFit.cover,
-              loadingBuilder: (c, w, p) => p == null ? w : Container(color: AppColors.button),
-              errorBuilder: (_, __, ___) => Container(color: AppColors.button),
-            )
-          else
-            Container(color: AppColors.button),
-          Center(
-            child: InkWell(
-              onTap: onPlay,
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.45),
-                  shape: BoxShape.circle,
+  Widget build(BuildContext context) => ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: AspectRatio(
+          aspectRatio: aspect,
+          child: Stack(fit: StackFit.expand, children: [
+            if (thumbUrl.isNotEmpty)
+              Image.network(thumbUrl,
+                  fit: BoxFit.cover,
+                  loadingBuilder: (c, w, p) =>
+                      p == null ? w : Container(color: AppColors.button),
+                  errorBuilder: (_, __, ___) =>
+                      Container(color: AppColors.button))
+            else
+              Container(color: AppColors.button),
+            Center(
+              child: InkWell(
+                onTap: onPlay,
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.45),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.play_arrow,
+                      color: Colors.white, size: 36),
                 ),
-                child: const Icon(Icons.play_arrow, color: Colors.white, size: 36),
               ),
             ),
-          ),
-        ]),
-      ),
-    );
-  }
+          ]),
+        ),
+      );
 }
 
 class _Avatar extends StatelessWidget {
   final String url;
   final double radius;
-  const _Avatar({Key? key, required this.url, this.radius = 20}) : super(key: key);
-
+  const _Avatar({required this.url, this.radius = 20});
   @override
-  Widget build(BuildContext context) {
-    if (url.isEmpty) {
-      return CircleAvatar(
-        radius: radius,
-        backgroundColor: AppColors.avatarBg,
-        child: const Icon(Icons.person_outline, color: AppColors.avatarFg),
-      );
-    }
-    return CircleAvatar(radius: radius, backgroundImage: NetworkImage(url));
-  }
+  Widget build(BuildContext context) => url.isEmpty
+      ? CircleAvatar(
+          radius: radius,
+          backgroundColor: AppColors.avatarBg,
+          child:
+              const Icon(Icons.person_outline, color: AppColors.avatarFg))
+      : CircleAvatar(radius: radius, backgroundImage: NetworkImage(url));
 }
