@@ -6,7 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/theme/tokens.dart';
-import 'package:connect_app/screens/consultation/select_consultant_screen.dart';
+import 'package:connect_app/screens/connections/connections_screen.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
 import 'package:connect_app/screens/messages/messages_screen.dart';
 
@@ -144,11 +144,6 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                 name: firstName,
                 onFindHelper: () =>
                     Navigator.of(context, rootNavigator: true).pushNamed('/search'),
-                onBookConsultation: () async {
-                  await Navigator.of(context, rootNavigator: true).push(
-                    MaterialPageRoute(builder: (_) => const SelectConsultantScreen()),
-                  );
-                },
               ),
             ),
             const SliverToBoxAdapter(child: _SectionTitle('Recent posts')),
@@ -248,7 +243,7 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                                           PostVideoPlayer(url: videoUrl)),
                                 );
                               },
-                        showConnect: !isOwnPost, // 👈 hide Connect for self
+                        showConnect: !isOwnPost,
                       );
                     },
                   );
@@ -298,18 +293,20 @@ class _HomeTopBar extends StatelessWidget {
   }
 }
 
-// ===== Welcome + Utility widgets =====
+// ===== Welcome Card =====
 class _WelcomeCard extends StatelessWidget {
   final String name;
   final VoidCallback onFindHelper;
-  final VoidCallback onBookConsultation;
-  const _WelcomeCard(
-      {required this.name,
-      required this.onFindHelper,
-      required this.onBookConsultation});
+  const _WelcomeCard({
+    required this.name,
+    required this.onFindHelper,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    final uid = user?.uid;
+
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       padding: const EdgeInsets.all(10),
@@ -337,10 +334,63 @@ class _WelcomeCard extends StatelessWidget {
                 label: 'Find a helper',
                 onTap: onFindHelper),
             const SizedBox(height: 12),
-            _TaupePill(
-                icon: Icons.event_available_outlined,
-                label: 'Book a consultation',
-                onTap: onBookConsultation),
+            // ✅ My Connections with badge
+            StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('connections')
+                  .where('userId', isEqualTo: uid)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                int recentCount = 0;
+                if (snapshot.hasData) {
+                  final now = DateTime.now();
+                  final lastWeek = now.subtract(const Duration(days: 7));
+                  for (var doc in snapshot.data!.docs) {
+                    final d = doc.data() as Map<String, dynamic>;
+                    final connectedAt = parseFirestoreTimestamp(d['connectedAt']);
+                    if (connectedAt != null && connectedAt.isAfter(lastWeek)) {
+                      recentCount++;
+                    }
+                  }
+                }
+
+                return Stack(
+                  children: [
+                    _TaupePill(
+                      icon: Icons.people_alt_outlined,
+                      label: 'My connections',
+                      onTap: () {
+                        Navigator.of(context, rootNavigator: true).push(
+                          MaterialPageRoute(
+                              builder: (_) => const ConnectionsScreen()),
+                        );
+                      },
+                    ),
+                    if (recentCount > 0)
+                      Positioned(
+                        right: 14,
+                        top: 10,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            '$recentCount',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
           ],
         ),
       ),
@@ -392,6 +442,7 @@ class _SectionTitle extends StatelessWidget {
         child: Text(text, style: Theme.of(context).textTheme.titleMedium),
       );
 }
+
 
 // ===== Post cell =====
 class _PostCell extends StatefulWidget {

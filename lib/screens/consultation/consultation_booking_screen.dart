@@ -7,6 +7,8 @@ import 'package:connect_app/theme/tokens.dart';
 import '/services/consultation_service.dart';
 import '/services/payment_service.dart';
 import 'package:connect_app/screens/pricing/pricing_config.dart';
+import '/services/interaction_service.dart';
+
 
 class ConsultationBookingScreen extends StatefulWidget {
   final String targetUserId;
@@ -223,7 +225,8 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
         _selectedDuration,
         scheduledAt: _scheduledAt!,
       );
-
+      
+      await InteractionService.recordInteraction(widget.targetUserId);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Consultation booked successfully.')),

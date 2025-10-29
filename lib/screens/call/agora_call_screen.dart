@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
+import '/services/interaction_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 const String appId = 'dac900a04a87460c87c3d18b63cac65d';
 
@@ -135,10 +137,22 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
               }
             });
           },
-          onUserJoined: (RtcConnection connection, int uid, int elapsed) {
-            _ringTimeout?.cancel();
-            setState(() => _remoteUid = uid);
-          },
+          onUserJoined: (RtcConnection connection, int uid, int elapsed) async {
+          _ringTimeout?.cancel();
+          setState(() => _remoteUid = uid);
+
+          // 👇 Add this
+          final me = FirebaseAuth.instance.currentUser?.uid;
+          if (me != null) {
+            // Extract the other user ID from channelName if you encoded it like `${me}_${otherId}`
+            final parts = widget.channelName.split('_');
+            final other = parts.firstWhere((p) => p != me, orElse: () => '');
+            if (other.isNotEmpty) {
+              await InteractionService.recordInteraction(other);
+            }
+          }
+        },
+
           onUserOffline: (RtcConnection connection, int uid, UserOfflineReasonType r) {
             // Remote hung up/declined
             setState(() {

@@ -56,8 +56,19 @@ class MyConsultationsScreen extends StatelessWidget {
               final scheduledAt = parseFirestoreTimestamp(data['scheduledAt']);
               final cost = data['cost'] ?? 0;
               final minutes = data['minutesRequested'] ?? 0;
-              // Use roomId if stored, otherwise fall back to consultationId
               final roomId = data['roomId'] ?? consultationId;
+
+              // ✅ Determine the other user in the consultation
+              final participants = (data['participants'] ?? []) as List;
+              final otherUserId = participants.firstWhere(
+                (id) => id != currentUserId,
+                orElse: () => null,
+              );
+
+              // ✅ Fetch optional display name if stored
+              final otherUserName =
+                  (data['otherUserName'] ?? data['partnerName'] ?? 'Helper')
+                      .toString();
 
               return Card(
                 margin: const EdgeInsets.all(8.0),
@@ -70,12 +81,23 @@ class MyConsultationsScreen extends StatelessWidget {
                   trailing: ElevatedButton(
                     child: const Text('Join'),
                     onPressed: () {
+                      if (otherUserId == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content:
+                                Text('No partner found for this consultation.'),
+                          ),
+                        );
+                        return;
+                      }
+
                       Navigator.push(
                         context,
                         MaterialPageRoute(
                           builder: (context) => ConsultationCallScreen(
                             roomId: roomId,
-                            userName: currentUser.displayName ?? 'User',
+                            otherUserId: otherUserId,
+                            otherUserName: otherUserName,
                           ),
                         ),
                       );

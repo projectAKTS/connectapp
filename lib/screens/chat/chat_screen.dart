@@ -9,11 +9,12 @@ import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
 import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
-
 import 'package:chewie/chewie.dart';
 import 'package:video_player/video_player.dart';
-
 import '../../theme/tokens.dart';
+import '../profile/profile_screen.dart'; // ✅ added for navigation
+import '/services/interaction_service.dart';
+
 
 class ChatScreen extends StatefulWidget {
   final String otherUserId;
@@ -161,6 +162,8 @@ class _ChatScreenState extends State<ChatScreen> {
       'text': t,
     });
 
+    await InteractionService.recordInteraction(widget.otherUserId);
+
     await chatRef.set({'updatedAt': now}, SetOptions(merge: true));
   }
 
@@ -248,6 +251,7 @@ class _ChatScreenState extends State<ChatScreen> {
         'size': bytes.length,
         'mime': mime,
       });
+      await InteractionService.recordInteraction(widget.otherUserId);
       await chatRef.set({'updatedAt': Timestamp.now()}, SetOptions(merge: true));
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -283,24 +287,48 @@ class _ChatScreenState extends State<ChatScreen> {
         titleSpacing: 0,
         title: Row(
           children: [
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: AppColors.avatarBg,
-              foregroundImage: (widget.otherUserAvatar?.isNotEmpty ?? false)
-                  ? NetworkImage(widget.otherUserAvatar!)
-                  : null,
-              child: const Icon(Icons.person_outline, color: AppColors.avatarFg, size: 18),
+            // ✅ Avatar now clickable
+            GestureDetector(
+              onTap: () {
+                if (widget.otherUserId.isNotEmpty) {
+                  Navigator.of(context, rootNavigator: true).push(
+                    MaterialPageRoute(
+                      builder: (_) => ProfileScreen(userID: widget.otherUserId),
+                    ),
+                  );
+                }
+              },
+              child: CircleAvatar(
+                radius: 16,
+                backgroundColor: AppColors.avatarBg,
+                foregroundImage: (widget.otherUserAvatar?.isNotEmpty ?? false)
+                    ? NetworkImage(widget.otherUserAvatar!)
+                    : null,
+                child: const Icon(Icons.person_outline, color: AppColors.avatarFg, size: 18),
+              ),
             ),
             const SizedBox(width: 10),
+            // ✅ Name now clickable
             Flexible(
-              child: Text(
-                _titleName?.isNotEmpty == true ? _titleName! : 'Chat',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: AppColors.text,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 20,
+              child: GestureDetector(
+                onTap: () {
+                  if (widget.otherUserId.isNotEmpty) {
+                    Navigator.of(context, rootNavigator: true).push(
+                      MaterialPageRoute(
+                        builder: (_) => ProfileScreen(userID: widget.otherUserId),
+                      ),
+                    );
+                  }
+                },
+                child: Text(
+                  _titleName?.isNotEmpty == true ? _titleName! : 'Chat',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.text,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 20,
+                  ),
                 ),
               ),
             ),
@@ -328,19 +356,15 @@ class _ChatScreenState extends State<ChatScreen> {
                 onSendPressed: (_) {},
                 user: types.User(id: _me),
                 theme: _chatTheme,
-
                 onMessageTap: (ctx, msg) async {
                   if (msg is types.FileMessage) await _openUri(msg.uri);
                 },
-
                 customBottomWidget: _Composer(
                   controller: _inputCtrl,
                   sending: _sending,
                   onAttach: _pickAttachment,
                   onSend: _sendText,
                 ),
-
-                // Inline renderer for video messages
                 customMessageBuilder: (message, {required int messageWidth}) {
                   if (message is types.CustomMessage) {
                     final meta = message.metadata ?? {};
@@ -471,7 +495,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
         videoPlayerController: _video,
         autoPlay: false,
         looping: false,
-        showControls: false, // we draw chrome ourselves
+        showControls: false,
         allowFullScreen: true,
         allowMuting: true,
       );
@@ -528,18 +552,10 @@ class _VideoBubbleState extends State<_VideoBubble> {
               )
             : Stack(
                 children: [
-                  // 1) The video
                   AspectRatio(aspectRatio: aspect, child: Chewie(controller: _chewie!)),
-
-                  // 2) Full-surface tap layer (UNDER the corner buttons)
                   Positioned.fill(
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(onTap: _togglePlay),
-                    ),
+                    child: Material(color: Colors.transparent, child: InkWell(onTap: _togglePlay)),
                   ),
-
-                  // 3) Center play button (only when paused) – tappable
                   if (!_video.value.isPlaying)
                     Positioned.fill(
                       child: Center(
@@ -558,28 +574,8 @@ class _VideoBubbleState extends State<_VideoBubble> {
                         ),
                       ),
                     ),
-
-                  // 4) Top-left: fullscreen
-                  Positioned(
-                    top: 8,
-                    left: 8,
-                    child: _ChromeIconButton(
-                      icon: Icons.fullscreen,
-                      onPressed: _openFullscreen,
-                    ),
-                  ),
-
-                  // 5) Top-right: mute
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: _ChromeIconButton(
-                      icon: _muted ? Icons.volume_off : Icons.volume_up,
-                      onPressed: _toggleMute,
-                    ),
-                  ),
-
-                  // 6) Bottom progress
+                  Positioned(top: 8, left: 8, child: _ChromeIconButton(icon: Icons.fullscreen, onPressed: _openFullscreen)),
+                  Positioned(top: 8, right: 8, child: _ChromeIconButton(icon: _muted ? Icons.volume_off : Icons.volume_up, onPressed: _toggleMute)),
                   Positioned(
                     left: 0,
                     right: 0,
@@ -612,7 +608,6 @@ class _VideoBubbleState extends State<_VideoBubble> {
   }
 }
 
-/// Fullscreen player route
 class _FullscreenVideoPage extends StatefulWidget {
   final String initialUrl;
   const _FullscreenVideoPage({required this.initialUrl});
@@ -637,7 +632,7 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
         looping: false,
         showControls: true,
         allowMuting: true,
-        allowFullScreen: false, // already full screen via route
+        allowFullScreen: false,
       );
       setState(() {});
     });
@@ -666,10 +661,7 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
             Positioned(
               top: 12,
               left: 12,
-              child: _ChromeIconButton(
-                icon: Icons.close,
-                onPressed: () => Navigator.of(context).pop(),
-              ),
+              child: _ChromeIconButton(icon: Icons.close, onPressed: () => Navigator.of(context).pop()),
             ),
           ],
         ),
@@ -678,7 +670,6 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
   }
 }
 
-/// Small rounded icon button (white icon on dark pill)
 class _ChromeIconButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onPressed;

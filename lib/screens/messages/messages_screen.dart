@@ -1,33 +1,32 @@
-// lib/screens/messages/messages_screen.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:connect_app/theme/tokens.dart';
 
 class MessagesScreen extends StatelessWidget {
-  const MessagesScreen({Key? key}) : super(key: key);
+  const MessagesScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final currentUser = FirebaseAuth.instance.currentUser;
+    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
 
     return Scaffold(
       backgroundColor: AppColors.canvas,
       appBar: AppBar(
         backgroundColor: AppColors.card,
         elevation: 0,
-        title: const Text(
-          'Messages',
-          style: TextStyle(color: AppColors.text, fontWeight: FontWeight.w600),
-        ),
         centerTitle: true,
         iconTheme: const IconThemeData(color: AppColors.text),
+        title: const Text(
+          'Messages',
+          style: TextStyle(
+              color: AppColors.text, fontWeight: FontWeight.w600, fontSize: 18),
+        ),
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
             .collection('chats')
-            .where('participants', arrayContains: currentUser?.uid)
-            .orderBy('lastMessageTime', descending: true)
+            .where('participants', arrayContains: currentUid)
             .snapshots(),
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
@@ -36,9 +35,8 @@ class MessagesScreen extends StatelessWidget {
           if (!snap.hasData || snap.data!.docs.isEmpty) {
             return const Center(
               child: Text(
-                'No messages yet.\nStart a conversation!',
+                'No conversations yet.',
                 style: TextStyle(color: AppColors.muted, fontSize: 16),
-                textAlign: TextAlign.center,
               ),
             );
           }
@@ -46,65 +44,101 @@ class MessagesScreen extends StatelessWidget {
           final chats = snap.data!.docs;
 
           return ListView.separated(
-            physics: const AlwaysScrollableScrollPhysics(),
             itemCount: chats.length,
-            separatorBuilder: (_, __) => const Divider(
-              height: 1,
-              color: AppColors.border,
-            ),
+            separatorBuilder: (_, __) =>
+                const Divider(height: 1, color: AppColors.border),
             itemBuilder: (context, i) {
-              final data = chats[i].data() as Map<String, dynamic>? ?? {};
-              final participants = (data['participants'] ?? []) as List?;
-              final otherUserId = participants
-                  ?.firstWhere((id) => id != currentUser?.uid, orElse: () => null);
+              final data = chats[i].data() as Map<String, dynamic>;
+              final participants = (data['participants'] ?? []) as List;
+              final otherId = participants
+                  .firstWhere((id) => id != currentUid, orElse: () => null);
+              final chatId = chats[i].id;
 
-              final otherName = (data['otherUserName'] ?? 'User') as String;
-              final avatar = (data['otherUserAvatar'] ?? '') as String;
-              final lastMsg = (data['lastMessage'] ?? '') as String;
-              final ts = data['lastMessageTime'];
-              final time = _formatTimestamp(ts);
+              if (otherId == null) {
+                return const SizedBox.shrink();
+              }
 
-              return ListTile(
-                leading: CircleAvatar(
-                  radius: 24,
-                  backgroundColor: AppColors.avatarBg,
-                  backgroundImage:
-                      avatar.isNotEmpty ? NetworkImage(avatar) : null,
-                  child: avatar.isEmpty
-                      ? const Icon(Icons.person_outline,
-                          color: AppColors.avatarFg)
-                      : null,
-                ),
-                title: Text(
-                  otherName,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.text,
-                    fontSize: 16,
-                  ),
-                ),
-                subtitle: Text(
-                  lastMsg.isEmpty ? '(No messages yet)' : lastMsg,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppColors.muted,
-                    fontSize: 14,
-                  ),
-                ),
-                trailing: Text(
-                  time,
-                  style: const TextStyle(
-                    color: AppColors.muted,
-                    fontSize: 12,
-                  ),
-                ),
-                onTap: () {
-                  if (otherUserId != null) {
-                    Navigator.of(context).pushNamed('/chat', arguments: {
-                      'otherUserId': otherUserId,
-                    });
+              // Fetch other user's profile from /users/{uid}
+              return FutureBuilder<DocumentSnapshot>(
+                future: FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(otherId)
+                    .get(),
+                builder: (context, userSnap) {
+                  if (!userSnap.hasData) {
+                    return const ListTile(
+                      leading: CircleAvatar(
+                        radius: 22,
+                        backgroundColor: AppColors.avatarBg,
+                        child: Icon(Icons.person_outline,
+                            color: AppColors.avatarFg),
+                      ),
+                      title: Text('Loading...',
+                          style: TextStyle(color: AppColors.muted)),
+                    );
                   }
+
+                  final userData =
+                      userSnap.data?.data() as Map<String, dynamic>? ?? {};
+                  final otherName =
+                      (userData['name'] ?? userData['displayName'] ?? 'User')
+                          .toString();
+                  final avatar =
+                      (userData['avatar'] ?? userData['photoUrl'] ?? '')
+                          .toString();
+
+                  return ListTile(
+                    leading: CircleAvatar(
+                      radius: 24,
+                      backgroundColor: AppColors.avatarBg,
+                      backgroundImage:
+                          avatar.isNotEmpty ? NetworkImage(avatar) : null,
+                      child: avatar.isEmpty
+                          ? const Icon(Icons.person_outline,
+                              color: AppColors.avatarFg)
+                          : null,
+                    ),
+                    title: Text(
+                      otherName,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.text,
+                        fontSize: 16,
+                      ),
+                    ),
+                    subtitle: FutureBuilder<QuerySnapshot>(
+                      future: FirebaseFirestore.instance
+                          .collection('chats')
+                          .doc(chatId)
+                          .collection('messages')
+                          .orderBy('createdAt', descending: true)
+                          .limit(1)
+                          .get(),
+                      builder: (context, msgSnap) {
+                        if (!msgSnap.hasData || msgSnap.data!.docs.isEmpty) {
+                          return const Text('(No messages yet)',
+                              style: TextStyle(color: AppColors.muted));
+                        }
+                        final last = msgSnap.data!.docs.first.data()
+                            as Map<String, dynamic>;
+                        return Text(
+                          last['text'] ?? '',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: AppColors.muted, fontSize: 14),
+                        );
+                      },
+                    ),
+                    onTap: () {
+                      Navigator.of(context).pushNamed('/chat', arguments: {
+                        'chatId': chatId,
+                        'otherUserId': otherId,
+                        'otherUserName': otherName,
+                        'otherUserAvatar': avatar,
+                      });
+                    },
+                  );
                 },
               );
             },
@@ -112,22 +146,5 @@ class MessagesScreen extends StatelessWidget {
         },
       ),
     );
-  }
-
-  /// Formats Firestore timestamp to human-readable short string.
-  String _formatTimestamp(dynamic ts) {
-    if (ts == null) return '';
-    try {
-      final dt = (ts is Timestamp) ? ts.toDate() : DateTime.parse(ts.toString());
-      final now = DateTime.now();
-      final diff = now.difference(dt);
-      if (diff.inMinutes < 1) return 'now';
-      if (diff.inMinutes < 60) return '${diff.inMinutes}m';
-      if (diff.inHours < 24) return '${diff.inHours}h';
-      if (diff.inDays < 7) return '${diff.inDays}d';
-      return '${dt.month}/${dt.day}';
-    } catch (_) {
-      return '';
-    }
   }
 }
