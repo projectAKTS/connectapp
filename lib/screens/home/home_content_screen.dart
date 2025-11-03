@@ -302,6 +302,18 @@ class _WelcomeCard extends StatelessWidget {
     required this.onFindHelper,
   });
 
+  Future<void> _markConnectionsSeen(String uid) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .set({'lastConnectionsSeenAt': FieldValue.serverTimestamp()},
+              SetOptions(merge: true));
+    } catch (_) {
+      // ignore UI errors
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -334,63 +346,83 @@ class _WelcomeCard extends StatelessWidget {
                 label: 'Find a helper',
                 onTap: onFindHelper),
             const SizedBox(height: 12),
-            // ✅ My Connections with badge
-            StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('connections')
-                  .where('userId', isEqualTo: uid)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                int recentCount = 0;
-                if (snapshot.hasData) {
-                  final now = DateTime.now();
-                  final lastWeek = now.subtract(const Duration(days: 7));
-                  for (var doc in snapshot.data!.docs) {
-                    final d = doc.data() as Map<String, dynamic>;
-                    final connectedAt = parseFirestoreTimestamp(d['connectedAt']);
-                    if (connectedAt != null && connectedAt.isAfter(lastWeek)) {
-                      recentCount++;
-                    }
-                  }
-                }
 
-                return Stack(
-                  children: [
-                    _TaupePill(
-                      icon: Icons.people_alt_outlined,
-                      label: 'My connections',
-                      onTap: () {
-                        Navigator.of(context, rootNavigator: true).push(
-                          MaterialPageRoute(
-                              builder: (_) => const ConnectionsScreen()),
-                        );
-                      },
-                    ),
-                    if (recentCount > 0)
-                      Positioned(
-                        right: 14,
-                        top: 10,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.primary,
-                            borderRadius: BorderRadius.circular(12),
+            // ✅ My Connections with live badge based on lastConnectionsSeenAt
+            if (uid != null)
+              StreamBuilder<DocumentSnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(uid)
+                    .snapshots(),
+                builder: (context, userSnap) {
+                  DateTime? lastSeen;
+                  if (userSnap.hasData) {
+                    final d = userSnap.data!.data() as Map<String, dynamic>?;
+                    lastSeen = parseFirestoreTimestamp(d?['lastConnectionsSeenAt']);
+                  }
+
+                  return StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collection('connections')
+                        .where('users', arrayContains: uid) // we store 'users': [a,b]
+                        .snapshots(),
+                    builder: (context, connSnap) {
+                      int recentCount = 0;
+                      if (connSnap.hasData) {
+                        for (final doc in connSnap.data!.docs) {
+                          final data = doc.data() as Map<String, dynamic>;
+                          final connectedAt = parseFirestoreTimestamp(data['connectedAt']);
+                          if (connectedAt == null) continue;
+                          // Count only items newer than lastSeen; if lastSeen is null, count all
+                          if (lastSeen == null || connectedAt.isAfter(lastSeen!)) {
+                            recentCount++;
+                          }
+                        }
+                      }
+
+                      return Stack(
+                        children: [
+                          _TaupePill(
+                            icon: Icons.people_alt_outlined,
+                            label: 'My connections',
+                            onTap: () async {
+                              // Mark as seen BEFORE navigating, so badge clears on return
+                              await _markConnectionsSeen(uid);
+                              // Navigate to Connections
+                              // ignore: use_build_context_synchronously
+                              Navigator.of(context, rootNavigator: true).push(
+                                MaterialPageRoute(
+                                    builder: (_) => const ConnectionsScreen()),
+                              );
+                            },
                           ),
-                          child: Text(
-                            '$recentCount',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
+                          if (recentCount > 0)
+                            Positioned(
+                              right: 14,
+                              top: 10,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppColors.primary,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  '$recentCount',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
-                      ),
-                  ],
-                );
-              },
-            ),
+                        ],
+                      );
+                    },
+                  );
+                },
+              ),
           ],
         ),
       ),
@@ -442,7 +474,6 @@ class _SectionTitle extends StatelessWidget {
         child: Text(text, style: Theme.of(context).textTheme.titleMedium),
       );
 }
-
 
 // ===== Post cell =====
 class _PostCell extends StatefulWidget {
