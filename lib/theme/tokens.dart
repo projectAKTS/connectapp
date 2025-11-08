@@ -7,6 +7,7 @@ class AppColors {
   // Core surfaces
   static const canvas = Color(0xFFFFFFFF); // Pure White background
   static const card   = Color(0xFFFBFAF8); // Ultra-white Card
+  static const postCard = Color(0xFFF4F2EF); // Slightly darker for post cards ⭐️ added
   static const button = Color(0xFFF7F5F2); // Soft Surface
   static const surface = button;
   static const surfaceTonal = button;
@@ -22,7 +23,7 @@ class AppColors {
   static const danger = Color(0xFFD75A4A);
 
   // Chips / Avatar defaults
-  static const chip = button; // 🔹 fix: alias to button so HomeScreen works
+  static const chip = button; // 🔹 alias to button so HomeScreen works
   static const avatarBg = Color(0xFFE6E1DA);
   static const avatarFg = text;
 }

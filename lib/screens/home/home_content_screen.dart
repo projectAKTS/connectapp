@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_markdown/flutter_markdown.dart'; // ✅ added for markdown rendering
 
 import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/theme/tokens.dart';
@@ -185,7 +186,7 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                       final avatar = (raw['userAvatar'] ?? '') as String;
                       final body = (raw['content'] ?? '').toString();
                       final right = _shortFromTs(raw['timestamp']);
-                      final subtitle = '${right} ago';
+                      final subtitle = '$right ago';
                       final imageUrl = (raw['imageUrl'] ?? '').toString();
                       final videoUrl = (raw['videoUrl'] ?? '').toString();
                       final videoThumbUrl = (raw['videoThumbUrl'] ?? '').toString();
@@ -539,7 +540,7 @@ class _PostCellState extends State<_PostCell> {
 
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.card,
+        color: AppColors.postCard, // ✅ subtle contrast improvement
         borderRadius: BorderRadius.circular(AppRadius.xl),
         boxShadow: const [AppShadows.soft],
         border: Border.all(color: borderColor, width: 1),
@@ -639,68 +640,165 @@ class _PostHeader extends StatelessWidget {
 }
 
 // ===== Shared widgets =====
+
+// ——— Category badge (for "**Experience Post**", "**Advice Request Post**", etc.) ———
+class _PostTypeBadge extends StatelessWidget {
+  final String label;
+  const _PostTypeBadge({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppColors.primary.withOpacity(0.18)),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: AppColors.primary,
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
+}
+
+// ===== Replace your existing _ExpandableText with this version (no markdown package) =====
 class _ExpandableText extends StatelessWidget {
   final String content;
   final bool expanded;
   final int maxLinesWhenCollapsed;
   final VoidCallback onToggle;
-  const _ExpandableText(
-      {required this.content,
-      required this.expanded,
-      required this.maxLinesWhenCollapsed,
-      required this.onToggle});
+  const _ExpandableText({
+    required this.content,
+    required this.expanded,
+    required this.maxLinesWhenCollapsed,
+    required this.onToggle,
+  });
+
+  // Pull out a first line like "**Experience Post**"
+  // Returns (badgeLabel, remainingText)
+  (String?, String) _extractBadge(String raw) {
+    final lines = raw.split('\n');
+
+    // find first non-empty line
+    int idx = 0;
+    while (idx < lines.length && lines[idx].trim().isEmpty) idx++;
+    if (idx >= lines.length) return (null, raw);
+
+    final first = lines[idx].trim();
+    final reg = RegExp(r'^\*\*(.+?)\*\*$'); // **Something**
+    final m = reg.firstMatch(first);
+    if (m != null && m.group(1) != null) {
+      final label = m.group(1)!.trim();
+      // treat as badge if it ends with "Post" (case-insensitive)
+      if (label.toLowerCase().endsWith(' post')) {
+        final rest = [...lines]..removeAt(idx);
+        // also trim a single blank line after for spacing
+        if (idx < rest.length && rest[idx].trim().isEmpty) {
+          rest.removeAt(idx);
+        }
+        return (label, rest.join('\n').trimLeft());
+      }
+    }
+    return (null, raw);
+  }
 
   @override
   Widget build(BuildContext context) {
-    const style = TextStyle(fontSize: 16, height: 1.4, color: AppColors.text);
+    const base = TextStyle(fontSize: 16, height: 1.4, color: AppColors.text);
+    const strong = TextStyle(
+      fontSize: 16,
+      height: 1.4,
+      color: AppColors.text,
+      fontWeight: FontWeight.w700,
+    );
+
+    final (badgeLabel, restText) = _extractBadge(content);
+    final span = _parseSimpleMarkdownToSpan(restText, base: base, strong: strong);
+
     return LayoutBuilder(builder: (ctx, constraints) {
+      // Measure with exact max width and line cap.
       final tp = TextPainter(
-        text: TextSpan(text: content, style: style),
+        text: span,
         textDirection: TextDirection.ltr,
         maxLines: maxLinesWhenCollapsed,
       )..layout(maxWidth: constraints.maxWidth);
+
       final hasOverflow = tp.didExceedMaxLines;
-      if (!hasOverflow) return Text(content, style: style);
+
+      Widget rich() => RichText(text: span);
+
+      if (!hasOverflow) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (badgeLabel != null) ...[
+              _PostTypeBadge(label: badgeLabel),
+              const SizedBox(height: 8),
+            ],
+            rich(),
+          ],
+        );
+      }
+
       if (expanded) {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(content, style: style),
+            if (badgeLabel != null) ...[
+              _PostTypeBadge(label: badgeLabel),
+              const SizedBox(height: 8),
+            ],
+            rich(),
             const SizedBox(height: 6),
             _ShowMoreButton(expanded: true, onTap: onToggle),
           ],
         );
       }
-      return Stack(children: [
-        Text(content,
-            style: style,
-            maxLines: maxLinesWhenCollapsed,
-            overflow: TextOverflow.clip),
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 28,
-          child: IgnorePointer(
-            child: Container(
-              height: 38,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    AppColors.card.withOpacity(0.0),
-                    AppColors.card.withOpacity(0.95),
-                  ],
-                ),
+
+      // Collapsed: strictly clamp height to the measured line height * lines.
+      final collapsedHeight = tp.preferredLineHeight * maxLinesWhenCollapsed;
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (badgeLabel != null) ...[
+            _PostTypeBadge(label: badgeLabel),
+            const SizedBox(height: 8),
+          ],
+          // The SizedBox + ClipRect prevents any render overflow.
+          SizedBox(
+            height: collapsedHeight,
+            child: ClipRect(
+              child: ShaderMask(
+                shaderCallback: (Rect r) {
+                  return const LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.transparent,
+                      Color(0xCCFFFFFF),
+                      Color(0xFFFFFFFF),
+                    ],
+                    stops: [0.0, 0.80, 0.93, 1.0],
+                  ).createShader(r);
+                },
+                blendMode: BlendMode.dstOut,
+                child: rich(),
               ),
             ),
           ),
-        ),
-        Positioned(
-            bottom: 0,
-            left: 0,
-            child: _ShowMoreButton(expanded: false, onTap: onToggle)),
-      ]);
+          const SizedBox(height: 6),
+          _ShowMoreButton(expanded: false, onTap: onToggle),
+        ],
+      );
     });
   }
 }
@@ -807,4 +905,34 @@ class _Avatar extends StatelessWidget {
           child:
               const Icon(Icons.person_outline, color: AppColors.avatarFg))
       : CircleAvatar(radius: radius, backgroundImage: NetworkImage(url));
+}
+
+// Put this helper near the bottom of the file (outside the widget classes).
+TextSpan _parseSimpleMarkdownToSpan(
+  String text, {
+  required TextStyle base,
+  required TextStyle strong,
+}) {
+  final spans = <TextSpan>[];
+  int i = 0;
+  while (i < text.length) {
+    final start = text.indexOf('**', i);
+    if (start == -1) {
+      spans.add(TextSpan(text: text.substring(i), style: base));
+      break;
+    }
+    if (start > i) {
+      spans.add(TextSpan(text: text.substring(i, start), style: base));
+    }
+    final end = text.indexOf('**', start + 2);
+    if (end == -1) {
+      // Unbalanced ** — render the rest as normal text.
+      spans.add(TextSpan(text: text.substring(start), style: base));
+      break;
+    }
+    final boldText = text.substring(start + 2, end);
+    spans.add(TextSpan(text: boldText, style: strong));
+    i = end + 2;
+  }
+  return TextSpan(children: spans, style: base);
 }

@@ -25,37 +25,69 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   final TextEditingController _contentController = TextEditingController();
   final TextEditingController _tagController = TextEditingController();
 
+  // For template fields
+  final TextEditingController _field1 = TextEditingController();
+  final TextEditingController _field2 = TextEditingController();
+  final TextEditingController _field3 = TextEditingController();
+
   bool _isPosting = false;
   List<String> selectedTags = [];
   String selectedType = 'Experience';
+  String postMode = 'Quick';
+  String selectedTemplate = 'Experience';
 
   File? _imageFile;
   File? _videoFile;
   String? _videoThumbPath;
-  double? _mediaAspect; // image ~16/9, video ~1.0
+  double? _mediaAspect;
 
   final picker = ImagePicker();
 
-  final Map<String, String> typePrompt = const {
-    'Experience': 'What happened? What did you learn?',
-    'Advice': 'What help do you need? Be specific.',
-    'How-To': 'Break it down step-by-step.',
-    'Looking For...': 'Describe your situation and the kind of people you’d like advice or insight from.',
+  final Map<String, Map<String, String>> templates = {
+    'Experience': {
+      'desc': 'Share what you went through and what you learned',
+      'q1': 'What happened?',
+      'q2': 'What did you learn?',
+      'q3': 'What advice would you give others?',
+    },
+    'Advice Request': {
+      'desc': 'Ask the community for help or insight',
+      'q1': 'What’s your challenge or question?',
+      'q2': 'What have you tried so far?',
+      'q3': 'What kind of advice do you need?',
+    },
+    'How-To Guide': {
+      'desc': 'Teach others something step-by-step',
+      'q1': 'What are you explaining?',
+      'q2': 'List the steps clearly',
+      'q3': 'What’s the key takeaway?',
+    },
+    'Lessons Learned': {
+      'desc': 'Share a few insights or realizations',
+      'q1': 'Topic of your lesson',
+      'q2': 'List 3–10 lessons or takeaways',
+      'q3': 'One key message for others',
+    },
   };
 
-  final Map<String, String> typeDescriptions = const {
-    'Experience': 'Share what you’ve been through to help others',
-    'Advice': 'Ask for tips or feedback on a challenge',
-    'How-To': 'Break down how to solve something step-by-step',
-    'Looking For...': 'Find people who’ve been through a specific experience',
-  };
-
-  bool get _canPost => !_isPosting && _contentController.text.trim().isNotEmpty;
+  bool get _canPost {
+    if (_isPosting) return false;
+    if (postMode == 'Quick') {
+      return _contentController.text.trim().isNotEmpty;
+    } else {
+      return _field1.text.trim().isNotEmpty ||
+          _field2.text.trim().isNotEmpty ||
+          _field3.text.trim().isNotEmpty;
+    }
+  }
 
   @override
   void dispose() {
     _contentController.dispose();
     _tagController.dispose();
+    _field1.dispose();
+    _field2.dispose();
+    _field3.dispose();
     super.dispose();
   }
 
@@ -71,7 +103,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         _imageFile = File(picked.path);
         _videoFile = null;
         _videoThumbPath = null;
-        _mediaAspect = 16 / 9; // horizontal look
+        _mediaAspect = 16 / 9;
       });
     }
   }
@@ -85,7 +117,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
     final video = File(picked.path);
 
-    // Generate a local JPEG thumbnail (square, ~480px)
     String? thumbPath;
     try {
       final tempDir = await getTemporaryDirectory();
@@ -95,47 +126,57 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         imageFormat: ImageFormat.JPEG,
         maxWidth: 480,
         quality: 75,
-        timeMs: 0, // first frame
+        timeMs: 0,
       );
       if (out != null) thumbPath = out;
-    } catch (_) {
-      // if it fails, we’ll still post without a thumb
-    }
+    } catch (_) {}
 
     setState(() {
       _videoFile = video;
       _imageFile = null;
-      _mediaAspect = 1.0;      // square look in feed
-      _videoThumbPath = thumbPath; // may be null if generation failed
+      _mediaAspect = 1.0;
+      _videoThumbPath = thumbPath;
     });
   }
 
   // —— Save post ————————————————————————————————————————————————
   Future<void> _savePost() async {
-    final content = _contentController.text.trim();
-    if (content.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please write your post')),
-      );
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Please log in to post')));
       return;
     }
 
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please log in to post')),
-      );
-      return;
+    String content;
+    if (postMode == 'Quick') {
+      content = _contentController.text.trim();
+      if (content.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Please write your post')));
+        return;
+      }
+    } else {
+      content = '''
+**${selectedTemplate} Post**
+
+**${templates[selectedTemplate]!['q1']}**
+${_field1.text.trim()}
+
+**${templates[selectedTemplate]!['q2']}**
+${_field2.text.trim()}
+
+**${templates[selectedTemplate]!['q3']}**
+${_field3.text.trim()}
+''';
     }
 
     setState(() => _isPosting = true);
-
     String? imageUrl;
     String? videoUrl;
     String? videoThumbUrl;
 
     try {
-      // Upload image (if any)
       if (_imageFile != null) {
         final ref = FirebaseStorage.instance
             .ref()
@@ -145,7 +186,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         imageUrl = await ref.getDownloadURL();
       }
 
-      // Upload video (if any)
       if (_videoFile != null) {
         final vRef = FirebaseStorage.instance
             .ref()
@@ -154,7 +194,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         await vRef.putFile(_videoFile!);
         videoUrl = await vRef.getDownloadURL();
 
-        // Upload thumb if we generated one
         if (_videoThumbPath != null) {
           final tRef = FirebaseStorage.instance
               .ref()
@@ -168,7 +207,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       await _postService.createPost(
         content,
         selectedTags,
-        selectedType,
+        selectedTemplate,
         imageUrl: imageUrl,
         videoUrl: videoUrl,
         videoThumbUrl: videoThumbUrl,
@@ -177,9 +216,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
       await _streakService.updateStreak(currentUser.uid);
 
-      // Reset form
       _contentController.clear();
       _tagController.clear();
+      _field1.clear();
+      _field2.clear();
+      _field3.clear();
       setState(() {
         selectedTags.clear();
         _imageFile = null;
@@ -190,9 +231,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       });
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Post created!')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('✅ Post created!')));
 
       if (Navigator.canPop(context)) {
         Navigator.pop(context, 'posted');
@@ -201,15 +241,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to post: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Failed to post: $e')));
     } finally {
       if (mounted) setState(() => _isPosting = false);
     }
   }
 
-  // —— UI helpers ————————————————————————————————————————————————
+  // —— UI Helpers ————————————————————————————————————————————————
   InputDecoration _pillInput({required String hint}) {
     return InputDecoration(
       hintText: hint,
@@ -240,7 +279,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             child: Image.file(_imageFile!, height: 220, fit: BoxFit.cover),
           ),
           Positioned(
-            top: 8, right: 8,
+            top: 8,
+            right: 8,
             child: _RemoveChip(onTap: () {
               setState(() {
                 _imageFile = null;
@@ -262,11 +302,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 : Container(
                     height: 220,
                     color: Colors.black12,
-                    child: const Center(child: Icon(Icons.videocam, size: 64, color: Colors.black54)),
+                    child: const Center(
+                        child: Icon(Icons.videocam, size: 64, color: Colors.black54)),
                   ),
           ),
           Positioned(
-            top: 8, right: 8,
+            top: 8,
+            right: 8,
             child: _RemoveChip(onTap: () {
               setState(() {
                 _videoFile = null;
@@ -279,6 +321,78 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       );
     }
     return const SizedBox.shrink();
+  }
+
+  // —— Enhanced Template Input Builder ———————————————————————————
+  Widget _buildTemplateFields() {
+    final tpl = templates[selectedTemplate]!;
+    final iconMap = {
+      'Experience': Icons.auto_stories_rounded,
+      'Advice Request': Icons.lightbulb_outline_rounded,
+      'How-To Guide': Icons.list_alt_rounded,
+      'Lessons Learned': Icons.school_rounded,
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          margin: const EdgeInsets.only(bottom: 16),
+          decoration: BoxDecoration(
+            color: AppColors.button,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.star_rounded, color: AppColors.text, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Tip: Posts that share what you learned get 3× more helpful votes ✨',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: AppColors.text.withOpacity(0.8)),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Row(
+          children: [
+            Icon(iconMap[selectedTemplate] ?? Icons.auto_awesome_rounded,
+                color: AppColors.text.withOpacity(0.8)),
+            const SizedBox(width: 8),
+            Text(
+              tpl['desc']!,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.text.withOpacity(0.9),
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _buildTemplateCard(
+          title: tpl['q1']!,
+          controller: _field1,
+          hint: 'Type your answer here...',
+        ),
+        const SizedBox(height: 14),
+        _buildTemplateCard(
+          title: tpl['q2']!,
+          controller: _field2,
+          hint: 'Add more details or steps...',
+        ),
+        const SizedBox(height: 14),
+        _buildTemplateCard(
+          title: tpl['q3']!,
+          controller: _field3,
+          hint: 'What’s the takeaway for others?',
+        ),
+      ],
+    );
   }
 
   @override
@@ -296,42 +410,63 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Choose Post Type:',
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: typePrompt.keys.map((type) {
-                  final isSel = selectedType == type;
-                  return ChoiceChip(
-                    label: Text(type),
-                    selected: isSel,
-                    onSelected: (_) => setState(() => selectedType = type),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ChoiceChip(
+                    label: const Text('Quick Post'),
+                    selected: postMode == 'Quick',
+                    onSelected: (_) => setState(() => postMode = 'Quick'),
                     selectedColor: AppColors.button,
-                    backgroundColor: AppColors.card,
-                    side: const BorderSide(color: AppColors.border),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    labelStyle: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: isSel ? AppColors.text : AppColors.text.withOpacity(0.9),
-                    ),
-                  );
-                }).toList(),
+                  ),
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    label: const Text('Template Post'),
+                    selected: postMode == 'Template',
+                    onSelected: (_) => setState(() => postMode = 'Template'),
+                    selectedColor: AppColors.button,
+                  ),
+                ],
               ),
-              const SizedBox(height: 6),
-              Text(typeDescriptions[selectedType]!, style: Theme.of(context).textTheme.bodyMedium),
-
               const SizedBox(height: 20),
-              TextField(
-                controller: _contentController,
-                maxLines: 8,
-                textInputAction: TextInputAction.newline,
-                decoration: _pillInput(hint: typePrompt[selectedType]!),
-              ),
-
+              if (postMode == 'Quick')
+                TextField(
+                  controller: _contentController,
+                  maxLines: 8,
+                  decoration: _pillInput(
+                      hint:
+                          'Share your experience, advice, or insight to help others...'),
+                )
+              else ...[
+                Text('Choose Template:',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyLarge
+                        ?.copyWith(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: templates.keys.map((type) {
+                    final isSel = selectedTemplate == type;
+                    return ChoiceChip(
+                      label: Text(type),
+                      selected: isSel,
+                      onSelected: (_) => setState(() => selectedTemplate = type),
+                      selectedColor: AppColors.button,
+                      backgroundColor: AppColors.card,
+                      side: const BorderSide(color: AppColors.border),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 16),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  child: _buildTemplateFields(),
+                ),
+              ],
               const SizedBox(height: 20),
               TextField(
                 controller: _tagController,
@@ -351,22 +486,22 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: selectedTags.map((tag) {
-                  return Chip(
-                    label: Text(tag, style: const TextStyle(fontWeight: FontWeight.w600)),
-                    backgroundColor: AppColors.button,
-                    shape: const StadiumBorder(side: BorderSide(color: AppColors.border)),
-                    deleteIcon: const Icon(Icons.close, size: 18, color: AppColors.muted),
-                    onDeleted: () => setState(() => selectedTags.remove(tag)),
-                  );
-                }).toList(),
+                children: selectedTags
+                    .map((tag) => Chip(
+                          label: Text(tag,
+                              style: const TextStyle(fontWeight: FontWeight.w600)),
+                          backgroundColor: AppColors.button,
+                          shape: const StadiumBorder(
+                              side: BorderSide(color: AppColors.border)),
+                          deleteIcon:
+                              const Icon(Icons.close, size: 18, color: AppColors.muted),
+                          onDeleted: () => setState(() => selectedTags.remove(tag)),
+                        ))
+                    .toList(),
               ),
-
               const Divider(height: 32, color: AppColors.border),
-
               _mediaPreview(),
               if (_imageFile != null || _videoFile != null) const SizedBox(height: 12),
-
               Row(
                 children: [
                   TextButton.icon(
@@ -380,7 +515,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         borderRadius: BorderRadius.circular(12),
                         side: const BorderSide(color: AppColors.border),
                       ),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -395,12 +531,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         borderRadius: BorderRadius.circular(12),
                         side: const BorderSide(color: AppColors.border),
                       ),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                     ),
                   ),
                 ],
               ),
-
               const SizedBox(height: 24),
               ElevatedButton.icon(
                 icon: _isPosting
@@ -443,11 +579,60 @@ class _RemoveChip extends StatelessWidget {
             children: [
               Icon(Icons.close, size: 16, color: Colors.white),
               SizedBox(width: 6),
-              Text('Remove', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+              Text('Remove',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
             ],
           ),
         ),
       ),
     );
   }
+}
+
+Widget _buildTemplateCard({
+  required String title,
+  required TextEditingController controller,
+  required String hint,
+}) {
+  return Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      border: Border.all(color: AppColors.border),
+      borderRadius: BorderRadius.circular(16),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.03),
+          blurRadius: 4,
+          offset: const Offset(0, 2),
+        ),
+      ],
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            color: AppColors.text,
+            fontSize: 15,
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: controller,
+          maxLines: null,
+          keyboardType: TextInputType.multiline,
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: TextStyle(color: AppColors.text.withOpacity(0.5)),
+            border: InputBorder.none,
+            isDense: true,
+          ),
+          style: const TextStyle(height: 1.4),
+        ),
+      ],
+    ),
+  );
 }
