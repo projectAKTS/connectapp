@@ -3,13 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter_markdown/flutter_markdown.dart'; // ✅ added for markdown rendering
 
 import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/theme/tokens.dart';
 import 'package:connect_app/screens/connections/connections_screen.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
 import 'package:connect_app/screens/messages/messages_screen.dart';
+import 'package:connect_app/screens/search/find_helper_screen.dart'; // ✅ new: dedicated helper finder
 
 // Fullscreen viewers
 import 'package:connect_app/screens/posts/post_video_player.dart';
@@ -143,8 +143,9 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
             SliverToBoxAdapter(
               child: _WelcomeCard(
                 name: firstName,
-                onFindHelper: () =>
-                    Navigator.of(context, rootNavigator: true).pushNamed('/search'),
+                onFindHelper: () => Navigator.of(context, rootNavigator: true).push(
+                  MaterialPageRoute(builder: (_) => const FindHelperScreen()),
+                ),
               ),
             ),
             const SliverToBoxAdapter(child: _SectionTitle('Recent posts')),
@@ -342,10 +343,13 @@ class _WelcomeCard extends StatelessWidget {
             Text('Welcome, $name',
                 style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 14),
+
+            // ✅ Now opens dedicated helper finder
             _TaupePill(
-                icon: Icons.search,
-                label: 'Find a helper',
-                onTap: onFindHelper),
+              icon: Icons.manage_search_rounded,
+              label: 'Find a helper',
+              onTap: onFindHelper,
+            ),
             const SizedBox(height: 12),
 
             // ✅ My Connections with live badge based on lastConnectionsSeenAt
@@ -540,7 +544,7 @@ class _PostCellState extends State<_PostCell> {
 
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.postCard, // ✅ subtle contrast improvement
+        color: AppColors.postCard, // subtle contrast
         borderRadius: BorderRadius.circular(AppRadius.xl),
         boxShadow: const [AppShadows.soft],
         border: Border.all(color: borderColor, width: 1),
@@ -668,7 +672,7 @@ class _PostTypeBadge extends StatelessWidget {
   }
 }
 
-// ===== Replace your existing _ExpandableText with this version (no markdown package) =====
+// ===== Expandable text (no markdown dependency) =====
 class _ExpandableText extends StatelessWidget {
   final String content;
   final bool expanded;
