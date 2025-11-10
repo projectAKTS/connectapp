@@ -57,7 +57,7 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
     try {
       List<QueryDocumentSnapshot<Map<String, dynamic>>> docs = [];
 
-      // Primary: helpers only
+      // Primary: helpers only (kept exactly as-is)
       try {
         final snap = await FirebaseFirestore.instance
             .collection('users')
@@ -67,36 +67,57 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
         docs = snap.docs;
       } catch (_) {}
 
-      // Fallback: if none returned, pull a broader batch and infer helpers.
+      // Fallback: if none returned, pull a broader batch (NO extra filtering)
       if (docs.isEmpty) {
         try {
           final broad = await FirebaseFirestore.instance
               .collection('users')
               .limit(400)
               .get();
-          docs = broad.docs.where((d) {
-            final m = d.data();
-            final hasFlag = m['isHelper'] == true;
-            final hasCats = (m['categories'] is List) && (m['categories'] as List).isNotEmpty;
-            final hasRate = _toDouble(m['hourlyRate']) != null;
-            return hasFlag || hasCats || hasRate;
-          }).toList();
+          docs = broad.docs;
         } catch (_) {}
       }
 
       final list = <_Helper>[];
       for (final d in docs) {
         final m = d.data();
+
+        // Derive fields from onboarding-style keys when missing
+        final List<String> categoriesRaw =
+            (m['categories'] is List) ? List<String>.from(m['categories']) : const [];
+        final List<String> interestTags =
+            (m['interestTags'] is List) ? List<String>.from(m['interestTags']) : const [];
+        final List<String> languagesRaw =
+            (m['languages'] is List) ? List<String>.from(m['languages']) : const [];
+        final String singleLanguage = (m['language'] ?? '').toString().trim();
+        final String photo =
+            (m['photoURL'] ?? m['avatar'] ?? m['profilePicture'] ?? '').toString();
+
+        final List<String> categories =
+            categoriesRaw.isNotEmpty ? categoriesRaw : interestTags;
+        final List<String> languages =
+            languagesRaw.isNotEmpty
+                ? languagesRaw.map((e) => e.toString()).toList()
+                : (singleLanguage.isNotEmpty ? <String>[singleLanguage] : <String>[]);
+
+        final bool availableFlag = (m['isAvailable'] == true);
+        final String availabilityStr = (m['availability'] ?? '').toString();
+        final bool derivedAvailable = availabilityStr.isNotEmpty;
+
+        final bool verifiedFlag = (m['isVerified'] == true);
+        final bool badgesVerified = (m['badges'] is List) &&
+            (m['badges'] as List).map((e) => e.toString().toLowerCase()).contains('verified');
+
         list.add(_Helper(
           id: d.id,
-          name: (m['displayName'] ?? m['userName'] ?? 'User').toString(),
+          name: (m['displayName'] ?? m['fullName'] ?? m['userName'] ?? 'User').toString(),
           handle: (m['userName'] ?? '').toString(),
           bio: (m['bio'] ?? '').toString(),
-          avatar: (m['photoURL'] ?? m['avatar'] ?? '').toString(),
-          categories: ((m['categories'] ?? []) as List).map((e) => e.toString()).toList(),
-          languages: ((m['languages']  ?? []) as List).map((e) => e.toString()).toList(),
-          isAvailable: (m['isAvailable'] == true),
-          isVerified: (m['isVerified'] == true),
+          avatar: photo,
+          categories: categories.map((e) => e.toString()).toList(),
+          languages: languages.map((e) => e.toString()).toList(),
+          isAvailable: availableFlag || derivedAvailable,
+          isVerified: verifiedFlag || badgesVerified,
           hourlyRate: _toDouble(m['hourlyRate']),
           rating: _toDouble(m['rating']) ?? 0.0,
           createdAt: m['createdAt'],
@@ -517,7 +538,7 @@ class _FilterRow extends StatelessWidget {
     // Helper to pass COPIES so parent mutations don't clear our local sets.
     Set<String> _copy(Set<String> s) => Set<String>.of(s);
 
-    // —— First row (single line, horizontally scrollable) with Verified included
+    // —— First row (always single line, horizontally scrollable):
     final firstRow = SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
@@ -531,15 +552,17 @@ class _FilterRow extends StatelessWidget {
               final result = await _pickListSheet(
                 context,
                 title: 'Select categories',
+                // Use onboarding categories
                 options: const [
                   'Immigration',
-                  'Housing',
-                  'Healthcare',
-                  'Jobs',
-                  'Education',
-                  'Refugee Support',
-                  'Legal',
-                  'Finance',
+                  'Moving to Canada',
+                  'PR Pathways',
+                  'Quebec-specific help',
+                  'Job hunting',
+                  'Refugee claim process',
+                  'Student life',
+                  'Parenting support',
+                  'Language learning',
                 ],
                 initial: selectedCategories,
               );
@@ -566,9 +589,8 @@ class _FilterRow extends StatelessWidget {
               final result = await _pickListSheet(
                 context,
                 title: 'Select languages',
-                options: const [
-                  'English','French','Turkish','Arabic','Spanish','Farsi','Russian','Hindi',
-                ],
+                // Use onboarding languages
+                options: const ['English', 'French', 'Other'],
                 initial: selectedLanguages,
               );
               if (result != null) {
@@ -598,29 +620,28 @@ class _FilterRow extends StatelessWidget {
               sort: sort,
             ),
           ),
-          const SizedBox(width: 8),
-          _TogglePill(
-            label: 'Verified',
-            value: onlyVerified,
-            onChanged: (v) => onChanged(
-              categories: _copy(selectedCategories),
-              languages: _copy(selectedLanguages),
-              onlyAvailable: onlyAvailable,
-              onlyVerified: v,
-              minPrice: minPrice,
-              maxPrice: maxPrice,
-              sort: sort,
-            ),
-          ),
         ],
       ),
     );
 
-    // —— Second row (Price + Sort)
+    // —— Second row
     final secondRow = Wrap(
       spacing: 8,
       runSpacing: 10,
       children: [
+        _TogglePill(
+          label: 'Verified',
+          value: onlyVerified,
+          onChanged: (v) => onChanged(
+            categories: _copy(selectedCategories),
+            languages: _copy(selectedLanguages),
+            onlyAvailable: onlyAvailable,
+            onlyVerified: v,
+            minPrice: minPrice,
+            maxPrice: maxPrice,
+            sort: sort,
+          ),
+        ),
         _PricePill(
           minPrice: minPrice,
           maxPrice: maxPrice,
@@ -684,7 +705,6 @@ class _FilterChipButton extends StatelessWidget {
             children: [
               Icon(icon, size: 18, color: AppColors.muted),
               const SizedBox(width: 8),
-              // Prevent inner overflow: ellipsize long labels.
               Flexible(
                 child: Text(
                   label,
@@ -701,6 +721,7 @@ class _FilterChipButton extends StatelessWidget {
   }
 }
 
+/// Reworked to visually match `_FilterChipButton` so baselines line up.
 class _TogglePill extends StatelessWidget {
   final String label;
   final bool value;
@@ -712,15 +733,29 @@ class _TogglePill extends StatelessWidget {
   });
   @override
   Widget build(BuildContext context) {
-    return FilterChip(
-      label: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
-      selected: value,
-      onSelected: onChanged,
-      selectedColor: AppColors.button,
-      backgroundColor: AppColors.card,
-      shape: const StadiumBorder(side: BorderSide(color: AppColors.border)),
-      showCheckmark: true,
-      visualDensity: const VisualDensity(horizontal: -2, vertical: 0),
+    return Material(
+      color: AppColors.button,
+      borderRadius: BorderRadius.circular(22),
+      child: InkWell(
+        onTap: () => onChanged(!value),
+        borderRadius: BorderRadius.circular(22),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (value) ...[
+                const Icon(Icons.check, size: 18, color: AppColors.primary),
+                const SizedBox(width: 8),
+              ],
+              Text(
+                label,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
