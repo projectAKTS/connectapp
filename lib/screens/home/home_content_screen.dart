@@ -723,7 +723,11 @@ class _ExpandableText extends StatelessWidget {
       fontWeight: FontWeight.w700,
     );
 
-    final (badgeLabel, restText) = _extractBadge(content);
+    final (extractedBadge, restText) = _extractBadge(content);
+
+    // ✅ If no template badge, this is a Quick post → show "Quick Post"
+    final badgeLabel = extractedBadge ?? 'Quick Post';
+
     final span = _parseSimpleMarkdownToSpan(restText, base: base, strong: strong);
 
     return LayoutBuilder(builder: (ctx, constraints) {
@@ -742,10 +746,8 @@ class _ExpandableText extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (badgeLabel != null) ...[
-              _PostTypeBadge(label: badgeLabel),
-              const SizedBox(height: 8),
-            ],
+            _PostTypeBadge(label: badgeLabel),
+            const SizedBox(height: 8),
             rich(),
           ],
         );
@@ -755,10 +757,8 @@ class _ExpandableText extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (badgeLabel != null) ...[
-              _PostTypeBadge(label: badgeLabel),
-              const SizedBox(height: 8),
-            ],
+            _PostTypeBadge(label: badgeLabel),
+            const SizedBox(height: 8),
             rich(),
             const SizedBox(height: 6),
             _ShowMoreButton(expanded: true, onTap: onToggle),
@@ -772,10 +772,8 @@ class _ExpandableText extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (badgeLabel != null) ...[
-            _PostTypeBadge(label: badgeLabel),
-            const SizedBox(height: 8),
-          ],
+          _PostTypeBadge(label: badgeLabel),
+          const SizedBox(height: 8),
           // The SizedBox + ClipRect prevents any render overflow.
           SizedBox(
             height: collapsedHeight,

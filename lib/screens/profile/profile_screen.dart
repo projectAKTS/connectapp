@@ -1,4 +1,3 @@
-// lib/screens/profile/profile_screen.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -7,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:connect_app/utils/time_utils.dart';
 import '../onboarding_screen.dart';
 import '../chat/chat_screen.dart';
+import '../posts/post_detail_screen.dart';
 import 'package:connect_app/services/call_service.dart';
 import 'package:connect_app/theme/tokens.dart';
 
@@ -29,14 +29,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool isFollowing = false;
   bool _followBusy = false;
 
-  String selectedFilter = 'all';
-  final Map<String, String?> filterMap = const {
-    'all': null,
-    'experience': 'experience',
-    'advice': 'advice',
-    'how-to': 'how-to',
-    'lookingFor': 'looking for...',
+  // ---- Filters (match Create Post templates) ----
+  // label -> slug
+  final Map<String, String?> _filters = const {
+    'All': null,
+    'Quick': 'quick',
+    'Experience': 'experience',
+    'Advice Request': 'advice',
+    'How-To Guide': 'how-to',
+    'Lessons Learned': 'lessons',
   };
+  String _selectedFilterLabel = 'All';
 
   bool _bioExpanded = false;
 
@@ -55,6 +58,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.initState();
     final cur = FirebaseAuth.instance.currentUser;
     isCurrentUser = (cur != null && cur.uid == widget.userID);
+
     _loadUserData();
 
     _postsStream = FirebaseFirestore.instance
@@ -242,32 +246,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _pillButton({
-    required Widget child,
-    VoidCallback? onTap,
-    EdgeInsets padding = const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-  }) {
-    return Material(
-      color: AppColors.button,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Padding(
-          padding: padding,
-          child: DefaultTextStyle.merge(
-            style: const TextStyle(
-              color: AppColors.text,
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
-            ),
-            child: child,
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _badgeChip(String text) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -284,6 +262,106 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final url = (data['profilePicture'] ?? '') as String? ?? '';
     if (url.isNotEmpty) return NetworkImage(url);
     return const AssetImage('assets/default_profile.png');
+  }
+
+  // ====== Parsing helpers ======
+  String? _firstBoldLineLabel(String content) {
+    final lines = content.split('\n');
+    int idx = 0;
+    while (idx < lines.length && lines[idx].trim().isEmpty) idx++;
+    if (idx >= lines.length) return null;
+    final m = RegExp(r'^\*\*(.+?)\*\*$').firstMatch(lines[idx].trim());
+    return m?.group(1);
+  }
+
+  /// Unified classifier (matches PostDetail behavior):
+  /// If content begins with "**X Post**" -> use that X (advice/how-to/lessons/experience/quick).
+  /// Otherwise -> default to QUICK (badge "Quick Post") and keep body as-is.
+  /// Returns: (slug, badgeText, body)
+  (String slug, String badgeText, String body) _classifyPost(Map<String, dynamic> map) {
+    final rawContent = (map['content'] ?? '').toString();
+
+    // 1) Respect a template header if present and strip it from body
+    final lblFromContent = _firstBoldLineLabel(rawContent);
+    if (lblFromContent != null && lblFromContent.toLowerCase().endsWith(' post')) {
+      final lower = lblFromContent.toLowerCase();
+
+      String slug;
+      if (lower.contains('advice')) slug = 'advice';
+      else if (lower.contains('how')) slug = 'how-to';
+      else if (lower.contains('lesson')) slug = 'lessons';
+      else if (lower.contains('experience')) slug = 'experience';
+      else if (lower.contains('quick')) slug = 'quick';
+      else slug = 'quick';
+
+      // strip first bold line
+      final lines = rawContent.split('\n');
+      int idx = 0;
+      while (idx < lines.length && lines[idx].trim().isEmpty) idx++;
+      if (idx < lines.length) {
+        lines.removeAt(idx);
+        if (idx < lines.length && lines[idx].trim().isEmpty) {
+          lines.removeAt(idx);
+        }
+      }
+      final body = lines.join('\n').trimLeft();
+      return (slug, lblFromContent, body);
+    }
+
+    // 2) No template -> QUICK by default
+    return ('quick', 'Quick Post', rawContent);
+  }
+
+  // Simple markdown (bold ** ** only)
+  TextSpan _mdSpan(String text) {
+    const base = TextStyle(fontSize: 15, height: 1.35, color: AppColors.text);
+    const strong = TextStyle(
+      fontSize: 15,
+      height: 1.35,
+      color: AppColors.text,
+      fontWeight: FontWeight.w700,
+    );
+
+    final spans = <TextSpan>[];
+    int i = 0;
+    while (i < text.length) {
+      final start = text.indexOf('**', i);
+      if (start == -1) {
+        spans.add(TextSpan(text: text.substring(i), style: base));
+        break;
+      }
+      if (start > i) {
+        spans.add(TextSpan(text: text.substring(i, start), style: base));
+      }
+      final end = text.indexOf('**', start + 2);
+      if (end == -1) {
+        spans.add(TextSpan(text: text.substring(start), style: base));
+        break;
+      }
+      spans.add(TextSpan(text: text.substring(start + 2, end), style: strong));
+      i = end + 2;
+    }
+    return TextSpan(children: spans, style: base);
+  }
+
+  Widget _postTypeBadge(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppColors.primary.withOpacity(0.18)),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: AppColors.primary,
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
   }
 
   @override
@@ -457,7 +535,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
               const SizedBox(height: 16),
 
-              // ===== Compact stats strip (one card with 3 columns) =====
+              // ===== Compact stats strip =====
               _softCard(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 child: _StatsStrip(
@@ -478,8 +556,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   children: [
                     for (var i = 0; i < badges.length && i < 3; i++) _badgeChip(badges[i]),
                     if (badges.length > 3)
-                      _pillButton(
-                        onTap: () {
+                      TextButton(
+                        onPressed: () {
                           showModalBottomSheet(
                             context: context,
                             backgroundColor: AppColors.card,
@@ -508,7 +586,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
               const SizedBox(height: 10),
               SizedBox(
-                height: 190,
+                height: 210,
                 child: StreamBuilder<QuerySnapshot>(
                   stream: _postsStream,
                   builder: (ctx, snap) {
@@ -539,31 +617,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       itemCount: featured.length,
                       padEnds: false,
                       itemBuilder: (c, i) {
-                        final data = featured[i].data() as Map<String, dynamic>;
+                        final doc = featured[i];
+                        final data = doc.data() as Map<String, dynamic>;
                         final date = parseFirestoreTimestamp(data['timestamp']);
+
+                        final (slug, badgeText, body) = _classifyPost(data);
+
                         return Padding(
                           padding: EdgeInsets.only(
                             left: i == 0 ? 0 : 10,
                             right: i == featured.length - 1 ? 0 : 10,
                           ),
-                          child: _softCard(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    _s(data['content']),
-                                    maxLines: 4,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 14, height: 1.35),
-                                  ),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => PostDetailScreen(postId: doc.id),
                                 ),
-                                if (date != null)
-                                  Text(
-                                    DateFormat.yMMMd().format(date),
-                                    style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                              );
+                            },
+                            child: _softCard(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _postTypeBadge(badgeText),
+                                  const SizedBox(height: 8),
+                                  Expanded(
+                                    child: RichText(
+                                      text: _mdSpan(body),
+                                      maxLines: 4,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
-                              ],
+                                  if (date != null)
+                                    Text(
+                                      DateFormat.yMMMd().format(date),
+                                      style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                                    ),
+                                ],
+                              ),
                             ),
                           ),
                         );
@@ -574,33 +667,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 16),
 
+              // ===== Filter chips =====
               SizedBox(
                 height: 44,
-                child: ListView.builder(
+                child: ListView.separated(
                   scrollDirection: Axis.horizontal,
-                  itemCount: filterMap.length,
+                  itemCount: _filters.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
                   itemBuilder: (ctx, i) {
-                    final key = filterMap.keys.elementAt(i);
-                    final label = key == 'all' ? 'All' : filterMap[key]!;
-                    final isSelected = key == selectedFilter;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        key: ValueKey(key),
-                        label: Text(
-                          label,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: isSelected ? AppColors.text : AppColors.text.withOpacity(0.85),
-                          ),
+                    final label = _filters.keys.elementAt(i);
+                    final selected = (label == _selectedFilterLabel);
+                    return ChoiceChip(
+                      key: ValueKey(label),
+                      label: Text(
+                        label,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: selected ? AppColors.text : AppColors.text.withOpacity(0.85),
                         ),
-                        selected: isSelected,
-                        onSelected: (_) => setState(() => selectedFilter = key),
-                        selectedColor: AppColors.button,
-                        backgroundColor: AppColors.card,
-                        side: const BorderSide(color: AppColors.border),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
+                      selected: selected,
+                      onSelected: (_) => setState(() => _selectedFilterLabel = label),
+                      selectedColor: AppColors.button,
+                      backgroundColor: AppColors.card,
+                      side: const BorderSide(color: AppColors.border),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     );
                   },
                 ),
@@ -610,66 +701,104 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const Text('Recent Activity',
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
               const SizedBox(height: 10),
-              SizedBox(
-                height: 320,
-                child: StreamBuilder<QuerySnapshot>(
-                  stream: _postsStream,
-                  builder: (ctx, snap) {
-                    if (snap.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    if (snap.hasError) {
-                      return Center(
-                        child: Text('Error: ${snap.error}', style: const TextStyle(color: Colors.red)),
-                      );
-                    }
 
-                    var docs = (snap.data?.docs ?? []).toList()
-                      ..sort((a, b) {
-                        final aTs = parseFirestoreTimestamp(a['timestamp']) ??
-                            DateTime.fromMillisecondsSinceEpoch(0);
-                        final bTs = parseFirestoreTimestamp(b['timestamp']) ??
-                            DateTime.fromMillisecondsSinceEpoch(0);
-                        return bTs.compareTo(aTs);
-                      });
-
-                    final tag = filterMap[selectedFilter];
-                    final filtered = docs.where((doc) {
-                      final map = doc.data() as Map<String, dynamic>;
-                      final tagsList =
-                          _stringList(map['tags']).map((e) => e.toLowerCase()).toList();
-                      return tag == null || tagsList.contains(tag.toLowerCase());
-                    }).toList();
-
-                    if (filtered.isEmpty) {
-                      return const Center(
-                        child: Text('No activity yet.', style: TextStyle(color: AppColors.muted)),
-                      );
-                    }
-
-                    return ListView.builder(
-                      itemCount: filtered.length,
-                      itemBuilder: (c, i) {
-                        final d = filtered[i].data() as Map<String, dynamic>;
-                        final dt = parseFirestoreTimestamp(d['timestamp']);
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _softCard(
-                            child: ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              title: Text(_s(d['content'])),
-                              subtitle: dt != null
-                                  ? Text(DateFormat.yMMMd().format(dt),
-                                      style: const TextStyle(color: AppColors.muted))
-                                  : null,
-                            ),
-                          ),
-                        );
-                      },
+              // ===== Recent Activity =====
+              StreamBuilder<QuerySnapshot>(
+                stream: _postsStream,
+                builder: (ctx, snap) {
+                  if (snap.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (snap.hasError) {
+                    return Center(
+                      child: Text('Error: ${snap.error}', style: const TextStyle(color: Colors.red)),
                     );
-                  },
-                ),
+                  }
+
+                  var docs = (snap.data?.docs ?? []).toList()
+                    ..sort((a, b) {
+                      final aTs = parseFirestoreTimestamp(a['timestamp']) ??
+                          DateTime.fromMillisecondsSinceEpoch(0);
+                      final bTs = parseFirestoreTimestamp(b['timestamp']) ??
+                          DateTime.fromMillisecondsSinceEpoch(0);
+                      return bTs.compareTo(aTs);
+                    });
+
+                  final selectedSlug = _filters[_selectedFilterLabel];
+
+                  // Classify once and reuse for filter + render
+                  final items = docs.map((doc) {
+                    final map = doc.data() as Map<String, dynamic>;
+                    final tuple = _classifyPost(map);
+                    return (
+                      doc,
+                      tuple.$1 /* slug */,
+                      tuple.$2 /* badge */,
+                      tuple.$3 /* body */,
+                      parseFirestoreTimestamp(map['timestamp'])
+                    );
+                  }).toList();
+
+                  final filtered = selectedSlug == null
+                      ? items
+                      : items.where((e) => e.$2 == selectedSlug).toList();
+
+                  if (filtered.isEmpty) {
+                    return const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Center(
+                        child: Text('No activity yet.', style: TextStyle(color: AppColors.muted)),
+                      ),
+                    );
+                  }
+
+                  return ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (c, i) {
+                      final row = filtered[i];
+                      final doc = row.$1;
+                      final badgeText = row.$3;
+                      final body = row.$4;
+                      final dt = row.$5;
+
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => PostDetailScreen(postId: doc.id)),
+                          );
+                        },
+                        child: _softCard(
+                          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _postTypeBadge(badgeText),
+                              const SizedBox(height: 8),
+                              RichText(
+                                text: _mdSpan(body),
+                                maxLines: 8,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              if (dt != null) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  DateFormat.yMMMd().format(dt),
+                                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
               ),
+
               const SizedBox(height: 28),
             ],
           ),
