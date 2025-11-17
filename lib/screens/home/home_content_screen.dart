@@ -9,7 +9,7 @@ import 'package:connect_app/theme/tokens.dart';
 import 'package:connect_app/screens/connections/connections_screen.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
 import 'package:connect_app/screens/messages/messages_screen.dart';
-import 'package:connect_app/screens/search/find_helper_screen.dart'; // ✅ new: dedicated helper finder
+import 'package:connect_app/screens/search/find_helper_screen.dart';
 
 // Fullscreen viewers
 import 'package:connect_app/screens/posts/post_video_player.dart';
@@ -87,6 +87,19 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                 ),
               ),
               const SizedBox(height: 10),
+
+              // ✅ Book a call – same route/args pattern as ProfileScreen
+              _item(Icons.event_available_outlined, 'Book a call', () {
+                Navigator.of(context).pushNamed(
+                  '/consultation',
+                  arguments: {
+                    'targetUserId': otherUserId,
+                    'targetUserName': otherUserName,
+                    'ratePerMinute': 0, // will be overridden if needed
+                  },
+                );
+              }),
+
               _item(Icons.phone_in_talk_rounded, 'Audio call', () {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Audio call — coming soon')),
@@ -143,9 +156,10 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
             SliverToBoxAdapter(
               child: _WelcomeCard(
                 name: firstName,
-                onFindHelper: () => Navigator.of(context, rootNavigator: true).push(
-                  MaterialPageRoute(builder: (_) => const FindHelperScreen()),
-                ),
+                onFindHelper: () => Navigator.of(context, rootNavigator: true)
+                    .push(MaterialPageRoute(
+                  builder: (_) => const FindHelperScreen(),
+                )),
               ),
             ),
             const SliverToBoxAdapter(child: _SectionTitle('Recent posts')),
@@ -181,7 +195,8 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                     itemCount: posts.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 14),
                     itemBuilder: (_, i) {
-                      final raw = posts[i].data() as Map<String, dynamic>? ?? {};
+                      final raw =
+                          posts[i].data() as Map<String, dynamic>? ?? {};
                       final authorName = (raw['userName'] ?? 'User') as String;
                       final authorId = _extractUserId(raw);
                       final avatar = (raw['userAvatar'] ?? '') as String;
@@ -190,7 +205,8 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                       final subtitle = '$right ago';
                       final imageUrl = (raw['imageUrl'] ?? '').toString();
                       final videoUrl = (raw['videoUrl'] ?? '').toString();
-                      final videoThumbUrl = (raw['videoThumbUrl'] ?? '').toString();
+                      final videoThumbUrl =
+                          (raw['videoThumbUrl'] ?? '').toString();
                       final aspect = (() {
                         final v = raw['mediaAspectRatio'];
                         if (v is num && v > 0) return v.toDouble();
@@ -212,9 +228,11 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                         onOpenProfile: authorId.isEmpty
                             ? null
                             : () {
-                                Navigator.of(context, rootNavigator: true).push(
+                                Navigator.of(context, rootNavigator: true)
+                                    .push(
                                   MaterialPageRoute(
-                                    builder: (_) => ProfileScreen(userID: authorId),
+                                    builder: (_) =>
+                                        ProfileScreen(userID: authorId),
                                   ),
                                 );
                               },
@@ -230,19 +248,23 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                         onOpenImage: imageUrl.isEmpty
                             ? null
                             : () {
-                                Navigator.of(context, rootNavigator: true).push(
+                                Navigator.of(context, rootNavigator: true)
+                                    .push(
                                   MaterialPageRoute(
-                                      builder: (_) =>
-                                          PostImageViewer(url: imageUrl)),
+                                    builder: (_) =>
+                                        PostImageViewer(url: imageUrl),
+                                  ),
                                 );
                               },
                         onOpenVideo: videoUrl.isEmpty
                             ? null
                             : () {
-                                Navigator.of(context, rootNavigator: true).push(
+                                Navigator.of(context, rootNavigator: true)
+                                    .push(
                                   MaterialPageRoute(
-                                      builder: (_) =>
-                                          PostVideoPlayer(url: videoUrl)),
+                                    builder: (_) =>
+                                        PostVideoPlayer(url: videoUrl),
+                                  ),
                                 );
                               },
                         showConnect: !isOwnPost,
@@ -284,7 +306,9 @@ class _HomeTopBar extends StatelessWidget {
               tooltip: 'Messages',
               onPressed: () {
                 Navigator.of(context, rootNavigator: true).push(
-                  MaterialPageRoute(builder: (_) => const MessagesScreen()),
+                  MaterialPageRoute(
+                    builder: (_) => const MessagesScreen(),
+                  ),
                 );
               },
             ),
@@ -309,7 +333,8 @@ class _WelcomeCard extends StatelessWidget {
       await FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
-          .set({'lastConnectionsSeenAt': FieldValue.serverTimestamp()},
+          .set(
+              {'lastConnectionsSeenAt': FieldValue.serverTimestamp()},
               SetOptions(merge: true));
     } catch (_) {
       // ignore UI errors
@@ -334,8 +359,8 @@ class _WelcomeCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppColors.canvas,
           borderRadius: BorderRadius.circular(AppRadius.lg),
-          border:
-              Border.all(color: AppColors.border.withOpacity(0.5), width: 1),
+          border: Border.all(
+              color: AppColors.border.withOpacity(0.5), width: 1),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -344,7 +369,6 @@ class _WelcomeCard extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 14),
 
-            // ✅ Now opens dedicated helper finder
             _TaupePill(
               icon: Icons.manage_search_rounded,
               label: 'Find a helper',
@@ -352,7 +376,6 @@ class _WelcomeCard extends StatelessWidget {
             ),
             const SizedBox(height: 12),
 
-            // ✅ My Connections with live badge based on lastConnectionsSeenAt
             if (uid != null)
               StreamBuilder<DocumentSnapshot>(
                 stream: FirebaseFirestore.instance
@@ -363,23 +386,26 @@ class _WelcomeCard extends StatelessWidget {
                   DateTime? lastSeen;
                   if (userSnap.hasData) {
                     final d = userSnap.data!.data() as Map<String, dynamic>?;
-                    lastSeen = parseFirestoreTimestamp(d?['lastConnectionsSeenAt']);
+                    lastSeen =
+                        parseFirestoreTimestamp(d?['lastConnectionsSeenAt']);
                   }
 
                   return StreamBuilder<QuerySnapshot>(
                     stream: FirebaseFirestore.instance
                         .collection('connections')
-                        .where('users', arrayContains: uid) // we store 'users': [a,b]
+                        .where('users', arrayContains: uid)
                         .snapshots(),
                     builder: (context, connSnap) {
                       int recentCount = 0;
                       if (connSnap.hasData) {
                         for (final doc in connSnap.data!.docs) {
-                          final data = doc.data() as Map<String, dynamic>;
-                          final connectedAt = parseFirestoreTimestamp(data['connectedAt']);
+                          final data =
+                              doc.data() as Map<String, dynamic>;
+                          final connectedAt =
+                              parseFirestoreTimestamp(data['connectedAt']);
                           if (connectedAt == null) continue;
-                          // Count only items newer than lastSeen; if lastSeen is null, count all
-                          if (lastSeen == null || connectedAt.isAfter(lastSeen!)) {
+                          if (lastSeen == null ||
+                              connectedAt.isAfter(lastSeen!)) {
                             recentCount++;
                           }
                         }
@@ -391,13 +417,14 @@ class _WelcomeCard extends StatelessWidget {
                             icon: Icons.people_alt_outlined,
                             label: 'My connections',
                             onTap: () async {
-                              // Mark as seen BEFORE navigating, so badge clears on return
                               await _markConnectionsSeen(uid);
-                              // Navigate to Connections
                               // ignore: use_build_context_synchronously
-                              Navigator.of(context, rootNavigator: true).push(
+                              Navigator.of(context, rootNavigator: true)
+                                  .push(
                                 MaterialPageRoute(
-                                    builder: (_) => const ConnectionsScreen()),
+                                  builder: (_) =>
+                                      const ConnectionsScreen(),
+                                ),
                               );
                             },
                           ),
@@ -457,11 +484,14 @@ class _TaupePill extends StatelessWidget {
             children: [
               Icon(icon, color: AppColors.muted, size: 22),
               const SizedBox(width: 12),
-              Text(label,
-                  style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.text)),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.text,
+                ),
+              ),
             ],
           ),
         ),
@@ -525,12 +555,14 @@ class _PostCellState extends State<_PostCell> {
   @override
   Widget build(BuildContext context) {
     final borderColor = AppColors.border.withOpacity(0.65);
+
     Widget? media() {
       if (widget.imageUrl.isNotEmpty) {
         return _MediaImage(
-            url: widget.imageUrl,
-            aspect: widget.mediaAspect,
-            onTap: widget.onOpenImage);
+          url: widget.imageUrl,
+          aspect: widget.mediaAspect,
+          onTap: widget.onOpenImage,
+        );
       }
       if (widget.videoUrl.isNotEmpty) {
         return _MediaVideoThumb(
@@ -544,20 +576,22 @@ class _PostCellState extends State<_PostCell> {
 
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.postCard, // subtle contrast
+        color: AppColors.postCard,
         borderRadius: BorderRadius.circular(AppRadius.xl),
         boxShadow: const [AppShadows.soft],
         border: Border.all(color: borderColor, width: 1),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           _PostHeader(
-              authorName: widget.authorName,
-              subtitle: widget.subtitle,
-              rightTime: widget.rightTime,
-              avatarUrl: widget.authorAvatarUrl,
-              onTap: widget.onOpenProfile),
+            authorName: widget.authorName,
+            subtitle: widget.subtitle,
+            rightTime: widget.rightTime,
+            avatarUrl: widget.authorAvatarUrl,
+            onTap: widget.onOpenProfile,
+          ),
           if (widget.body.isNotEmpty) const SizedBox(height: 12),
           if (widget.body.isNotEmpty)
             _ExpandableText(
@@ -572,15 +606,23 @@ class _PostCellState extends State<_PostCell> {
             const SizedBox(height: 12),
             TextButton(
               onPressed: widget.onConnect,
+              // ✅ Softer & a bit longer
               style: TextButton.styleFrom(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 22, vertical: 10),
                 backgroundColor: AppColors.button,
-                foregroundColor: AppColors.text,
+                foregroundColor: AppColors.primary,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppRadius.sm)),
-                textStyle:
-                    const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  side: const BorderSide(
+                    color: AppColors.primary,
+                    width: 1.2,
+                  ),
+                ),
+                textStyle: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
               ),
               child: const Text('Connect'),
             ),
@@ -597,39 +639,58 @@ class _PostHeader extends StatelessWidget {
   final String rightTime;
   final String avatarUrl;
   final VoidCallback? onTap;
-  const _PostHeader(
-      {required this.authorName,
-      required this.subtitle,
-      required this.rightTime,
-      required this.avatarUrl,
-      this.onTap});
+  const _PostHeader({
+    required this.authorName,
+    required this.subtitle,
+    required this.rightTime,
+    required this.avatarUrl,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final row = Row(children: [
-      _Avatar(url: avatarUrl, radius: 20),
-      const SizedBox(width: 10),
-      Expanded(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(authorName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+    final row = Row(
+      children: [
+        _Avatar(url: avatarUrl, radius: 20),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                authorName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
                   fontWeight: FontWeight.w700,
                   fontSize: 16,
-                  color: AppColors.text)),
-          const SizedBox(height: 2),
-          Text(subtitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style:
-                  const TextStyle(fontSize: 14, color: AppColors.muted)),
-        ]),
-      ),
-      const SizedBox(width: 8),
-      Text(rightTime,
-          style: const TextStyle(fontSize: 14, color: AppColors.muted)),
-    ]);
+                  color: AppColors.text,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: AppColors.muted,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          rightTime,
+          style: const TextStyle(
+            fontSize: 14,
+            color: AppColors.muted,
+          ),
+        ),
+      ],
+    );
+
     return onTap == null
         ? row
         : InkWell(
@@ -645,7 +706,6 @@ class _PostHeader extends StatelessWidget {
 
 // ===== Shared widgets =====
 
-// ——— Category badge (for "**Experience Post**", "**Advice Request Post**", etc.) ———
 class _PostTypeBadge extends StatelessWidget {
   final String label;
   const _PostTypeBadge({required this.label});
@@ -657,7 +717,9 @@ class _PostTypeBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.primary.withOpacity(0.08),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: AppColors.primary.withOpacity(0.18)),
+        border: Border.all(
+          color: AppColors.primary.withOpacity(0.18),
+        ),
       ),
       child: Text(
         label,
@@ -725,83 +787,84 @@ class _ExpandableText extends StatelessWidget {
 
     final (extractedBadge, restText) = _extractBadge(content);
 
-    // ✅ If no template badge, this is a Quick post → show "Quick Post"
+    // If no template badge, this is a Quick Post
     final badgeLabel = extractedBadge ?? 'Quick Post';
 
-    final span = _parseSimpleMarkdownToSpan(restText, base: base, strong: strong);
+    final span =
+        _parseSimpleMarkdownToSpan(restText, base: base, strong: strong);
 
-    return LayoutBuilder(builder: (ctx, constraints) {
-      // Measure with exact max width and line cap.
-      final tp = TextPainter(
-        text: span,
-        textDirection: TextDirection.ltr,
-        maxLines: maxLinesWhenCollapsed,
-      )..layout(maxWidth: constraints.maxWidth);
+    return LayoutBuilder(
+      builder: (ctx, constraints) {
+        final tp = TextPainter(
+          text: span,
+          textDirection: TextDirection.ltr,
+          maxLines: maxLinesWhenCollapsed,
+        )..layout(maxWidth: constraints.maxWidth);
 
-      final hasOverflow = tp.didExceedMaxLines;
+        final hasOverflow = tp.didExceedMaxLines;
 
-      Widget rich() => RichText(text: span);
+        Widget rich() => RichText(text: span);
 
-      if (!hasOverflow) {
+        if (!hasOverflow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _PostTypeBadge(label: badgeLabel),
+              const SizedBox(height: 8),
+              rich(),
+            ],
+          );
+        }
+
+        if (expanded) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _PostTypeBadge(label: badgeLabel),
+              const SizedBox(height: 8),
+              rich(),
+              const SizedBox(height: 6),
+              _ShowMoreButton(expanded: true, onTap: onToggle),
+            ],
+          );
+        }
+
+        final collapsedHeight =
+            tp.preferredLineHeight * maxLinesWhenCollapsed;
+
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _PostTypeBadge(label: badgeLabel),
             const SizedBox(height: 8),
-            rich(),
-          ],
-        );
-      }
-
-      if (expanded) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _PostTypeBadge(label: badgeLabel),
-            const SizedBox(height: 8),
-            rich(),
-            const SizedBox(height: 6),
-            _ShowMoreButton(expanded: true, onTap: onToggle),
-          ],
-        );
-      }
-
-      // Collapsed: strictly clamp height to the measured line height * lines.
-      final collapsedHeight = tp.preferredLineHeight * maxLinesWhenCollapsed;
-
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _PostTypeBadge(label: badgeLabel),
-          const SizedBox(height: 8),
-          // The SizedBox + ClipRect prevents any render overflow.
-          SizedBox(
-            height: collapsedHeight,
-            child: ClipRect(
-              child: ShaderMask(
-                shaderCallback: (Rect r) {
-                  return const LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.transparent,
-                      Colors.transparent,
-                      Color(0xCCFFFFFF),
-                      Color(0xFFFFFFFF),
-                    ],
-                    stops: [0.0, 0.80, 0.93, 1.0],
-                  ).createShader(r);
-                },
-                blendMode: BlendMode.dstOut,
-                child: rich(),
+            SizedBox(
+              height: collapsedHeight,
+              child: ClipRect(
+                child: ShaderMask(
+                  shaderCallback: (Rect r) {
+                    return const LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.transparent,
+                        Colors.transparent,
+                        Color(0xCCFFFFFF),
+                        Color(0xFFFFFFFF),
+                      ],
+                      stops: [0.0, 0.80, 0.93, 1.0],
+                    ).createShader(r);
+                  },
+                  blendMode: BlendMode.dstOut,
+                  child: rich(),
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 6),
-          _ShowMoreButton(expanded: false, onTap: onToggle),
-        ],
-      );
-    });
+            const SizedBox(height: 6),
+            _ShowMoreButton(expanded: false, onTap: onToggle),
+          ],
+        );
+      },
+    );
   }
 }
 
@@ -810,70 +873,96 @@ class _ShowMoreButton extends StatelessWidget {
   final VoidCallback onTap;
   const _ShowMoreButton({required this.expanded, required this.onTap});
   @override
-  Widget build(BuildContext context) => Material(
-        color: AppColors.button,
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.button,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(10),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(10),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            child: Text(expanded ? 'Show less' : 'Show more',
-                style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                    color: AppColors.text)),
+        child: Padding(
+          padding:
+              const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Text(
+            expanded ? 'Show less' : 'Show more',
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+              color: AppColors.text,
+            ),
           ),
         ),
-      );
+      ),
+    );
+  }
 }
 
 class _MediaImage extends StatelessWidget {
   final String url;
   final double aspect;
   final VoidCallback? onTap;
-  const _MediaImage({required this.url, required this.aspect, this.onTap});
+  const _MediaImage({
+    required this.url,
+    required this.aspect,
+    this.onTap,
+  });
+
   @override
-  Widget build(BuildContext context) => ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: AspectRatio(
-          aspectRatio: aspect,
-          child: InkWell(
-            onTap: onTap,
-            child: Image.network(url,
-                fit: BoxFit.cover,
-                loadingBuilder: (c, w, p) =>
-                    p == null ? w : Container(color: AppColors.button),
-                errorBuilder: (_, __, ___) => Container(
-                      color: AppColors.button,
-                      alignment: Alignment.center,
-                      child: const Icon(Icons.broken_image,
-                          color: AppColors.muted),
-                    )),
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: AspectRatio(
+        aspectRatio: aspect,
+        child: InkWell(
+          onTap: onTap,
+          child: Image.network(
+            url,
+            fit: BoxFit.cover,
+            loadingBuilder: (c, w, p) =>
+                p == null ? w : Container(color: AppColors.button),
+            errorBuilder: (_, __, ___) => Container(
+              color: AppColors.button,
+              alignment: Alignment.center,
+              child: const Icon(
+                Icons.broken_image,
+                color: AppColors.muted,
+              ),
+            ),
           ),
         ),
-      );
+      ),
+    );
+  }
 }
 
 class _MediaVideoThumb extends StatelessWidget {
   final String thumbUrl;
   final double aspect;
   final VoidCallback? onPlay;
-  const _MediaVideoThumb(
-      {required this.thumbUrl, required this.aspect, this.onPlay});
+  const _MediaVideoThumb({
+    required this.thumbUrl,
+    required this.aspect,
+    this.onPlay,
+  });
+
   @override
-  Widget build(BuildContext context) => ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: AspectRatio(
-          aspectRatio: aspect,
-          child: Stack(fit: StackFit.expand, children: [
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: AspectRatio(
+        aspectRatio: aspect,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
             if (thumbUrl.isNotEmpty)
-              Image.network(thumbUrl,
-                  fit: BoxFit.cover,
-                  loadingBuilder: (c, w, p) =>
-                      p == null ? w : Container(color: AppColors.button),
-                  errorBuilder: (_, __, ___) =>
-                      Container(color: AppColors.button))
+              Image.network(
+                thumbUrl,
+                fit: BoxFit.cover,
+                loadingBuilder: (c, w, p) =>
+                    p == null ? w : Container(color: AppColors.button),
+                errorBuilder: (_, __, ___) =>
+                    Container(color: AppColors.button),
+              )
             else
               Container(color: AppColors.button),
             Center(
@@ -885,31 +974,45 @@ class _MediaVideoThumb extends StatelessWidget {
                     color: Colors.black.withOpacity(0.45),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.play_arrow,
-                      color: Colors.white, size: 36),
+                  child: const Icon(
+                    Icons.play_arrow,
+                    color: Colors.white,
+                    size: 36,
+                  ),
                 ),
               ),
             ),
-          ]),
+          ],
         ),
-      );
+      ),
+    );
+  }
 }
 
 class _Avatar extends StatelessWidget {
   final String url;
   final double radius;
   const _Avatar({required this.url, this.radius = 20});
+
   @override
-  Widget build(BuildContext context) => url.isEmpty
-      ? CircleAvatar(
-          radius: radius,
-          backgroundColor: AppColors.avatarBg,
-          child:
-              const Icon(Icons.person_outline, color: AppColors.avatarFg))
-      : CircleAvatar(radius: radius, backgroundImage: NetworkImage(url));
+  Widget build(BuildContext context) {
+    return url.isEmpty
+        ? CircleAvatar(
+            radius: radius,
+            backgroundColor: AppColors.avatarBg,
+            child: const Icon(
+              Icons.person_outline,
+              color: AppColors.avatarFg,
+            ),
+          )
+        : CircleAvatar(
+            radius: radius,
+            backgroundImage: NetworkImage(url),
+          );
+  }
 }
 
-// Put this helper near the bottom of the file (outside the widget classes).
+// Helper for simple **bold** markdown
 TextSpan _parseSimpleMarkdownToSpan(
   String text, {
   required TextStyle base,
@@ -928,7 +1031,6 @@ TextSpan _parseSimpleMarkdownToSpan(
     }
     final end = text.indexOf('**', start + 2);
     if (end == -1) {
-      // Unbalanced ** — render the rest as normal text.
       spans.add(TextSpan(text: text.substring(start), style: base));
       break;
     }
