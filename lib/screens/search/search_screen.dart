@@ -200,11 +200,8 @@ class _SearchScreenState extends State<SearchScreen> {
       appBar: AppBar(
         backgroundColor: AppColors.canvas,
         elevation: 0,
+        automaticallyImplyLeading: false, // 🔹 no back button in Search tab
         title: const Text('Search'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).maybePop(),
-        ),
       ),
       body: Column(
         children: [
@@ -554,8 +551,97 @@ class _PostTile extends StatelessWidget {
     return '${(diff.inDays / 365).floor()}y';
   }
 
+  // ---- Pull "**Something Post**" from first non-empty line
+  (String?, String) _extractBadgeAndBody(String raw) {
+    final lines = raw.split('\n');
+    int idx = 0;
+    while (idx < lines.length && lines[idx].trim().isEmpty) idx++;
+    if (idx >= lines.length) return (null, raw);
+
+    final first = lines[idx].trim();
+    final reg = RegExp(r'^\*\*(.+?)\*\*$'); // **Something**
+    final m = reg.firstMatch(first);
+    if (m != null && m.group(1) != null) {
+      final label = m.group(1)!.trim();
+      if (label.toLowerCase().endsWith(' post')) {
+        final rest = [...lines]..removeAt(idx);
+        if (idx < rest.length && rest[idx].trim().isEmpty) {
+          rest.removeAt(idx);
+        }
+        return (label, rest.join('\n').trimLeft());
+      }
+    }
+    return (null, raw);
+  }
+
+  // Simple markdown (**bold** only)
+  TextSpan _mdSpan(String text) {
+    const base = TextStyle(
+      fontSize: 15.5,
+      height: 1.35,
+      color: AppColors.text,
+    );
+    const strong = TextStyle(
+      fontSize: 15.5,
+      height: 1.35,
+      color: AppColors.text,
+      fontWeight: FontWeight.w700,
+    );
+
+    final spans = <TextSpan>[];
+    int i = 0;
+    while (i < text.length) {
+      final start = text.indexOf('**', i);
+      if (start == -1) {
+        spans.add(TextSpan(text: text.substring(i), style: base));
+        break;
+      }
+      if (start > i) {
+        spans.add(TextSpan(text: text.substring(i, start), style: base));
+      }
+      final end = text.indexOf('**', start + 2);
+      if (end == -1) {
+        spans.add(TextSpan(text: text.substring(start), style: base));
+        break;
+      }
+      spans.add(TextSpan(text: text.substring(start + 2, end), style: strong));
+      i = end + 2;
+    }
+    return TextSpan(children: spans, style: base);
+  }
+
+  Widget _postTypeBadge(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppColors.primary.withOpacity(0.18)),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: AppColors.primary,
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final (maybeBadge, body) = _extractBadgeAndBody(hit.content);
+    final badgeLabel = maybeBadge ?? 'Quick Post';
+    final contentSpan = _mdSpan(body);
+
+    void openDetail() {
+      Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute(builder: (_) => PostDetailScreen(postId: hit.id)),
+      );
+    }
+
     return Card(
       color: AppColors.card,
       shape: RoundedRectangleBorder(
@@ -564,16 +650,13 @@ class _PostTile extends StatelessWidget {
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: () {
-          Navigator.of(context, rootNavigator: true).push(
-            MaterialPageRoute(builder: (_) => PostDetailScreen(postId: hit.id)),
-          );
-        },
+        onTap: openDetail,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Header (avatar + name + time)
               Row(
                 children: [
                   _Avatar(url: hit.authorAvatar, radius: 18),
@@ -582,39 +665,79 @@ class _PostTile extends StatelessWidget {
                     child: Text(
                       hit.authorName,
                       style: const TextStyle(
-                          fontWeight: FontWeight.w700, color: AppColors.text),
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.text,
+                      ),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(_ago(hit.ts),
-                      style:
-                          const TextStyle(fontSize: 13, color: AppColors.muted)),
+                  Text(
+                    _ago(hit.ts),
+                    style: const TextStyle(fontSize: 13, color: AppColors.muted),
+                  ),
                 ],
               ),
               const SizedBox(height: 10),
-              Text(
-                hit.content,
-                style: const TextStyle(
-                    fontSize: 15.5, color: AppColors.text, height: 1.35),
+
+              // Badge + content (matching Profile/Home style)
+              _postTypeBadge(badgeLabel),
+              const SizedBox(height: 8),
+              RichText(
+                text: contentSpan,
                 maxLines: 4,
                 overflow: TextOverflow.ellipsis,
               ),
+
+              const SizedBox(height: 6),
+
+              // NEW: explicit CTA so users know there is more
+              TextButton(
+                onPressed: openDetail,
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  foregroundColor: AppColors.primary,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Text(
+                      'View full post',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    SizedBox(width: 4),
+                    Icon(Icons.arrow_forward_ios_rounded, size: 13),
+                  ],
+                ),
+              ),
+
+              // Tags
               if (hit.tags.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 Wrap(
                   spacing: 6,
                   runSpacing: 6,
                   children: hit.tags
-                      .map((t) => Chip(
-                            label: Text(t,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.text)),
-                            backgroundColor: AppColors.button,
-                            shape: const StadiumBorder(
-                                side: BorderSide(color: AppColors.border)),
-                          ))
+                      .map(
+                        (t) => Chip(
+                          label: Text(
+                            t,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.text,
+                            ),
+                          ),
+                          backgroundColor: AppColors.button,
+                          shape: const StadiumBorder(
+                            side: BorderSide(color: AppColors.border),
+                          ),
+                        ),
+                      )
                       .toList(),
                 ),
               ],
