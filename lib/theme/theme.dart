@@ -1,26 +1,35 @@
-// lib/theme/theme.dart
 import 'package:flutter/material.dart';
 import 'tokens.dart';
 
-/// Global theme tuned to the soft, warm palette.
+/// Global theme tuned to the soft, mostly-white palette.
 ThemeData buildAppTheme() {
   const family = 'SF Pro';
 
   final baseText = const TextTheme(
     displaySmall: TextStyle(
-      fontSize: 32, height: 1.15, fontWeight: FontWeight.w700,
-      color: AppColors.text, letterSpacing: -0.2,
+      fontSize: 32,
+      height: 1.15,
+      fontWeight: FontWeight.w700,
+      color: AppColors.text,
+      letterSpacing: -0.2,
     ),
     titleMedium: TextStyle(
-      fontSize: 22, height: 1.25, fontWeight: FontWeight.w700,
-      color: AppColors.text, letterSpacing: -0.2,
+      fontSize: 22,
+      height: 1.25,
+      fontWeight: FontWeight.w700,
+      color: AppColors.text,
+      letterSpacing: -0.2,
     ),
     bodyLarge: TextStyle(
-      fontSize: 16, height: 1.40, fontWeight: FontWeight.w500,
+      fontSize: 16,
+      height: 1.40,
+      fontWeight: FontWeight.w500,
       color: AppColors.text,
     ),
     bodyMedium: TextStyle(
-      fontSize: 14, height: 1.30, fontWeight: FontWeight.w500,
+      fontSize: 14,
+      height: 1.30,
+      fontWeight: FontWeight.w500,
       color: AppColors.muted,
     ),
   );
@@ -66,8 +75,9 @@ ThemeData buildAppTheme() {
           borderRadius: BorderRadius.circular(AppRadius.sm),
         ),
       ).copyWith(
-        overlayColor:
-            MaterialStateProperty.all(AppColors.button.withOpacity(0.65)),
+        overlayColor: MaterialStateProperty.all(
+          AppColors.button.withOpacity(0.65),
+        ),
       ),
     ),
 
@@ -84,14 +94,17 @@ ThemeData buildAppTheme() {
       ),
     ),
 
-    // ✅ Card theme must be CardThemeData for your SDK
+    // Card theme: very clean, almost like LinkedIn/Reddit
     cardTheme: CardThemeData(
       color: AppColors.card,
       elevation: 0,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        side: const BorderSide(color: AppColors.border),
+        side: BorderSide(
+          color: AppColors.border.withOpacity(0.6),
+          width: 1,
+        ),
       ),
       shadowColor: Colors.transparent,
       clipBehavior: Clip.none,

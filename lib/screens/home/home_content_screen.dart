@@ -1,4 +1,3 @@
-// lib/screens/home/home_content_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -54,7 +53,7 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppColors.card,
+      backgroundColor: AppColors.canvas, // bottom sheet is also clean white
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
@@ -65,7 +64,10 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
               backgroundColor: AppColors.avatarBg,
               child: Icon(icon, color: AppColors.avatarFg),
             ),
-            title: Text(label, style: const TextStyle(color: AppColors.text)),
+            title: Text(
+              label,
+              style: const TextStyle(color: AppColors.text),
+            ),
             onTap: () {
               Navigator.pop(context);
               onTap();
@@ -88,7 +90,7 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
               ),
               const SizedBox(height: 10),
 
-              // ✅ Book a call – same route/args pattern as ProfileScreen
+              // Book a call – same route/args pattern as ProfileScreen
               _item(Icons.event_available_outlined, 'Book a call', () {
                 Navigator.of(context).pushNamed(
                   '/consultation',
@@ -157,9 +159,11 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
               child: _WelcomeCard(
                 name: firstName,
                 onFindHelper: () => Navigator.of(context, rootNavigator: true)
-                    .push(MaterialPageRoute(
-                  builder: (_) => const FindHelperScreen(),
-                )),
+                    .push(
+                  MaterialPageRoute(
+                    builder: (_) => const FindHelperScreen(),
+                  ),
+                ),
               ),
             ),
             const SliverToBoxAdapter(child: _SectionTitle('Recent posts')),
@@ -193,7 +197,8 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                     shrinkWrap: true,
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
                     itemCount: posts.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 14),
+                    separatorBuilder: (_, __) =>
+                        const SizedBox(height: 0), // spacing handled in cell
                     itemBuilder: (_, i) {
                       final raw =
                           posts[i].data() as Map<String, dynamic>? ?? {};
@@ -301,8 +306,10 @@ class _HomeTopBar extends StatelessWidget {
               borderRadius: BorderRadius.circular(AppRadius.md),
             ),
             child: IconButton(
-              icon: const Icon(Icons.chat_bubble_outline_rounded,
-                  color: AppColors.primary),
+              icon: const Icon(
+                Icons.chat_bubble_outline_rounded,
+                color: AppColors.primary,
+              ),
               tooltip: 'Messages',
               onPressed: () {
                 Navigator.of(context, rootNavigator: true).push(
@@ -323,6 +330,7 @@ class _HomeTopBar extends StatelessWidget {
 class _WelcomeCard extends StatelessWidget {
   final String name;
   final VoidCallback onFindHelper;
+
   const _WelcomeCard({
     required this.name,
     required this.onFindHelper,
@@ -334,8 +342,9 @@ class _WelcomeCard extends StatelessWidget {
           .collection('users')
           .doc(uid)
           .set(
-              {'lastConnectionsSeenAt': FieldValue.serverTimestamp()},
-              SetOptions(merge: true));
+            {'lastConnectionsSeenAt': FieldValue.serverTimestamp()},
+            SetOptions(merge: true),
+          );
     } catch (_) {
       // ignore UI errors
     }
@@ -350,23 +359,27 @@ class _WelcomeCard extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: AppColors.card,
+        color: AppColors.canvas, // outer halo matches background
         borderRadius: BorderRadius.circular(AppRadius.xl),
         boxShadow: const [AppShadows.soft],
       ),
       child: Container(
         padding: const EdgeInsets.fromLTRB(14, 16, 14, 14),
         decoration: BoxDecoration(
-          color: AppColors.canvas,
+          color: AppColors.card, // inner card is clean white
           borderRadius: BorderRadius.circular(AppRadius.lg),
           border: Border.all(
-              color: AppColors.border.withOpacity(0.5), width: 1),
+            color: AppColors.border.withOpacity(0.45),
+            width: 1,
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Welcome, $name',
-                style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              'Welcome, $name',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 14),
 
             _TaupePill(
@@ -419,8 +432,7 @@ class _WelcomeCard extends StatelessWidget {
                             onTap: () async {
                               await _markConnectionsSeen(uid);
                               // ignore: use_build_context_synchronously
-                              Navigator.of(context, rootNavigator: true)
-                                  .push(
+                              Navigator.of(context, rootNavigator: true).push(
                                 MaterialPageRoute(
                                   builder: (_) =>
                                       const ConnectionsScreen(),
@@ -434,7 +446,9 @@ class _WelcomeCard extends StatelessWidget {
                               top: 10,
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 2),
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
                                 decoration: BoxDecoration(
                                   color: AppColors.primary,
                                   borderRadius: BorderRadius.circular(12),
@@ -466,8 +480,12 @@ class _TaupePill extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
-  const _TaupePill(
-      {required this.icon, required this.label, required this.onTap});
+
+  const _TaupePill({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -502,11 +520,16 @@ class _TaupePill extends StatelessWidget {
 
 class _SectionTitle extends StatelessWidget {
   final String text;
+
   const _SectionTitle(this.text);
+
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-        child: Text(text, style: Theme.of(context).textTheme.titleMedium),
+        child: Text(
+          text,
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
       );
 }
 
@@ -554,8 +577,6 @@ class _PostCellState extends State<_PostCell> {
 
   @override
   Widget build(BuildContext context) {
-    final borderColor = AppColors.border.withOpacity(0.65);
-
     Widget? media() {
       if (widget.imageUrl.isNotEmpty) {
         return _MediaImage(
@@ -574,17 +595,21 @@ class _PostCellState extends State<_PostCell> {
       return null;
     }
 
+    // LinkedIn / Reddit style: flat white, divider between posts, no card
     return Container(
-      decoration: BoxDecoration(
-        color: AppColors.postCard,
-        borderRadius: BorderRadius.circular(AppRadius.xl),
-        boxShadow: const [AppShadows.soft],
-        border: Border.all(color: borderColor, width: 1),
+      padding: const EdgeInsets.fromLTRB(0, 16, 0, 24), // top + bottom space
+      decoration: const BoxDecoration(
+        color: AppColors.canvas,
+        border: Border(
+          bottom: BorderSide(
+            color: AppColors.border,
+            width: 1,
+          ),
+        ),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child:
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
           _PostHeader(
             authorName: widget.authorName,
             subtitle: widget.subtitle,
@@ -606,11 +631,10 @@ class _PostCellState extends State<_PostCell> {
             const SizedBox(height: 12),
             TextButton(
               onPressed: widget.onConnect,
-              // ✅ Softer & a bit longer
               style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 22, vertical: 10),
-                backgroundColor: AppColors.button,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                backgroundColor: AppColors.canvas,
                 foregroundColor: AppColors.primary,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(AppRadius.lg),
@@ -627,7 +651,7 @@ class _PostCellState extends State<_PostCell> {
               child: const Text('Connect'),
             ),
           ],
-        ]),
+        ],
       ),
     );
   }
@@ -639,6 +663,7 @@ class _PostHeader extends StatelessWidget {
   final String rightTime;
   final String avatarUrl;
   final VoidCallback? onTap;
+
   const _PostHeader({
     required this.authorName,
     required this.subtitle,
@@ -708,6 +733,7 @@ class _PostHeader extends StatelessWidget {
 
 class _PostTypeBadge extends StatelessWidget {
   final String label;
+
   const _PostTypeBadge({required this.label});
 
   @override
@@ -715,10 +741,10 @@ class _PostTypeBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: AppColors.primary.withOpacity(0.08),
+        color: AppColors.primary.withOpacity(0.04), // softer tint
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
-          color: AppColors.primary.withOpacity(0.18),
+          color: AppColors.primary.withOpacity(0.12),
         ),
       ),
       child: Text(
@@ -740,6 +766,7 @@ class _ExpandableText extends StatelessWidget {
   final bool expanded;
   final int maxLinesWhenCollapsed;
   final VoidCallback onToggle;
+
   const _ExpandableText({
     required this.content,
     required this.expanded,
@@ -777,7 +804,11 @@ class _ExpandableText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const base = TextStyle(fontSize: 16, height: 1.4, color: AppColors.text);
+    const base = TextStyle(
+      fontSize: 16,
+      height: 1.4,
+      color: AppColors.text,
+    );
     const strong = TextStyle(
       fontSize: 16,
       height: 1.4,
@@ -871,27 +902,37 @@ class _ExpandableText extends StatelessWidget {
 class _ShowMoreButton extends StatelessWidget {
   final bool expanded;
   final VoidCallback onTap;
+
   const _ShowMoreButton({required this.expanded, required this.onTap});
+
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.button,
-      borderRadius: BorderRadius.circular(10),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: Padding(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          child: Text(
+    // LinkedIn-style tiny text link
+    return TextButton(
+      onPressed: onTap,
+      style: TextButton.styleFrom(
+        padding: EdgeInsets.zero,
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
             expanded ? 'Show less' : 'Show more',
             style: const TextStyle(
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w500,
               fontSize: 13,
-              color: AppColors.text,
+              color: AppColors.muted,
             ),
           ),
-        ),
+          const SizedBox(width: 4),
+          Icon(
+            expanded ? Icons.expand_less : Icons.expand_more,
+            size: 16,
+            color: AppColors.muted,
+          ),
+        ],
       ),
     );
   }
@@ -901,6 +942,7 @@ class _MediaImage extends StatelessWidget {
   final String url;
   final double aspect;
   final VoidCallback? onTap;
+
   const _MediaImage({
     required this.url,
     required this.aspect,
@@ -939,6 +981,7 @@ class _MediaVideoThumb extends StatelessWidget {
   final String thumbUrl;
   final double aspect;
   final VoidCallback? onPlay;
+
   const _MediaVideoThumb({
     required this.thumbUrl,
     required this.aspect,
@@ -992,6 +1035,7 @@ class _MediaVideoThumb extends StatelessWidget {
 class _Avatar extends StatelessWidget {
   final String url;
   final double radius;
+
   const _Avatar({required this.url, this.radius = 20});
 
   @override

@@ -5,6 +5,7 @@ import 'package:connect_app/screens/home/home_content_screen.dart';
 import 'package:connect_app/screens/posts/create_post_screen.dart';
 import 'package:connect_app/screens/search/search_screen.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
+import 'package:connect_app/theme/tokens.dart';
 
 class MainScaffold extends StatefulWidget {
   const MainScaffold({Key? key}) : super(key: key);
@@ -33,15 +34,25 @@ class _MainScaffoldState extends State<MainScaffold> {
   @override
   Widget build(BuildContext context) {
     final screens = _buildScreens();
-    final primary = Theme.of(context).colorScheme.primary;
 
     return Scaffold(
       body: IndexedStack(index: _selectedIndex, children: screens),
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
+        backgroundColor: AppColors.canvas,
         currentIndex: _selectedIndex,
-        selectedItemColor: primary,
-        unselectedItemColor: Colors.grey,
+        selectedItemColor: AppColors.primary,
+        unselectedItemColor: AppColors.muted,
+        selectedIconTheme: const IconThemeData(color: AppColors.primary),
+        unselectedIconTheme: const IconThemeData(color: AppColors.muted),
+        selectedLabelStyle: const TextStyle(
+          fontWeight: FontWeight.w600,
+          fontSize: 12,
+        ),
+        unselectedLabelStyle: const TextStyle(
+          fontWeight: FontWeight.w500,
+          fontSize: 12,
+        ),
         onTap: _onItemTapped,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
