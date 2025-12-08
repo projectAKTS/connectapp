@@ -44,12 +44,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _bioExpanded = false;
 
   // helpers
-  String _s(dynamic v, [String fallback = '']) => v == null ? fallback : v.toString();
+  String _s(dynamic v, [String fallback = '']) =>
+      v == null ? fallback : v.toString();
   int _i(dynamic v, [int fallback = 0]) {
     if (v is int) return v;
     if (v is num) return v.toInt();
     return fallback;
   }
+
   List<String> _stringList(dynamic v) =>
       (v is List) ? v.map((e) => e.toString()).toList() : const <String>[];
 
@@ -78,8 +80,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _loadUserData() async {
     try {
-      final snap =
-          await FirebaseFirestore.instance.collection('users').doc(widget.userID).get();
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.userID)
+          .get();
       if (!snap.exists) {
         setState(() {
           userData = null;
@@ -141,7 +145,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (previous) {
         await ref.delete();
       } else {
-        await ref.set({'timestamp': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+        await ref.set(
+          {'timestamp': FieldValue.serverTimestamp()},
+          SetOptions(merge: true),
+        );
       }
     } catch (e) {
       setState(() => isFollowing = previous);
@@ -164,13 +171,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _signOut() async {
     await FirebaseAuth.instance.signOut();
     if (!mounted) return;
-    Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+    Navigator.of(context).pushNamedAndRemoveUntil(
+      '/login',
+      (route) => false,
+    );
   }
 
   void _openConnectSheet() {
     final otherName = (userData?['fullName'] as String?) ?? 'Unknown';
-    final ratePerMinute =
-        (userData?['ratePerMinute'] is num) ? (userData!['ratePerMinute'] as num).toInt() : 0;
+    final ratePerMinute = (userData?['ratePerMinute'] is num)
+        ? (userData!['ratePerMinute'] as num).toInt()
+        : 0;
 
     showModalBottomSheet(
       context: context,
@@ -186,7 +197,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               foregroundColor: AppColors.text,
               child: Icon(icon),
             ),
-            title: Text(label, style: const TextStyle(color: AppColors.text)),
+            title: Text(
+              label,
+              style: const TextStyle(color: AppColors.text),
+            ),
             onTap: () {
               Navigator.pop(context);
               onTap();
@@ -220,7 +234,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               }),
               item(Icons.chat_bubble_outline, 'Message', () {
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => ChatScreen(otherUserId: widget.userID)),
+                  MaterialPageRoute(
+                    builder: (_) => ChatScreen(otherUserId: widget.userID),
+                  ),
                 );
               }),
               item(Icons.call, 'Audio call', () => _startCall(isVideo: false)),
@@ -234,12 +250,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   // ---------- UI helpers ----------
-  Widget _softCard({required Widget child, EdgeInsets padding = const EdgeInsets.all(16)}) {
+  Widget _softCard({
+    required Widget child,
+    EdgeInsets padding = const EdgeInsets.all(16),
+  }) {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.card,
         borderRadius: BorderRadius.circular(16),
-        border: const Border.fromBorderSide(BorderSide(color: AppColors.border)),
+        border: Border.all(
+          color: AppColors.border.withOpacity(0.7),
+          width: 1,
+        ),
         boxShadow: const [AppShadows.soft],
       ),
       child: Padding(padding: padding, child: child),
@@ -248,13 +270,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _badgeChip(String text) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
         color: AppColors.button,
-        borderRadius: BorderRadius.circular(10),
-        border: const Border.fromBorderSide(BorderSide(color: AppColors.border)),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: AppColors.border.withOpacity(0.6),
+          width: 1,
+        ),
       ),
-      child: Text(text, style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.text)),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontWeight: FontWeight.w600,
+          fontSize: 14,
+          color: AppColors.text,
+        ),
+      ),
     );
   }
 
@@ -270,7 +302,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     int idx = 0;
     while (idx < lines.length && lines[idx].trim().isEmpty) idx++;
     if (idx >= lines.length) return null;
-    final m = RegExp(r'^\*\*(.+?)\*\*$').firstMatch(lines[idx].trim());
+    final m =
+        RegExp(r'^\*\*(.+?)\*\*$').firstMatch(lines[idx].trim());
     return m?.group(1);
   }
 
@@ -278,21 +311,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// If content begins with "**X Post**" -> use that X (advice/how-to/lessons/experience/quick).
   /// Otherwise -> default to QUICK (badge "Quick Post") and keep body as-is.
   /// Returns: (slug, badgeText, body)
-  (String slug, String badgeText, String body) _classifyPost(Map<String, dynamic> map) {
+  (String slug, String badgeText, String body) _classifyPost(
+      Map<String, dynamic> map) {
     final rawContent = (map['content'] ?? '').toString();
 
     // 1) Respect a template header if present and strip it from body
     final lblFromContent = _firstBoldLineLabel(rawContent);
-    if (lblFromContent != null && lblFromContent.toLowerCase().endsWith(' post')) {
+    if (lblFromContent != null &&
+        lblFromContent.toLowerCase().endsWith(' post')) {
       final lower = lblFromContent.toLowerCase();
 
       String slug;
-      if (lower.contains('advice')) slug = 'advice';
-      else if (lower.contains('how')) slug = 'how-to';
-      else if (lower.contains('lesson')) slug = 'lessons';
-      else if (lower.contains('experience')) slug = 'experience';
-      else if (lower.contains('quick')) slug = 'quick';
-      else slug = 'quick';
+      if (lower.contains('advice')) {
+        slug = 'advice';
+      } else if (lower.contains('how')) {
+        slug = 'how-to';
+      } else if (lower.contains('lesson')) {
+        slug = 'lessons';
+      } else if (lower.contains('experience')) {
+        slug = 'experience';
+      } else if (lower.contains('quick')) {
+        slug = 'quick';
+      } else {
+        slug = 'quick';
+      }
 
       // strip first bold line
       final lines = rawContent.split('\n');
@@ -314,7 +356,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // Simple markdown (bold ** ** only)
   TextSpan _mdSpan(String text) {
-    const base = TextStyle(fontSize: 15, height: 1.35, color: AppColors.text);
+    const base = TextStyle(
+      fontSize: 15,
+      height: 1.35,
+      color: AppColors.text,
+    );
     const strong = TextStyle(
       fontSize: 15,
       height: 1.35,
@@ -338,7 +384,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         spans.add(TextSpan(text: text.substring(start), style: base));
         break;
       }
-      spans.add(TextSpan(text: text.substring(start + 2, end), style: strong));
+      spans.add(
+        TextSpan(text: text.substring(start + 2, end), style: strong),
+      );
       i = end + 2;
     }
     return TextSpan(children: spans, style: base);
@@ -350,7 +398,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       decoration: BoxDecoration(
         color: AppColors.primary.withOpacity(0.08),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: AppColors.primary.withOpacity(0.18)),
+        border: Border.all(
+          color: AppColors.primary.withOpacity(0.18),
+        ),
       ),
       child: Text(
         label,
@@ -373,13 +423,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
         elevation: 0,
         foregroundColor: AppColors.text,
         iconTheme: IconThemeData(color: AppColors.text),
-        titleTextStyle: TextStyle(color: AppColors.text, fontSize: 20, fontWeight: FontWeight.w700),
+        titleTextStyle: TextStyle(
+          color: AppColors.text,
+          fontSize: 20,
+          fontWeight: FontWeight.w700,
+        ),
       ),
       textTheme: Theme.of(context).textTheme.apply(
             bodyColor: AppColors.text,
             displayColor: AppColors.text,
           ),
-      snackBarTheme: const SnackBarThemeData(contentTextStyle: TextStyle(color: Colors.white)),
+      snackBarTheme: const SnackBarThemeData(
+        contentTextStyle: TextStyle(color: Colors.white),
+      ),
     );
 
     if (isLoading) {
@@ -388,7 +444,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: Scaffold(
           appBar: AppBar(
             title: const Text('Profile'),
-            leading: BackButton(onPressed: () => Navigator.of(context).maybePop()),
+            leading:
+                BackButton(onPressed: () => Navigator.of(context).maybePop()),
           ),
           body: const Center(child: CircularProgressIndicator()),
         ),
@@ -401,17 +458,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: Scaffold(
           appBar: AppBar(
             title: const Text('Profile'),
-            leading: BackButton(onPressed: () => Navigator.of(context).maybePop()),
+            leading:
+                BackButton(onPressed: () => Navigator.of(context).maybePop()),
           ),
           body: const Center(
-            child: Text('User not found!', style: TextStyle(color: AppColors.muted)),
+            child: Text(
+              'User not found!',
+              style: TextStyle(color: AppColors.muted),
+            ),
           ),
         ),
       );
     }
 
     final boostedUntil = parseFirestoreTimestamp(userData!['boostedUntil']);
-    final isBoosted = boostedUntil != null && boostedUntil.isAfter(DateTime.now());
+    final isBoosted =
+        boostedUntil != null && boostedUntil.isAfter(DateTime.now());
 
     final fullName = _s(userData!['fullName'], 'Unknown User');
     final bio = _s(userData!['bio']);
@@ -433,7 +495,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 tooltip: "Edit Profile",
                 onPressed: () {
                   Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+                    MaterialPageRoute(
+                      builder: (_) => const OnboardingScreen(),
+                    ),
                   );
                 },
               ),
@@ -473,7 +537,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         child: const CircleAvatar(
                           radius: 14,
                           backgroundColor: Colors.orange,
-                          child: Icon(Icons.star, color: Colors.white, size: 18),
+                          child: Icon(
+                            Icons.star,
+                            color: Colors.white,
+                            size: 18,
+                          ),
                         ),
                       ),
                   ],
@@ -483,7 +551,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Text(
                 fullName,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
+                style: const TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
 
               if (bio.isNotEmpty) ...[
@@ -491,7 +562,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 _ExpandableBio(
                   text: bio,
                   expanded: _bioExpanded,
-                  onToggle: () => setState(() => _bioExpanded = !_bioExpanded),
+                  onToggle: () =>
+                      setState(() => _bioExpanded = !_bioExpanded),
                 ),
               ],
 
@@ -533,11 +605,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ],
 
-              const SizedBox(height: 16),
+              const SizedBox(height: 18),
 
               // ===== Compact stats strip =====
               _softCard(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 child: _StatsStrip(
                   streakText: '$streakDays days',
                   xpText: '$xpPoints',
@@ -546,15 +619,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
 
               if (badges.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                const Text('Badges',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 20),
+                const Text(
+                  'Badges',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
                 const SizedBox(height: 10),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    for (var i = 0; i < badges.length && i < 3; i++) _badgeChip(badges[i]),
+                    for (var i = 0; i < badges.length && i < 3; i++)
+                      _badgeChip(badges[i]),
                     if (badges.length > 3)
                       TextButton(
                         onPressed: () {
@@ -562,15 +641,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             context: context,
                             backgroundColor: AppColors.card,
                             shape: const RoundedRectangleBorder(
-                              borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+                              borderRadius: BorderRadius.vertical(
+                                top: Radius.circular(18),
+                              ),
                             ),
                             builder: (_) => ListView(
                               padding: const EdgeInsets.all(16),
                               children: badges
-                                  .map((b) => ListTile(
-                                        leading: const Icon(Icons.star_border, color: AppColors.text),
-                                        title: Text(b, style: const TextStyle(color: AppColors.text)),
-                                      ))
+                                  .map(
+                                    (b) => ListTile(
+                                      leading: const Icon(
+                                        Icons.star_border,
+                                        color: AppColors.text,
+                                      ),
+                                      title: Text(
+                                        b,
+                                        style: const TextStyle(
+                                          color: AppColors.text,
+                                        ),
+                                      ),
+                                    ),
+                                  )
                                   .toList(),
                             ),
                           );
@@ -581,9 +672,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ],
 
-              const SizedBox(height: 16),
-              const Text('Featured Posts',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 20),
+              const Text(
+                'Featured Posts',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               const SizedBox(height: 10),
               SizedBox(
                 height: 210,
@@ -595,7 +691,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     }
                     if (snap.hasError) {
                       return Center(
-                        child: Text('Error: ${snap.error}', style: const TextStyle(color: Colors.red)),
+                        child: Text(
+                          'Error: ${snap.error}',
+                          style: const TextStyle(color: Colors.red),
+                        ),
                       );
                     }
                     final all = (snap.data?.docs ?? []).toList();
@@ -609,7 +708,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     final featured = all.take(3).toList();
                     if (featured.isEmpty) {
                       return const Center(
-                        child: Text('No featured posts yet.', style: TextStyle(color: AppColors.muted)),
+                        child: Text(
+                          'No featured posts yet.',
+                          style: TextStyle(color: AppColors.muted),
+                        ),
                       );
                     }
                     return PageView.builder(
@@ -619,9 +721,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       itemBuilder: (c, i) {
                         final doc = featured[i];
                         final data = doc.data() as Map<String, dynamic>;
-                        final date = parseFirestoreTimestamp(data['timestamp']);
+                        final date =
+                            parseFirestoreTimestamp(data['timestamp']);
 
                         final (slug, badgeText, body) = _classifyPost(data);
+                        // slug is currently unused but kept for consistency
 
                         return Padding(
                           padding: EdgeInsets.only(
@@ -633,7 +737,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             onTap: () {
                               Navigator.of(context).push(
                                 MaterialPageRoute(
-                                  builder: (_) => PostDetailScreen(postId: doc.id),
+                                  builder: (_) =>
+                                      PostDetailScreen(postId: doc.id),
                                 ),
                               );
                             },
@@ -653,7 +758,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   if (date != null)
                                     Text(
                                       DateFormat.yMMMd().format(date),
-                                      style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: AppColors.muted,
+                                      ),
                                     ),
                                 ],
                               ),
@@ -665,7 +773,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   },
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 20),
 
               // ===== Filter chips =====
               SizedBox(
@@ -683,23 +791,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         label,
                         style: TextStyle(
                           fontWeight: FontWeight.w600,
-                          color: selected ? AppColors.text : AppColors.text.withOpacity(0.85),
+                          color: selected
+                              ? AppColors.text
+                              : AppColors.text.withOpacity(0.85),
                         ),
                       ),
                       selected: selected,
-                      onSelected: (_) => setState(() => _selectedFilterLabel = label),
+                      onSelected: (_) =>
+                          setState(() => _selectedFilterLabel = label),
                       selectedColor: AppColors.button,
                       backgroundColor: AppColors.card,
                       side: const BorderSide(color: AppColors.border),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     );
                   },
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 18),
 
-              const Text('Recent Activity',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+              const Text(
+                'Recent Activity',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               const SizedBox(height: 10),
 
               // ===== Recent Activity =====
@@ -711,7 +829,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   }
                   if (snap.hasError) {
                     return Center(
-                      child: Text('Error: ${snap.error}', style: const TextStyle(color: Colors.red)),
+                      child: Text(
+                        'Error: ${snap.error}',
+                        style: const TextStyle(color: Colors.red),
+                      ),
                     );
                   }
 
@@ -747,7 +868,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     return const Padding(
                       padding: EdgeInsets.symmetric(vertical: 24),
                       child: Center(
-                        child: Text('No activity yet.', style: TextStyle(color: AppColors.muted)),
+                        child: Text(
+                          'No activity yet.',
+                          style: TextStyle(color: AppColors.muted),
+                        ),
                       ),
                     );
                   }
@@ -756,7 +880,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: filtered.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    separatorBuilder: (_, __) =>
+                        const SizedBox(height: 12),
                     itemBuilder: (c, i) {
                       final row = filtered[i];
                       final doc = row.$1;
@@ -768,7 +893,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         borderRadius: BorderRadius.circular(16),
                         onTap: () {
                           Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => PostDetailScreen(postId: doc.id)),
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  PostDetailScreen(postId: doc.id),
+                            ),
                           );
                         },
                         child: _softCard(
@@ -787,7 +915,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 const SizedBox(height: 8),
                                 Text(
                                   DateFormat.yMMMd().format(dt),
-                                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.muted,
+                                  ),
                                 ),
                               ],
                             ],
@@ -825,32 +956,60 @@ class _StatsStrip extends StatelessWidget {
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, size: 18, color: AppColors.text),
-            const SizedBox(width: 6),
-            Text(label, style: const TextStyle(color: AppColors.muted)),
-          ]),
+          Icon(
+            icon,
+            size: 18,
+            color: AppColors.primary,
+          ),
           const SizedBox(height: 6),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
+          Text(
+            value,
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 16,
+              color: AppColors.text,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.muted,
+            ),
+          ),
         ],
       );
     }
 
     Widget divider() => Container(
           width: 1,
-          height: 30,
+          height: 32,
           margin: const EdgeInsets.symmetric(horizontal: 6),
-          color: AppColors.border,
+          color: AppColors.border.withOpacity(0.5),
         );
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        Expanded(child: Center(child: cell(Icons.local_fire_department_rounded, 'Streak', streakText))),
+        Expanded(
+          child: Center(
+            child:
+                cell(Icons.local_fire_department_rounded, 'Streak', streakText),
+          ),
+        ),
         divider(),
-        Expanded(child: Center(child: cell(Icons.emoji_events_outlined, 'XP', xpText))),
+        Expanded(
+          child: Center(
+            child: cell(Icons.emoji_events_outlined, 'XP', xpText),
+          ),
+        ),
         divider(),
-        Expanded(child: Center(child: cell(Icons.thumb_up_alt_outlined, 'Helpful', helpfulText))),
+        Expanded(
+          child: Center(
+            child: cell(Icons.thumb_up_alt_outlined, 'Helpful', helpfulText),
+          ),
+        ),
       ],
     );
   }
@@ -922,7 +1081,9 @@ class _FilledActionButton extends StatelessWidget {
         foregroundColor: Colors.white,
         minimumSize: const Size.fromHeight(48),
         elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
         padding: const EdgeInsets.symmetric(horizontal: 14),
         textStyle: const TextStyle(fontWeight: FontWeight.w700),
       ),
@@ -958,7 +1119,9 @@ class _OutlinedActionButton extends StatelessWidget {
         backgroundColor: AppColors.button,
         foregroundColor: AppColors.text,
         side: const BorderSide(color: AppColors.border),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
         padding: const EdgeInsets.symmetric(horizontal: 14),
         textStyle: const TextStyle(fontWeight: FontWeight.w700),
       ),
