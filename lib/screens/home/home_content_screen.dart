@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -43,6 +44,22 @@ class HomeContentScreen extends StatefulWidget {
 
 class _HomeContentScreenState extends State<HomeContentScreen> {
   final ScrollController _scroll = ScrollController();
+
+  // Pull-to-refresh handler (UX only; Firestore streams auto-update)
+  Future<void> _onRefresh() async {
+    HapticFeedback.mediumImpact();
+
+    if (_scroll.hasClients) {
+      await _scroll.animateTo(
+        0,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOut,
+      );
+    }
+
+    // Let the spinner show briefly; Firestore stream will emit as needed
+    await Future.delayed(const Duration(milliseconds: 600));
+  }
 
   void _openConnectSheet({
     required String otherUserId,
@@ -151,135 +168,144 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
     return Scaffold(
       backgroundColor: AppColors.canvas,
       body: SafeArea(
-        child: CustomScrollView(
-          controller: _scroll,
-          slivers: [
-            const SliverToBoxAdapter(child: _HomeTopBar()),
-            SliverToBoxAdapter(
-              child: _WelcomeCard(
-                name: firstName,
-                onFindHelper: () => Navigator.of(context, rootNavigator: true)
-                    .push(
-                  MaterialPageRoute(
-                    builder: (_) => const FindHelperScreen(),
+        child: RefreshIndicator.adaptive(
+          onRefresh: _onRefresh,
+          edgeOffset: 0,
+          displacement: 56,
+          child: CustomScrollView(
+            controller: _scroll,
+            physics: const BouncingScrollPhysics(
+              parent: AlwaysScrollableScrollPhysics(),
+            ),
+            slivers: [
+              const SliverToBoxAdapter(child: _HomeTopBar()),
+              SliverToBoxAdapter(
+                child: _WelcomeCard(
+                  name: firstName,
+                  onFindHelper: () => Navigator.of(context, rootNavigator: true)
+                      .push(
+                    CupertinoPageRoute(
+                      builder: (_) => const FindHelperScreen(),
+                    ),
                   ),
                 ),
               ),
-            ),
-            const SliverToBoxAdapter(child: _SectionTitle('Recent posts')),
-            SliverToBoxAdapter(
-              child: StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('posts')
-                    .orderBy('timestamp', descending: true)
-                    .snapshots(),
-                builder: (context, snap) {
-                  if (snap.connectionState == ConnectionState.waiting) {
-                    return const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 24),
-                      child: Center(child: CircularProgressIndicator()),
-                    );
-                  }
-                  if (!snap.hasData || snap.data!.docs.isEmpty) {
-                    return const Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Text(
-                        'No posts yet! Create one to get started.',
-                        style: TextStyle(color: AppColors.muted),
-                      ),
-                    );
-                  }
-
-                  final posts = snap.data!.docs;
-
-                  return ListView.separated(
-                    physics: const NeverScrollableScrollPhysics(),
-                    shrinkWrap: true,
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-                    itemCount: posts.length,
-                    separatorBuilder: (_, __) =>
-                        const SizedBox(height: 0), // spacing handled in cell
-                    itemBuilder: (_, i) {
-                      final raw =
-                          posts[i].data() as Map<String, dynamic>? ?? {};
-                      final authorName = (raw['userName'] ?? 'User') as String;
-                      final authorId = _extractUserId(raw);
-                      final avatar = (raw['userAvatar'] ?? '') as String;
-                      final body = (raw['content'] ?? '').toString();
-                      final right = _shortFromTs(raw['timestamp']);
-                      final subtitle = '$right ago';
-                      final imageUrl = (raw['imageUrl'] ?? '').toString();
-                      final videoUrl = (raw['videoUrl'] ?? '').toString();
-                      final videoThumbUrl =
-                          (raw['videoThumbUrl'] ?? '').toString();
-                      final aspect = (() {
-                        final v = raw['mediaAspectRatio'];
-                        if (v is num && v > 0) return v.toDouble();
-                        return imageUrl.isNotEmpty ? (16 / 9) : 1.0;
-                      })();
-
-                      final isOwnPost = (authorId == currentUid);
-
-                      return _PostCell(
-                        authorName: authorName,
-                        authorAvatarUrl: avatar,
-                        subtitle: subtitle,
-                        rightTime: right,
-                        body: body,
-                        imageUrl: imageUrl,
-                        videoUrl: videoUrl,
-                        videoThumbUrl: videoThumbUrl,
-                        mediaAspect: aspect,
-                        onOpenProfile: authorId.isEmpty
-                            ? null
-                            : () {
-                                Navigator.of(context, rootNavigator: true)
-                                    .push(
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        ProfileScreen(userID: authorId),
-                                  ),
-                                );
-                              },
-                        onConnect: isOwnPost
-                            ? null
-                            : () {
-                                HapticFeedback.lightImpact();
-                                _openConnectSheet(
-                                  otherUserId: authorId,
-                                  otherUserName: authorName,
-                                );
-                              },
-                        onOpenImage: imageUrl.isEmpty
-                            ? null
-                            : () {
-                                Navigator.of(context, rootNavigator: true)
-                                    .push(
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        PostImageViewer(url: imageUrl),
-                                  ),
-                                );
-                              },
-                        onOpenVideo: videoUrl.isEmpty
-                            ? null
-                            : () {
-                                Navigator.of(context, rootNavigator: true)
-                                    .push(
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        PostVideoPlayer(url: videoUrl),
-                                  ),
-                                );
-                              },
-                        showConnect: !isOwnPost,
+              const SliverToBoxAdapter(child: _SectionTitle('Recent posts')),
+              SliverToBoxAdapter(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('posts')
+                      .orderBy('timestamp', descending: true)
+                      .snapshots(),
+                  builder: (context, snap) {
+                    if (snap.connectionState == ConnectionState.waiting) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: Center(child: CircularProgressIndicator()),
                       );
-                    },
-                  );
-                },
+                    }
+                    if (!snap.hasData || snap.data!.docs.isEmpty) {
+                      return const Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Text(
+                          'No posts yet! Create one to get started.',
+                          style: TextStyle(color: AppColors.muted),
+                        ),
+                      );
+                    }
+
+                    final posts = snap.data!.docs;
+
+                    return ListView.separated(
+                      physics: const NeverScrollableScrollPhysics(),
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+                      itemCount: posts.length,
+                      separatorBuilder: (_, __) =>
+                          const SizedBox(height: 0), // spacing handled in cell
+                      itemBuilder: (_, i) {
+                        final raw =
+                            posts[i].data() as Map<String, dynamic>? ?? {};
+                        final authorName =
+                            (raw['userName'] ?? 'User') as String;
+                        final authorId = _extractUserId(raw);
+                        final avatar = (raw['userAvatar'] ?? '') as String;
+                        final body = (raw['content'] ?? '').toString();
+                        final right = _shortFromTs(raw['timestamp']);
+                        final subtitle = '$right ago';
+                        final imageUrl = (raw['imageUrl'] ?? '').toString();
+                        final videoUrl = (raw['videoUrl'] ?? '').toString();
+                        final videoThumbUrl =
+                            (raw['videoThumbUrl'] ?? '').toString();
+                        final aspect = (() {
+                          final v = raw['mediaAspectRatio'];
+                          if (v is num && v > 0) return v.toDouble();
+                          return imageUrl.isNotEmpty ? (16 / 9) : 1.0;
+                        })();
+
+                        final isOwnPost = (authorId == currentUid);
+
+                        return _PostCell(
+                          authorName: authorName,
+                          authorAvatarUrl: avatar,
+                          subtitle: subtitle,
+                          rightTime: right,
+                          body: body,
+                          imageUrl: imageUrl,
+                          videoUrl: videoUrl,
+                          videoThumbUrl: videoThumbUrl,
+                          mediaAspect: aspect,
+                          onOpenProfile: authorId.isEmpty
+                              ? null
+                              : () {
+                                  Navigator.of(context, rootNavigator: true)
+                                      .push(
+                                    CupertinoPageRoute(
+                                      builder: (_) =>
+                                          ProfileScreen(userID: authorId),
+                                    ),
+                                  );
+                                },
+                          onConnect: isOwnPost
+                              ? null
+                              : () {
+                                  HapticFeedback.lightImpact();
+                                  _openConnectSheet(
+                                    otherUserId: authorId,
+                                    otherUserName: authorName,
+                                  );
+                                },
+                          onOpenImage: imageUrl.isEmpty
+                              ? null
+                              : () {
+                                  Navigator.of(context, rootNavigator: true)
+                                      .push(
+                                    CupertinoPageRoute(
+                                      builder: (_) =>
+                                          PostImageViewer(url: imageUrl),
+                                    ),
+                                  );
+                                },
+                          onOpenVideo: videoUrl.isEmpty
+                              ? null
+                              : () {
+                                  Navigator.of(context, rootNavigator: true)
+                                      .push(
+                                    CupertinoPageRoute(
+                                      builder: (_) =>
+                                          PostVideoPlayer(url: videoUrl),
+                                    ),
+                                  );
+                                },
+                          showConnect: !isOwnPost,
+                        );
+                      },
+                    );
+                  },
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -313,7 +339,7 @@ class _HomeTopBar extends StatelessWidget {
               tooltip: 'Messages',
               onPressed: () {
                 Navigator.of(context, rootNavigator: true).push(
-                  MaterialPageRoute(
+                  CupertinoPageRoute(
                     builder: (_) => const MessagesScreen(),
                   ),
                 );
@@ -398,7 +424,8 @@ class _WelcomeCard extends StatelessWidget {
                 builder: (context, userSnap) {
                   DateTime? lastSeen;
                   if (userSnap.hasData) {
-                    final d = userSnap.data!.data() as Map<String, dynamic>?;
+                    final d =
+                        userSnap.data!.data() as Map<String, dynamic>?;
                     lastSeen =
                         parseFirestoreTimestamp(d?['lastConnectionsSeenAt']);
                   }
@@ -433,7 +460,7 @@ class _WelcomeCard extends StatelessWidget {
                               await _markConnectionsSeen(uid);
                               // ignore: use_build_context_synchronously
                               Navigator.of(context, rootNavigator: true).push(
-                                MaterialPageRoute(
+                                CupertinoPageRoute(
                                   builder: (_) =>
                                       const ConnectionsScreen(),
                                 ),

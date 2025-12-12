@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
@@ -28,6 +30,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool isCurrentUser = false;
   bool isFollowing = false;
   bool _followBusy = false;
+
+  // Horizontal swipe-back helpers
+  double? _dragStartX;
+  bool _dragFromEdge = false;
 
   // ---- Filters (match Create Post templates) ----
   // label -> slug
@@ -115,6 +121,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  // Pull-to-refresh handler
+  Future<void> _onRefresh() async {
+    HapticFeedback.mediumImpact();
+    await _loadUserData();
+    await Future.delayed(const Duration(milliseconds: 400));
+  }
+
   void _snack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
@@ -145,10 +158,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (previous) {
         await ref.delete();
       } else {
-        await ref.set(
-          {'timestamp': FieldValue.serverTimestamp()},
-          SetOptions(merge: true),
-        );
+        await ref.set({'timestamp': FieldValue.serverTimestamp()},
+            SetOptions(merge: true));
       }
     } catch (e) {
       setState(() => isFollowing = previous);
@@ -171,10 +182,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _signOut() async {
     await FirebaseAuth.instance.signOut();
     if (!mounted) return;
-    Navigator.of(context).pushNamedAndRemoveUntil(
-      '/login',
-      (route) => false,
-    );
+    Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
   }
 
   void _openConnectSheet() {
@@ -197,10 +205,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               foregroundColor: AppColors.text,
               child: Icon(icon),
             ),
-            title: Text(
-              label,
-              style: const TextStyle(color: AppColors.text),
-            ),
+            title: Text(label, style: const TextStyle(color: AppColors.text)),
             onTap: () {
               Navigator.pop(context);
               onTap();
@@ -234,7 +239,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               }),
               item(Icons.chat_bubble_outline, 'Message', () {
                 Navigator.of(context).push(
-                  MaterialPageRoute(
+                  CupertinoPageRoute(
                     builder: (_) => ChatScreen(otherUserId: widget.userID),
                   ),
                 );
@@ -249,6 +254,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  // ---------- Horizontal swipe-back handlers ----------
+  void _handleHorizontalDragStart(DragStartDetails details) {
+    _dragStartX = details.globalPosition.dx;
+    // treat as edge-swipe if within 32 px from left edge
+    _dragFromEdge = (_dragStartX ?? 0) < 32.0;
+  }
+
+  void _handleHorizontalDragUpdate(DragUpdateDetails details) {
+    if (!_dragFromEdge) return;
+    // Only pop if there's actually somewhere to go back to
+    if (!Navigator.of(context).canPop()) return;
+
+    // Rightward movement with some threshold
+    if (details.primaryDelta != null && details.primaryDelta! > 16) {
+      _dragFromEdge = false;
+      Navigator.of(context).maybePop();
+    }
+  }
+
   // ---------- UI helpers ----------
   Widget _softCard({
     required Widget child,
@@ -258,10 +282,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       decoration: BoxDecoration(
         color: AppColors.card,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: AppColors.border.withOpacity(0.7),
-          width: 1,
-        ),
+        border: const Border.fromBorderSide(BorderSide(color: AppColors.border)),
         boxShadow: const [AppShadows.soft],
       ),
       child: Padding(padding: padding, child: child),
@@ -270,20 +291,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _badgeChip(String text) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: AppColors.button,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: AppColors.border.withOpacity(0.6),
-          width: 1,
-        ),
+        borderRadius: BorderRadius.circular(10),
+        border: const Border.fromBorderSide(BorderSide(color: AppColors.border)),
       ),
       child: Text(
         text,
         style: const TextStyle(
           fontWeight: FontWeight.w600,
-          fontSize: 14,
           color: AppColors.text,
         ),
       ),
@@ -302,8 +319,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     int idx = 0;
     while (idx < lines.length && lines[idx].trim().isEmpty) idx++;
     if (idx >= lines.length) return null;
-    final m =
-        RegExp(r'^\*\*(.+?)\*\*$').firstMatch(lines[idx].trim());
+    final m = RegExp(r'^\*\*(.+?)\*\*$').firstMatch(lines[idx].trim());
     return m?.group(1);
   }
 
@@ -317,8 +333,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     // 1) Respect a template header if present and strip it from body
     final lblFromContent = _firstBoldLineLabel(rawContent);
-    if (lblFromContent != null &&
-        lblFromContent.toLowerCase().endsWith(' post')) {
+    if (lblFromContent != null && lblFromContent.toLowerCase().endsWith(' post')) {
       final lower = lblFromContent.toLowerCase();
 
       String slug;
@@ -356,11 +371,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // Simple markdown (bold ** ** only)
   TextSpan _mdSpan(String text) {
-    const base = TextStyle(
-      fontSize: 15,
-      height: 1.35,
-      color: AppColors.text,
-    );
+    const base = TextStyle(fontSize: 15, height: 1.35, color: AppColors.text);
     const strong = TextStyle(
       fontSize: 15,
       height: 1.35,
@@ -384,9 +395,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         spans.add(TextSpan(text: text.substring(start), style: base));
         break;
       }
-      spans.add(
-        TextSpan(text: text.substring(start + 2, end), style: strong),
-      );
+      spans.add(TextSpan(text: text.substring(start + 2, end), style: strong));
       i = end + 2;
     }
     return TextSpan(children: spans, style: base);
@@ -398,9 +407,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       decoration: BoxDecoration(
         color: AppColors.primary.withOpacity(0.08),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: AppColors.primary.withOpacity(0.18),
-        ),
+        border: Border.all(color: AppColors.primary.withOpacity(0.18)),
       ),
       child: Text(
         label,
@@ -416,6 +423,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final canPop = Navigator.of(context).canPop();
+
     final theme = Theme.of(context).copyWith(
       scaffoldBackgroundColor: AppColors.canvas,
       appBarTheme: const AppBarTheme(
@@ -444,8 +453,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: Scaffold(
           appBar: AppBar(
             title: const Text('Profile'),
-            leading:
-                BackButton(onPressed: () => Navigator.of(context).maybePop()),
+            leading: canPop ? BackButton(onPressed: () => Navigator.of(context).maybePop()) : null,
           ),
           body: const Center(child: CircularProgressIndicator()),
         ),
@@ -458,8 +466,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: Scaffold(
           appBar: AppBar(
             title: const Text('Profile'),
-            leading:
-                BackButton(onPressed: () => Navigator.of(context).maybePop()),
+            leading: canPop ? BackButton(onPressed: () => Navigator.of(context).maybePop()) : null,
           ),
           body: const Center(
             child: Text(
@@ -472,8 +479,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     final boostedUntil = parseFirestoreTimestamp(userData!['boostedUntil']);
-    final isBoosted =
-        boostedUntil != null && boostedUntil.isAfter(DateTime.now());
+    final isBoosted = boostedUntil != null && boostedUntil.isAfter(DateTime.now());
 
     final fullName = _s(userData!['fullName'], 'Unknown User');
     final bio = _s(userData!['bio']);
@@ -486,7 +492,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       data: theme,
       child: Scaffold(
         appBar: AppBar(
-          leading: BackButton(onPressed: () => Navigator.of(context).maybePop()),
+          leading: canPop ? BackButton(onPressed: () => Navigator.of(context).maybePop()) : null,
           title: const Text('Profile'),
           actions: [
             if (isCurrentUser) ...[
@@ -495,7 +501,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 tooltip: "Edit Profile",
                 onPressed: () {
                   Navigator.of(context).push(
-                    MaterialPageRoute(
+                    CupertinoPageRoute(
                       builder: (_) => const OnboardingScreen(),
                     ),
                   );
@@ -509,429 +515,472 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ],
           ],
         ),
-        body: SingleChildScrollView(
-          key: const PageStorageKey('profileScroll'),
-          controller: _scrollController,
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Avatar + name + bio
-              Center(
-                child: Stack(
-                  alignment: Alignment.topRight,
-                  children: [
-                    CircleAvatar(
-                      radius: 56,
-                      backgroundColor: AppColors.avatarBg,
-                      foregroundColor: AppColors.avatarFg,
-                      backgroundImage: _avatarProvider(userData!),
-                    ),
-                    if (isBoosted)
-                      Container(
-                        margin: const EdgeInsets.only(right: 6, top: 6),
-                        decoration: const BoxDecoration(
-                          color: AppColors.button,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const CircleAvatar(
-                          radius: 14,
-                          backgroundColor: Colors.orange,
-                          child: Icon(
-                            Icons.star,
-                            color: Colors.white,
-                            size: 18,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
+        body: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragStart: _handleHorizontalDragStart,
+          onHorizontalDragUpdate: _handleHorizontalDragUpdate,
+          child: RefreshIndicator.adaptive(
+            onRefresh: _onRefresh,
+            edgeOffset: 0,
+            displacement: 56,
+            child: SingleChildScrollView(
+              key: const PageStorageKey('profileScroll'),
+              controller: _scrollController,
+              physics: const BouncingScrollPhysics(
+                parent: AlwaysScrollableScrollPhysics(),
               ),
-              const SizedBox(height: 12),
-              Text(
-                fullName,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-
-              if (bio.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                _ExpandableBio(
-                  text: bio,
-                  expanded: _bioExpanded,
-                  onToggle: () =>
-                      setState(() => _bioExpanded = !_bioExpanded),
-                ),
-              ],
-
-              // ===== Action row (Follow / Connect) =====
-              if (!isCurrentUser) ...[
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    Expanded(
-                      child: AbsorbPointer(
-                        absorbing: _followBusy,
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 160),
-                          child: isFollowing
-                              ? _OutlinedActionButton(
-                                  key: const ValueKey('following-pill'),
-                                  icon: Icons.check_circle,
-                                  label: 'Following',
-                                  onTap: _toggleFollow,
-                                )
-                              : _FilledActionButton(
-                                  key: const ValueKey('follow-pill'),
-                                  icon: Icons.person_add_alt_1,
-                                  label: 'Follow',
-                                  onTap: _toggleFollow,
-                                ),
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Avatar + name + bio
+                  Center(
+                    child: Stack(
+                      alignment: Alignment.topRight,
+                      children: [
+                        CircleAvatar(
+                          radius: 56,
+                          backgroundColor: AppColors.avatarBg,
+                          foregroundColor: AppColors.avatarFg,
+                          backgroundImage: _avatarProvider(userData!),
                         ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _OutlinedActionButton(
-                        icon: Icons.flash_on_outlined,
-                        label: 'Connect',
-                        onTap: _openConnectSheet,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-
-              const SizedBox(height: 18),
-
-              // ===== Compact stats strip =====
-              _softCard(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                child: _StatsStrip(
-                  streakText: '$streakDays days',
-                  xpText: '$xpPoints',
-                  helpfulText: '$helpfulMarks',
-                ),
-              ),
-
-              if (badges.isNotEmpty) ...[
-                const SizedBox(height: 20),
-                const Text(
-                  'Badges',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (var i = 0; i < badges.length && i < 3; i++)
-                      _badgeChip(badges[i]),
-                    if (badges.length > 3)
-                      TextButton(
-                        onPressed: () {
-                          showModalBottomSheet(
-                            context: context,
-                            backgroundColor: AppColors.card,
-                            shape: const RoundedRectangleBorder(
-                              borderRadius: BorderRadius.vertical(
-                                top: Radius.circular(18),
+                        if (isBoosted)
+                          Container(
+                            margin: const EdgeInsets.only(right: 6, top: 6),
+                            decoration: const BoxDecoration(
+                              color: AppColors.button,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const CircleAvatar(
+                              radius: 14,
+                              backgroundColor: Colors.orange,
+                              child: Icon(
+                                Icons.star,
+                                color: Colors.white,
+                                size: 18,
                               ),
                             ),
-                            builder: (_) => ListView(
-                              padding: const EdgeInsets.all(16),
-                              children: badges
-                                  .map(
-                                    (b) => ListTile(
-                                      leading: const Icon(
-                                        Icons.star_border,
-                                        color: AppColors.text,
-                                      ),
-                                      title: Text(
-                                        b,
-                                        style: const TextStyle(
-                                          color: AppColors.text,
-                                        ),
-                                      ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    fullName,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+
+                  if (bio.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    _ExpandableBio(
+                      text: bio,
+                      expanded: _bioExpanded,
+                      onToggle: () =>
+                          setState(() => _bioExpanded = !_bioExpanded),
+                    ),
+                  ],
+
+                  // ===== Action row (Follow / Connect) =====
+                  if (!isCurrentUser) ...[
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: AbsorbPointer(
+                            absorbing: _followBusy,
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 160),
+                              child: isFollowing
+                                  ? _OutlinedActionButton(
+                                      key: const ValueKey('following-pill'),
+                                      icon: Icons.check_circle,
+                                      label: 'Following',
+                                      onTap: _toggleFollow,
+                                    )
+                                  : _FilledActionButton(
+                                      key: const ValueKey('follow-pill'),
+                                      icon: Icons.person_add_alt_1,
+                                      label: 'Follow',
+                                      onTap: _toggleFollow,
                                     ),
-                                  )
-                                  .toList(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _OutlinedActionButton(
+                            icon: Icons.flash_on_outlined,
+                            label: 'Connect',
+                            onTap: _openConnectSheet,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+
+                  const SizedBox(height: 16),
+
+                  // ===== Compact stats strip =====
+                  _softCard(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    child: _StatsStrip(
+                      streakText: '$streakDays days',
+                      xpText: '$xpPoints',
+                      helpfulText: '$helpfulMarks',
+                    ),
+                  ),
+
+                  if (badges.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Badges',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (var i = 0; i < badges.length && i < 3; i++)
+                          _badgeChip(badges[i]),
+                        if (badges.length > 3)
+                          TextButton(
+                            onPressed: () {
+                              showModalBottomSheet(
+                                context: context,
+                                backgroundColor: AppColors.card,
+                                shape: const RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.vertical(
+                                    top: Radius.circular(18),
+                                  ),
+                                ),
+                                builder: (_) => ListView(
+                                  padding: const EdgeInsets.all(16),
+                                  children: badges
+                                      .map(
+                                        (b) => ListTile(
+                                          leading: const Icon(
+                                            Icons.star_border,
+                                            color: AppColors.text,
+                                          ),
+                                          title: Text(
+                                            b,
+                                            style: const TextStyle(
+                                              color: AppColors.text,
+                                            ),
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                              );
+                            },
+                            child: Text('+ ${badges.length - 3} more'),
+                          ),
+                      ],
+                    ),
+                  ],
+
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Featured Posts',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 210,
+                    child: StreamBuilder<QuerySnapshot>(
+                      stream: _postsStream,
+                      builder: (ctx, snap) {
+                        if (snap.connectionState ==
+                            ConnectionState.waiting) {
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
+                        }
+                        if (snap.hasError) {
+                          return Center(
+                            child: Text(
+                              'Error: ${snap.error}',
+                              style: const TextStyle(color: Colors.red),
                             ),
                           );
-                        },
-                        child: Text('+ ${badges.length - 3} more'),
-                      ),
-                  ],
-                ),
-              ],
+                        }
+                        final all = (snap.data?.docs ?? []).toList();
+                        all.sort((a, b) {
+                          final aTs =
+                              parseFirestoreTimestamp(a['timestamp']) ??
+                                  DateTime.fromMillisecondsSinceEpoch(0);
+                          final bTs =
+                              parseFirestoreTimestamp(b['timestamp']) ??
+                                  DateTime.fromMillisecondsSinceEpoch(0);
+                          return bTs.compareTo(aTs);
+                        });
+                        final featured = all.take(3).toList();
+                        if (featured.isEmpty) {
+                          return const Center(
+                            child: Text(
+                              'No featured posts yet.',
+                              style: TextStyle(color: AppColors.muted),
+                            ),
+                          );
+                        }
+                        return PageView.builder(
+                          controller: _pageController,
+                          itemCount: featured.length,
+                          padEnds: false,
+                          physics: const BouncingScrollPhysics(),
+                          itemBuilder: (c, i) {
+                            final doc = featured[i];
+                            final data =
+                                doc.data() as Map<String, dynamic>;
+                            final date =
+                                parseFirestoreTimestamp(data['timestamp']);
 
-              const SizedBox(height: 20),
-              const Text(
-                'Featured Posts',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                height: 210,
-                child: StreamBuilder<QuerySnapshot>(
-                  stream: _postsStream,
-                  builder: (ctx, snap) {
-                    if (snap.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    if (snap.hasError) {
-                      return Center(
-                        child: Text(
-                          'Error: ${snap.error}',
-                          style: const TextStyle(color: Colors.red),
-                        ),
-                      );
-                    }
-                    final all = (snap.data?.docs ?? []).toList();
-                    all.sort((a, b) {
-                      final aTs = parseFirestoreTimestamp(a['timestamp']) ??
-                          DateTime.fromMillisecondsSinceEpoch(0);
-                      final bTs = parseFirestoreTimestamp(b['timestamp']) ??
-                          DateTime.fromMillisecondsSinceEpoch(0);
-                      return bTs.compareTo(aTs);
-                    });
-                    final featured = all.take(3).toList();
-                    if (featured.isEmpty) {
-                      return const Center(
-                        child: Text(
-                          'No featured posts yet.',
-                          style: TextStyle(color: AppColors.muted),
-                        ),
-                      );
-                    }
-                    return PageView.builder(
-                      controller: _pageController,
-                      itemCount: featured.length,
-                      padEnds: false,
-                      itemBuilder: (c, i) {
-                        final doc = featured[i];
-                        final data = doc.data() as Map<String, dynamic>;
-                        final date =
-                            parseFirestoreTimestamp(data['timestamp']);
+                            final (slug, badgeText, body) =
+                                _classifyPost(data);
+                            // slug is currently unused but preserved
 
-                        final (slug, badgeText, body) = _classifyPost(data);
-                        // slug is currently unused but kept for consistency
+                            return Padding(
+                              padding: EdgeInsets.only(
+                                left: i == 0 ? 0 : 10,
+                                right: i == featured.length - 1 ? 0 : 10,
+                              ),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(16),
+                                onTap: () {
+                                  Navigator.of(context).push(
+                                    CupertinoPageRoute(
+                                      builder: (_) =>
+                                          PostDetailScreen(postId: doc.id),
+                                    ),
+                                  );
+                                },
+                                child: _softCard(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      _postTypeBadge(badgeText),
+                                      const SizedBox(height: 8),
+                                      Expanded(
+                                        child: RichText(
+                                          text: _mdSpan(body),
+                                          maxLines: 4,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      if (date != null)
+                                        Text(
+                                          DateFormat.yMMMd().format(date),
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            color: AppColors.muted,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 16),
 
-                        return Padding(
-                          padding: EdgeInsets.only(
-                            left: i == 0 ? 0 : 10,
-                            right: i == featured.length - 1 ? 0 : 10,
+                  // ===== Filter chips =====
+                  SizedBox(
+                    height: 44,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _filters.length,
+                      separatorBuilder: (_, __) =>
+                          const SizedBox(width: 8),
+                      itemBuilder: (ctx, i) {
+                        final label = _filters.keys.elementAt(i);
+                        final selected = (label == _selectedFilterLabel);
+                        return ChoiceChip(
+                          key: ValueKey(label),
+                          label: Text(
+                            label,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: selected
+                                  ? AppColors.text
+                                  : AppColors.text.withOpacity(0.85),
+                            ),
                           ),
-                          child: InkWell(
+                          selected: selected,
+                          onSelected: (_) =>
+                              setState(() => _selectedFilterLabel = label),
+                          selectedColor: AppColors.button,
+                          backgroundColor: AppColors.card,
+                          side:
+                              const BorderSide(color: AppColors.border),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  const Text(
+                    'Recent Activity',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  // ===== Recent Activity =====
+                  StreamBuilder<QuerySnapshot>(
+                    stream: _postsStream,
+                    builder: (ctx, snap) {
+                      if (snap.connectionState ==
+                          ConnectionState.waiting) {
+                        return const Center(
+                          child: CircularProgressIndicator(),
+                        );
+                      }
+                      if (snap.hasError) {
+                        return Center(
+                          child: Text(
+                            'Error: ${snap.error}',
+                            style: const TextStyle(color: Colors.red),
+                          ),
+                        );
+                      }
+
+                      var docs = (snap.data?.docs ?? []).toList()
+                        ..sort((a, b) {
+                          final aTs =
+                              parseFirestoreTimestamp(a['timestamp']) ??
+                                  DateTime.fromMillisecondsSinceEpoch(0);
+                          final bTs =
+                              parseFirestoreTimestamp(b['timestamp']) ??
+                                  DateTime.fromMillisecondsSinceEpoch(0);
+                          return bTs.compareTo(aTs);
+                        });
+
+                      final selectedSlug = _filters[_selectedFilterLabel];
+
+                      // Classify once and reuse for filter + render
+                      final items = docs
+                          .map((doc) {
+                            final map =
+                                doc.data() as Map<String, dynamic>;
+                            final tuple = _classifyPost(map);
+                            return (
+                              doc,
+                              tuple.$1 /* slug */,
+                              tuple.$2 /* badge */,
+                              tuple.$3 /* body */,
+                              parseFirestoreTimestamp(map['timestamp'])
+                            );
+                          })
+                          .toList();
+
+                      final filtered = selectedSlug == null
+                          ? items
+                          : items
+                              .where((e) => e.$2 == selectedSlug)
+                              .toList();
+
+                      if (filtered.isEmpty) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24),
+                          child: Center(
+                            child: Text(
+                              'No activity yet.',
+                              style: TextStyle(color: AppColors.muted),
+                            ),
+                          ),
+                        );
+                      }
+
+                      return ListView.separated(
+                        shrinkWrap: true,
+                        physics:
+                            const NeverScrollableScrollPhysics(),
+                        itemCount: filtered.length,
+                        separatorBuilder: (_, __) =>
+                            const SizedBox(height: 12),
+                        itemBuilder: (c, i) {
+                          final row = filtered[i];
+                          final doc = row.$1;
+                          final badgeText = row.$3;
+                          final body = row.$4;
+                          final dt = row.$5;
+
+                          return InkWell(
                             borderRadius: BorderRadius.circular(16),
                             onTap: () {
                               Navigator.of(context).push(
-                                MaterialPageRoute(
+                                CupertinoPageRoute(
                                   builder: (_) =>
                                       PostDetailScreen(postId: doc.id),
                                 ),
                               );
                             },
                             child: _softCard(
+                              padding: const EdgeInsets.fromLTRB(
+                                14,
+                                12,
+                                14,
+                                12,
+                              ),
                               child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
                                 children: [
                                   _postTypeBadge(badgeText),
                                   const SizedBox(height: 8),
-                                  Expanded(
-                                    child: RichText(
-                                      text: _mdSpan(body),
-                                      maxLines: 4,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
+                                  RichText(
+                                    text: _mdSpan(body),
+                                    maxLines: 8,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                  if (date != null)
+                                  if (dt != null) ...[
+                                    const SizedBox(height: 8),
                                     Text(
-                                      DateFormat.yMMMd().format(date),
+                                      DateFormat.yMMMd().format(dt),
                                       style: const TextStyle(
                                         fontSize: 12,
                                         color: AppColors.muted,
                                       ),
                                     ),
+                                  ],
                                 ],
                               ),
                             ),
-                          ),
-                        );
-                      },
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // ===== Filter chips =====
-              SizedBox(
-                height: 44,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _filters.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
-                  itemBuilder: (ctx, i) {
-                    final label = _filters.keys.elementAt(i);
-                    final selected = (label == _selectedFilterLabel);
-                    return ChoiceChip(
-                      key: ValueKey(label),
-                      label: Text(
-                        label,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: selected
-                              ? AppColors.text
-                              : AppColors.text.withOpacity(0.85),
-                        ),
-                      ),
-                      selected: selected,
-                      onSelected: (_) =>
-                          setState(() => _selectedFilterLabel = label),
-                      selectedColor: AppColors.button,
-                      backgroundColor: AppColors.card,
-                      side: const BorderSide(color: AppColors.border),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 18),
-
-              const Text(
-                'Recent Activity',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 10),
-
-              // ===== Recent Activity =====
-              StreamBuilder<QuerySnapshot>(
-                stream: _postsStream,
-                builder: (ctx, snap) {
-                  if (snap.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (snap.hasError) {
-                    return Center(
-                      child: Text(
-                        'Error: ${snap.error}',
-                        style: const TextStyle(color: Colors.red),
-                      ),
-                    );
-                  }
-
-                  var docs = (snap.data?.docs ?? []).toList()
-                    ..sort((a, b) {
-                      final aTs = parseFirestoreTimestamp(a['timestamp']) ??
-                          DateTime.fromMillisecondsSinceEpoch(0);
-                      final bTs = parseFirestoreTimestamp(b['timestamp']) ??
-                          DateTime.fromMillisecondsSinceEpoch(0);
-                      return bTs.compareTo(aTs);
-                    });
-
-                  final selectedSlug = _filters[_selectedFilterLabel];
-
-                  // Classify once and reuse for filter + render
-                  final items = docs.map((doc) {
-                    final map = doc.data() as Map<String, dynamic>;
-                    final tuple = _classifyPost(map);
-                    return (
-                      doc,
-                      tuple.$1 /* slug */,
-                      tuple.$2 /* badge */,
-                      tuple.$3 /* body */,
-                      parseFirestoreTimestamp(map['timestamp'])
-                    );
-                  }).toList();
-
-                  final filtered = selectedSlug == null
-                      ? items
-                      : items.where((e) => e.$2 == selectedSlug).toList();
-
-                  if (filtered.isEmpty) {
-                    return const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 24),
-                      child: Center(
-                        child: Text(
-                          'No activity yet.',
-                          style: TextStyle(color: AppColors.muted),
-                        ),
-                      ),
-                    );
-                  }
-
-                  return ListView.separated(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: filtered.length,
-                    separatorBuilder: (_, __) =>
-                        const SizedBox(height: 12),
-                    itemBuilder: (c, i) {
-                      final row = filtered[i];
-                      final doc = row.$1;
-                      final badgeText = row.$3;
-                      final body = row.$4;
-                      final dt = row.$5;
-
-                      return InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  PostDetailScreen(postId: doc.id),
-                            ),
                           );
                         },
-                        child: _softCard(
-                          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _postTypeBadge(badgeText),
-                              const SizedBox(height: 8),
-                              RichText(
-                                text: _mdSpan(body),
-                                maxLines: 8,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              if (dt != null) ...[
-                                const SizedBox(height: 8),
-                                Text(
-                                  DateFormat.yMMMd().format(dt),
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: AppColors.muted,
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
                       );
                     },
-                  );
-                },
-              ),
+                  ),
 
-              const SizedBox(height: 28),
-            ],
+                  const SizedBox(height: 28),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -956,37 +1005,23 @@ class _StatsStrip extends StatelessWidget {
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: 18,
-            color: AppColors.primary,
-          ),
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 18, color: AppColors.text),
+            const SizedBox(width: 6),
+            Text(label, style: const TextStyle(color: AppColors.muted)),
+          ]),
           const SizedBox(height: 6),
-          Text(
-            value,
-            style: const TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 16,
-              color: AppColors.text,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 12,
-              color: AppColors.muted,
-            ),
-          ),
+          Text(value,
+              style: const TextStyle(fontWeight: FontWeight.w700)),
         ],
       );
     }
 
     Widget divider() => Container(
           width: 1,
-          height: 32,
+          height: 30,
           margin: const EdgeInsets.symmetric(horizontal: 6),
-          color: AppColors.border.withOpacity(0.5),
+          color: AppColors.border,
         );
 
     return Row(
@@ -994,8 +1029,8 @@ class _StatsStrip extends StatelessWidget {
       children: [
         Expanded(
           child: Center(
-            child:
-                cell(Icons.local_fire_department_rounded, 'Streak', streakText),
+            child: cell(Icons.local_fire_department_rounded,
+                'Streak', streakText),
           ),
         ),
         divider(),
@@ -1029,7 +1064,8 @@ class _ExpandableBio extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final maxLines = expanded ? null : 2;
-    final overflow = expanded ? TextOverflow.visible : TextOverflow.ellipsis;
+    final overflow =
+        expanded ? TextOverflow.visible : TextOverflow.ellipsis;
     final showToggle = text.trim().length > 80;
 
     return Column(
