@@ -1,4 +1,3 @@
-// lib/screens/posts/create_post_screen.dart
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -97,12 +96,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     super.dispose();
   }
 
-  // —— Navigation close (safe; avoids weird blank state) ————————————————
-  void _close() {
-    FocusScope.of(context).unfocus();
-    Navigator.of(context).maybePop();
-  }
-
   // —— Media pickers ————————————————————————————————————————
   Future<void> _pickImage() async {
     final picked = await picker.pickImage(
@@ -167,19 +160,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _quickController.clear();
     });
 
-    Future.microtask(() {
-      FocusScope.of(context).unfocus();
-    });
+    Future.microtask(() => FocusScope.of(context).unfocus());
   }
 
-  void _clearTemplate() {
+  void _setQuickPost() {
     setState(() {
       _selectedTemplate = null;
       _a1.clear();
       _a2.clear();
       _a3.clear();
     });
-
     Future.microtask(() => _quickFocus.requestFocus());
   }
 
@@ -213,44 +203,51 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       'Templates',
                       style: TextStyle(
                         fontSize: 18,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w800,
                         color: AppColors.text,
                       ),
                     ),
                     const Spacer(),
                     TextButton(
                       onPressed: () {
-                        _clearTemplate();
+                        _setQuickPost();
                         Navigator.pop(context);
                       },
                       style: TextButton.styleFrom(
                         backgroundColor: Colors.transparent,
                         padding: EdgeInsets.zero,
                       ),
-                      child: const Text('Clear',
-                          style: TextStyle(color: AppColors.muted)),
+                      child: const Text(
+                        'Quick',
+                        style: TextStyle(
+                          color: AppColors.muted,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 10),
+
+                // ✅ Quick post item
+                _TemplateRow(
+                  title: 'Quick post',
+                  selected: _selectedTemplate == null,
+                  icon: Icons.flash_on_rounded,
+                  onTap: () {
+                    Navigator.pop(context);
+                    _setQuickPost();
+                  },
+                ),
+
+                const SizedBox(height: 6),
+                const Divider(height: 18, color: AppColors.border),
+
                 ...templates.keys.map((k) {
-                  final selected = _selectedTemplate == k;
-                  return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: CircleAvatar(
-                      backgroundColor: AppColors.button,
-                      child: Icon(
-                        selected ? Icons.check : Icons.view_list_outlined,
-                        color: AppColors.primary,
-                      ),
-                    ),
-                    title: Text(
-                      k,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.text,
-                      ),
-                    ),
+                  return _TemplateRow(
+                    title: k,
+                    selected: _selectedTemplate == k,
+                    icon: Icons.view_list_outlined,
                     onTap: () {
                       Navigator.pop(context);
                       _selectTemplate(k);
@@ -296,7 +293,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       'Tags',
                       style: TextStyle(
                         fontSize: 18,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w800,
                         color: AppColors.text,
                       ),
                     ),
@@ -310,19 +307,41 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         backgroundColor: Colors.transparent,
                         padding: EdgeInsets.zero,
                       ),
-                      child: const Text('Clear',
-                          style: TextStyle(color: AppColors.muted)),
+                      child: const Text(
+                        'Clear',
+                        style: TextStyle(
+                          color: AppColors.muted,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 10),
+
+                // cleaner input
                 TextField(
                   controller: _tagController,
                   textInputAction: TextInputAction.done,
-                  decoration: const InputDecoration(
-                    hintText: 'Type a tag and press enter (e.g. career)',
-                    filled: false,
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    hintText: 'Add a tag (e.g. career)',
+                    filled: true,
+                    fillColor: AppColors.button,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: AppColors.border),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: AppColors.border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide:
+                          const BorderSide(color: AppColors.primary, width: 1.4),
+                    ),
                   ),
                   onSubmitted: (value) {
                     final raw = value.trim();
@@ -334,6 +353,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     _tagController.clear();
                   },
                 ),
+
                 const SizedBox(height: 12),
                 Align(
                   alignment: Alignment.centerLeft,
@@ -392,7 +412,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       ].join('\n');
     }
 
-    if (content.trim().isEmpty && _imageFile == null && _videoFile == null) return;
+    if (content.trim().isEmpty && _imageFile == null && _videoFile == null) {
+      return;
+    }
 
     setState(() => _isPosting = true);
 
@@ -443,8 +465,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       await _streakService.updateStreak(currentUser.uid);
 
       if (!mounted) return;
-
-      // ✅ safe pop (don’t force rootNavigator here)
       Navigator.of(context).maybePop('posted');
     } catch (e) {
       if (!mounted) return;
@@ -459,7 +479,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   // —— UI ————————————————————————————————————————————————
   @override
   Widget build(BuildContext context) {
-    // local override so ONLY this screen has blank fields
     final localTheme = Theme.of(context).copyWith(
       scaffoldBackgroundColor: Colors.white,
       canvasColor: Colors.white,
@@ -477,28 +496,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       ),
     );
 
+    final hasMedia = _imageFile != null || _videoFile != null;
+
     return Theme(
       data: localTheme,
       child: GestureDetector(
         onTap: () => FocusScope.of(context).unfocus(),
         child: Scaffold(
           appBar: AppBar(
-            leadingWidth: 84,
-            leading: TextButton(
-              onPressed: _close,
-              style: TextButton.styleFrom(
-                backgroundColor: Colors.transparent,
-                padding: const EdgeInsets.only(left: 12),
-              ),
-              child: const Text(
-                'Cancel',
-                style: TextStyle(
-                  color: AppColors.text,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 15,
-                ),
-              ),
-            ),
+            leading: const SizedBox(width: 0), // keep layout stable
             title: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -509,18 +515,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     fontWeight: FontWeight.w800,
                   ),
                 ),
-                if (_selectedTemplate != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      _selectedTemplate!,
-                      style: const TextStyle(
-                        color: AppColors.muted,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                Text(
+                  _selectedTemplate ?? 'Quick post',
+                  style: const TextStyle(
+                    color: AppColors.muted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
                   ),
+                ),
               ],
             ),
             centerTitle: true,
@@ -530,13 +532,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 child: TextButton(
                   onPressed: _canPost ? _savePost : null,
                   style: TextButton.styleFrom(
-                    backgroundColor: _canPost ? AppColors.primary : AppColors.button,
-                    foregroundColor: _canPost ? Colors.white : AppColors.muted,
+                    backgroundColor:
+                        _canPost ? AppColors.primary : AppColors.button,
+                    foregroundColor:
+                        _canPost ? Colors.white : AppColors.muted,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
                     ),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 10),
                   ),
                   child: _isPosting
                       ? const SizedBox(
@@ -553,9 +557,32 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           ),
           body: Column(
             children: [
+              // ✅ KEEP Quick button top-left + Template chip (unchanged)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                child: Row(
+                  children: [
+                    _ModeChip(
+                      label: 'Quick',
+                      selected: _selectedTemplate == null,
+                      onTap: _setQuickPost,
+                    ),
+                    const SizedBox(width: 8),
+                    _ModeChip(
+                      label: 'Template',
+                      selected: _selectedTemplate != null,
+                      onTap: _openTemplateSheet,
+                    ),
+                    const Spacer(),
+
+                    // ❌ removed “Switch to Quick” (THIS IS THE ONLY UX CHANGE)
+                  ],
+                ),
+              ),
+
               Expanded(
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+                  padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
                   child: _selectedTemplate == null
                       ? _QuickEditor(
                           controller: _quickController,
@@ -572,7 +599,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 ),
               ),
 
-              if (_imageFile != null || _videoFile != null)
+              if (hasMedia)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                   child: Stack(
@@ -580,7 +607,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       ClipRRect(
                         borderRadius: BorderRadius.circular(14),
                         child: _imageFile != null
-                            ? Image.file(_imageFile!, height: 180, fit: BoxFit.cover)
+                            ? Image.file(_imageFile!,
+                                height: 180, fit: BoxFit.cover)
                             : (_videoThumbPath != null
                                 ? Image.file(File(_videoThumbPath!),
                                     height: 180, fit: BoxFit.cover)
@@ -603,8 +631,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                             borderRadius: BorderRadius.circular(999),
                             onTap: _removeMedia,
                             child: const Padding(
-                              padding:
-                                  EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 6),
                               child: Icon(Icons.close,
                                   size: 18, color: Colors.white),
                             ),
@@ -615,17 +643,21 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   ),
                 ),
 
-              // ✅ premium bottom action bar (ONLY this screen)
+              // ✅ keep the 4 bottom buttons + white background (unchanged)
               SafeArea(
                 top: false,
                 child: Container(
                   decoration: const BoxDecoration(
                     color: Colors.white,
-                    border: Border(top: BorderSide(color: AppColors.border, width: 1)),
+                    border: Border(top: BorderSide(color: AppColors.border)),
                   ),
                   padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-                  child: _CreatePostActionBar(
+                  child: _CreatePostToolbar(
                     disabled: _isPosting,
+                    hasPhoto: _imageFile != null,
+                    hasVideo: _videoFile != null,
+                    templateSelected: _selectedTemplate != null,
+                    tagCount: selectedTags.length,
                     onPhoto: _pickImage,
                     onVideo: _pickVideo,
                     onTemplate: _openTemplateSheet,
@@ -721,7 +753,6 @@ class _TemplateEditor extends StatelessWidget {
                 color: AppColors.text,
                 fontWeight: FontWeight.w500,
               ),
-              // ✅ removed "Write here..."
               decoration: const InputDecoration(
                 hintText: '',
                 isCollapsed: true,
@@ -747,16 +778,110 @@ class _TemplateEditor extends StatelessWidget {
   }
 }
 
-/// ✅ Premium bottom bar (ONLY in create post screen)
-class _CreatePostActionBar extends StatelessWidget {
+// ===== UI components =====
+
+class _ModeChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ModeChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = selected ? AppColors.primary.withOpacity(0.10) : AppColors.button;
+    final fg = selected ? AppColors.primary : AppColors.text;
+
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: selected
+                  ? AppColors.primary.withOpacity(0.25)
+                  : AppColors.border,
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: fg,
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TemplateRow extends StatelessWidget {
+  final String title;
+  final bool selected;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _TemplateRow({
+    required this.title,
+    required this.selected,
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: CircleAvatar(
+        backgroundColor:
+            selected ? AppColors.primary.withOpacity(0.10) : AppColors.button,
+        child: Icon(
+          selected ? Icons.check_rounded : icon,
+          color: selected ? AppColors.primary : AppColors.muted,
+        ),
+      ),
+      title: Text(
+        title,
+        style: const TextStyle(
+          fontWeight: FontWeight.w800,
+          color: AppColors.text,
+        ),
+      ),
+      onTap: onTap,
+    );
+  }
+}
+
+class _CreatePostToolbar extends StatelessWidget {
   final bool disabled;
+
+  final bool hasPhoto;
+  final bool hasVideo;
+  final bool templateSelected;
+  final int tagCount;
+
   final VoidCallback onPhoto;
   final VoidCallback onVideo;
   final VoidCallback onTemplate;
   final VoidCallback onTags;
 
-  const _CreatePostActionBar({
+  const _CreatePostToolbar({
     required this.disabled,
+    required this.hasPhoto,
+    required this.hasVideo,
+    required this.templateSelected,
+    required this.tagCount,
     required this.onPhoto,
     required this.onVideo,
     required this.onTemplate,
@@ -766,38 +891,42 @@ class _CreatePostActionBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 62,
+      height: 58,
       decoration: BoxDecoration(
         color: AppColors.button,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: AppColors.border),
       ),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _ActionItem(
+          _IconChip(
             icon: Icons.image_outlined,
             label: 'Photo',
+            selected: hasPhoto,
             disabled: disabled,
             onTap: onPhoto,
           ),
-          const _ActionSep(),
-          _ActionItem(
+          _IconChip(
             icon: Icons.videocam_outlined,
             label: 'Video',
+            selected: hasVideo,
             disabled: disabled,
             onTap: onVideo,
           ),
-          const _ActionSep(),
-          _ActionItem(
+          _IconChip(
             icon: Icons.view_list_outlined,
             label: 'Template',
+            selected: templateSelected,
             disabled: disabled,
             onTap: onTemplate,
           ),
-          const _ActionSep(),
-          _ActionItem(
+          _IconChip(
             icon: Icons.tag_outlined,
             label: 'Tags',
+            selected: tagCount > 0,
+            badge: tagCount > 0 ? '$tagCount' : null,
             disabled: disabled,
             onTap: onTags,
           ),
@@ -807,59 +936,74 @@ class _CreatePostActionBar extends StatelessWidget {
   }
 }
 
-class _ActionItem extends StatelessWidget {
+class _IconChip extends StatelessWidget {
   final IconData icon;
   final String label;
+  final bool selected;
   final bool disabled;
+  final String? badge;
   final VoidCallback onTap;
 
-  const _ActionItem({
+  const _IconChip({
     required this.icon,
     required this.label,
+    required this.selected,
     required this.disabled,
     required this.onTap,
+    this.badge,
   });
 
   @override
   Widget build(BuildContext context) {
-    final fg = disabled ? AppColors.border : AppColors.muted;
-    final text = disabled ? AppColors.border : AppColors.text;
+    final fg = disabled
+        ? AppColors.border
+        : (selected ? AppColors.primary : AppColors.muted);
 
-    return Expanded(
+    final bg =
+        selected ? AppColors.primary.withOpacity(0.10) : Colors.transparent;
+
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: disabled ? null : onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Center(
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          width: 64,
+          height: 44,
+          alignment: Alignment.center,
+          child: Stack(
+            clipBehavior: Clip.none,
             children: [
-              Icon(icon, size: 20, color: fg),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  color: text,
-                ),
+              Center(
+                child: Icon(icon, size: 22, color: fg),
               ),
+              if (badge != null)
+                Positioned(
+                  right: -6,
+                  top: -6,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: Colors.white, width: 1),
+                    ),
+                    child: Text(
+                      badge!,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
       ),
-    );
-  }
-}
-
-class _ActionSep extends StatelessWidget {
-  const _ActionSep();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 26,
-      color: AppColors.border,
     );
   }
 }

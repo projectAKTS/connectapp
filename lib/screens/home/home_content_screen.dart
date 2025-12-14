@@ -57,7 +57,6 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
       );
     }
 
-    // Let the spinner show briefly; Firestore stream will emit as needed
     await Future.delayed(const Duration(milliseconds: 600));
   }
 
@@ -70,7 +69,7 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppColors.canvas, // bottom sheet is also clean white
+      backgroundColor: AppColors.canvas,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
@@ -81,10 +80,7 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
               backgroundColor: AppColors.avatarBg,
               child: Icon(icon, color: AppColors.avatarFg),
             ),
-            title: Text(
-              label,
-              style: const TextStyle(color: AppColors.text),
-            ),
+            title: Text(label, style: const TextStyle(color: AppColors.text)),
             onTap: () {
               Navigator.pop(context);
               onTap();
@@ -107,14 +103,13 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
               ),
               const SizedBox(height: 10),
 
-              // Book a call – same route/args pattern as ProfileScreen
               _item(Icons.event_available_outlined, 'Book a call', () {
                 Navigator.of(context).pushNamed(
                   '/consultation',
                   arguments: {
                     'targetUserId': otherUserId,
                     'targetUserName': otherUserName,
-                    'ratePerMinute': 0, // will be overridden if needed
+                    'ratePerMinute': 0,
                   },
                 );
               }),
@@ -221,22 +216,25 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                       shrinkWrap: true,
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
                       itemCount: posts.length,
-                      separatorBuilder: (_, __) =>
-                          const SizedBox(height: 0), // spacing handled in cell
+                      separatorBuilder: (_, __) => const SizedBox(height: 0),
                       itemBuilder: (_, i) {
                         final raw =
                             posts[i].data() as Map<String, dynamic>? ?? {};
-                        final authorName =
-                            (raw['userName'] ?? 'User') as String;
+                        final authorName = (raw['userName'] ?? 'User') as String;
                         final authorId = _extractUserId(raw);
                         final avatar = (raw['userAvatar'] ?? '') as String;
                         final body = (raw['content'] ?? '').toString();
+
                         final right = _shortFromTs(raw['timestamp']);
                         final subtitle = '$right ago';
+
                         final imageUrl = (raw['imageUrl'] ?? '').toString();
                         final videoUrl = (raw['videoUrl'] ?? '').toString();
                         final videoThumbUrl =
                             (raw['videoThumbUrl'] ?? '').toString();
+
+                        final type = (raw['type'] ?? 'Quick').toString();
+
                         final aspect = (() {
                           final v = raw['mediaAspectRatio'];
                           if (v is num && v > 0) return v.toDouble();
@@ -246,6 +244,7 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                         final isOwnPost = (authorId == currentUid);
 
                         return _PostCell(
+                          postType: type,
                           authorName: authorName,
                           authorAvatarUrl: avatar,
                           subtitle: subtitle,
@@ -371,9 +370,7 @@ class _WelcomeCard extends StatelessWidget {
             {'lastConnectionsSeenAt': FieldValue.serverTimestamp()},
             SetOptions(merge: true),
           );
-    } catch (_) {
-      // ignore UI errors
-    }
+    } catch (_) {}
   }
 
   @override
@@ -385,14 +382,14 @@ class _WelcomeCard extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: AppColors.canvas, // outer halo matches background
+        color: AppColors.canvas,
         borderRadius: BorderRadius.circular(AppRadius.xl),
         boxShadow: const [AppShadows.soft],
       ),
       child: Container(
         padding: const EdgeInsets.fromLTRB(14, 16, 14, 14),
         decoration: BoxDecoration(
-          color: AppColors.card, // inner card is clean white
+          color: AppColors.card,
           borderRadius: BorderRadius.circular(AppRadius.lg),
           border: Border.all(
             color: AppColors.border.withOpacity(0.45),
@@ -407,14 +404,12 @@ class _WelcomeCard extends StatelessWidget {
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 14),
-
             _TaupePill(
               icon: Icons.manage_search_rounded,
               label: 'Find a helper',
               onTap: onFindHelper,
             ),
             const SizedBox(height: 12),
-
             if (uid != null)
               StreamBuilder<DocumentSnapshot>(
                 stream: FirebaseFirestore.instance
@@ -562,6 +557,7 @@ class _SectionTitle extends StatelessWidget {
 
 // ===== Post cell =====
 class _PostCell extends StatefulWidget {
+  final String postType; // ✅ use Firestore field 'type'
   final String authorName;
   final String authorAvatarUrl;
   final String subtitle;
@@ -578,6 +574,7 @@ class _PostCell extends StatefulWidget {
   final bool showConnect;
 
   const _PostCell({
+    required this.postType,
     required this.authorName,
     required this.authorAvatarUrl,
     required this.subtitle,
@@ -599,7 +596,7 @@ class _PostCell extends StatefulWidget {
 }
 
 class _PostCellState extends State<_PostCell> {
-  static const _collapsedLines = 5;
+  static const _collapsedLines = 7;
   bool _expanded = false;
 
   @override
@@ -622,16 +619,12 @@ class _PostCellState extends State<_PostCell> {
       return null;
     }
 
-    // LinkedIn / Reddit style: flat white, divider between posts, no card
     return Container(
-      padding: const EdgeInsets.fromLTRB(0, 16, 0, 24), // top + bottom space
+      padding: const EdgeInsets.fromLTRB(0, 16, 0, 24),
       decoration: const BoxDecoration(
         color: AppColors.canvas,
         border: Border(
-          bottom: BorderSide(
-            color: AppColors.border,
-            width: 1,
-          ),
+          bottom: BorderSide(color: AppColors.border, width: 1),
         ),
       ),
       child: Column(
@@ -644,16 +637,22 @@ class _PostCellState extends State<_PostCell> {
             avatarUrl: widget.authorAvatarUrl,
             onTap: widget.onOpenProfile,
           ),
-          if (widget.body.isNotEmpty) const SizedBox(height: 12),
+          const SizedBox(height: 12),
+
+          _PostTypeBadge(label: _typeToBadge(widget.postType)),
+
+          if (widget.body.isNotEmpty) const SizedBox(height: 10),
           if (widget.body.isNotEmpty)
-            _ExpandableText(
+            _ExpandableStructuredText(
               content: widget.body,
               expanded: _expanded,
               maxLinesWhenCollapsed: _collapsedLines,
               onToggle: () => setState(() => _expanded = !_expanded),
             ),
+
           if (media() != null) const SizedBox(height: 10),
           if (media() != null) media()!,
+
           if (widget.showConnect) ...[
             const SizedBox(height: 12),
             TextButton(
@@ -681,6 +680,14 @@ class _PostCellState extends State<_PostCell> {
         ],
       ),
     );
+  }
+
+  String _typeToBadge(String raw) {
+    final t = raw.trim();
+    if (t.isEmpty) return 'Quick Post';
+    if (t.toLowerCase() == 'quick') return 'Quick Post';
+    // e.g. "Advice Request" -> "Advice Request Post"
+    return t.endsWith('Post') ? t : '$t Post';
   }
 }
 
@@ -756,8 +763,7 @@ class _PostHeader extends StatelessWidget {
   }
 }
 
-// ===== Shared widgets =====
-
+// ===== Badge =====
 class _PostTypeBadge extends StatelessWidget {
   final String label;
 
@@ -768,7 +774,7 @@ class _PostTypeBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: AppColors.primary.withOpacity(0.04), // softer tint
+        color: AppColors.primary.withOpacity(0.04),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
           color: AppColors.primary.withOpacity(0.12),
@@ -787,69 +793,79 @@ class _PostTypeBadge extends StatelessWidget {
   }
 }
 
-// ===== Expandable text (no markdown dependency) =====
-class _ExpandableText extends StatelessWidget {
+// ===== Expandable Structured Text (NO MARKDOWN) =====
+class _ExpandableStructuredText extends StatelessWidget {
   final String content;
   final bool expanded;
   final int maxLinesWhenCollapsed;
   final VoidCallback onToggle;
 
-  const _ExpandableText({
+  const _ExpandableStructuredText({
     required this.content,
     required this.expanded,
     required this.maxLinesWhenCollapsed,
     required this.onToggle,
   });
 
-  // Pull out a first line like "**Experience Post**"
-  // Returns (badgeLabel, remainingText)
-  (String?, String) _extractBadge(String raw) {
-    final lines = raw.split('\n');
+  bool _looksLikeQuestion(String s) {
+    final t = s.trim();
+    if (t.isEmpty) return false;
+    if (t.endsWith('?')) return true;
 
-    // find first non-empty line
-    int idx = 0;
-    while (idx < lines.length && lines[idx].trim().isEmpty) idx++;
-    if (idx >= lines.length) return (null, raw);
-
-    final first = lines[idx].trim();
-    final reg = RegExp(r'^\*\*(.+?)\*\*$'); // **Something**
-    final m = reg.firstMatch(first);
-    if (m != null && m.group(1) != null) {
-      final label = m.group(1)!.trim();
-      // treat as badge if it ends with "Post" (case-insensitive)
-      if (label.toLowerCase().endsWith(' post')) {
-        final rest = [...lines]..removeAt(idx);
-        // also trim a single blank line after for spacing
-        if (idx < rest.length && rest[idx].trim().isEmpty) {
-          rest.removeAt(idx);
-        }
-        return (label, rest.join('\n').trimLeft());
-      }
-    }
-    return (null, raw);
+    final lower = t.toLowerCase();
+    return lower.startsWith('what ') ||
+        lower.startsWith("what’s ") ||
+        lower.startsWith('whats ') ||
+        lower.startsWith('how ') ||
+        lower.startsWith('list ') ||
+        lower.startsWith('topic ') ||
+        lower.startsWith('one key ');
   }
 
-  @override
-  Widget build(BuildContext context) {
+  TextSpan _buildSpan(String raw) {
     const base = TextStyle(
       fontSize: 16,
       height: 1.4,
       color: AppColors.text,
+      fontWeight: FontWeight.w400,
     );
     const strong = TextStyle(
       fontSize: 16,
       height: 1.4,
       color: AppColors.text,
-      fontWeight: FontWeight.w700,
+      fontWeight: FontWeight.w800,
     );
 
-    final (extractedBadge, restText) = _extractBadge(content);
+    final lines = raw.split('\n');
+    final spans = <InlineSpan>[];
 
-    // If no template badge, this is a Quick Post
-    final badgeLabel = extractedBadge ?? 'Quick Post';
+    for (int i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      final isQ = _looksLikeQuestion(line);
 
-    final span =
-        _parseSimpleMarkdownToSpan(restText, base: base, strong: strong);
+      // add a little breathing room before question lines (except first)
+      if (isQ && spans.isNotEmpty) {
+        spans.add(const TextSpan(text: '\n'));
+      }
+
+      spans.add(
+        TextSpan(
+          text: line,
+          style: isQ ? strong : base,
+        ),
+      );
+
+      if (i != lines.length - 1) {
+        spans.add(const TextSpan(text: '\n'));
+      }
+    }
+
+    return TextSpan(children: spans, style: base);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final span = _buildSpan(content);
 
     return LayoutBuilder(
       builder: (ctx, constraints) {
@@ -864,22 +880,13 @@ class _ExpandableText extends StatelessWidget {
         Widget rich() => RichText(text: span);
 
         if (!hasOverflow) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _PostTypeBadge(label: badgeLabel),
-              const SizedBox(height: 8),
-              rich(),
-            ],
-          );
+          return rich();
         }
 
         if (expanded) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _PostTypeBadge(label: badgeLabel),
-              const SizedBox(height: 8),
               rich(),
               const SizedBox(height: 6),
               _ShowMoreButton(expanded: true, onTap: onToggle),
@@ -893,8 +900,6 @@ class _ExpandableText extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _PostTypeBadge(label: badgeLabel),
-            const SizedBox(height: 8),
             SizedBox(
               height: collapsedHeight,
               child: ClipRect(
@@ -934,7 +939,6 @@ class _ShowMoreButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // LinkedIn-style tiny text link
     return TextButton(
       onPressed: onTap,
       style: TextButton.styleFrom(
@@ -965,6 +969,7 @@ class _ShowMoreButton extends StatelessWidget {
   }
 }
 
+// ===== Media =====
 class _MediaImage extends StatelessWidget {
   final String url;
   final double aspect;
@@ -1059,6 +1064,7 @@ class _MediaVideoThumb extends StatelessWidget {
   }
 }
 
+// ===== Avatar =====
 class _Avatar extends StatelessWidget {
   final String url;
   final double radius;
@@ -1081,33 +1087,4 @@ class _Avatar extends StatelessWidget {
             backgroundImage: NetworkImage(url),
           );
   }
-}
-
-// Helper for simple **bold** markdown
-TextSpan _parseSimpleMarkdownToSpan(
-  String text, {
-  required TextStyle base,
-  required TextStyle strong,
-}) {
-  final spans = <TextSpan>[];
-  int i = 0;
-  while (i < text.length) {
-    final start = text.indexOf('**', i);
-    if (start == -1) {
-      spans.add(TextSpan(text: text.substring(i), style: base));
-      break;
-    }
-    if (start > i) {
-      spans.add(TextSpan(text: text.substring(i, start), style: base));
-    }
-    final end = text.indexOf('**', start + 2);
-    if (end == -1) {
-      spans.add(TextSpan(text: text.substring(start), style: base));
-      break;
-    }
-    final boldText = text.substring(start + 2, end);
-    spans.add(TextSpan(text: boldText, style: strong));
-    i = end + 2;
-  }
-  return TextSpan(children: spans, style: base);
 }
