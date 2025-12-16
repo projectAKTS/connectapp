@@ -1,11 +1,17 @@
-// lib/screens/posts/post_video_player.dart
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:chewie/chewie.dart';
 import 'package:video_player/video_player.dart';
 
 class PostVideoPlayer extends StatefulWidget {
-  final String url;
-  const PostVideoPlayer({super.key, required this.url});
+  final String? url; // ✅ for Home
+  final File? file;  // ✅ for Create preview
+
+  const PostVideoPlayer({
+    super.key,
+    this.url,
+    this.file,
+  }) : assert(url != null || file != null, 'Provide either url or file');
 
   @override
   State<PostVideoPlayer> createState() => _PostVideoPlayerState();
@@ -18,18 +24,22 @@ class _PostVideoPlayerState extends State<PostVideoPlayer> {
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.url))
-      ..initialize().then((_) {
-        _chewie = ChewieController(
-          videoPlayerController: _controller,
-          autoPlay: true,
-          looping: false,
-          allowMuting: true,
-          allowPlaybackSpeedChanging: true,
-          showControls: true,
-        );
-        setState(() {});
-      });
+
+    _controller = widget.file != null
+        ? VideoPlayerController.file(widget.file!)
+        : VideoPlayerController.networkUrl(Uri.parse(widget.url!));
+
+    _controller.initialize().then((_) {
+      _chewie = ChewieController(
+        videoPlayerController: _controller,
+        autoPlay: true,
+        looping: false,
+        allowMuting: true,
+        allowPlaybackSpeedChanging: true,
+        showControls: true,
+      );
+      if (mounted) setState(() {});
+    });
   }
 
   @override

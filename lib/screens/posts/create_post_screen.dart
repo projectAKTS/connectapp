@@ -1,3 +1,4 @@
+// lib/screens/posts/create_post_screen.dart
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -12,6 +13,10 @@ import 'package:connect_app/services/post_service.dart';
 import 'package:connect_app/services/streak_service.dart';
 import 'package:connect_app/theme/tokens.dart';
 
+// ✅ reuse your existing viewers (must support `file:`)
+import 'package:connect_app/screens/posts/post_image_viewer.dart';
+import 'package:connect_app/screens/posts/post_video_player.dart';
+
 class CreatePostScreen extends StatefulWidget {
   const CreatePostScreen({Key? key}) : super(key: key);
 
@@ -23,18 +28,19 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   final PostService _postService = PostService();
   final StreakService _streakService = StreakService();
 
-  // Quick post
   final TextEditingController _quickController = TextEditingController();
   final FocusNode _quickFocus = FocusNode();
 
-  // Template answers
   final TextEditingController _a1 = TextEditingController();
   final TextEditingController _a2 = TextEditingController();
   final TextEditingController _a3 = TextEditingController();
 
   bool _isPosting = false;
 
-  File? _imageFile;
+  // ✅ multiple photos
+  final List<File> _imageFiles = [];
+
+  // ✅ single video (mutually exclusive with photos)
   File? _videoFile;
   String? _videoThumbPath;
   double? _mediaAspect;
@@ -66,23 +72,31 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     },
   };
 
-  // tags kept simple
+  final Map<String, String> templateDescriptions = const {
+    'Quick post': 'Write freely in one field.',
+    'Experience': 'Share a story + what you learned.',
+    'Advice Request': 'Ask a question and add context.',
+    'How-To Guide': 'Explain steps so others can follow.',
+    'Lessons Learned': 'Summarize takeaways from a topic.',
+  };
+
   final List<String> selectedTags = [];
   final TextEditingController _tagController = TextEditingController();
+  final FocusNode _tagFocus = FocusNode();
+
+  bool get _hasMedia => _imageFiles.isNotEmpty || _videoFile != null;
 
   bool get _canPost {
     if (_isPosting) return false;
-    final hasMedia = _imageFile != null || _videoFile != null;
 
     if (_selectedTemplate == null) {
-      return _quickController.text.trim().isNotEmpty || hasMedia;
+      return _quickController.text.trim().isNotEmpty || _hasMedia;
     }
 
-    final hasAnyAnswer = _a1.text.trim().isNotEmpty ||
-        _a2.text.trim().isNotEmpty ||
-        _a3.text.trim().isNotEmpty;
+    final hasAnyAnswer =
+        _a1.text.trim().isNotEmpty || _a2.text.trim().isNotEmpty || _a3.text.trim().isNotEmpty;
 
-    return hasAnyAnswer || hasMedia;
+    return hasAnyAnswer || _hasMedia;
   }
 
   @override
@@ -93,23 +107,38 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _a2.dispose();
     _a3.dispose();
     _tagController.dispose();
+    _tagFocus.dispose();
     super.dispose();
   }
 
+  // —— Tags helpers ————————————————————————————————————————
+  void _addTagFromField() {
+    final raw = _tagController.text.trim();
+    if (raw.isEmpty) return;
+
+    final tag = raw.startsWith('#') ? raw : '#$raw';
+    if (!selectedTags.contains(tag)) {
+      setState(() => selectedTags.add(tag));
+    }
+    _tagController.clear();
+    _tagFocus.requestFocus();
+  }
+
+  void _clearTags() => setState(() => selectedTags.clear());
+
   // —— Media pickers ————————————————————————————————————————
-  Future<void> _pickImage() async {
-    final picked = await picker.pickImage(
-      source: ImageSource.gallery,
-      maxWidth: 1600,
-      imageQuality: 85,
-    );
-    if (picked == null) return;
+  Future<void> _pickPhotos({required bool addMore}) async {
+    final picks = await picker.pickMultiImage(maxWidth: 1600, imageQuality: 85);
+    if (picks.isEmpty) return;
 
     setState(() {
-      _imageFile = File(picked.path);
+      if (!addMore) _imageFiles.clear();
+      _imageFiles.addAll(picks.map((e) => File(e.path)));
+
+      // mutually exclusive
       _videoFile = null;
       _videoThumbPath = null;
-      _mediaAspect = 16 / 9;
+      _mediaAspect = 1.0;
     });
   }
 
@@ -129,8 +158,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         video: video.path,
         thumbnailPath: tempDir.path,
         imageFormat: ImageFormat.JPEG,
-        maxWidth: 520,
-        quality: 75,
+        maxWidth: 900,
+        quality: 80,
         timeMs: 0,
       );
       thumbPath = out;
@@ -138,15 +167,33 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
     setState(() {
       _videoFile = video;
-      _imageFile = null;
-      _mediaAspect = 1.0;
       _videoThumbPath = thumbPath;
+      _mediaAspect = 16 / 9;
+
+      // mutually exclusive
+      _imageFiles.clear();
     });
   }
 
-  void _removeMedia() {
+  void _removePhotoAt(int index) {
     setState(() {
-      _imageFile = null;
+      if (index >= 0 && index < _imageFiles.length) {
+        _imageFiles.removeAt(index);
+      }
+    });
+  }
+
+  void _removeVideo() {
+    setState(() {
+      _videoFile = null;
+      _videoThumbPath = null;
+      _mediaAspect = null;
+    });
+  }
+
+  void _removeAllMedia() {
+    setState(() {
+      _imageFiles.clear();
       _videoFile = null;
       _videoThumbPath = null;
       _mediaAspect = null;
@@ -159,7 +206,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _selectedTemplate = name;
       _quickController.clear();
     });
-
     Future.microtask(() => FocusScope.of(context).unfocus());
   }
 
@@ -202,9 +248,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     const Text(
                       'Templates',
                       style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
                         color: AppColors.text,
+                        letterSpacing: -0.2,
                       ),
                     ),
                     const Spacer(),
@@ -218,20 +265,19 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         padding: EdgeInsets.zero,
                       ),
                       child: const Text(
-                        'Quick',
+                        'Set Quick',
                         style: TextStyle(
                           color: AppColors.muted,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 10),
-
-                // ✅ Quick post item
-                _TemplateRow(
+                _TemplateRowPro(
                   title: 'Quick post',
+                  subtitle: templateDescriptions['Quick post']!,
                   selected: _selectedTemplate == null,
                   icon: Icons.flash_on_rounded,
                   onTap: () {
@@ -239,13 +285,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     _setQuickPost();
                   },
                 ),
-
-                const SizedBox(height: 6),
-                const Divider(height: 18, color: AppColors.border),
-
+                const SizedBox(height: 8),
+                const Divider(height: 1, color: AppColors.border),
+                const SizedBox(height: 10),
                 ...templates.keys.map((k) {
-                  return _TemplateRow(
+                  return _TemplateRowPro(
                     title: k,
+                    subtitle: templateDescriptions[k] ?? '',
                     selected: _selectedTemplate == k,
                     icon: Icons.view_list_outlined,
                     onTap: () {
@@ -262,127 +308,49 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 
-  // —— Tags ————————————————————————————————————————————————
-  void _openTagsSheet() {
+  // —— Keyboard compact bar / sheets ————————————————————————————————
+  void _openMediaSheet() {
+    // ✅ IMPORTANT UX: close keyboard first so sheet + compact feel responsive
+    FocusScope.of(context).unfocus();
+
     HapticFeedback.lightImpact();
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
       builder: (_) {
         return SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.border,
-                    borderRadius: BorderRadius.circular(99),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    const Text(
-                      'Tags',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.text,
-                      ),
-                    ),
-                    const Spacer(),
-                    TextButton(
-                      onPressed: () {
-                        setState(() => selectedTags.clear());
-                        Navigator.pop(context);
-                      },
-                      style: TextButton.styleFrom(
-                        backgroundColor: Colors.transparent,
-                        padding: EdgeInsets.zero,
-                      ),
-                      child: const Text(
-                        'Clear',
-                        style: TextStyle(
-                          color: AppColors.muted,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-
-                // cleaner input
-                TextField(
-                  controller: _tagController,
-                  textInputAction: TextInputAction.done,
-                  decoration: InputDecoration(
-                    hintText: 'Add a tag (e.g. career)',
-                    filled: true,
-                    fillColor: AppColors.button,
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: const BorderSide(color: AppColors.border),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: const BorderSide(color: AppColors.border),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide:
-                          const BorderSide(color: AppColors.primary, width: 1.4),
-                    ),
-                  ),
-                  onSubmitted: (value) {
-                    final raw = value.trim();
-                    if (raw.isEmpty) return;
-                    final tag = raw.startsWith('#') ? raw : '#$raw';
-                    if (!selectedTags.contains(tag)) {
-                      setState(() => selectedTags.add(tag));
-                    }
-                    _tagController.clear();
-                  },
-                ),
-
-                const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: selectedTags
-                        .map(
-                          (t) => Chip(
-                            label: Text(t),
-                            backgroundColor: AppColors.button,
-                            shape: const StadiumBorder(
-                              side: BorderSide(color: AppColors.border),
-                            ),
-                            deleteIcon: const Icon(Icons.close,
-                                size: 18, color: AppColors.muted),
-                            onDeleted: () =>
-                                setState(() => selectedTags.remove(t)),
-                          ),
-                        )
-                        .toList(),
-                  ),
-                ),
-              ],
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 20),
+            child: _MediaPanel(
+              imageFiles: _imageFiles,
+              videoFile: _videoFile,
+              videoThumbPath: _videoThumbPath,
+              onRemoveAll: _removeAllMedia,
+              onRemovePhotoAt: _removePhotoAt,
+              onRemoveVideo: _removeVideo,
+              onAddMorePhotos: () => _pickPhotos(addMore: true),
             ),
           ),
         );
       },
     );
+  }
+
+  // —— Clear everything after successful post ——————————————————————
+  void _resetComposer() {
+    _quickController.clear();
+    _a1.clear();
+    _a2.clear();
+    _a3.clear();
+    _tagController.clear();
+    selectedTags.clear();
+    _removeAllMedia();
+    FocusScope.of(context).unfocus();
+    setState(() {}); // refresh UI
   }
 
   // —— Save post ————————————————————————————————————————————————
@@ -412,9 +380,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       ].join('\n');
     }
 
-    if (content.trim().isEmpty && _imageFile == null && _videoFile == null) {
-      return;
-    }
+    if (content.trim().isEmpty && !_hasMedia) return;
 
     setState(() => _isPosting = true);
 
@@ -423,12 +389,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     String? videoThumbUrl;
 
     try {
-      if (_imageFile != null) {
+      if (_imageFiles.isNotEmpty) {
+        final first = _imageFiles.first;
         final ref = FirebaseStorage.instance
             .ref()
             .child('post_images')
             .child('${DateTime.now().millisecondsSinceEpoch}.jpg');
-        await ref.putFile(_imageFile!);
+        await ref.putFile(first);
         imageUrl = await ref.getDownloadURL();
       }
 
@@ -462,10 +429,19 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         mediaAspectRatio: _mediaAspect,
       );
 
-      await _streakService.updateStreak(currentUser.uid);
+      await _streak_service_update(currentUser.uid);
 
       if (!mounted) return;
-      Navigator.of(context).maybePop('posted');
+
+      _resetComposer();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Posted ✅')),
+      );
+
+      Future.delayed(const Duration(milliseconds: 250), () {
+        if (mounted) Navigator.of(context).maybePop('posted');
+      });
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -476,9 +452,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
+  // keep your original call, just wrapped to avoid accidental renames
+  Future<void> _streak_service_update(String uid) async {
+    await _streakService.updateStreak(uid);
+  }
+
   // —— UI ————————————————————————————————————————————————
   @override
   Widget build(BuildContext context) {
+    final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+
     final localTheme = Theme.of(context).copyWith(
       scaffoldBackgroundColor: Colors.white,
       canvasColor: Colors.white,
@@ -496,15 +479,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       ),
     );
 
-    final hasMedia = _imageFile != null || _videoFile != null;
-
     return Theme(
       data: localTheme,
       child: GestureDetector(
         onTap: () => FocusScope.of(context).unfocus(),
         child: Scaffold(
+          resizeToAvoidBottomInset: true,
           appBar: AppBar(
-            leading: const SizedBox(width: 0), // keep layout stable
+            leading: const SizedBox(width: 0),
             title: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -532,32 +514,26 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 child: TextButton(
                   onPressed: _canPost ? _savePost : null,
                   style: TextButton.styleFrom(
-                    backgroundColor:
-                        _canPost ? AppColors.primary : AppColors.button,
-                    foregroundColor:
-                        _canPost ? Colors.white : AppColors.muted,
+                    backgroundColor: _canPost ? AppColors.primary : AppColors.button,
+                    foregroundColor: _canPost ? Colors.white : AppColors.muted,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
                     ),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   ),
                   child: _isPosting
                       ? const SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white),
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                         )
-                      : const Text('Post',
-                          style: TextStyle(fontWeight: FontWeight.w700)),
+                      : const Text('Post', style: TextStyle(fontWeight: FontWeight.w700)),
                 ),
               ),
             ],
           ),
           body: Column(
             children: [
-              // ✅ KEEP Quick button top-left + Template chip (unchanged)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
                 child: Row(
@@ -574,15 +550,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       onTap: _openTemplateSheet,
                     ),
                     const Spacer(),
-
-                    // ❌ removed “Switch to Quick” (THIS IS THE ONLY UX CHANGE)
                   ],
                 ),
               ),
+              const SizedBox(height: 10),
 
               Expanded(
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
                   child: _selectedTemplate == null
                       ? _QuickEditor(
                           controller: _quickController,
@@ -599,70 +574,158 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 ),
               ),
 
-              if (hasMedia)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                  child: Stack(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: _imageFile != null
-                            ? Image.file(_imageFile!,
-                                height: 180, fit: BoxFit.cover)
-                            : (_videoThumbPath != null
-                                ? Image.file(File(_videoThumbPath!),
-                                    height: 180, fit: BoxFit.cover)
-                                : Container(
-                                    height: 180,
-                                    color: Colors.black12,
-                                    child: const Center(
-                                      child: Icon(Icons.videocam,
-                                          size: 48, color: Colors.black54),
-                                    ),
-                                  )),
-                      ),
-                      Positioned(
-                        right: 10,
-                        top: 10,
-                        child: Material(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(999),
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(999),
-                            onTap: _removeMedia,
-                            child: const Padding(
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 6),
-                              child: Icon(Icons.close,
-                                  size: 18, color: Colors.white),
+              // ✅ FINAL FIX: put compact/full pinned in a bottom bar that always stays visible
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                child: keyboardOpen
+                    ? SafeArea(
+                        key: const ValueKey('compactSafe'),
+                        top: false,
+                        child: _CompactPinnedBar(
+                          mediaCount: _imageFiles.length + (_videoFile != null ? 1 : 0),
+                          tagCount: selectedTags.length,
+                          onOpenMedia: _openMediaSheet,
+                          onOpenTags: () => _tagFocus.requestFocus(),
+                          onPhoto: () => _pickPhotos(addMore: _imageFiles.isNotEmpty),
+                          onVideo: _pickVideo,
+                        ),
+                      )
+                    : SafeArea(
+                        key: const ValueKey('fullSafe'),
+                        top: false,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (_hasMedia)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                                child: _MediaPanel(
+                                  imageFiles: _imageFiles,
+                                  videoFile: _videoFile,
+                                  videoThumbPath: _videoThumbPath,
+                                  onRemoveAll: _removeAllMedia,
+                                  onRemovePhotoAt: _removePhotoAt,
+                                  onRemoveVideo: _removeVideo,
+                                  onAddMorePhotos: () => _pickPhotos(addMore: true),
+                                ),
+                              ),
+                            Container(
+                              decoration: const BoxDecoration(
+                                color: Colors.white,
+                                border: Border(top: BorderSide(color: AppColors.border)),
+                              ),
+                              padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+                              child: _InlineTagsComposer(
+                                controller: _tagController,
+                                focusNode: _tagFocus,
+                                tags: selectedTags,
+                                onAdd: _addTagFromField,
+                                onRemove: (t) => setState(() => selectedTags.remove(t)),
+                                onClear: _clearTags,
+                              ),
                             ),
-                          ),
+                            Container(
+                              color: Colors.white,
+                              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                              child: _CreatePostToolbar(
+                                disabled: _isPosting,
+                                hasPhoto: _imageFiles.isNotEmpty,
+                                hasVideo: _videoFile != null,
+                                onPhoto: () => _pickPhotos(addMore: false),
+                                onVideo: _pickVideo,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
-              // ✅ keep the 4 bottom buttons + white background (unchanged)
-              SafeArea(
-                top: false,
-                child: Container(
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    border: Border(top: BorderSide(color: AppColors.border)),
-                  ),
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-                  child: _CreatePostToolbar(
-                    disabled: _isPosting,
-                    hasPhoto: _imageFile != null,
-                    hasVideo: _videoFile != null,
-                    templateSelected: _selectedTemplate != null,
-                    tagCount: selectedTags.length,
-                    onPhoto: _pickImage,
-                    onVideo: _pickVideo,
-                    onTemplate: _openTemplateSheet,
-                    onTags: _openTagsSheet,
-                  ),
+// ===== Compact pinned bar (keyboard open) =====
+
+class _CompactPinnedBar extends StatelessWidget {
+  final int mediaCount;
+  final int tagCount;
+  final VoidCallback onOpenMedia;
+  final VoidCallback onOpenTags;
+  final VoidCallback onPhoto;
+  final VoidCallback onVideo;
+
+  const _CompactPinnedBar({
+    super.key,
+    required this.mediaCount,
+    required this.tagCount,
+    required this.onOpenMedia,
+    required this.onOpenTags,
+    required this.onPhoto,
+    required this.onVideo,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: AppColors.border)),
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+      child: Row(
+        children: [
+          _MiniChip(
+            label: mediaCount > 0 ? 'Media ($mediaCount)' : 'Media',
+            icon: Icons.photo_library_outlined,
+            onTap: onOpenMedia,
+          ),
+          const SizedBox(width: 8),
+          _MiniChip(
+            label: tagCount > 0 ? 'Tags ($tagCount)' : 'Tags',
+            icon: Icons.tag_outlined,
+            onTap: onOpenTags,
+          ),
+          const Spacer(),
+          _MiniIconBtn(icon: Icons.image_outlined, onTap: onPhoto),
+          const SizedBox(width: 8),
+          _MiniIconBtn(icon: Icons.videocam_outlined, onTap: onVideo),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniChip extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _MiniChip({required this.label, required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.primary.withOpacity(0.08),
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18, color: AppColors.primary),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.text,
+                  fontSize: 13,
                 ),
               ),
             ],
@@ -672,6 +735,438 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 }
+
+class _MiniIconBtn extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  const _MiniIconBtn({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: AppColors.border),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Icon(icon, size: 20, color: AppColors.muted),
+        ),
+      ),
+    );
+  }
+}
+
+// ===== Media panel =====
+
+class _MediaPanel extends StatelessWidget {
+  final List<File> imageFiles;
+  final File? videoFile;
+  final String? videoThumbPath;
+
+  final VoidCallback onRemoveAll;
+  final ValueChanged<int> onRemovePhotoAt;
+  final VoidCallback onRemoveVideo;
+  final VoidCallback onAddMorePhotos;
+
+  const _MediaPanel({
+    required this.imageFiles,
+    required this.videoFile,
+    required this.videoThumbPath,
+    required this.onRemoveAll,
+    required this.onRemovePhotoAt,
+    required this.onRemoveVideo,
+    required this.onAddMorePhotos,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasPhotos = imageFiles.isNotEmpty;
+    final hasVideo = videoFile != null && videoThumbPath != null;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text(
+                'Media',
+                style: TextStyle(
+                  color: AppColors.text,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 14,
+                  letterSpacing: -0.2,
+                ),
+              ),
+              const Spacer(),
+              InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: onRemoveAll,
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                  child: Text(
+                    'Remove all',
+                    style: TextStyle(
+                      color: AppColors.muted,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          if (hasPhotos)
+            _PhotosRow(
+              imageFiles: imageFiles,
+              onRemoveAt: onRemovePhotoAt,
+              onAdd: onAddMorePhotos,
+            ),
+
+          if (hasVideo) ...[
+            if (hasPhotos) const SizedBox(height: 12),
+            _BigVideoPreview(
+              thumbPath: videoThumbPath!,
+              videoFile: videoFile!,
+              onRemove: onRemoveVideo,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _PhotosRow extends StatelessWidget {
+  final List<File> imageFiles;
+  final ValueChanged<int> onRemoveAt;
+  final VoidCallback onAdd;
+
+  const _PhotosRow({
+    required this.imageFiles,
+    required this.onRemoveAt,
+    required this.onAdd,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const double size = 86;
+    const double radius = 16;
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          ...List.generate(imageFiles.length, (i) {
+            return Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  InkWell(
+                    borderRadius: BorderRadius.circular(radius),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => PostImageViewer(file: imageFiles[i]),
+                        ),
+                      );
+                    },
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(radius),
+                      child: SizedBox(
+                        width: size,
+                        height: size,
+                        child: Image.file(
+                          imageFiles[i],
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    right: -6,
+                    top: -6,
+                    child: _MiniRemoveButton(onTap: () => onRemoveAt(i)),
+                  ),
+                ],
+              ),
+            );
+          }),
+
+          InkWell(
+            borderRadius: BorderRadius.circular(radius),
+            onTap: onAdd,
+            child: Container(
+              width: size,
+              height: size,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(radius),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: const Center(
+                child: Icon(Icons.add_rounded, size: 28, color: AppColors.muted),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BigVideoPreview extends StatelessWidget {
+  final String thumbPath;
+  final File videoFile;
+  final VoidCallback onRemove;
+
+  const _BigVideoPreview({
+    required this.thumbPath,
+    required this.videoFile,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => PostVideoPlayer(file: videoFile)),
+        );
+      },
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: SizedBox(
+              height: 140,
+              width: double.infinity,
+              child: Image.file(
+                File(thumbPath),
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: Center(
+              child: Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.45),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 34),
+              ),
+            ),
+          ),
+          Positioned(
+            right: 10,
+            top: 10,
+            child: Material(
+              color: Colors.black.withOpacity(0.50),
+              borderRadius: BorderRadius.circular(999),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(999),
+                onTap: onRemove,
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  child: Icon(Icons.close, size: 18, color: Colors.white),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniRemoveButton extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _MiniRemoveButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black.withOpacity(0.55),
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Icon(Icons.close, size: 16, color: Colors.white),
+        ),
+      ),
+    );
+  }
+}
+
+// ===== Tags / Editors / UI components =====
+// KEEP exactly as you already have them in your file
+// (_InlineTagsComposer, _QuickEditor, _TemplateEditor, _ModeChip, _TemplateRowPro, _CreatePostToolbar, _ActionButton)
+
+// ===== Tags =====
+
+class _InlineTagsComposer extends StatelessWidget {
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final List<String> tags;
+  final VoidCallback onAdd;
+  final ValueChanged<String> onRemove;
+  final VoidCallback onClear;
+
+  const _InlineTagsComposer({
+    required this.controller,
+    required this.focusNode,
+    required this.tags,
+    required this.onAdd,
+    required this.onRemove,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Text(
+              'Tags',
+              style: TextStyle(
+                color: AppColors.text,
+                fontWeight: FontWeight.w800,
+                fontSize: 13.5,
+                letterSpacing: -0.2,
+              ),
+            ),
+            const Spacer(),
+            if (tags.isNotEmpty)
+              InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: onClear,
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                  child: Text(
+                    'Clear',
+                    style: TextStyle(
+                      color: AppColors.muted,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: controller,
+                focusNode: focusNode,
+                textInputAction: TextInputAction.done,
+                style: const TextStyle(
+                  color: AppColors.text,
+                  fontWeight: FontWeight.w700,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'Add a tag (e.g. career)',
+                  hintStyle: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600),
+                  filled: true,
+                  fillColor: Colors.white,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: AppColors.border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: AppColors.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: AppColors.primary, width: 1.4),
+                  ),
+                ),
+                onSubmitted: (_) => onAdd(),
+              ),
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              height: 44,
+              child: TextButton(
+                onPressed: onAdd,
+                style: TextButton.styleFrom(
+                  backgroundColor: AppColors.primary.withOpacity(0.10),
+                  foregroundColor: AppColors.primary,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    side: BorderSide(color: AppColors.primary.withOpacity(0.25)),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                ),
+                child: const Text('Add', style: TextStyle(fontWeight: FontWeight.w900)),
+              ),
+            ),
+          ],
+        ),
+        if (tags.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: tags
+                  .map(
+                    (t) => Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Chip(
+                        label: Text(
+                          t,
+                          style: const TextStyle(
+                            color: AppColors.text,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        backgroundColor: Colors.white,
+                        shape: const StadiumBorder(side: BorderSide(color: AppColors.border)),
+                        deleteIcon: const Icon(Icons.close, size: 18, color: AppColors.muted),
+                        onDeleted: () => onRemove(t),
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+// ===== Editors =====
 
 class _QuickEditor extends StatelessWidget {
   final TextEditingController controller;
@@ -736,9 +1231,10 @@ class _TemplateEditor extends StatelessWidget {
             Text(
               q,
               style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w800,
+                fontSize: 14.5,
+                fontWeight: FontWeight.w700,
                 color: AppColors.text,
+                letterSpacing: -0.2,
               ),
             ),
             const SizedBox(height: 6),
@@ -807,9 +1303,7 @@ class _ModeChip extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
-              color: selected
-                  ? AppColors.primary.withOpacity(0.25)
-                  : AppColors.border,
+              color: selected ? AppColors.primary.withOpacity(0.25) : AppColors.border,
             ),
           ),
           child: Text(
@@ -826,14 +1320,16 @@ class _ModeChip extends StatelessWidget {
   }
 }
 
-class _TemplateRow extends StatelessWidget {
+class _TemplateRowPro extends StatelessWidget {
   final String title;
+  final String subtitle;
   final bool selected;
   final IconData icon;
   final VoidCallback onTap;
 
-  const _TemplateRow({
+  const _TemplateRowPro({
     required this.title,
+    required this.subtitle,
     required this.selected,
     required this.icon,
     required this.onTap,
@@ -841,165 +1337,161 @@ class _TemplateRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: CircleAvatar(
-        backgroundColor:
-            selected ? AppColors.primary.withOpacity(0.10) : AppColors.button,
-        child: Icon(
-          selected ? Icons.check_rounded : icon,
-          color: selected ? AppColors.primary : AppColors.muted,
+    final leadingBg = selected ? AppColors.primary.withOpacity(0.10) : AppColors.button;
+    final leadingFg = selected ? AppColors.primary : AppColors.muted;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: leadingBg,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Icon(selected ? Icons.check_rounded : icon, color: leadingFg),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.text,
+                        fontSize: 15,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        color: AppColors.muted,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                selected ? Icons.check_circle_rounded : Icons.chevron_right_rounded,
+                color: selected ? AppColors.primary : AppColors.border,
+              ),
+            ],
+          ),
         ),
       ),
-      title: Text(
-        title,
-        style: const TextStyle(
-          fontWeight: FontWeight.w800,
-          color: AppColors.text,
-        ),
-      ),
-      onTap: onTap,
     );
   }
 }
 
 class _CreatePostToolbar extends StatelessWidget {
   final bool disabled;
-
   final bool hasPhoto;
   final bool hasVideo;
-  final bool templateSelected;
-  final int tagCount;
-
   final VoidCallback onPhoto;
   final VoidCallback onVideo;
-  final VoidCallback onTemplate;
-  final VoidCallback onTags;
 
   const _CreatePostToolbar({
     required this.disabled,
     required this.hasPhoto,
     required this.hasVideo,
-    required this.templateSelected,
-    required this.tagCount,
     required this.onPhoto,
     required this.onVideo,
-    required this.onTemplate,
-    required this.onTags,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 58,
-      decoration: BoxDecoration(
-        color: AppColors.button,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          _IconChip(
+    return Row(
+      children: [
+        Expanded(
+          child: _ActionButton(
             icon: Icons.image_outlined,
-            label: 'Photo',
+            label: 'Photos',
             selected: hasPhoto,
             disabled: disabled,
             onTap: onPhoto,
           ),
-          _IconChip(
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _ActionButton(
             icon: Icons.videocam_outlined,
             label: 'Video',
             selected: hasVideo,
             disabled: disabled,
             onTap: onVideo,
           ),
-          _IconChip(
-            icon: Icons.view_list_outlined,
-            label: 'Template',
-            selected: templateSelected,
-            disabled: disabled,
-            onTap: onTemplate,
-          ),
-          _IconChip(
-            icon: Icons.tag_outlined,
-            label: 'Tags',
-            selected: tagCount > 0,
-            badge: tagCount > 0 ? '$tagCount' : null,
-            disabled: disabled,
-            onTap: onTags,
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
 
-class _IconChip extends StatelessWidget {
+class _ActionButton extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool selected;
   final bool disabled;
-  final String? badge;
   final VoidCallback onTap;
 
-  const _IconChip({
+  const _ActionButton({
     required this.icon,
     required this.label,
     required this.selected,
     required this.disabled,
     required this.onTap,
-    this.badge,
   });
 
   @override
   Widget build(BuildContext context) {
-    final fg = disabled
-        ? AppColors.border
-        : (selected ? AppColors.primary : AppColors.muted);
-
-    final bg =
-        selected ? AppColors.primary.withOpacity(0.10) : Colors.transparent;
+    final fg = disabled ? AppColors.border : (selected ? AppColors.primary : AppColors.muted);
+    final border = selected ? AppColors.primary.withOpacity(0.35) : AppColors.border;
 
     return Material(
-      color: bg,
+      color: Colors.white,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: disabled ? null : onTap,
         borderRadius: BorderRadius.circular(14),
         child: Container(
-          width: 64,
           height: 44,
-          alignment: Alignment.center,
-          child: Stack(
-            clipBehavior: Clip.none,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: border),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Center(
-                child: Icon(icon, size: 22, color: fg),
-              ),
-              if (badge != null)
-                Positioned(
-                  right: -6,
-                  top: -6,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: Colors.white, width: 1),
-                    ),
-                    child: Text(
-                      badge!,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
+              Icon(icon, size: 20, color: fg),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: disabled ? AppColors.border : AppColors.text,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.2,
                   ),
                 ),
+              ),
             ],
           ),
         ),
