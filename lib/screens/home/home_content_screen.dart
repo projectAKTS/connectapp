@@ -45,7 +45,6 @@ class HomeContentScreen extends StatefulWidget {
 class _HomeContentScreenState extends State<HomeContentScreen> {
   final ScrollController _scroll = ScrollController();
 
-  // Pull-to-refresh handler (UX only; Firestore streams auto-update)
   Future<void> _onRefresh() async {
     HapticFeedback.mediumImpact();
 
@@ -154,6 +153,23 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
     return '';
   }
 
+  List<String> _extractImageUrls(Map<String, dynamic> raw) {
+    // ✅ NEW: supports imageUrls: [..]
+    final v = raw['imageUrls'];
+    if (v is List) {
+      return v
+          .whereType<String>()
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+    }
+
+    // ✅ fallback: old single imageUrl
+    final single = (raw['imageUrl'] ?? '').toString().trim();
+    if (single.isNotEmpty) return [single];
+    return [];
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -218,8 +234,7 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                       itemCount: posts.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 0),
                       itemBuilder: (_, i) {
-                        final raw =
-                            posts[i].data() as Map<String, dynamic>? ?? {};
+                        final raw = posts[i].data() as Map<String, dynamic>? ?? {};
                         final authorName = (raw['userName'] ?? 'User') as String;
                         final authorId = _extractUserId(raw);
                         final avatar = (raw['userAvatar'] ?? '') as String;
@@ -228,17 +243,18 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                         final right = _shortFromTs(raw['timestamp']);
                         final subtitle = '$right ago';
 
-                        final imageUrl = (raw['imageUrl'] ?? '').toString();
-                        final videoUrl = (raw['videoUrl'] ?? '').toString();
-                        final videoThumbUrl =
-                            (raw['videoThumbUrl'] ?? '').toString();
+                        final imageUrls = _extractImageUrls(raw);
 
-                        final type = (raw['type'] ?? 'Quick').toString();
+                        final videoUrl = (raw['videoUrl'] ?? '').toString();
+                        final videoThumbUrl = (raw['videoThumbUrl'] ?? '').toString();
+
+                        final type = (raw['type'] ?? raw['postType'] ?? raw['templateType'] ?? raw['template'] ?? 'Quick').toString();
 
                         final aspect = (() {
                           final v = raw['mediaAspectRatio'];
                           if (v is num && v > 0) return v.toDouble();
-                          return imageUrl.isNotEmpty ? (16 / 9) : 1.0;
+                          // keep your existing default behavior
+                          return (imageUrls.isNotEmpty || videoUrl.isNotEmpty) ? (16 / 9) : 1.0;
                         })();
 
                         final isOwnPost = (authorId == currentUid);
@@ -250,18 +266,16 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                           subtitle: subtitle,
                           rightTime: right,
                           body: body,
-                          imageUrl: imageUrl,
+                          imageUrls: imageUrls,
                           videoUrl: videoUrl,
                           videoThumbUrl: videoThumbUrl,
                           mediaAspect: aspect,
                           onOpenProfile: authorId.isEmpty
                               ? null
                               : () {
-                                  Navigator.of(context, rootNavigator: true)
-                                      .push(
+                                  Navigator.of(context, rootNavigator: true).push(
                                     CupertinoPageRoute(
-                                      builder: (_) =>
-                                          ProfileScreen(userID: authorId),
+                                      builder: (_) => ProfileScreen(userID: authorId),
                                     ),
                                   );
                                 },
@@ -274,25 +288,12 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                                     otherUserName: authorName,
                                   );
                                 },
-                          onOpenImage: imageUrl.isEmpty
-                              ? null
-                              : () {
-                                  Navigator.of(context, rootNavigator: true)
-                                      .push(
-                                    CupertinoPageRoute(
-                                      builder: (_) =>
-                                          PostImageViewer(url: imageUrl),
-                                    ),
-                                  );
-                                },
                           onOpenVideo: videoUrl.isEmpty
                               ? null
                               : () {
-                                  Navigator.of(context, rootNavigator: true)
-                                      .push(
+                                  Navigator.of(context, rootNavigator: true).push(
                                     CupertinoPageRoute(
-                                      builder: (_) =>
-                                          PostVideoPlayer(url: videoUrl),
+                                      builder: (_) => PostVideoPlayer(url: videoUrl),
                                     ),
                                   );
                                 },
@@ -366,10 +367,7 @@ class _WelcomeCard extends StatelessWidget {
       await FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
-          .set(
-            {'lastConnectionsSeenAt': FieldValue.serverTimestamp()},
-            SetOptions(merge: true),
-          );
+          .set({'lastConnectionsSeenAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
     } catch (_) {}
   }
 
@@ -399,10 +397,7 @@ class _WelcomeCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Welcome, $name',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
+            Text('Welcome, $name', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 14),
             _TaupePill(
               icon: Icons.manage_search_rounded,
@@ -412,17 +407,12 @@ class _WelcomeCard extends StatelessWidget {
             const SizedBox(height: 12),
             if (uid != null)
               StreamBuilder<DocumentSnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(uid)
-                    .snapshots(),
+                stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
                 builder: (context, userSnap) {
                   DateTime? lastSeen;
                   if (userSnap.hasData) {
-                    final d =
-                        userSnap.data!.data() as Map<String, dynamic>?;
-                    lastSeen =
-                        parseFirestoreTimestamp(d?['lastConnectionsSeenAt']);
+                    final d = userSnap.data!.data() as Map<String, dynamic>?;
+                    lastSeen = parseFirestoreTimestamp(d?['lastConnectionsSeenAt']);
                   }
 
                   return StreamBuilder<QuerySnapshot>(
@@ -434,13 +424,10 @@ class _WelcomeCard extends StatelessWidget {
                       int recentCount = 0;
                       if (connSnap.hasData) {
                         for (final doc in connSnap.data!.docs) {
-                          final data =
-                              doc.data() as Map<String, dynamic>;
-                          final connectedAt =
-                              parseFirestoreTimestamp(data['connectedAt']);
+                          final data = doc.data() as Map<String, dynamic>;
+                          final connectedAt = parseFirestoreTimestamp(data['connectedAt']);
                           if (connectedAt == null) continue;
-                          if (lastSeen == null ||
-                              connectedAt.isAfter(lastSeen!)) {
+                          if (lastSeen == null || connectedAt.isAfter(lastSeen!)) {
                             recentCount++;
                           }
                         }
@@ -456,8 +443,7 @@ class _WelcomeCard extends StatelessWidget {
                               // ignore: use_build_context_synchronously
                               Navigator.of(context, rootNavigator: true).push(
                                 CupertinoPageRoute(
-                                  builder: (_) =>
-                                      const ConnectionsScreen(),
+                                  builder: (_) => const ConnectionsScreen(),
                                 ),
                               );
                             },
@@ -467,10 +453,7 @@ class _WelcomeCard extends StatelessWidget {
                               right: 14,
                               top: 10,
                               child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 2,
-                                ),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: AppColors.primary,
                                   borderRadius: BorderRadius.circular(12),
@@ -542,34 +525,33 @@ class _TaupePill extends StatelessWidget {
 
 class _SectionTitle extends StatelessWidget {
   final String text;
-
   const _SectionTitle(this.text);
 
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-        child: Text(
-          text,
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
+        child: Text(text, style: Theme.of(context).textTheme.titleMedium),
       );
 }
 
 // ===== Post cell =====
 class _PostCell extends StatefulWidget {
-  final String postType; // ✅ use Firestore field 'type'
+  final String postType;
   final String authorName;
   final String authorAvatarUrl;
   final String subtitle;
   final String rightTime;
   final String body;
-  final String imageUrl;
+
+  // ✅ NEW: multiple images support
+  final List<String> imageUrls;
+
   final String videoUrl;
   final String videoThumbUrl;
   final double mediaAspect;
+
   final VoidCallback? onOpenProfile;
   final VoidCallback? onConnect;
-  final VoidCallback? onOpenImage;
   final VoidCallback? onOpenVideo;
   final bool showConnect;
 
@@ -580,13 +562,12 @@ class _PostCell extends StatefulWidget {
     required this.subtitle,
     required this.rightTime,
     required this.body,
-    required this.imageUrl,
+    required this.imageUrls,
     required this.videoUrl,
     required this.videoThumbUrl,
     required this.mediaAspect,
     required this.onOpenProfile,
     required this.onConnect,
-    required this.onOpenImage,
     required this.onOpenVideo,
     required this.showConnect,
   });
@@ -602,11 +583,17 @@ class _PostCellState extends State<_PostCell> {
   @override
   Widget build(BuildContext context) {
     Widget? media() {
-      if (widget.imageUrl.isNotEmpty) {
-        return _MediaImage(
-          url: widget.imageUrl,
+      if (widget.imageUrls.isNotEmpty) {
+        return _MediaCarousel(
+          urls: widget.imageUrls,
           aspect: widget.mediaAspect,
-          onTap: widget.onOpenImage,
+          onOpenIndex: (idx) {
+            Navigator.of(context, rootNavigator: true).push(
+              CupertinoPageRoute(
+                builder: (_) => PostImageViewer(url: widget.imageUrls[idx]),
+              ),
+            );
+          },
         );
       }
       if (widget.videoUrl.isNotEmpty) {
@@ -620,7 +607,7 @@ class _PostCellState extends State<_PostCell> {
     }
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(0, 16, 0, 24),
+      padding: const EdgeInsets.fromLTRB(0, 12, 0, 14),
       decoration: const BoxDecoration(
         color: AppColors.canvas,
         border: Border(
@@ -637,11 +624,11 @@ class _PostCellState extends State<_PostCell> {
             avatarUrl: widget.authorAvatarUrl,
             onTap: widget.onOpenProfile,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
 
           _PostTypeBadge(label: _typeToBadge(widget.postType)),
 
-          if (widget.body.isNotEmpty) const SizedBox(height: 10),
+          if (widget.body.isNotEmpty) const SizedBox(height: 8),
           if (widget.body.isNotEmpty)
             _ExpandableStructuredText(
               content: widget.body,
@@ -650,24 +637,20 @@ class _PostCellState extends State<_PostCell> {
               onToggle: () => setState(() => _expanded = !_expanded),
             ),
 
-          if (media() != null) const SizedBox(height: 10),
+          if (media() != null) const SizedBox(height: 8),
           if (media() != null) media()!,
 
           if (widget.showConnect) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             TextButton(
               onPressed: widget.onConnect,
               style: TextButton.styleFrom(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
                 backgroundColor: AppColors.canvas,
                 foregroundColor: AppColors.primary,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(AppRadius.lg),
-                  side: const BorderSide(
-                    color: AppColors.primary,
-                    width: 1.2,
-                  ),
+                  side: const BorderSide(color: AppColors.primary, width: 1.2),
                 ),
                 textStyle: const TextStyle(
                   fontWeight: FontWeight.w600,
@@ -686,7 +669,6 @@ class _PostCellState extends State<_PostCell> {
     final t = raw.trim();
     if (t.isEmpty) return 'Quick Post';
     if (t.toLowerCase() == 'quick') return 'Quick Post';
-    // e.g. "Advice Request" -> "Advice Request Post"
     return t.endsWith('Post') ? t : '$t Post';
   }
 }
@@ -710,7 +692,7 @@ class _PostHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final row = Row(
       children: [
-        _Avatar(url: avatarUrl, radius: 20),
+        _Avatar(url: avatarUrl, radius: 18),
         const SizedBox(width: 10),
         Expanded(
           child: Column(
@@ -722,17 +704,17 @@ class _PostHeader extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontWeight: FontWeight.w700,
-                  fontSize: 16,
+                  fontSize: 15,
                   color: AppColors.text,
                 ),
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: 1),
               Text(
                 subtitle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  fontSize: 14,
+                  fontSize: 12.5,
                   color: AppColors.muted,
                 ),
               ),
@@ -743,7 +725,7 @@ class _PostHeader extends StatelessWidget {
         Text(
           rightTime,
           style: const TextStyle(
-            fontSize: 14,
+            fontSize: 12.5,
             color: AppColors.muted,
           ),
         ),
@@ -766,34 +748,31 @@ class _PostHeader extends StatelessWidget {
 // ===== Badge =====
 class _PostTypeBadge extends StatelessWidget {
   final String label;
-
   const _PostTypeBadge({required this.label});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: AppColors.primary.withOpacity(0.04),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: AppColors.primary.withOpacity(0.12),
-        ),
+        border: Border.all(color: AppColors.primary.withOpacity(0.12)),
       ),
       child: Text(
         label,
         style: const TextStyle(
           color: AppColors.primary,
           fontWeight: FontWeight.w700,
-          fontSize: 13,
-          letterSpacing: 0.2,
+          fontSize: 12.5,
+          letterSpacing: 0.15,
         ),
       ),
     );
   }
 }
 
-// ===== Expandable Structured Text (NO MARKDOWN) =====
+// ===== Expandable Structured Text (compact like Reddit) =====
 class _ExpandableStructuredText extends StatelessWidget {
   final String content;
   final bool expanded;
@@ -824,14 +803,14 @@ class _ExpandableStructuredText extends StatelessWidget {
 
   TextSpan _buildSpan(String raw) {
     const base = TextStyle(
-      fontSize: 16,
-      height: 1.4,
+      fontSize: 15.5,
+      height: 1.28,
       color: AppColors.text,
       fontWeight: FontWeight.w400,
     );
     const strong = TextStyle(
-      fontSize: 16,
-      height: 1.4,
+      fontSize: 15.5,
+      height: 1.28,
       color: AppColors.text,
       fontWeight: FontWeight.w800,
     );
@@ -843,17 +822,8 @@ class _ExpandableStructuredText extends StatelessWidget {
       final line = lines[i];
       final isQ = _looksLikeQuestion(line);
 
-      // add a little breathing room before question lines (except first)
-      if (isQ && spans.isNotEmpty) {
-        spans.add(const TextSpan(text: '\n'));
-      }
-
-      spans.add(
-        TextSpan(
-          text: line,
-          style: isQ ? strong : base,
-        ),
-      );
+      // ✅ NO extra blank line before questions (fixes big spacing)
+      spans.add(TextSpan(text: line, style: isQ ? strong : base));
 
       if (i != lines.length - 1) {
         spans.add(const TextSpan(text: '\n'));
@@ -876,26 +846,22 @@ class _ExpandableStructuredText extends StatelessWidget {
         )..layout(maxWidth: constraints.maxWidth);
 
         final hasOverflow = tp.didExceedMaxLines;
-
         Widget rich() => RichText(text: span);
 
-        if (!hasOverflow) {
-          return rich();
-        }
+        if (!hasOverflow) return rich();
 
         if (expanded) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               rich(),
-              const SizedBox(height: 6),
+              const SizedBox(height: 4),
               _ShowMoreButton(expanded: true, onTap: onToggle),
             ],
           );
         }
 
-        final collapsedHeight =
-            tp.preferredLineHeight * maxLinesWhenCollapsed;
+        final collapsedHeight = tp.preferredLineHeight * maxLinesWhenCollapsed;
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -914,7 +880,7 @@ class _ExpandableStructuredText extends StatelessWidget {
                         Color(0xCCFFFFFF),
                         Color(0xFFFFFFFF),
                       ],
-                      stops: [0.0, 0.80, 0.93, 1.0],
+                      stops: [0.0, 0.78, 0.92, 1.0],
                     ).createShader(r);
                   },
                   blendMode: BlendMode.dstOut,
@@ -922,7 +888,7 @@ class _ExpandableStructuredText extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
             _ShowMoreButton(expanded: false, onTap: onToggle),
           ],
         );
@@ -969,7 +935,92 @@ class _ShowMoreButton extends StatelessWidget {
   }
 }
 
-// ===== Media =====
+// ===== Media (multiple images like Reddit swipe) =====
+class _MediaCarousel extends StatefulWidget {
+  final List<String> urls;
+  final double aspect;
+  final ValueChanged<int> onOpenIndex;
+
+  const _MediaCarousel({
+    required this.urls,
+    required this.aspect,
+    required this.onOpenIndex,
+  });
+
+  @override
+  State<_MediaCarousel> createState() => _MediaCarouselState();
+}
+
+class _MediaCarouselState extends State<_MediaCarousel> {
+  int _index = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final urls = widget.urls;
+
+    if (urls.length == 1) {
+      return _MediaImage(
+        url: urls.first,
+        aspect: widget.aspect,
+        onTap: () => widget.onOpenIndex(0),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Stack(
+        children: [
+          AspectRatio(
+            aspectRatio: widget.aspect,
+            child: PageView.builder(
+              itemCount: urls.length,
+              onPageChanged: (i) => setState(() => _index = i),
+              itemBuilder: (_, i) {
+                return InkWell(
+                  onTap: () => widget.onOpenIndex(i),
+                  child: Image.network(
+                    urls[i],
+                    fit: BoxFit.cover,
+                    loadingBuilder: (c, w, p) => p == null ? w : Container(color: AppColors.button),
+                    errorBuilder: (_, __, ___) => Container(
+                      color: AppColors.button,
+                      alignment: Alignment.center,
+                      child: const Icon(Icons.broken_image, color: AppColors.muted),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+
+          // dots
+          Positioned(
+            bottom: 10,
+            left: 0,
+            right: 0,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(urls.length, (i) {
+                final active = i == _index;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  width: active ? 14 : 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(active ? 0.55 : 0.25),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                );
+              }),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _MediaImage extends StatelessWidget {
   final String url;
   final double aspect;
@@ -992,15 +1043,11 @@ class _MediaImage extends StatelessWidget {
           child: Image.network(
             url,
             fit: BoxFit.cover,
-            loadingBuilder: (c, w, p) =>
-                p == null ? w : Container(color: AppColors.button),
+            loadingBuilder: (c, w, p) => p == null ? w : Container(color: AppColors.button),
             errorBuilder: (_, __, ___) => Container(
               color: AppColors.button,
               alignment: Alignment.center,
-              child: const Icon(
-                Icons.broken_image,
-                color: AppColors.muted,
-              ),
+              child: const Icon(Icons.broken_image, color: AppColors.muted),
             ),
           ),
         ),
@@ -1033,10 +1080,8 @@ class _MediaVideoThumb extends StatelessWidget {
               Image.network(
                 thumbUrl,
                 fit: BoxFit.cover,
-                loadingBuilder: (c, w, p) =>
-                    p == null ? w : Container(color: AppColors.button),
-                errorBuilder: (_, __, ___) =>
-                    Container(color: AppColors.button),
+                loadingBuilder: (c, w, p) => p == null ? w : Container(color: AppColors.button),
+                errorBuilder: (_, __, ___) => Container(color: AppColors.button),
               )
             else
               Container(color: AppColors.button),
@@ -1077,10 +1122,7 @@ class _Avatar extends StatelessWidget {
         ? CircleAvatar(
             radius: radius,
             backgroundColor: AppColors.avatarBg,
-            child: const Icon(
-              Icons.person_outline,
-              color: AppColors.avatarFg,
-            ),
+            child: const Icon(Icons.person_outline, color: AppColors.avatarFg),
           )
         : CircleAvatar(
             radius: radius,

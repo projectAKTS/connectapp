@@ -13,7 +13,6 @@ import 'package:connect_app/services/post_service.dart';
 import 'package:connect_app/services/streak_service.dart';
 import 'package:connect_app/theme/tokens.dart';
 
-// ✅ reuse your existing viewers (must support `file:`)
 import 'package:connect_app/screens/posts/post_image_viewer.dart';
 import 'package:connect_app/screens/posts/post_video_player.dart';
 
@@ -35,12 +34,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   final TextEditingController _a2 = TextEditingController();
   final TextEditingController _a3 = TextEditingController();
 
+  final FocusNode _a1Focus = FocusNode();
+  final FocusNode _a2Focus = FocusNode();
+  final FocusNode _a3Focus = FocusNode();
+
   bool _isPosting = false;
 
-  // ✅ multiple photos
   final List<File> _imageFiles = [];
-
-  // ✅ single video (mutually exclusive with photos)
   File? _videoFile;
   String? _videoThumbPath;
   double? _mediaAspect;
@@ -84,6 +84,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   final TextEditingController _tagController = TextEditingController();
   final FocusNode _tagFocus = FocusNode();
 
+  bool _isTyping = false;
+
   bool get _hasMedia => _imageFiles.isNotEmpty || _videoFile != null;
 
   bool get _canPost {
@@ -100,12 +102,38 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   @override
+  void initState() {
+    super.initState();
+
+    void syncTyping() {
+      final focused = _quickFocus.hasFocus ||
+          _a1Focus.hasFocus ||
+          _a2Focus.hasFocus ||
+          _a3Focus.hasFocus ||
+          _tagFocus.hasFocus;
+      if (_isTyping != focused) setState(() => _isTyping = focused);
+    }
+
+    _quickFocus.addListener(syncTyping);
+    _a1Focus.addListener(syncTyping);
+    _a2Focus.addListener(syncTyping);
+    _a3Focus.addListener(syncTyping);
+    _tagFocus.addListener(syncTyping);
+  }
+
+  @override
   void dispose() {
     _quickController.dispose();
     _quickFocus.dispose();
+
     _a1.dispose();
     _a2.dispose();
     _a3.dispose();
+
+    _a1Focus.dispose();
+    _a2Focus.dispose();
+    _a3Focus.dispose();
+
     _tagController.dispose();
     _tagFocus.dispose();
     super.dispose();
@@ -126,6 +154,62 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   void _clearTags() => setState(() => selectedTags.clear());
 
+  // ✅ tags sheet: INSTANT visual updates (no reopen needed)
+  void _openTagsSheet() {
+    HapticFeedback.lightImpact();
+    FocusScope.of(context).unfocus();
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (sheetCtx) {
+        final bottom = MediaQuery.of(sheetCtx).viewInsets.bottom;
+
+        return SafeArea(
+          child: StatefulBuilder(
+            builder: (ctx, setSheetState) {
+              void addTagInstant() {
+                _addTagFromField();
+                if (mounted) setSheetState(() {}); // ✅ refresh chips instantly
+              }
+
+              void removeTagInstant(String t) {
+                setState(() => selectedTags.remove(t)); // updates main + sheet
+                if (mounted) setSheetState(() {});
+              }
+
+              void clearTagsInstant() {
+                _clearTags();
+                if (mounted) setSheetState(() {});
+              }
+
+              return Padding(
+                padding: EdgeInsets.fromLTRB(12, 12, 12, 12 + bottom),
+                child: SingleChildScrollView(
+                  child: _InlineTagsComposer(
+                    controller: _tagController,
+                    focusNode: _tagFocus,
+                    autofocus: true,
+                    tags: selectedTags,
+                    onAdd: addTagInstant, // ✅ instant
+                    onRemove: removeTagInstant, // ✅ instant
+                    onClear: clearTagsInstant, // ✅ instant
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    ).whenComplete(() {
+      if (mounted) FocusScope.of(context).unfocus();
+    });
+  }
+
   // —— Media pickers ————————————————————————————————————————
   Future<void> _pickPhotos({required bool addMore}) async {
     final picks = await picker.pickMultiImage(maxWidth: 1600, imageQuality: 85);
@@ -135,7 +219,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       if (!addMore) _imageFiles.clear();
       _imageFiles.addAll(picks.map((e) => File(e.path)));
 
-      // mutually exclusive
       _videoFile = null;
       _videoThumbPath = null;
       _mediaAspect = 1.0;
@@ -163,23 +246,22 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         timeMs: 0,
       );
       thumbPath = out;
-    } catch (_) {}
+    } catch (_) {
+      thumbPath = null;
+    }
 
     setState(() {
       _videoFile = video;
       _videoThumbPath = thumbPath;
       _mediaAspect = 16 / 9;
 
-      // mutually exclusive
       _imageFiles.clear();
     });
   }
 
   void _removePhotoAt(int index) {
     setState(() {
-      if (index >= 0 && index < _imageFiles.length) {
-        _imageFiles.removeAt(index);
-      }
+      if (index >= 0 && index < _imageFiles.length) _imageFiles.removeAt(index);
     });
   }
 
@@ -198,6 +280,68 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _videoThumbPath = null;
       _mediaAspect = null;
     });
+  }
+
+  // ✅ media sheet: bottom sheet style + INSTANT updates (no reopen)
+  void _openMediaSheet() {
+    HapticFeedback.lightImpact();
+    FocusScope.of(context).unfocus();
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: StatefulBuilder(
+            builder: (ctx, setSheetState) {
+              Future<void> pickPhotosFromSheet({required bool addMore}) async {
+                await _pickPhotos(addMore: addMore);
+                if (mounted) setSheetState(() {}); // ✅ instant
+              }
+
+              Future<void> pickVideoFromSheet() async {
+                await _pickVideo();
+                if (mounted) setSheetState(() {});
+              }
+
+              void removeAllFromSheet() {
+                _removeAllMedia();
+                if (mounted) setSheetState(() {});
+              }
+
+              void removePhotoAtFromSheet(int i) {
+                _removePhotoAt(i);
+                if (mounted) setSheetState(() {});
+              }
+
+              void removeVideoFromSheet() {
+                _removeVideo();
+                if (mounted) setSheetState(() {});
+              }
+
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
+                child: _MediaPanel(
+                  imageFiles: _imageFiles,
+                  videoFile: _videoFile,
+                  videoThumbPath: _videoThumbPath,
+                  onAddPhotos: () => pickPhotosFromSheet(addMore: false),
+                  onAddVideo: pickVideoFromSheet,
+                  onRemoveAll: removeAllFromSheet,
+                  onRemovePhotoAt: removePhotoAtFromSheet,
+                  onRemoveVideo: removeVideoFromSheet,
+                  onAddMorePhotos: () => pickPhotosFromSheet(addMore: true),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
   }
 
   // —— Templates ————————————————————————————————————————————————
@@ -308,38 +452,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 
-  // —— Keyboard compact bar / sheets ————————————————————————————————
-  void _openMediaSheet() {
-    // ✅ IMPORTANT UX: close keyboard first so sheet + compact feel responsive
-    FocusScope.of(context).unfocus();
-
-    HapticFeedback.lightImpact();
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-      ),
-      builder: (_) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 20),
-            child: _MediaPanel(
-              imageFiles: _imageFiles,
-              videoFile: _videoFile,
-              videoThumbPath: _videoThumbPath,
-              onRemoveAll: _removeAllMedia,
-              onRemovePhotoAt: _removePhotoAt,
-              onRemoveVideo: _removeVideo,
-              onAddMorePhotos: () => _pickPhotos(addMore: true),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   // —— Clear everything after successful post ——————————————————————
   void _resetComposer() {
     _quickController.clear();
@@ -350,7 +462,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     selectedTags.clear();
     _removeAllMedia();
     FocusScope.of(context).unfocus();
-    setState(() {}); // refresh UI
+    setState(() {});
   }
 
   // —— Save post ————————————————————————————————————————————————
@@ -429,7 +541,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         mediaAspectRatio: _mediaAspect,
       );
 
-      await _streak_service_update(currentUser.uid);
+      await _streakService.updateStreak(currentUser.uid);
 
       if (!mounted) return;
 
@@ -452,16 +564,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
-  // keep your original call, just wrapped to avoid accidental renames
-  Future<void> _streak_service_update(String uid) async {
-    await _streakService.updateStreak(uid);
-  }
-
   // —— UI ————————————————————————————————————————————————
   @override
   Widget build(BuildContext context) {
-    final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
-
     final localTheme = Theme.of(context).copyWith(
       scaffoldBackgroundColor: Colors.white,
       canvasColor: Colors.white,
@@ -554,7 +659,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 ),
               ),
               const SizedBox(height: 10),
-
               Expanded(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
@@ -569,163 +673,46 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           a1: _a1,
                           a2: _a2,
                           a3: _a3,
+                          a1Focus: _a1Focus,
+                          a2Focus: _a2Focus,
+                          a3Focus: _a3Focus,
                           onChanged: () => setState(() {}),
                         ),
                 ),
               ),
 
-              // ✅ FINAL FIX: put compact/full pinned in a bottom bar that always stays visible
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 180),
-                child: keyboardOpen
-                    ? SafeArea(
-                        key: const ValueKey('compactSafe'),
-                        top: false,
-                        child: _CompactPinnedBar(
-                          mediaCount: _imageFiles.length + (_videoFile != null ? 1 : 0),
-                          tagCount: selectedTags.length,
-                          onOpenMedia: _openMediaSheet,
-                          onOpenTags: () => _tagFocus.requestFocus(),
-                          onPhoto: () => _pickPhotos(addMore: _imageFiles.isNotEmpty),
-                          onVideo: _pickVideo,
-                        ),
-                      )
-                    : SafeArea(
-                        key: const ValueKey('fullSafe'),
-                        top: false,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (_hasMedia)
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                                child: _MediaPanel(
-                                  imageFiles: _imageFiles,
-                                  videoFile: _videoFile,
-                                  videoThumbPath: _videoThumbPath,
-                                  onRemoveAll: _removeAllMedia,
-                                  onRemovePhotoAt: _removePhotoAt,
-                                  onRemoveVideo: _removeVideo,
-                                  onAddMorePhotos: () => _pickPhotos(addMore: true),
-                                ),
-                              ),
-                            Container(
-                              decoration: const BoxDecoration(
-                                color: Colors.white,
-                                border: Border(top: BorderSide(color: AppColors.border)),
-                              ),
-                              padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-                              child: _InlineTagsComposer(
-                                controller: _tagController,
-                                focusNode: _tagFocus,
-                                tags: selectedTags,
-                                onAdd: _addTagFromField,
-                                onRemove: (t) => setState(() => selectedTags.remove(t)),
-                                onClear: _clearTags,
-                              ),
-                            ),
-                            Container(
-                              color: Colors.white,
-                              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                              child: _CreatePostToolbar(
-                                disabled: _isPosting,
-                                hasPhoto: _imageFiles.isNotEmpty,
-                                hasVideo: _videoFile != null,
-                                onPhoto: () => _pickPhotos(addMore: false),
-                                onVideo: _pickVideo,
-                              ),
-                            ),
-                          ],
+              // ✅ keep 2 buttons exactly like before (Media + Tags)
+              SafeArea(
+                top: false,
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    border: Border(top: BorderSide(color: AppColors.border)),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _PillButton(
+                          label: (_imageFiles.isNotEmpty || _videoFile != null)
+                              ? 'Media (${_imageFiles.length + (_videoFile != null ? 1 : 0)})'
+                              : 'Media',
+                          icon: Icons.photo_library_outlined,
+                          onTap: _openMediaSheet,
+                          selected: _hasMedia,
                         ),
                       ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ===== Compact pinned bar (keyboard open) =====
-
-class _CompactPinnedBar extends StatelessWidget {
-  final int mediaCount;
-  final int tagCount;
-  final VoidCallback onOpenMedia;
-  final VoidCallback onOpenTags;
-  final VoidCallback onPhoto;
-  final VoidCallback onVideo;
-
-  const _CompactPinnedBar({
-    super.key,
-    required this.mediaCount,
-    required this.tagCount,
-    required this.onOpenMedia,
-    required this.onOpenTags,
-    required this.onPhoto,
-    required this.onVideo,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: AppColors.border)),
-      ),
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-      child: Row(
-        children: [
-          _MiniChip(
-            label: mediaCount > 0 ? 'Media ($mediaCount)' : 'Media',
-            icon: Icons.photo_library_outlined,
-            onTap: onOpenMedia,
-          ),
-          const SizedBox(width: 8),
-          _MiniChip(
-            label: tagCount > 0 ? 'Tags ($tagCount)' : 'Tags',
-            icon: Icons.tag_outlined,
-            onTap: onOpenTags,
-          ),
-          const Spacer(),
-          _MiniIconBtn(icon: Icons.image_outlined, onTap: onPhoto),
-          const SizedBox(width: 8),
-          _MiniIconBtn(icon: Icons.videocam_outlined, onTap: onVideo),
-        ],
-      ),
-    );
-  }
-}
-
-class _MiniChip extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  const _MiniChip({required this.label, required this.icon, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.primary.withOpacity(0.08),
-      borderRadius: BorderRadius.circular(999),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 18, color: AppColors.primary),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.text,
-                  fontSize: 13,
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _PillButton(
+                          label: selectedTags.isNotEmpty ? 'Tags (${selectedTags.length})' : 'Tags',
+                          icon: Icons.tag_outlined,
+                          onTap: _openTagsSheet,
+                          selected: selectedTags.isNotEmpty,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -736,37 +723,15 @@ class _MiniChip extends StatelessWidget {
   }
 }
 
-class _MiniIconBtn extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  const _MiniIconBtn({required this.icon, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: AppColors.border),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Icon(icon, size: 20, color: AppColors.muted),
-        ),
-      ),
-    );
-  }
-}
-
-// ===== Media panel =====
+// ===== Media panel (bottom sheet content) =====
 
 class _MediaPanel extends StatelessWidget {
   final List<File> imageFiles;
   final File? videoFile;
   final String? videoThumbPath;
+
+  final VoidCallback onAddPhotos;
+  final VoidCallback onAddVideo;
 
   final VoidCallback onRemoveAll;
   final ValueChanged<int> onRemovePhotoAt;
@@ -777,6 +742,8 @@ class _MediaPanel extends StatelessWidget {
     required this.imageFiles,
     required this.videoFile,
     required this.videoThumbPath,
+    required this.onAddPhotos,
+    required this.onAddVideo,
     required this.onRemoveAll,
     required this.onRemovePhotoAt,
     required this.onRemoveVideo,
@@ -786,7 +753,7 @@ class _MediaPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasPhotos = imageFiles.isNotEmpty;
-    final hasVideo = videoFile != null && videoThumbPath != null;
+    final hasVideo = videoFile != null;
 
     return Container(
       decoration: BoxDecoration(
@@ -796,6 +763,7 @@ class _MediaPanel extends StatelessWidget {
       ),
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
@@ -829,6 +797,28 @@ class _MediaPanel extends StatelessWidget {
           ),
           const SizedBox(height: 10),
 
+          Row(
+            children: [
+              Expanded(
+                child: _SheetAction(
+                  icon: Icons.image_outlined,
+                  label: hasPhotos ? 'Replace photos' : 'Add photos',
+                  onTap: onAddPhotos,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _SheetAction(
+                  icon: Icons.videocam_outlined,
+                  label: hasVideo ? 'Replace video' : 'Add video',
+                  onTap: onAddVideo,
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
           if (hasPhotos)
             _PhotosRow(
               imageFiles: imageFiles,
@@ -839,12 +829,72 @@ class _MediaPanel extends StatelessWidget {
           if (hasVideo) ...[
             if (hasPhotos) const SizedBox(height: 12),
             _BigVideoPreview(
-              thumbPath: videoThumbPath!,
+              thumbPath: videoThumbPath,
               videoFile: videoFile!,
               onRemove: onRemoveVideo,
             ),
           ],
+
+          if (!hasPhotos && !hasVideo)
+            const Padding(
+              padding: EdgeInsets.only(top: 6),
+              child: Text(
+                'No media added yet.',
+                style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600),
+              ),
+            ),
         ],
+      ),
+    );
+  }
+}
+
+class _SheetAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _SheetAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          height: 44,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.border),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 20, color: AppColors.muted),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.text,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -891,10 +941,7 @@ class _PhotosRow extends StatelessWidget {
                       child: SizedBox(
                         width: size,
                         height: size,
-                        child: Image.file(
-                          imageFiles[i],
-                          fit: BoxFit.cover,
-                        ),
+                        child: Image.file(imageFiles[i], fit: BoxFit.cover),
                       ),
                     ),
                   ),
@@ -907,7 +954,6 @@ class _PhotosRow extends StatelessWidget {
               ),
             );
           }),
-
           InkWell(
             borderRadius: BorderRadius.circular(radius),
             onTap: onAdd,
@@ -931,7 +977,7 @@ class _PhotosRow extends StatelessWidget {
 }
 
 class _BigVideoPreview extends StatelessWidget {
-  final String thumbPath;
+  final String? thumbPath;
   final File videoFile;
   final VoidCallback onRemove;
 
@@ -959,10 +1005,13 @@ class _BigVideoPreview extends StatelessWidget {
             child: SizedBox(
               height: 140,
               width: double.infinity,
-              child: Image.file(
-                File(thumbPath),
-                fit: BoxFit.cover,
-              ),
+              child: (thumbPath != null && thumbPath!.isNotEmpty)
+                  ? Image.file(File(thumbPath!), fit: BoxFit.cover)
+                  : Container(
+                      color: AppColors.button,
+                      alignment: Alignment.center,
+                      child: const Icon(Icons.videocam_rounded, color: AppColors.muted, size: 34),
+                    ),
             ),
           ),
           Positioned.fill(
@@ -1002,7 +1051,6 @@ class _BigVideoPreview extends StatelessWidget {
 
 class _MiniRemoveButton extends StatelessWidget {
   final VoidCallback onTap;
-
   const _MiniRemoveButton({required this.onTap});
 
   @override
@@ -1022,15 +1070,12 @@ class _MiniRemoveButton extends StatelessWidget {
   }
 }
 
-// ===== Tags / Editors / UI components =====
-// KEEP exactly as you already have them in your file
-// (_InlineTagsComposer, _QuickEditor, _TemplateEditor, _ModeChip, _TemplateRowPro, _CreatePostToolbar, _ActionButton)
-
 // ===== Tags =====
 
 class _InlineTagsComposer extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
+  final bool autofocus;
   final List<String> tags;
   final VoidCallback onAdd;
   final ValueChanged<String> onRemove;
@@ -1039,6 +1084,7 @@ class _InlineTagsComposer extends StatelessWidget {
   const _InlineTagsComposer({
     required this.controller,
     required this.focusNode,
+    required this.autofocus,
     required this.tags,
     required this.onAdd,
     required this.onRemove,
@@ -1048,6 +1094,7 @@ class _InlineTagsComposer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
@@ -1087,6 +1134,7 @@ class _InlineTagsComposer extends StatelessWidget {
               child: TextField(
                 controller: controller,
                 focusNode: focusNode,
+                autofocus: autofocus,
                 textInputAction: TextInputAction.done,
                 style: const TextStyle(
                   color: AppColors.text,
@@ -1111,6 +1159,7 @@ class _InlineTagsComposer extends StatelessWidget {
                     borderSide: const BorderSide(color: AppColors.primary, width: 1.4),
                   ),
                 ),
+                // ✅ onSubmitted triggers instantly (sheet refresh handled by onAdd)
                 onSubmitted: (_) => onAdd(),
               ),
             ),
@@ -1210,6 +1259,11 @@ class _TemplateEditor extends StatelessWidget {
   final TextEditingController a1;
   final TextEditingController a2;
   final TextEditingController a3;
+
+  final FocusNode a1Focus;
+  final FocusNode a2Focus;
+  final FocusNode a3Focus;
+
   final VoidCallback onChanged;
 
   const _TemplateEditor({
@@ -1217,12 +1271,15 @@ class _TemplateEditor extends StatelessWidget {
     required this.a1,
     required this.a2,
     required this.a3,
+    required this.a1Focus,
+    required this.a2Focus,
+    required this.a3Focus,
     required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    Widget block(String q, TextEditingController c) {
+    Widget block(String q, TextEditingController c, FocusNode f) {
       return Padding(
         padding: const EdgeInsets.only(bottom: 18),
         child: Column(
@@ -1240,6 +1297,7 @@ class _TemplateEditor extends StatelessWidget {
             const SizedBox(height: 6),
             TextField(
               controller: c,
+              focusNode: f,
               maxLines: null,
               keyboardType: TextInputType.multiline,
               textCapitalization: TextCapitalization.sentences,
@@ -1266,9 +1324,9 @@ class _TemplateEditor extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        block(template['q1']!, a1),
-        block(template['q2']!, a2),
-        block(template['q3']!, a3),
+        block(template['q1']!, a1, a1Focus),
+        block(template['q2']!, a2, a2Focus),
+        block(template['q3']!, a3, a3Focus),
       ],
     );
   }
@@ -1398,96 +1456,51 @@ class _TemplateRowPro extends StatelessWidget {
   }
 }
 
-class _CreatePostToolbar extends StatelessWidget {
-  final bool disabled;
-  final bool hasPhoto;
-  final bool hasVideo;
-  final VoidCallback onPhoto;
-  final VoidCallback onVideo;
-
-  const _CreatePostToolbar({
-    required this.disabled,
-    required this.hasPhoto,
-    required this.hasVideo,
-    required this.onPhoto,
-    required this.onVideo,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _ActionButton(
-            icon: Icons.image_outlined,
-            label: 'Photos',
-            selected: hasPhoto,
-            disabled: disabled,
-            onTap: onPhoto,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _ActionButton(
-            icon: Icons.videocam_outlined,
-            label: 'Video',
-            selected: hasVideo,
-            disabled: disabled,
-            onTap: onVideo,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ActionButton extends StatelessWidget {
-  final IconData icon;
+class _PillButton extends StatelessWidget {
   final String label;
-  final bool selected;
-  final bool disabled;
+  final IconData icon;
   final VoidCallback onTap;
+  final bool selected;
 
-  const _ActionButton({
-    required this.icon,
+  const _PillButton({
     required this.label,
-    required this.selected,
-    required this.disabled,
+    required this.icon,
     required this.onTap,
+    required this.selected,
   });
 
   @override
   Widget build(BuildContext context) {
-    final fg = disabled ? AppColors.border : (selected ? AppColors.primary : AppColors.muted);
-    final border = selected ? AppColors.primary.withOpacity(0.35) : AppColors.border;
+    final bg = selected ? AppColors.primary.withOpacity(0.10) : Colors.white;
+    final border = selected ? AppColors.primary.withOpacity(0.25) : AppColors.border;
+    final iconColor = selected ? AppColors.primary : AppColors.muted;
 
     return Material(
-      color: Colors.white,
+      color: bg,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
-        onTap: disabled ? null : onTap,
         borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
         child: Container(
           height: 44,
           decoration: BoxDecoration(
-            color: Colors.white,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: border),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 20, color: fg),
+              Icon(icon, size: 20, color: iconColor),
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
                   label,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: disabled ? AppColors.border : AppColors.text,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.text,
                     fontSize: 13,
-                    fontWeight: FontWeight.w700,
                     letterSpacing: -0.2,
                   ),
                 ),
