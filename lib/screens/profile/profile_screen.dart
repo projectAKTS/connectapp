@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
@@ -34,6 +35,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // Horizontal swipe-back helpers
   double? _dragStartX;
   bool _dragFromEdge = false;
+
+  // ✅ prevent multiple pops (fixes _debugLocked)
+  bool _popQueued = false;
 
   // ---- Filters (match Create Post templates) ----
   // label -> slug
@@ -182,7 +186,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _signOut() async {
     await FirebaseAuth.instance.signOut();
     if (!mounted) return;
-    Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+    Navigator.of(context, rootNavigator: true)
+        .pushNamedAndRemoveUntil('/login', (route) => false);
   }
 
   void _openConnectSheet() {
@@ -256,20 +261,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // ---------- Horizontal swipe-back handlers ----------
   void _handleHorizontalDragStart(DragStartDetails details) {
+    if (Platform.isIOS) return; // ✅ iOS already has native swipe-back
     _dragStartX = details.globalPosition.dx;
-    // treat as edge-swipe if within 32 px from left edge
     _dragFromEdge = (_dragStartX ?? 0) < 32.0;
   }
 
   void _handleHorizontalDragUpdate(DragUpdateDetails details) {
+    if (Platform.isIOS) return; // ✅ prevent double-gesture pop on iOS
     if (!_dragFromEdge) return;
-    // Only pop if there's actually somewhere to go back to
-    if (!Navigator.of(context).canPop()) return;
 
-    // Rightward movement with some threshold
+    final nav = Navigator.of(context, rootNavigator: true);
+    if (!nav.canPop()) return;
+
+    if (_popQueued) return;
+
     if (details.primaryDelta != null && details.primaryDelta! > 16) {
       _dragFromEdge = false;
-      Navigator.of(context).maybePop();
+      _popQueued = true;
+
+      // ✅ pop safely after current frame to avoid _debugLocked
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        nav.maybePop();
+        _popQueued = false;
+      });
     }
   }
 
@@ -323,15 +338,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return m?.group(1);
   }
 
-  /// Unified classifier (matches PostDetail behavior):
-  /// If content begins with "**X Post**" -> use that X (advice/how-to/lessons/experience/quick).
-  /// Otherwise -> default to QUICK (badge "Quick Post") and keep body as-is.
-  /// Returns: (slug, badgeText, body)
   (String slug, String badgeText, String body) _classifyPost(
       Map<String, dynamic> map) {
     final rawContent = (map['content'] ?? '').toString();
 
-    // 1) Respect a template header if present and strip it from body
     final lblFromContent = _firstBoldLineLabel(rawContent);
     if (lblFromContent != null && lblFromContent.toLowerCase().endsWith(' post')) {
       final lower = lblFromContent.toLowerCase();
@@ -351,7 +361,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         slug = 'quick';
       }
 
-      // strip first bold line
       final lines = rawContent.split('\n');
       int idx = 0;
       while (idx < lines.length && lines[idx].trim().isEmpty) idx++;
@@ -365,11 +374,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return (slug, lblFromContent, body);
     }
 
-    // 2) No template -> QUICK by default
     return ('quick', 'Quick Post', rawContent);
   }
 
-  // Simple markdown (bold ** ** only)
   TextSpan _mdSpan(String text) {
     const base = TextStyle(fontSize: 15, height: 1.35, color: AppColors.text);
     const strong = TextStyle(
@@ -423,7 +430,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final canPop = Navigator.of(context).canPop();
+    final nav = Navigator.of(context, rootNavigator: true);
+    final canPop = nav.canPop();
 
     final theme = Theme.of(context).copyWith(
       scaffoldBackgroundColor: AppColors.canvas,
@@ -453,7 +461,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: Scaffold(
           appBar: AppBar(
             title: const Text('Profile'),
-            leading: canPop ? BackButton(onPressed: () => Navigator.of(context).maybePop()) : null,
+            leading: canPop ? BackButton(onPressed: () => nav.maybePop()) : null,
           ),
           body: const Center(child: CircularProgressIndicator()),
         ),
@@ -466,7 +474,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: Scaffold(
           appBar: AppBar(
             title: const Text('Profile'),
-            leading: canPop ? BackButton(onPressed: () => Navigator.of(context).maybePop()) : null,
+            leading: canPop ? BackButton(onPressed: () => nav.maybePop()) : null,
           ),
           body: const Center(
             child: Text(
@@ -479,7 +487,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     final boostedUntil = parseFirestoreTimestamp(userData!['boostedUntil']);
-    final isBoosted = boostedUntil != null && boostedUntil.isAfter(DateTime.now());
+    final isBoosted =
+        boostedUntil != null && boostedUntil.isAfter(DateTime.now());
 
     final fullName = _s(userData!['fullName'], 'Unknown User');
     final bio = _s(userData!['bio']);
@@ -492,7 +501,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       data: theme,
       child: Scaffold(
         appBar: AppBar(
-          leading: canPop ? BackButton(onPressed: () => Navigator.of(context).maybePop()) : null,
+          leading: canPop ? BackButton(onPressed: () => nav.maybePop()) : null,
           title: const Text('Profile'),
           actions: [
             if (isCurrentUser) ...[
@@ -533,7 +542,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Avatar + name + bio
                   Center(
                     child: Stack(
                       alignment: Alignment.topRight,
@@ -584,7 +592,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ],
 
-                  // ===== Action row (Follow / Connect) =====
                   if (!isCurrentUser) ...[
                     const SizedBox(height: 14),
                     Row(
@@ -624,7 +631,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                   const SizedBox(height: 16),
 
-                  // ===== Compact stats strip =====
                   _softCard(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -705,11 +711,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     child: StreamBuilder<QuerySnapshot>(
                       stream: _postsStream,
                       builder: (ctx, snap) {
-                        if (snap.connectionState ==
-                            ConnectionState.waiting) {
-                          return const Center(
-                            child: CircularProgressIndicator(),
-                          );
+                        if (snap.connectionState == ConnectionState.waiting) {
+                          return const Center(child: CircularProgressIndicator());
                         }
                         if (snap.hasError) {
                           return Center(
@@ -721,12 +724,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         }
                         final all = (snap.data?.docs ?? []).toList();
                         all.sort((a, b) {
-                          final aTs =
-                              parseFirestoreTimestamp(a['timestamp']) ??
-                                  DateTime.fromMillisecondsSinceEpoch(0);
-                          final bTs =
-                              parseFirestoreTimestamp(b['timestamp']) ??
-                                  DateTime.fromMillisecondsSinceEpoch(0);
+                          final aTs = parseFirestoreTimestamp(a['timestamp']) ??
+                              DateTime.fromMillisecondsSinceEpoch(0);
+                          final bTs = parseFirestoreTimestamp(b['timestamp']) ??
+                              DateTime.fromMillisecondsSinceEpoch(0);
                           return bTs.compareTo(aTs);
                         });
                         final featured = all.take(3).toList();
@@ -745,14 +746,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           physics: const BouncingScrollPhysics(),
                           itemBuilder: (c, i) {
                             final doc = featured[i];
-                            final data =
-                                doc.data() as Map<String, dynamic>;
-                            final date =
-                                parseFirestoreTimestamp(data['timestamp']);
-
-                            final (slug, badgeText, body) =
-                                _classifyPost(data);
-                            // slug is currently unused but preserved
+                            final data = doc.data() as Map<String, dynamic>;
+                            final date = parseFirestoreTimestamp(data['timestamp']);
+                            final (_, badgeText, body) = _classifyPost(data);
 
                             return Padding(
                               padding: EdgeInsets.only(
@@ -764,15 +760,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 onTap: () {
                                   Navigator.of(context).push(
                                     CupertinoPageRoute(
-                                      builder: (_) =>
-                                          PostDetailScreen(postId: doc.id),
+                                      builder: (_) => PostDetailScreen(postId: doc.id),
                                     ),
                                   );
                                 },
                                 child: _softCard(
                                   child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       _postTypeBadge(badgeText),
                                       const SizedBox(height: 8),
@@ -801,16 +795,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       },
                     ),
                   ),
+
                   const SizedBox(height: 16),
 
-                  // ===== Filter chips =====
                   SizedBox(
                     height: 44,
                     child: ListView.separated(
                       scrollDirection: Axis.horizontal,
                       itemCount: _filters.length,
-                      separatorBuilder: (_, __) =>
-                          const SizedBox(width: 8),
+                      separatorBuilder: (_, __) => const SizedBox(width: 8),
                       itemBuilder: (ctx, i) {
                         final label = _filters.keys.elementAt(i);
                         final selected = (label == _selectedFilterLabel);
@@ -830,8 +823,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               setState(() => _selectedFilterLabel = label),
                           selectedColor: AppColors.button,
                           backgroundColor: AppColors.card,
-                          side:
-                              const BorderSide(color: AppColors.border),
+                          side: const BorderSide(color: AppColors.border),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
                           ),
@@ -839,26 +831,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       },
                     ),
                   ),
-                  const SizedBox(height: 16),
 
+                  const SizedBox(height: 16),
                   const Text(
                     'Recent Activity',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                    ),
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 10),
 
-                  // ===== Recent Activity =====
                   StreamBuilder<QuerySnapshot>(
                     stream: _postsStream,
                     builder: (ctx, snap) {
-                      if (snap.connectionState ==
-                          ConnectionState.waiting) {
-                        return const Center(
-                          child: CircularProgressIndicator(),
-                        );
+                      if (snap.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
                       }
                       if (snap.hasError) {
                         return Center(
@@ -871,28 +856,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                       var docs = (snap.data?.docs ?? []).toList()
                         ..sort((a, b) {
-                          final aTs =
-                              parseFirestoreTimestamp(a['timestamp']) ??
-                                  DateTime.fromMillisecondsSinceEpoch(0);
-                          final bTs =
-                              parseFirestoreTimestamp(b['timestamp']) ??
-                                  DateTime.fromMillisecondsSinceEpoch(0);
+                          final aTs = parseFirestoreTimestamp(a['timestamp']) ??
+                              DateTime.fromMillisecondsSinceEpoch(0);
+                          final bTs = parseFirestoreTimestamp(b['timestamp']) ??
+                              DateTime.fromMillisecondsSinceEpoch(0);
                           return bTs.compareTo(aTs);
                         });
 
                       final selectedSlug = _filters[_selectedFilterLabel];
 
-                      // Classify once and reuse for filter + render
                       final items = docs
                           .map((doc) {
-                            final map =
-                                doc.data() as Map<String, dynamic>;
+                            final map = doc.data() as Map<String, dynamic>;
                             final tuple = _classifyPost(map);
                             return (
                               doc,
-                              tuple.$1 /* slug */,
-                              tuple.$2 /* badge */,
-                              tuple.$3 /* body */,
+                              tuple.$1,
+                              tuple.$2,
+                              tuple.$3,
                               parseFirestoreTimestamp(map['timestamp'])
                             );
                           })
@@ -900,9 +881,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                       final filtered = selectedSlug == null
                           ? items
-                          : items
-                              .where((e) => e.$2 == selectedSlug)
-                              .toList();
+                          : items.where((e) => e.$2 == selectedSlug).toList();
 
                       if (filtered.isEmpty) {
                         return const Padding(
@@ -918,11 +897,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                       return ListView.separated(
                         shrinkWrap: true,
-                        physics:
-                            const NeverScrollableScrollPhysics(),
+                        physics: const NeverScrollableScrollPhysics(),
                         itemCount: filtered.length,
-                        separatorBuilder: (_, __) =>
-                            const SizedBox(height: 12),
+                        separatorBuilder: (_, __) => const SizedBox(height: 12),
                         itemBuilder: (c, i) {
                           final row = filtered[i];
                           final doc = row.$1;
@@ -935,21 +912,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             onTap: () {
                               Navigator.of(context).push(
                                 CupertinoPageRoute(
-                                  builder: (_) =>
-                                      PostDetailScreen(postId: doc.id),
+                                  builder: (_) => PostDetailScreen(postId: doc.id),
                                 ),
                               );
                             },
                             child: _softCard(
-                              padding: const EdgeInsets.fromLTRB(
-                                14,
-                                12,
-                                14,
-                                12,
-                              ),
+                              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
                               child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   _postTypeBadge(badgeText),
                                   const SizedBox(height: 8),
@@ -1011,8 +981,7 @@ class _StatsStrip extends StatelessWidget {
             Text(label, style: const TextStyle(color: AppColors.muted)),
           ]),
           const SizedBox(height: 6),
-          Text(value,
-              style: const TextStyle(fontWeight: FontWeight.w700)),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
         ],
       );
     }
@@ -1027,24 +996,11 @@ class _StatsStrip extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        Expanded(
-          child: Center(
-            child: cell(Icons.local_fire_department_rounded,
-                'Streak', streakText),
-          ),
-        ),
+        Expanded(child: Center(child: cell(Icons.local_fire_department_rounded, 'Streak', streakText))),
         divider(),
-        Expanded(
-          child: Center(
-            child: cell(Icons.emoji_events_outlined, 'XP', xpText),
-          ),
-        ),
+        Expanded(child: Center(child: cell(Icons.emoji_events_outlined, 'XP', xpText))),
         divider(),
-        Expanded(
-          child: Center(
-            child: cell(Icons.thumb_up_alt_outlined, 'Helpful', helpfulText),
-          ),
-        ),
+        Expanded(child: Center(child: cell(Icons.thumb_up_alt_outlined, 'Helpful', helpfulText))),
       ],
     );
   }
@@ -1064,8 +1020,7 @@ class _ExpandableBio extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final maxLines = expanded ? null : 2;
-    final overflow =
-        expanded ? TextOverflow.visible : TextOverflow.ellipsis;
+    final overflow = expanded ? TextOverflow.visible : TextOverflow.ellipsis;
     final showToggle = text.trim().length > 80;
 
     return Column(
@@ -1094,8 +1049,6 @@ class _ExpandableBio extends StatelessWidget {
     );
   }
 }
-
-/// ===== Small shared buttons for the top action row =====
 
 class _FilledActionButton extends StatelessWidget {
   final IconData icon;

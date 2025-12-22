@@ -10,6 +10,7 @@ import 'package:connect_app/screens/connections/connections_screen.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
 import 'package:connect_app/screens/messages/messages_screen.dart';
 import 'package:connect_app/screens/search/find_helper_screen.dart';
+import 'package:connect_app/services/call_service.dart';
 
 // Fullscreen viewers
 import 'package:connect_app/screens/posts/post_video_player.dart';
@@ -39,15 +40,20 @@ class HomeContentScreen extends StatefulWidget {
   const HomeContentScreen({Key? key}) : super(key: key);
 
   @override
-  State<HomeContentScreen> createState() => _HomeContentScreenState();
+  HomeContentScreenState createState() => HomeContentScreenState();
 }
 
-class _HomeContentScreenState extends State<HomeContentScreen> {
+// ✅ PUBLIC State (so GlobalKey<HomeContentScreenState> works)
+class HomeContentScreenState extends State<HomeContentScreen>
+    with AutomaticKeepAliveClientMixin {
+  // ✅ Keep ONE controller. PageStorageKey + IndexedStack will preserve offset.
   final ScrollController _scroll = ScrollController();
 
-  Future<void> _onRefresh() async {
-    HapticFeedback.mediumImpact();
+  @override
+  bool get wantKeepAlive => true;
 
+  Future<void> _scrollToTop({bool haptic = true}) async {
+    if (haptic) HapticFeedback.mediumImpact();
     if (_scroll.hasClients) {
       await _scroll.animateTo(
         0,
@@ -55,8 +61,29 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
         curve: Curves.easeOut,
       );
     }
+  }
 
+  // ✅ called by bottom nav when Home tapped again
+  Future<void> scrollToTopFromTab() async {
+    await _scrollToTop(haptic: true);
+  }
+
+  Future<void> _onRefresh() async {
+    await _scrollToTop(haptic: true);
     await Future.delayed(const Duration(milliseconds: 600));
+  }
+
+  Future<void> _startCall({
+    required String toUid,
+    required String toName,
+    required bool isVideo,
+  }) async {
+    await CallService().startCall(
+      context,
+      toUid: toUid,
+      toName: toName,
+      isVideo: isVideo,
+    );
   }
 
   void _openConnectSheet({
@@ -68,16 +95,17 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppColors.canvas,
+      backgroundColor: AppColors.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
       builder: (_) {
-        Widget _item(IconData icon, String label, VoidCallback onTap) {
+        Widget item(IconData icon, String label, VoidCallback onTap) {
           return ListTile(
             leading: CircleAvatar(
-              backgroundColor: AppColors.avatarBg,
-              child: Icon(icon, color: AppColors.avatarFg),
+              backgroundColor: AppColors.button,
+              foregroundColor: AppColors.text,
+              child: Icon(icon),
             ),
             title: Text(label, style: const TextStyle(color: AppColors.text)),
             onTap: () {
@@ -102,7 +130,15 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
               ),
               const SizedBox(height: 10),
 
-              _item(Icons.event_available_outlined, 'Book a call', () {
+              item(Icons.person_outline, 'View profile', () {
+                Navigator.of(context, rootNavigator: true).push(
+                  CupertinoPageRoute(
+                    builder: (_) => ProfileScreen(userID: otherUserId),
+                  ),
+                );
+              }),
+
+              item(Icons.event_available_outlined, 'Book a call', () {
                 Navigator.of(context).pushNamed(
                   '/consultation',
                   arguments: {
@@ -113,22 +149,29 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                 );
               }),
 
-              _item(Icons.phone_in_talk_rounded, 'Audio call', () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Audio call — coming soon')),
-                );
-              }),
-              _item(Icons.videocam_rounded, 'Video call', () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Video call — coming soon')),
-                );
-              }),
-              _item(Icons.chat_bubble_outline_rounded, 'Message', () {
+              item(Icons.chat_bubble_outline, 'Message', () {
                 Navigator.of(context).pushNamed(
                   '/chat',
                   arguments: {'otherUserId': otherUserId},
                 );
               }),
+
+              item(Icons.call, 'Audio call', () {
+                _startCall(
+                  toUid: otherUserId,
+                  toName: otherUserName,
+                  isVideo: false,
+                );
+              }),
+
+              item(Icons.videocam, 'Video call', () {
+                _startCall(
+                  toUid: otherUserId,
+                  toName: otherUserName,
+                  isVideo: true,
+                );
+              }),
+
               const SizedBox(height: 8),
             ],
           ),
@@ -154,7 +197,6 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
   }
 
   List<String> _extractImageUrls(Map<String, dynamic> raw) {
-    // ✅ NEW: supports imageUrls: [..]
     final v = raw['imageUrls'];
     if (v is List) {
       return v
@@ -163,8 +205,6 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
           .where((e) => e.isNotEmpty)
           .toList();
     }
-
-    // ✅ fallback: old single imageUrl
     final single = (raw['imageUrl'] ?? '').toString().trim();
     if (single.isNotEmpty) return [single];
     return [];
@@ -172,6 +212,8 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+
     final user = FirebaseAuth.instance.currentUser;
     final firstName = (user?.displayName ?? 'Maria').split(' ').first;
     final currentUid = user?.uid ?? '';
@@ -184,6 +226,8 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
           edgeOffset: 0,
           displacement: 56,
           child: CustomScrollView(
+            // ✅ THIS is what preserves position in PageStorageBucket (MainScaffold)
+            key: const PageStorageKey('homeScroll'),
             controller: _scroll,
             physics: const BouncingScrollPhysics(
               parent: AlwaysScrollableScrollPhysics(),
@@ -194,11 +238,8 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                 child: _WelcomeCard(
                   name: firstName,
                   onFindHelper: () => Navigator.of(context, rootNavigator: true)
-                      .push(
-                    CupertinoPageRoute(
-                      builder: (_) => const FindHelperScreen(),
-                    ),
-                  ),
+                      .push(CupertinoPageRoute(
+                          builder: (_) => const FindHelperScreen())),
                 ),
               ),
               const SliverToBoxAdapter(child: _SectionTitle('Recent posts')),
@@ -234,7 +275,8 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                       itemCount: posts.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 0),
                       itemBuilder: (_, i) {
-                        final raw = posts[i].data() as Map<String, dynamic>? ?? {};
+                        final raw =
+                            posts[i].data() as Map<String, dynamic>? ?? {};
                         final authorName = (raw['userName'] ?? 'User') as String;
                         final authorId = _extractUserId(raw);
                         final avatar = (raw['userAvatar'] ?? '') as String;
@@ -246,15 +288,22 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                         final imageUrls = _extractImageUrls(raw);
 
                         final videoUrl = (raw['videoUrl'] ?? '').toString();
-                        final videoThumbUrl = (raw['videoThumbUrl'] ?? '').toString();
+                        final videoThumbUrl =
+                            (raw['videoThumbUrl'] ?? '').toString();
 
-                        final type = (raw['type'] ?? raw['postType'] ?? raw['templateType'] ?? raw['template'] ?? 'Quick').toString();
+                        final type = (raw['type'] ??
+                                raw['postType'] ??
+                                raw['templateType'] ??
+                                raw['template'] ??
+                                'Quick')
+                            .toString();
 
                         final aspect = (() {
                           final v = raw['mediaAspectRatio'];
                           if (v is num && v > 0) return v.toDouble();
-                          // keep your existing default behavior
-                          return (imageUrls.isNotEmpty || videoUrl.isNotEmpty) ? (16 / 9) : 1.0;
+                          return (imageUrls.isNotEmpty || videoUrl.isNotEmpty)
+                              ? (16 / 9)
+                              : 1.0;
                         })();
 
                         final isOwnPost = (authorId == currentUid);
@@ -273,9 +322,11 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                           onOpenProfile: authorId.isEmpty
                               ? null
                               : () {
-                                  Navigator.of(context, rootNavigator: true).push(
+                                  Navigator.of(context, rootNavigator: true)
+                                      .push(
                                     CupertinoPageRoute(
-                                      builder: (_) => ProfileScreen(userID: authorId),
+                                      builder: (_) =>
+                                          ProfileScreen(userID: authorId),
                                     ),
                                   );
                                 },
@@ -291,9 +342,11 @@ class _HomeContentScreenState extends State<HomeContentScreen> {
                           onOpenVideo: videoUrl.isEmpty
                               ? null
                               : () {
-                                  Navigator.of(context, rootNavigator: true).push(
+                                  Navigator.of(context, rootNavigator: true)
+                                      .push(
                                     CupertinoPageRoute(
-                                      builder: (_) => PostVideoPlayer(url: videoUrl),
+                                      builder: (_) =>
+                                          PostVideoPlayer(url: videoUrl),
                                     ),
                                   );
                                 },
@@ -364,10 +417,9 @@ class _WelcomeCard extends StatelessWidget {
 
   Future<void> _markConnectionsSeen(String uid) async {
     try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .set({'lastConnectionsSeenAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+      await FirebaseFirestore.instance.collection('users').doc(uid).set(
+          {'lastConnectionsSeenAt': FieldValue.serverTimestamp()},
+          SetOptions(merge: true));
     } catch (_) {}
   }
 
@@ -397,7 +449,8 @@ class _WelcomeCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Welcome, $name', style: Theme.of(context).textTheme.titleMedium),
+            Text('Welcome, $name',
+                style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 14),
             _TaupePill(
               icon: Icons.manage_search_rounded,
@@ -407,12 +460,16 @@ class _WelcomeCard extends StatelessWidget {
             const SizedBox(height: 12),
             if (uid != null)
               StreamBuilder<DocumentSnapshot>(
-                stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+                stream: FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(uid)
+                    .snapshots(),
                 builder: (context, userSnap) {
                   DateTime? lastSeen;
                   if (userSnap.hasData) {
                     final d = userSnap.data!.data() as Map<String, dynamic>?;
-                    lastSeen = parseFirestoreTimestamp(d?['lastConnectionsSeenAt']);
+                    lastSeen =
+                        parseFirestoreTimestamp(d?['lastConnectionsSeenAt']);
                   }
 
                   return StreamBuilder<QuerySnapshot>(
@@ -425,9 +482,11 @@ class _WelcomeCard extends StatelessWidget {
                       if (connSnap.hasData) {
                         for (final doc in connSnap.data!.docs) {
                           final data = doc.data() as Map<String, dynamic>;
-                          final connectedAt = parseFirestoreTimestamp(data['connectedAt']);
+                          final connectedAt =
+                              parseFirestoreTimestamp(data['connectedAt']);
                           if (connectedAt == null) continue;
-                          if (lastSeen == null || connectedAt.isAfter(lastSeen!)) {
+                          if (lastSeen == null ||
+                              connectedAt.isAfter(lastSeen)) {
                             recentCount++;
                           }
                         }
@@ -453,7 +512,8 @@ class _WelcomeCard extends StatelessWidget {
                               right: 14,
                               top: 10,
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: AppColors.primary,
                                   borderRadius: BorderRadius.circular(12),
@@ -534,7 +594,8 @@ class _SectionTitle extends StatelessWidget {
       );
 }
 
-// ===== Post cell =====
+// ===== Post cell + media widgets (UNCHANGED) =====
+
 class _PostCell extends StatefulWidget {
   final String postType;
   final String authorName;
@@ -543,9 +604,7 @@ class _PostCell extends StatefulWidget {
   final String rightTime;
   final String body;
 
-  // ✅ NEW: multiple images support
   final List<String> imageUrls;
-
   final String videoUrl;
   final String videoThumbUrl;
   final double mediaAspect;
@@ -625,9 +684,7 @@ class _PostCellState extends State<_PostCell> {
             onTap: widget.onOpenProfile,
           ),
           const SizedBox(height: 8),
-
           _PostTypeBadge(label: _typeToBadge(widget.postType)),
-
           if (widget.body.isNotEmpty) const SizedBox(height: 8),
           if (widget.body.isNotEmpty)
             _ExpandableStructuredText(
@@ -636,16 +693,15 @@ class _PostCellState extends State<_PostCell> {
               maxLinesWhenCollapsed: _collapsedLines,
               onToggle: () => setState(() => _expanded = !_expanded),
             ),
-
           if (media() != null) const SizedBox(height: 8),
           if (media() != null) media()!,
-
           if (widget.showConnect) ...[
             const SizedBox(height: 10),
             TextButton(
               onPressed: widget.onConnect,
               style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
                 backgroundColor: AppColors.canvas,
                 foregroundColor: AppColors.primary,
                 shape: RoundedRectangleBorder(
@@ -673,6 +729,7 @@ class _PostCellState extends State<_PostCell> {
   }
 }
 
+// (rest of your Post widgets unchanged)
 class _PostHeader extends StatelessWidget {
   final String authorName;
   final String subtitle;
@@ -745,7 +802,6 @@ class _PostHeader extends StatelessWidget {
   }
 }
 
-// ===== Badge =====
 class _PostTypeBadge extends StatelessWidget {
   final String label;
   const _PostTypeBadge({required this.label});
@@ -821,13 +877,8 @@ class _ExpandableStructuredText extends StatelessWidget {
     for (int i = 0; i < lines.length; i++) {
       final line = lines[i];
       final isQ = _looksLikeQuestion(line);
-
-      // ✅ NO extra blank line before questions (fixes big spacing)
       spans.add(TextSpan(text: line, style: isQ ? strong : base));
-
-      if (i != lines.length - 1) {
-        spans.add(const TextSpan(text: '\n'));
-      }
+      if (i != lines.length - 1) spans.add(const TextSpan(text: '\n'));
     }
 
     return TextSpan(children: spans, style: base);
@@ -935,7 +986,7 @@ class _ShowMoreButton extends StatelessWidget {
   }
 }
 
-// ===== Media (multiple images like Reddit swipe) =====
+// ===== Media widgets =====
 class _MediaCarousel extends StatefulWidget {
   final List<String> urls;
   final double aspect;
@@ -981,7 +1032,8 @@ class _MediaCarouselState extends State<_MediaCarousel> {
                   child: Image.network(
                     urls[i],
                     fit: BoxFit.cover,
-                    loadingBuilder: (c, w, p) => p == null ? w : Container(color: AppColors.button),
+                    loadingBuilder: (c, w, p) =>
+                        p == null ? w : Container(color: AppColors.button),
                     errorBuilder: (_, __, ___) => Container(
                       color: AppColors.button,
                       alignment: Alignment.center,
@@ -992,8 +1044,6 @@ class _MediaCarouselState extends State<_MediaCarousel> {
               },
             ),
           ),
-
-          // dots
           Positioned(
             bottom: 10,
             left: 0,
@@ -1043,7 +1093,8 @@ class _MediaImage extends StatelessWidget {
           child: Image.network(
             url,
             fit: BoxFit.cover,
-            loadingBuilder: (c, w, p) => p == null ? w : Container(color: AppColors.button),
+            loadingBuilder: (c, w, p) =>
+                p == null ? w : Container(color: AppColors.button),
             errorBuilder: (_, __, ___) => Container(
               color: AppColors.button,
               alignment: Alignment.center,
@@ -1080,7 +1131,8 @@ class _MediaVideoThumb extends StatelessWidget {
               Image.network(
                 thumbUrl,
                 fit: BoxFit.cover,
-                loadingBuilder: (c, w, p) => p == null ? w : Container(color: AppColors.button),
+                loadingBuilder: (c, w, p) =>
+                    p == null ? w : Container(color: AppColors.button),
                 errorBuilder: (_, __, ___) => Container(color: AppColors.button),
               )
             else

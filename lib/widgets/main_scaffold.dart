@@ -1,3 +1,4 @@
+// lib/widgets/main_scaffold.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -17,10 +18,21 @@ class MainScaffold extends StatefulWidget {
 class _MainScaffoldState extends State<MainScaffold> {
   int _selectedIndex = 0;
 
-  List<Widget> _buildScreens() {
+  // PageStorage bucket keeps scroll positions for children with PageStorageKey
+  final PageStorageBucket _bucket = PageStorageBucket();
+
+  final GlobalKey<HomeContentScreenState> _homeKey =
+      GlobalKey<HomeContentScreenState>();
+
+  late final List<Widget> _screens;
+
+  @override
+  void initState() {
+    super.initState();
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    return [
-      const HomeContentScreen(),
+
+    _screens = [
+      HomeContentScreen(key: _homeKey),
       const SearchScreen(),
       const CreatePostScreen(),
       ProfileScreen(userID: uid),
@@ -28,15 +40,25 @@ class _MainScaffoldState extends State<MainScaffold> {
   }
 
   void _onItemTapped(int index) {
+    if (index == _selectedIndex) {
+      if (index == 0) {
+        _homeKey.currentState?.scrollToTopFromTab();
+      }
+      return;
+    }
     setState(() => _selectedIndex = index);
   }
 
   @override
   Widget build(BuildContext context) {
-    final screens = _buildScreens();
-
     return Scaffold(
-      body: IndexedStack(index: _selectedIndex, children: screens),
+      body: PageStorage(
+        bucket: _bucket,
+        child: IndexedStack(
+          index: _selectedIndex,
+          children: _screens,
+        ),
+      ),
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
         backgroundColor: AppColors.canvas,
