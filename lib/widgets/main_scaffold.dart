@@ -1,4 +1,3 @@
-// lib/widgets/main_scaffold.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -7,6 +6,26 @@ import 'package:connect_app/screens/posts/create_post_screen.dart';
 import 'package:connect_app/screens/search/search_screen.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
 import 'package:connect_app/theme/tokens.dart';
+import 'package:flutter/cupertino.dart';
+
+/// ✅ Controller that HomeContentScreenState can register into (NO GlobalKey)
+class HomeTabController {
+  HomeContentScreenState? _state;
+
+  void attach(HomeContentScreenState state) {
+    _state = state;
+  }
+
+  void detach(HomeContentScreenState state) {
+    if (_state == state) _state = null;
+  }
+
+  Future<void> scrollToTop() async {
+    final s = _state;
+    if (s == null) return;
+    await s.scrollToTopFromTab();
+  }
+}
 
 class MainScaffold extends StatefulWidget {
   const MainScaffold({Key? key}) : super(key: key);
@@ -18,70 +37,118 @@ class MainScaffold extends StatefulWidget {
 class _MainScaffoldState extends State<MainScaffold> {
   int _selectedIndex = 0;
 
-  // PageStorage bucket keeps scroll positions for children with PageStorageKey
-  final PageStorageBucket _bucket = PageStorageBucket();
+  // ✅ Each tab gets its own Navigator (Instagram behavior)
+  final _navKeys = List.generate(4, (_) => GlobalKey<NavigatorState>());
 
-  final GlobalKey<HomeContentScreenState> _homeKey =
-      GlobalKey<HomeContentScreenState>();
+  // ✅ Home scroll-to-top without GlobalKey
+  final HomeTabController _homeController = HomeTabController();
 
-  late final List<Widget> _screens;
+  // Cache root pages so switching tabs doesn’t recreate them
+  late final Widget _homeRoot;
+  late final Widget _searchRoot;
+  late final Widget _createRoot;
+  late final Widget _profileRoot;
 
   @override
   void initState() {
     super.initState();
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
 
-    _screens = [
-      HomeContentScreen(key: _homeKey),
-      const SearchScreen(),
-      const CreatePostScreen(),
-      ProfileScreen(userID: uid),
-    ];
+    _homeRoot = HomeContentScreen(controller: _homeController);
+    _searchRoot = const SearchScreen();
+    _createRoot = const CreatePostScreen();
+    _profileRoot = ProfileScreen(userID: uid);
   }
 
-  void _onItemTapped(int index) {
+  NavigatorState? get _currentNav => _navKeys[_selectedIndex].currentState;
+
+  void _onItemTapped(int index) async {
+    // ✅ Re-tap current tab behavior:
+    // - pop to root of that tab
+    // - home tab additionally scrolls to top
     if (index == _selectedIndex) {
+      final nav = _currentNav;
+      if (nav != null && nav.canPop()) {
+        nav.popUntil((r) => r.isFirst);
+      }
       if (index == 0) {
-        _homeKey.currentState?.scrollToTopFromTab();
+        await _homeController.scrollToTop();
       }
       return;
     }
+
     setState(() => _selectedIndex = index);
+  }
+
+  Future<bool> _onWillPop() async {
+    final nav = _currentNav;
+
+    if (nav != null && nav.canPop()) {
+      nav.pop();
+      return false; // handled internally
+    }
+
+    // If not on home tab, go to home on back
+    if (_selectedIndex != 0) {
+      setState(() => _selectedIndex = 0);
+      return false;
+    }
+
+    return true; // allow app exit
+  }
+
+  Widget _buildTabNavigator(int index, Widget root) {
+    return Offstage(
+      offstage: _selectedIndex != index,
+      child: Navigator(
+        key: _navKeys[index],
+        onGenerateRoute: (settings) {
+          return CupertinoPageRoute(
+            settings: settings,
+            builder: (_) => root,
+          );
+        },
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: PageStorage(
-        bucket: _bucket,
-        child: IndexedStack(
-          index: _selectedIndex,
-          children: _screens,
+    return WillPopScope(
+      onWillPop: _onWillPop,
+      child: Scaffold(
+        body: Stack(
+          children: [
+            _buildTabNavigator(0, _homeRoot),
+            _buildTabNavigator(1, _searchRoot),
+            _buildTabNavigator(2, _createRoot),
+            _buildTabNavigator(3, _profileRoot),
+          ],
         ),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed,
-        backgroundColor: AppColors.canvas,
-        currentIndex: _selectedIndex,
-        selectedItemColor: AppColors.primary,
-        unselectedItemColor: AppColors.muted,
-        selectedIconTheme: const IconThemeData(color: AppColors.primary),
-        unselectedIconTheme: const IconThemeData(color: AppColors.muted),
-        selectedLabelStyle: const TextStyle(
-          fontWeight: FontWeight.w600,
-          fontSize: 12,
+        bottomNavigationBar: BottomNavigationBar(
+          type: BottomNavigationBarType.fixed,
+          backgroundColor: AppColors.canvas,
+          currentIndex: _selectedIndex,
+          selectedItemColor: AppColors.primary,
+          unselectedItemColor: AppColors.muted,
+          selectedIconTheme: const IconThemeData(color: AppColors.primary),
+          unselectedIconTheme: const IconThemeData(color: AppColors.muted),
+          selectedLabelStyle: const TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 12,
+          ),
+          unselectedLabelStyle: const TextStyle(
+            fontWeight: FontWeight.w500,
+            fontSize: 12,
+          ),
+          onTap: _onItemTapped,
+          items: const [
+            BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+            BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
+            BottomNavigationBarItem(icon: Icon(Icons.add_box), label: 'Post'),
+            BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+          ],
         ),
-        unselectedLabelStyle: const TextStyle(
-          fontWeight: FontWeight.w500,
-          fontSize: 12,
-        ),
-        onTap: _onItemTapped,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
-          BottomNavigationBarItem(icon: Icon(Icons.add_box), label: 'Post'),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
-        ],
       ),
     );
   }

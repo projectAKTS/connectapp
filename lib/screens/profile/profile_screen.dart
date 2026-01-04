@@ -270,7 +270,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (Platform.isIOS) return; // ✅ prevent double-gesture pop on iOS
     if (!_dragFromEdge) return;
 
-    final nav = Navigator.of(context, rootNavigator: true);
+    final nav = Navigator.of(context);
     if (!nav.canPop()) return;
 
     if (_popQueued) return;
@@ -430,7 +430,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final nav = Navigator.of(context, rootNavigator: true);
+    final nav = Navigator.of(context);
     final canPop = nav.canPop();
 
     final theme = Theme.of(context).copyWith(

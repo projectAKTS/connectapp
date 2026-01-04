@@ -1,3 +1,4 @@
+// lib/screens/home/home_content_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
@@ -15,6 +16,8 @@ import 'package:connect_app/services/call_service.dart';
 // Fullscreen viewers
 import 'package:connect_app/screens/posts/post_video_player.dart';
 import 'package:connect_app/screens/posts/post_image_viewer.dart';
+
+import 'package:connect_app/widgets/main_scaffold.dart';
 
 // ===== Utility functions =====
 String _timeAgoShort(DateTime dt) {
@@ -37,17 +40,33 @@ String _shortFromTs(dynamic ts) {
 
 // ===== Main screen =====
 class HomeContentScreen extends StatefulWidget {
-  const HomeContentScreen({Key? key}) : super(key: key);
+  final HomeTabController controller;
+
+  const HomeContentScreen({
+    Key? key,
+    required this.controller,
+  }) : super(key: key);
 
   @override
   HomeContentScreenState createState() => HomeContentScreenState();
 }
 
-// ✅ PUBLIC State (so GlobalKey<HomeContentScreenState> works)
 class HomeContentScreenState extends State<HomeContentScreen>
     with AutomaticKeepAliveClientMixin {
-  // ✅ Keep ONE controller. PageStorageKey + IndexedStack will preserve offset.
   final ScrollController _scroll = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.attach(this);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.detach(this);
+    _scroll.dispose();
+    super.dispose();
+  }
 
   @override
   bool get wantKeepAlive => true;
@@ -63,7 +82,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
     }
   }
 
-  // ✅ called by bottom nav when Home tapped again
+  // Called by MainScaffold when Home tab is tapped again.
   Future<void> scrollToTopFromTab() async {
     await _scrollToTop(haptic: true);
   }
@@ -78,8 +97,11 @@ class HomeContentScreenState extends State<HomeContentScreen>
     required String toName,
     required bool isVideo,
   }) async {
+    // ✅ Use ROOT navigator context for calls to avoid tab-navigator side effects.
+    final rootCtx = Navigator.of(context, rootNavigator: true).context;
+
     await CallService().startCall(
-      context,
+      rootCtx,
       toUid: toUid,
       toName: toName,
       isVideo: isVideo,
@@ -93,13 +115,21 @@ class HomeContentScreenState extends State<HomeContentScreen>
     final currentUser = FirebaseAuth.instance.currentUser;
     if (otherUserId == currentUser?.uid) return;
 
+    // ✅ Hybrid nav:
+    // - tabNav for "View profile" (preserves scroll position perfectly)
+    // - rootNav for named routes like /chat and /consultation
+    final tabNav = Navigator.of(context);
+    final rootNav = Navigator.of(context, rootNavigator: true);
+
     showModalBottomSheet(
       context: context,
+      // keep sheet in the same navigator as Home (better feel)
+      // (do NOT useRootNavigator here)
       backgroundColor: AppColors.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
-      builder: (_) {
+      builder: (sheetCtx) {
         Widget item(IconData icon, String label, VoidCallback onTap) {
           return ListTile(
             leading: CircleAvatar(
@@ -109,7 +139,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
             ),
             title: Text(label, style: const TextStyle(color: AppColors.text)),
             onTap: () {
-              Navigator.pop(context);
+              Navigator.pop(sheetCtx);
               onTap();
             },
           );
@@ -130,16 +160,18 @@ class HomeContentScreenState extends State<HomeContentScreen>
               ),
               const SizedBox(height: 10),
 
+              // ✅ TAB navigator push → comes back to exact scroll position
               item(Icons.person_outline, 'View profile', () {
-                Navigator.of(context, rootNavigator: true).push(
+                tabNav.push(
                   CupertinoPageRoute(
                     builder: (_) => ProfileScreen(userID: otherUserId),
                   ),
                 );
               }),
 
+              // ✅ ROOT navigator pushNamed → resolves your global routes properly
               item(Icons.event_available_outlined, 'Book a call', () {
-                Navigator.of(context).pushNamed(
+                rootNav.pushNamed(
                   '/consultation',
                   arguments: {
                     'targetUserId': otherUserId,
@@ -149,13 +181,18 @@ class HomeContentScreenState extends State<HomeContentScreen>
                 );
               }),
 
+              // ✅ ROOT navigator pushNamed → avoids “jump to top” / fallback route issues
               item(Icons.chat_bubble_outline, 'Message', () {
-                Navigator.of(context).pushNamed(
+                rootNav.pushNamed(
                   '/chat',
-                  arguments: {'otherUserId': otherUserId},
+                  arguments: {
+                    'otherUserId': otherUserId,
+                    'otherUserName': otherUserName,
+                  },
                 );
               }),
 
+              // Calls already use root context in _startCall()
               item(Icons.call, 'Audio call', () {
                 _startCall(
                   toUid: otherUserId,
@@ -226,7 +263,6 @@ class HomeContentScreenState extends State<HomeContentScreen>
           edgeOffset: 0,
           displacement: 56,
           child: CustomScrollView(
-            // ✅ THIS is what preserves position in PageStorageBucket (MainScaffold)
             key: const PageStorageKey('homeScroll'),
             controller: _scroll,
             physics: const BouncingScrollPhysics(
@@ -237,9 +273,9 @@ class HomeContentScreenState extends State<HomeContentScreen>
               SliverToBoxAdapter(
                 child: _WelcomeCard(
                   name: firstName,
-                  onFindHelper: () => Navigator.of(context, rootNavigator: true)
-                      .push(CupertinoPageRoute(
-                          builder: (_) => const FindHelperScreen())),
+                  onFindHelper: () => Navigator.of(context).push(
+                    CupertinoPageRoute(builder: (_) => const FindHelperScreen()),
+                  ),
                 ),
               ),
               const SliverToBoxAdapter(child: _SectionTitle('Recent posts')),
@@ -319,11 +355,11 @@ class HomeContentScreenState extends State<HomeContentScreen>
                           videoUrl: videoUrl,
                           videoThumbUrl: videoThumbUrl,
                           mediaAspect: aspect,
+                          // ✅ TAB push for profile
                           onOpenProfile: authorId.isEmpty
                               ? null
                               : () {
-                                  Navigator.of(context, rootNavigator: true)
-                                      .push(
+                                  Navigator.of(context).push(
                                     CupertinoPageRoute(
                                       builder: (_) =>
                                           ProfileScreen(userID: authorId),
@@ -339,11 +375,11 @@ class HomeContentScreenState extends State<HomeContentScreen>
                                     otherUserName: authorName,
                                   );
                                 },
+                          // ✅ TAB push for video viewer (keeps scroll)
                           onOpenVideo: videoUrl.isEmpty
                               ? null
                               : () {
-                                  Navigator.of(context, rootNavigator: true)
-                                      .push(
+                                  Navigator.of(context).push(
                                     CupertinoPageRoute(
                                       builder: (_) =>
                                           PostVideoPlayer(url: videoUrl),
@@ -391,10 +427,9 @@ class _HomeTopBar extends StatelessWidget {
               ),
               tooltip: 'Messages',
               onPressed: () {
-                Navigator.of(context, rootNavigator: true).push(
-                  CupertinoPageRoute(
-                    builder: (_) => const MessagesScreen(),
-                  ),
+                // Messages screen is a page → tab push is fine
+                Navigator.of(context).push(
+                  CupertinoPageRoute(builder: (_) => const MessagesScreen()),
                 );
               },
             ),
@@ -418,8 +453,9 @@ class _WelcomeCard extends StatelessWidget {
   Future<void> _markConnectionsSeen(String uid) async {
     try {
       await FirebaseFirestore.instance.collection('users').doc(uid).set(
-          {'lastConnectionsSeenAt': FieldValue.serverTimestamp()},
-          SetOptions(merge: true));
+        {'lastConnectionsSeenAt': FieldValue.serverTimestamp()},
+        SetOptions(merge: true),
+      );
     } catch (_) {}
   }
 
@@ -500,7 +536,7 @@ class _WelcomeCard extends StatelessWidget {
                             onTap: () async {
                               await _markConnectionsSeen(uid);
                               // ignore: use_build_context_synchronously
-                              Navigator.of(context, rootNavigator: true).push(
+                              Navigator.of(context).push(
                                 CupertinoPageRoute(
                                   builder: (_) => const ConnectionsScreen(),
                                 ),
@@ -513,7 +549,9 @@ class _WelcomeCard extends StatelessWidget {
                               top: 10,
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 2),
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
                                 decoration: BoxDecoration(
                                   color: AppColors.primary,
                                   borderRadius: BorderRadius.circular(12),
@@ -560,22 +598,24 @@ class _TaupePill extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(28),
-        child: Container(
+        child: SizedBox(
           height: 56,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              Icon(icon, color: AppColors.muted, size: 22),
-              const SizedBox(width: 12),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.text,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Icon(icon, color: AppColors.muted, size: 22),
+                const SizedBox(width: 12),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.text,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -594,7 +634,7 @@ class _SectionTitle extends StatelessWidget {
       );
 }
 
-// ===== Post cell + media widgets (UNCHANGED) =====
+// ===== Post cell + media widgets (unchanged) =====
 
 class _PostCell extends StatefulWidget {
   final String postType;
@@ -647,7 +687,8 @@ class _PostCellState extends State<_PostCell> {
           urls: widget.imageUrls,
           aspect: widget.mediaAspect,
           onOpenIndex: (idx) {
-            Navigator.of(context, rootNavigator: true).push(
+            // ✅ tab push for image viewer
+            Navigator.of(context).push(
               CupertinoPageRoute(
                 builder: (_) => PostImageViewer(url: widget.imageUrls[idx]),
               ),
@@ -729,7 +770,6 @@ class _PostCellState extends State<_PostCell> {
   }
 }
 
-// (rest of your Post widgets unchanged)
 class _PostHeader extends StatelessWidget {
   final String authorName;
   final String subtitle;
@@ -828,7 +868,7 @@ class _PostTypeBadge extends StatelessWidget {
   }
 }
 
-// ===== Expandable Structured Text (compact like Reddit) =====
+// ===== Expandable Structured Text =====
 class _ExpandableStructuredText extends StatelessWidget {
   final String content;
   final bool expanded;
@@ -1037,7 +1077,8 @@ class _MediaCarouselState extends State<_MediaCarousel> {
                     errorBuilder: (_, __, ___) => Container(
                       color: AppColors.button,
                       alignment: Alignment.center,
-                      child: const Icon(Icons.broken_image, color: AppColors.muted),
+                      child: const Icon(Icons.broken_image,
+                          color: AppColors.muted),
                     ),
                   ),
                 );

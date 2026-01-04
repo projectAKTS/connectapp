@@ -131,7 +131,6 @@ class _MyAppState extends State<MyApp> {
   Future<void> _initDynamicLinks() async {
     FirebaseDynamicLinks.instance.onLink.listen((PendingDynamicLinkData data) {
       final uri = data.link;
-
       final ctx = navigatorKey.currentContext;
       if (ctx == null) return;
 
@@ -175,12 +174,16 @@ class _MyAppState extends State<MyApp> {
         onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
         child: child,
       ),
+
+      // ✅ AuthGate is the ONLY place that decides login vs MainScaffold
       home: const AuthGate(),
+
+      // ✅ Keep global routes that are NOT the app shell
       routes: {
         '/login': (_) => const LoginScreen(),
         '/register': (_) => const SignupScreen(),
         '/forgot-password': (_) => const ForgotPasswordScreen(),
-        '/home': (_) => const MainScaffold(),
+
         '/create_post': (_) => const CreatePostScreen(),
         '/search': (_) => const SearchScreen(),
         '/edit_post': (_) => const EditPostScreen(),
@@ -188,6 +191,7 @@ class _MyAppState extends State<MyApp> {
         '/credits': (_) => const CreditsStoreScreen(),
         '/onboarding': (_) => const OnboardingScreen(),
         '/paymentSetup': (_) => const PaymentSetupScreen(),
+
         '/chat': (ctx) {
           final args =
               ModalRoute.of(ctx)!.settings.arguments as Map<String, dynamic>?;
@@ -196,7 +200,9 @@ class _MyAppState extends State<MyApp> {
           final otherUserAvatar = args?['otherUserAvatar'] as String?;
 
           if (otherUserId == null || otherUserId.isEmpty) {
-            return const Scaffold(body: Center(child: Text('Missing otherUserId')));
+            return const Scaffold(
+              body: Center(child: Text('Missing otherUserId')),
+            );
           }
 
           return ChatScreen(
@@ -206,6 +212,7 @@ class _MyAppState extends State<MyApp> {
           );
         },
       },
+
       onGenerateRoute: (settings) {
         final name = settings.name;
         if (name == null) return null;
@@ -253,8 +260,13 @@ class _MyAppState extends State<MyApp> {
 
         return null;
       },
-      onUnknownRoute: (_) =>
-          MaterialPageRoute(builder: (_) => const MainScaffold()),
+
+      // ✅ DO NOT create MainScaffold here (prevents nesting shells)
+      onUnknownRoute: (_) => MaterialPageRoute(
+        builder: (_) => const Scaffold(
+          body: Center(child: Text('Route not found')),
+        ),
+      ),
     );
   }
 }
@@ -268,7 +280,7 @@ class AuthGate extends StatefulWidget {
 class _AuthGateState extends State<AuthGate> {
   bool _notifInitDone = false;
 
-  // ✅ IMPORTANT: cache the home widget so PageStorageBucket stays alive
+  // ✅ Cache widgets so nothing rebuilds into a new tree unexpectedly
   final Widget _cachedHome = const MainScaffold();
   final Widget _cachedLogin = const LoginScreen();
 
@@ -303,10 +315,12 @@ class _AuthGateState extends State<AuthGate> {
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
 
-        if (snap.hasData) return _cachedHome; // ✅ do NOT create new MainScaffold()
+        if (snap.hasData) return _cachedHome;
         return _cachedLogin;
       },
     );
