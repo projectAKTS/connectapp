@@ -1,4 +1,5 @@
 // lib/main.dart
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -19,11 +20,14 @@ import 'screens/posts/edit_post_screen.dart';
 import 'screens/posts/post_detail_screen.dart';
 import 'screens/consultation/consultation_booking_screen.dart';
 import 'screens/consultation/my_consultation_screen.dart';
-import 'screens/credits_store_screen.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/chat/chat_screen.dart';
 import 'screens/payment/payment_setup_screen.dart';
+
+// ✅ NEW: your new screens
+import 'screens/credits/credits_screen.dart';
+import 'screens/premium/premium_screen.dart';
 
 import 'services/firebase_options.dart';
 import 'services/notification_service.dart';
@@ -175,10 +179,10 @@ class _MyAppState extends State<MyApp> {
         child: child,
       ),
 
-      // ✅ AuthGate is the ONLY place that decides login vs MainScaffold
+      // ✅ AuthGate decides login vs MainScaffold
       home: const AuthGate(),
 
-      // ✅ Keep global routes that are NOT the app shell
+      // ✅ Global routes (root navigator)
       routes: {
         '/login': (_) => const LoginScreen(),
         '/register': (_) => const SignupScreen(),
@@ -187,10 +191,33 @@ class _MyAppState extends State<MyApp> {
         '/create_post': (_) => const CreatePostScreen(),
         '/search': (_) => const SearchScreen(),
         '/edit_post': (_) => const EditPostScreen(),
+
         '/my_consultations': (_) => const MyConsultationsScreen(),
-        '/credits': (_) => const CreditsStoreScreen(),
+
+        // ✅ Swap these to your NEW screens
+        '/credits': (_) => CreditsStoreScreen(),
+        '/premium': (_) => PremiumScreen(),
+
         '/onboarding': (_) => const OnboardingScreen(),
         '/paymentSetup': (_) => const PaymentSetupScreen(),
+
+        '/consultation': (ctx) {
+          final args =
+              ModalRoute.of(ctx)!.settings.arguments as Map<String, dynamic>?;
+          final id = args?['targetUserId'] as String?;
+          final name = args?['targetUserName'] as String?;
+
+          if (id == null || id.isEmpty || name == null || name.isEmpty) {
+            return const Scaffold(
+              body: Center(child: Text('Invalid consultation arguments')),
+            );
+          }
+
+          return ConsultationBookingScreen(
+            targetUserId: id,
+            targetUserName: name,
+          );
+        },
 
         '/chat': (ctx) {
           final args =
@@ -213,6 +240,7 @@ class _MyAppState extends State<MyApp> {
         },
       },
 
+      // ✅ Only deep links here
       onGenerateRoute: (settings) {
         final name = settings.name;
         if (name == null) return null;
@@ -235,33 +263,9 @@ class _MyAppState extends State<MyApp> {
           );
         }
 
-        if (settings.name == '/consultation') {
-          final args = settings.arguments as Map<String, dynamic>?;
-          final id = args?['targetUserId'] as String?;
-          final name = args?['targetUserName'] as String?;
-
-          if (id == null || name == null) {
-            return MaterialPageRoute(
-              builder: (_) => const Scaffold(
-                body: Center(child: Text('Invalid consultation arguments')),
-              ),
-              settings: settings,
-            );
-          }
-
-          return MaterialPageRoute(
-            builder: (_) => ConsultationBookingScreen(
-              targetUserId: id,
-              targetUserName: name,
-            ),
-            settings: settings,
-          );
-        }
-
         return null;
       },
 
-      // ✅ DO NOT create MainScaffold here (prevents nesting shells)
       onUnknownRoute: (_) => MaterialPageRoute(
         builder: (_) => const Scaffold(
           body: Center(child: Text('Route not found')),
@@ -280,15 +284,16 @@ class AuthGate extends StatefulWidget {
 class _AuthGateState extends State<AuthGate> {
   bool _notifInitDone = false;
 
-  // ✅ Cache widgets so nothing rebuilds into a new tree unexpectedly
   final Widget _cachedHome = const MainScaffold();
   final Widget _cachedLogin = const LoginScreen();
+
+  late final StreamSubscription<User?> _sub;
 
   @override
   void initState() {
     super.initState();
 
-    FirebaseAuth.instance.authStateChanges().listen((user) async {
+    _sub = FirebaseAuth.instance.authStateChanges().listen((user) async {
       if (user != null && !_notifInitDone) {
         _notifInitDone = true;
 
@@ -307,6 +312,12 @@ class _AuthGateState extends State<AuthGate> {
         });
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _sub.cancel();
+    super.dispose();
   }
 
   @override

@@ -1,3 +1,4 @@
+// lib/screens/profile/profile_screen.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
@@ -11,7 +12,6 @@ import '../onboarding_screen.dart';
 import '../posts/post_detail_screen.dart';
 import 'package:connect_app/services/call_service.dart';
 import 'package:connect_app/theme/tokens.dart';
-import '../consultation/my_consultation_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String userID;
@@ -54,8 +54,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _bioExpanded = false;
 
   // helpers
-  String _s(dynamic v, [String fallback = '']) =>
-      v == null ? fallback : v.toString();
+  String _s(dynamic v, [String fallback = '']) => v == null ? fallback : v.toString();
   int _i(dynamic v, [int fallback = 0]) {
     if (v is int) return v;
     if (v is num) return v.toInt();
@@ -90,10 +89,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _loadUserData() async {
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(widget.userID)
-          .get();
+      final snap = await FirebaseFirestore.instance.collection('users').doc(widget.userID).get();
       if (!snap.exists) {
         setState(() {
           userData = null;
@@ -129,7 +125,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _onRefresh() async {
     HapticFeedback.mediumImpact();
     await _loadUserData();
-    await Future.delayed(const Duration(milliseconds: 400));
+    await Future.delayed(const Duration(milliseconds: 350));
   }
 
   void _snack(String msg) {
@@ -162,10 +158,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (previous) {
         await ref.delete();
       } else {
-        await ref.set(
-          {'timestamp': FieldValue.serverTimestamp()},
-          SetOptions(merge: true),
-        );
+        await ref.set({'timestamp': FieldValue.serverTimestamp()}, SetOptions(merge: true));
       }
     } catch (e) {
       setState(() => isFollowing = previous);
@@ -194,15 +187,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (!mounted) return;
 
     // ✅ Auth flows always on ROOT navigator
-    Navigator.of(context, rootNavigator: true)
-        .pushNamedAndRemoveUntil('/login', (route) => false);
+    Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil('/login', (route) => false);
   }
 
   void _openConnectSheet() {
     final otherName = (userData?['fullName'] as String?) ?? 'Unknown';
-    final ratePerMinute = (userData?['ratePerMinute'] is num)
-        ? (userData!['ratePerMinute'] as num).toInt()
-        : 0;
+    final ratePerMinute = (userData?['ratePerMinute'] is num) ? (userData!['ratePerMinute'] as num).toInt() : 0;
 
     final rootNav = Navigator.of(context, rootNavigator: true);
 
@@ -255,15 +245,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 );
               }),
 
-              // ✅ Global route -> ROOT (keeps chat behavior consistent everywhere)
+              // ✅ Global route -> ROOT
               item(Icons.chat_bubble_outline, 'Message', () {
                 rootNav.pushNamed(
                   '/chat',
                   arguments: {
                     'otherUserId': widget.userID,
                     'otherUserName': otherName,
-                    'otherUserAvatar':
-                        (userData?['profilePicture'] ?? '').toString(),
+                    'otherUserAvatar': (userData?['profilePicture'] ?? '').toString(),
                   },
                 );
               }),
@@ -275,13 +264,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         );
       },
-    );
-  }
-
-  // ✅ ADD: open My Consultations (from current user profile)
-  void _openMyConsultations() {
-    Navigator.of(context, rootNavigator: true).push(
-      CupertinoPageRoute(builder: (_) => const MyConsultationsScreen()),
     );
   }
 
@@ -298,14 +280,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     final nav = Navigator.of(context);
     if (!nav.canPop()) return;
-
     if (_popQueued) return;
 
     if (details.primaryDelta != null && details.primaryDelta! > 16) {
       _dragFromEdge = false;
       _popQueued = true;
 
-      // ✅ pop safely after current frame to avoid _debugLocked
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         nav.maybePop();
@@ -323,11 +303,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
       decoration: BoxDecoration(
         color: AppColors.card,
         borderRadius: BorderRadius.circular(16),
-        border:
-            const Border.fromBorderSide(BorderSide(color: AppColors.border)),
+        border: const Border.fromBorderSide(BorderSide(color: AppColors.border)),
         boxShadow: const [AppShadows.soft],
       ),
       child: Padding(padding: padding, child: child),
+    );
+  }
+
+  Widget _sectionTitle(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text(
+        text,
+        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+      ),
     );
   }
 
@@ -337,8 +326,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       decoration: BoxDecoration(
         color: AppColors.button,
         borderRadius: BorderRadius.circular(10),
-        border:
-            const Border.fromBorderSide(BorderSide(color: AppColors.border)),
+        border: const Border.fromBorderSide(BorderSide(color: AppColors.border)),
       ),
       child: Text(
         text,
@@ -366,13 +354,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return m?.group(1);
   }
 
-  (String slug, String badgeText, String body) _classifyPost(
-      Map<String, dynamic> map) {
+  (String slug, String badgeText, String body) _classifyPost(Map<String, dynamic> map) {
     final rawContent = (map['content'] ?? '').toString();
 
     final lblFromContent = _firstBoldLineLabel(rawContent);
-    if (lblFromContent != null &&
-        lblFromContent.toLowerCase().endsWith(' post')) {
+    if (lblFromContent != null && lblFromContent.toLowerCase().endsWith(' post')) {
       final lower = lblFromContent.toLowerCase();
 
       String slug;
@@ -457,58 +443,65 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // ✅ ADD: a nice “menu row” card that matches your UI
-  Widget _menuRow({
+  // ========= Account row (new) =========
+  Widget _accountRow({
     required IconData icon,
     required String title,
     String? subtitle,
     required VoidCallback onTap,
+    Color? iconBg,
+    Color? iconFg,
   }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: _softCard(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-        child: Row(
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: AppColors.button,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: iconBg ?? AppColors.button,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Icon(icon, color: iconFg ?? AppColors.text),
               ),
-              child: Icon(icon, color: AppColors.text),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      color: AppColors.text,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16,
-                    ),
-                  ),
-                  if (subtitle != null && subtitle.trim().isNotEmpty) ...[
-                    const SizedBox(height: 3),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Text(
-                      subtitle,
-                      style: const TextStyle(color: AppColors.muted, fontSize: 13),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.text,
+                        fontSize: 15,
+                        letterSpacing: -0.2,
+                      ),
                     ),
+                    if (subtitle != null && subtitle.trim().isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: const TextStyle(
+                          color: AppColors.muted,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
-          ],
+              const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+            ],
+          ),
         ),
       ),
     );
@@ -563,18 +556,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
             leading: canPop ? BackButton(onPressed: () => nav.maybePop()) : null,
           ),
           body: const Center(
-            child: Text(
-              'User not found!',
-              style: TextStyle(color: AppColors.muted),
-            ),
+            child: Text('User not found!', style: TextStyle(color: AppColors.muted)),
           ),
         ),
       );
     }
 
     final boostedUntil = parseFirestoreTimestamp(userData!['boostedUntil']);
-    final isBoosted =
-        boostedUntil != null && boostedUntil.isAfter(DateTime.now());
+    final isBoosted = boostedUntil != null && boostedUntil.isAfter(DateTime.now());
 
     final fullName = _s(userData!['fullName'], 'Unknown User');
     final bio = _s(userData!['bio']);
@@ -582,6 +571,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final streakDays = _i(userData!['streakDays']);
     final xpPoints = _i(userData!['xpPoints']);
     final helpfulMarks = _i(userData!['helpfulMarks']);
+
+    // For Account section status (safe defaults)
+    final premiumStatus = _s(userData!['premiumStatus']);
+    final premiumExpiresAt = parseFirestoreTimestamp(userData!['premiumExpiresAt']);
+    final hasCard = _s(userData!['defaultPaymentMethodId']).isNotEmpty;
+    final credits = _i(userData!['freeConsultationMinutes']); // you already use this for credits IAP
+
+    String premiumSubtitle() {
+      if (premiumStatus.isEmpty) return 'Not active';
+      final exp = premiumExpiresAt != null ? DateFormat.yMMMd().format(premiumExpiresAt) : null;
+      return exp == null ? premiumStatus : '$premiumStatus • Expires $exp';
+    }
 
     return Theme(
       data: theme,
@@ -595,10 +596,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 icon: const Icon(Icons.edit),
                 tooltip: "Edit Profile",
                 onPressed: () {
-                  Navigator.of(context, rootNavigator: true).push(
-                    CupertinoPageRoute(
-                      builder: (_) => const OnboardingScreen(),
-                    ),
+                  Navigator.of(context).push(
+                    CupertinoPageRoute(builder: (_) => const OnboardingScreen()),
                   );
                 },
               ),
@@ -621,13 +620,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: SingleChildScrollView(
               key: const PageStorageKey('profileScroll'),
               controller: _scrollController,
-              physics: const BouncingScrollPhysics(
-                parent: AlwaysScrollableScrollPhysics(),
-              ),
+              physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  // Avatar
                   Center(
                     child: Stack(
                       alignment: Alignment.topRight,
@@ -648,11 +646,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             child: const CircleAvatar(
                               radius: 14,
                               backgroundColor: Colors.orange,
-                              child: Icon(
-                                Icons.star,
-                                color: Colors.white,
-                                size: 18,
-                              ),
+                              child: Icon(Icons.star, color: Colors.white, size: 18),
                             ),
                           ),
                       ],
@@ -662,10 +656,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Text(
                     fullName,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 26,
-                      fontWeight: FontWeight.w800,
-                    ),
+                    style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
                   ),
 
                   if (bio.isNotEmpty) ...[
@@ -673,22 +664,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     _ExpandableBio(
                       text: bio,
                       expanded: _bioExpanded,
-                      onToggle: () =>
-                          setState(() => _bioExpanded = !_bioExpanded),
+                      onToggle: () => setState(() => _bioExpanded = !_bioExpanded),
                     ),
                   ],
 
-                  // ✅ ADD: My Consultations entry (only for current user)
-                  if (isCurrentUser) ...[
-                    const SizedBox(height: 14),
-                    _menuRow(
-                      icon: Icons.event_note_outlined,
-                      title: 'My Consultations',
-                      subtitle: 'Upcoming calls you booked or received',
-                      onTap: _openMyConsultations,
-                    ),
-                  ],
-
+                  // Follow / Connect for other users
                   if (!isCurrentUser) ...[
                     const SizedBox(height: 14),
                     Row(
@@ -728,11 +708,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                   const SizedBox(height: 16),
 
+                  // Stats
                   _softCard(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     child: _StatsStrip(
                       streakText: '$streakDays days',
                       xpText: '$xpPoints',
@@ -740,22 +718,67 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
 
-                  if (badges.isNotEmpty) ...[
+                  // ✅ Account hub (ONLY for current user)
+                  if (isCurrentUser) ...[
                     const SizedBox(height: 16),
-                    const Text(
-                      'Badges',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
+                    _sectionTitle('Account'),
+                    _softCard(
+                      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+                      child: Column(
+                        children: [
+                          _accountRow(
+                            icon: Icons.event_note_outlined,
+                            title: 'My consultations',
+                            subtitle: 'Upcoming & past sessions',
+                            onTap: () {
+                              Navigator.of(context, rootNavigator: true)
+                                  .pushNamed('/my_consultations');
+                            },
+                          ),
+                          const Divider(height: 1, color: AppColors.border),
+                          _accountRow(
+                            icon: Icons.credit_card_rounded,
+                            title: 'Billing',
+                            subtitle: hasCard ? 'Card on file' : 'Add a card for consultations',
+                            onTap: () {
+                              Navigator.of(context, rootNavigator: true)
+                                  .pushNamed('/paymentSetup');
+                            },
+                          ),
+                          const Divider(height: 1, color: AppColors.border),
+                          _accountRow(
+                            icon: Icons.local_atm_outlined,
+                            title: 'Credits',
+                            subtitle: credits > 0 ? '$credits minutes available' : 'No credits yet',
+                            onTap: () {
+                              Navigator.of(context, rootNavigator: true).pushNamed('/credits');
+                            },
+                          ),
+                          const Divider(height: 1, color: AppColors.border),
+                          _accountRow(
+                            icon: Icons.workspace_premium_outlined,
+                            title: 'Premium',
+                            subtitle: premiumSubtitle(),
+                            onTap: () {
+                              // If you have a premium screen route later, switch this.
+                              Navigator.of(context, rootNavigator: true)
+                                  .pushNamed('/credits'); // placeholder
+                            },
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 10),
+                  ],
+
+                  // Badges
+                  if (badges.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    _sectionTitle('Badges'),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        for (var i = 0; i < badges.length && i < 3; i++)
-                          _badgeChip(badges[i]),
+                        for (var i = 0; i < badges.length && i < 3; i++) _badgeChip(badges[i]),
                         if (badges.length > 3)
                           TextButton(
                             onPressed: () {
@@ -763,25 +786,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 context: context,
                                 backgroundColor: AppColors.card,
                                 shape: const RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.vertical(
-                                    top: Radius.circular(18),
-                                  ),
+                                  borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
                                 ),
                                 builder: (_) => ListView(
                                   padding: const EdgeInsets.all(16),
                                   children: badges
                                       .map(
                                         (b) => ListTile(
-                                          leading: const Icon(
-                                            Icons.star_border,
-                                            color: AppColors.text,
-                                          ),
-                                          title: Text(
-                                            b,
-                                            style: const TextStyle(
-                                              color: AppColors.text,
-                                            ),
-                                          ),
+                                          leading: const Icon(Icons.star_border, color: AppColors.text),
+                                          title: Text(b, style: const TextStyle(color: AppColors.text)),
                                         ),
                                       )
                                       .toList(),
@@ -795,31 +808,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ],
 
                   const SizedBox(height: 16),
-                  const Text(
-                    'Featured Posts',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
+                  _sectionTitle('Featured Posts'),
                   SizedBox(
                     height: 210,
                     child: StreamBuilder<QuerySnapshot>(
                       stream: _postsStream,
                       builder: (ctx, snap) {
                         if (snap.connectionState == ConnectionState.waiting) {
-                          return const Center(
-                              child: CircularProgressIndicator());
+                          return const Center(child: CircularProgressIndicator());
                         }
                         if (snap.hasError) {
                           return Center(
-                            child: Text(
-                              'Error: ${snap.error}',
-                              style: const TextStyle(color: Colors.red),
-                            ),
+                            child: Text('Error: ${snap.error}', style: const TextStyle(color: Colors.red)),
                           );
                         }
+
                         final all = (snap.data?.docs ?? []).toList();
                         all.sort((a, b) {
                           final aTs = parseFirestoreTimestamp(a['timestamp']) ??
@@ -828,15 +831,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               DateTime.fromMillisecondsSinceEpoch(0);
                           return bTs.compareTo(aTs);
                         });
+
                         final featured = all.take(3).toList();
                         if (featured.isEmpty) {
                           return const Center(
-                            child: Text(
-                              'No featured posts yet.',
-                              style: TextStyle(color: AppColors.muted),
-                            ),
+                            child: Text('No featured posts yet.', style: TextStyle(color: AppColors.muted)),
                           );
                         }
+
                         return PageView.builder(
                           controller: _pageController,
                           itemCount: featured.length,
@@ -845,8 +847,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           itemBuilder: (c, i) {
                             final doc = featured[i];
                             final data = doc.data() as Map<String, dynamic>;
-                            final date =
-                                parseFirestoreTimestamp(data['timestamp']);
+                            final date = parseFirestoreTimestamp(data['timestamp']);
                             final (_, badgeText, body) = _classifyPost(data);
 
                             return Padding(
@@ -858,16 +859,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 borderRadius: BorderRadius.circular(16),
                                 onTap: () {
                                   Navigator.of(context).push(
-                                    CupertinoPageRoute(
-                                      builder: (_) =>
-                                          PostDetailScreen(postId: doc.id),
-                                    ),
+                                    CupertinoPageRoute(builder: (_) => PostDetailScreen(postId: doc.id)),
                                   );
                                 },
                                 child: _softCard(
                                   child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       _postTypeBadge(badgeText),
                                       const SizedBox(height: 8),
@@ -881,10 +878,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       if (date != null)
                                         Text(
                                           DateFormat.yMMMd().format(date),
-                                          style: const TextStyle(
-                                            fontSize: 12,
-                                            color: AppColors.muted,
-                                          ),
+                                          style: const TextStyle(fontSize: 12, color: AppColors.muted),
                                         ),
                                     ],
                                   ),
@@ -899,6 +893,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                   const SizedBox(height: 16),
 
+                  // Filters
                   SizedBox(
                     height: 44,
                     child: ListView.separated(
@@ -914,45 +909,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             label,
                             style: TextStyle(
                               fontWeight: FontWeight.w600,
-                              color: selected
-                                  ? AppColors.text
-                                  : AppColors.text.withOpacity(0.85),
+                              color: selected ? AppColors.text : AppColors.text.withOpacity(0.85),
                             ),
                           ),
                           selected: selected,
-                          onSelected: (_) =>
-                              setState(() => _selectedFilterLabel = label),
+                          onSelected: (_) => setState(() => _selectedFilterLabel = label),
                           selectedColor: AppColors.button,
                           backgroundColor: AppColors.card,
                           side: const BorderSide(color: AppColors.border),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         );
                       },
                     ),
                   ),
 
                   const SizedBox(height: 16),
-                  const Text(
-                    'Recent Activity',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 10),
+                  _sectionTitle('Recent Activity'),
 
                   StreamBuilder<QuerySnapshot>(
                     stream: _postsStream,
                     builder: (ctx, snap) {
                       if (snap.connectionState == ConnectionState.waiting) {
-                        return const Center(
-                            child: CircularProgressIndicator());
+                        return const Center(child: CircularProgressIndicator());
                       }
                       if (snap.hasError) {
                         return Center(
-                          child: Text(
-                            'Error: ${snap.error}',
-                            style: const TextStyle(color: Colors.red),
-                          ),
+                          child: Text('Error: ${snap.error}', style: const TextStyle(color: Colors.red)),
                         );
                       }
 
@@ -967,32 +949,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                       final selectedSlug = _filters[_selectedFilterLabel];
 
-                      final items = docs
-                          .map((doc) {
-                            final map = doc.data() as Map<String, dynamic>;
-                            final tuple = _classifyPost(map);
-                            return (
-                              doc,
-                              tuple.$1,
-                              tuple.$2,
-                              tuple.$3,
-                              parseFirestoreTimestamp(map['timestamp'])
-                            );
-                          })
-                          .toList();
+                      final items = docs.map((doc) {
+                        final map = doc.data() as Map<String, dynamic>;
+                        final tuple = _classifyPost(map);
+                        return (
+                          doc,
+                          tuple.$1,
+                          tuple.$2,
+                          tuple.$3,
+                          parseFirestoreTimestamp(map['timestamp'])
+                        );
+                      }).toList();
 
-                      final filtered = selectedSlug == null
-                          ? items
-                          : items.where((e) => e.$2 == selectedSlug).toList();
+                      final filtered = selectedSlug == null ? items : items.where((e) => e.$2 == selectedSlug).toList();
 
                       if (filtered.isEmpty) {
                         return const Padding(
                           padding: EdgeInsets.symmetric(vertical: 24),
                           child: Center(
-                            child: Text(
-                              'No activity yet.',
-                              style: TextStyle(color: AppColors.muted),
-                            ),
+                            child: Text('No activity yet.', style: TextStyle(color: AppColors.muted)),
                           ),
                         );
                       }
@@ -1001,8 +976,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
                         itemCount: filtered.length,
-                        separatorBuilder: (_, __) =>
-                            const SizedBox(height: 12),
+                        separatorBuilder: (_, __) => const SizedBox(height: 12),
                         itemBuilder: (c, i) {
                           final row = filtered[i];
                           final doc = row.$1;
@@ -1014,15 +988,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             borderRadius: BorderRadius.circular(16),
                             onTap: () {
                               Navigator.of(context).push(
-                                CupertinoPageRoute(
-                                  builder: (_) =>
-                                      PostDetailScreen(postId: doc.id),
-                                ),
+                                CupertinoPageRoute(builder: (_) => PostDetailScreen(postId: doc.id)),
                               );
                             },
                             child: _softCard(
-                              padding:
-                                  const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -1037,10 +1007,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     const SizedBox(height: 8),
                                     Text(
                                       DateFormat.yMMMd().format(dt),
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        color: AppColors.muted,
-                                      ),
+                                      style: const TextStyle(fontSize: 12, color: AppColors.muted),
                                     ),
                                   ],
                                 ],
@@ -1101,24 +1068,11 @@ class _StatsStrip extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        Expanded(
-          child: Center(
-            child:
-                cell(Icons.local_fire_department_rounded, 'Streak', streakText),
-          ),
-        ),
+        Expanded(child: Center(child: cell(Icons.local_fire_department_rounded, 'Streak', streakText))),
         divider(),
-        Expanded(
-          child: Center(
-            child: cell(Icons.emoji_events_outlined, 'XP', xpText),
-          ),
-        ),
+        Expanded(child: Center(child: cell(Icons.emoji_events_outlined, 'XP', xpText))),
         divider(),
-        Expanded(
-          child: Center(
-            child: cell(Icons.thumb_up_alt_outlined, 'Helpful', helpfulText),
-          ),
-        ),
+        Expanded(child: Center(child: cell(Icons.thumb_up_alt_outlined, 'Helpful', helpfulText))),
       ],
     );
   }
@@ -1188,9 +1142,7 @@ class _FilledActionButton extends StatelessWidget {
         foregroundColor: Colors.white,
         minimumSize: const Size.fromHeight(48),
         elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         padding: const EdgeInsets.symmetric(horizontal: 14),
         textStyle: const TextStyle(fontWeight: FontWeight.w700),
       ),
@@ -1226,9 +1178,7 @@ class _OutlinedActionButton extends StatelessWidget {
         backgroundColor: AppColors.button,
         foregroundColor: AppColors.text,
         side: const BorderSide(color: AppColors.border),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         padding: const EdgeInsets.symmetric(horizontal: 14),
         textStyle: const TextStyle(fontWeight: FontWeight.w700),
       ),
