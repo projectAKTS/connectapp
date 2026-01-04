@@ -1,8 +1,10 @@
+// lib/screens/payment/payment_setup_screen.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
+
+import 'package:connect_app/theme/tokens.dart';
 import '/services/payment_service.dart';
 
 class PaymentSetupScreen extends StatefulWidget {
@@ -14,11 +16,10 @@ class PaymentSetupScreen extends StatefulWidget {
 
 class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
   bool _isProcessing = false;
-  final FirebaseFunctions _functions =
-      FirebaseFunctions.instanceFor(region: 'us-central1');
   final PaymentService _paymentService = PaymentService();
 
   Future<void> _setupPaymentMethod() async {
+    if (_isProcessing) return;
     setState(() => _isProcessing = true);
 
     try {
@@ -29,65 +30,59 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
       // ✅ Refresh token to avoid UNAUTHENTICATED errors
       await user.getIdToken(true);
 
-      // ✅ Make sure a Stripe customer exists for this user
-      final hasCustomer = await _paymentService.ensureStripeCustomer();
-      if (!hasCustomer) throw Exception('Could not create Stripe customer.');
+      // ✅ Ensure Stripe customer exists
+      final ok = await _paymentService.ensureStripeCustomer();
+      if (!ok) throw Exception('Could not create Stripe customer.');
 
-      // ✅ Request a SetupIntent from Cloud Functions
+      // ✅ Create SetupIntent (server should create + return client_secret)
       final clientSecret = await _paymentService.createSetupIntent();
       if (clientSecret == null || clientSecret.isEmpty) {
         throw Exception('No client secret returned from backend.');
       }
 
-      // ✅ Initialize Stripe PaymentSheet for setup intent
+      // ✅ Init PaymentSheet for SetupIntent
       await Stripe.instance.initPaymentSheet(
         paymentSheetParameters: SetupPaymentSheetParameters(
           merchantDisplayName: 'Helperly',
           setupIntentClientSecret: clientSecret,
           style: ThemeMode.system,
+          // NOTE:
+          // If your backend uses ephemeral keys/customer in PaymentSheet,
+          // add those params inside PaymentService + pass them here.
         ),
       );
 
-      // ✅ Present the payment sheet
+      // ✅ Present PaymentSheet
       await Stripe.instance.presentPaymentSheet();
 
-      // ✅ Retrieve setup intent details to get payment method ID
-      final setupIntent =
-          await Stripe.instance.retrieveSetupIntent(clientSecret);
+      // ✅ Retrieve the setup intent and extract payment method id
+      final setupIntent = await Stripe.instance.retrieveSetupIntent(clientSecret);
       final paymentMethodId = setupIntent.paymentMethodId;
 
       if (paymentMethodId == null || paymentMethodId.isEmpty) {
         throw Exception('No payment method ID returned from Stripe.');
       }
 
-      // ✅ Save to Firestore under the user's document
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .set(
-            {'defaultPaymentMethodId': paymentMethodId},
-            SetOptions(merge: true),
-          );
+      // ✅ Save default payment method on user doc
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
+        {'defaultPaymentMethodId': paymentMethodId},
+        SetOptions(merge: true),
+      );
 
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('✅ Card added successfully!')),
       );
-
       Navigator.pop(context, true);
     } on StripeException catch (e) {
-      debugPrint('❌ Stripe error: ${e.error.localizedMessage}');
+      // User cancel is not really an error UX-wise
+      final msg = e.error.localizedMessage ?? 'Stripe error';
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Stripe error: ${e.error.localizedMessage}')),
-      );
-    } on FirebaseFunctionsException catch (e) {
-      debugPrint('❌ Firebase Functions error: ${e.code} - ${e.message}');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Setup failed: ${e.message}')),
+        SnackBar(content: Text(msg)),
       );
     } catch (e) {
-      debugPrint('⚠️ Error during setup: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Setup failed: $e')),
       );
@@ -99,27 +94,34 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.canvas,
       appBar: AppBar(
         title: const Text('Add Payment Method'),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        elevation: 0.5,
+        backgroundColor: AppColors.canvas,
+        foregroundColor: AppColors.text,
+        elevation: 0,
       ),
-      backgroundColor: Colors.white,
       body: Center(
         child: _isProcessing
             ? const CircularProgressIndicator()
-            : ElevatedButton.icon(
-                onPressed: _setupPaymentMethod,
-                icon: const Icon(Icons.credit_card),
-                label: const Text('Set Up Card'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0F4C46),
-                  foregroundColor: Colors.white,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+            : SizedBox(
+                width: 240,
+                child: ElevatedButton.icon(
+                  onPressed: _setupPaymentMethod,
+                  icon: const Icon(Icons.credit_card),
+                  label: const Text('Set Up Card'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 14,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    elevation: 0,
+                    textStyle: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
               ),

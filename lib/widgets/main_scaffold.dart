@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import 'package:connect_app/screens/home/home_content_screen.dart';
@@ -6,7 +7,8 @@ import 'package:connect_app/screens/posts/create_post_screen.dart';
 import 'package:connect_app/screens/search/search_screen.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
 import 'package:connect_app/theme/tokens.dart';
-import 'package:flutter/cupertino.dart';
+
+import 'package:connect_app/navigation/app_router.dart';
 
 /// ✅ Controller that HomeContentScreenState can register into (NO GlobalKey)
 class HomeTabController {
@@ -63,9 +65,6 @@ class _MainScaffoldState extends State<MainScaffold> {
   NavigatorState? get _currentNav => _navKeys[_selectedIndex].currentState;
 
   void _onItemTapped(int index) async {
-    // ✅ Re-tap current tab behavior:
-    // - pop to root of that tab
-    // - home tab additionally scrolls to top
     if (index == _selectedIndex) {
       final nav = _currentNav;
       if (nav != null && nav.canPop()) {
@@ -76,7 +75,6 @@ class _MainScaffoldState extends State<MainScaffold> {
       }
       return;
     }
-
     setState(() => _selectedIndex = index);
   }
 
@@ -85,16 +83,15 @@ class _MainScaffoldState extends State<MainScaffold> {
 
     if (nav != null && nav.canPop()) {
       nav.pop();
-      return false; // handled internally
+      return false;
     }
 
-    // If not on home tab, go to home on back
     if (_selectedIndex != 0) {
       setState(() => _selectedIndex = 0);
       return false;
     }
 
-    return true; // allow app exit
+    return true;
   }
 
   Widget _buildTabNavigator(int index, Widget root) {
@@ -103,9 +100,10 @@ class _MainScaffoldState extends State<MainScaffold> {
       child: Navigator(
         key: _navKeys[index],
         onGenerateRoute: (settings) {
-          return CupertinoPageRoute(
+          // ✅ IMPORTANT: make tab navigator understand shared routes too
+          return AppRouter.onGenerateTabRoute(
             settings: settings,
-            builder: (_) => root,
+            tabRoot: root,
           );
         },
       ),

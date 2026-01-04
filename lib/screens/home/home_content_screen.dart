@@ -13,7 +13,6 @@ import 'package:connect_app/screens/messages/messages_screen.dart';
 import 'package:connect_app/screens/search/find_helper_screen.dart';
 import 'package:connect_app/services/call_service.dart';
 
-// Fullscreen viewers
 import 'package:connect_app/screens/posts/post_video_player.dart';
 import 'package:connect_app/screens/posts/post_image_viewer.dart';
 
@@ -82,7 +81,6 @@ class HomeContentScreenState extends State<HomeContentScreen>
     }
   }
 
-  // Called by MainScaffold when Home tab is tapped again.
   Future<void> scrollToTopFromTab() async {
     await _scrollToTop(haptic: true);
   }
@@ -97,7 +95,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
     required String toName,
     required bool isVideo,
   }) async {
-    // ✅ Use ROOT navigator context for calls to avoid tab-navigator side effects.
+    // Calls are "global fullscreen" -> root navigator is fine.
     final rootCtx = Navigator.of(context, rootNavigator: true).context;
 
     await CallService().startCall(
@@ -115,16 +113,10 @@ class HomeContentScreenState extends State<HomeContentScreen>
     final currentUser = FirebaseAuth.instance.currentUser;
     if (otherUserId == currentUser?.uid) return;
 
-    // ✅ Hybrid nav:
-    // - tabNav for "View profile" (preserves scroll position perfectly)
-    // - rootNav for named routes like /chat and /consultation
     final tabNav = Navigator.of(context);
-    final rootNav = Navigator.of(context, rootNavigator: true);
 
     showModalBottomSheet(
       context: context,
-      // keep sheet in the same navigator as Home (better feel)
-      // (do NOT useRootNavigator here)
       backgroundColor: AppColors.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
@@ -160,18 +152,21 @@ class HomeContentScreenState extends State<HomeContentScreen>
               ),
               const SizedBox(height: 10),
 
-              // ✅ TAB navigator push → comes back to exact scroll position
+              // ✅ Keep as tab push (perfectly preserves position)
               item(Icons.person_outline, 'View profile', () {
                 tabNav.push(
                   CupertinoPageRoute(
                     builder: (_) => ProfileScreen(userID: otherUserId),
                   ),
                 );
+
+                // Or use the shared route style:
+                // tabNav.pushNamed('/profile/$otherUserId');
               }),
 
-              // ✅ ROOT navigator pushNamed → resolves your global routes properly
+              // ✅ NOW ALSO tab pushNamed (future-proof, consistent, keeps scroll)
               item(Icons.event_available_outlined, 'Book a call', () {
-                rootNav.pushNamed(
+                tabNav.pushNamed(
                   '/consultation',
                   arguments: {
                     'targetUserId': otherUserId,
@@ -181,9 +176,8 @@ class HomeContentScreenState extends State<HomeContentScreen>
                 );
               }),
 
-              // ✅ ROOT navigator pushNamed → avoids “jump to top” / fallback route issues
               item(Icons.chat_bubble_outline, 'Message', () {
-                rootNav.pushNamed(
+                tabNav.pushNamed(
                   '/chat',
                   arguments: {
                     'otherUserId': otherUserId,
@@ -192,7 +186,6 @@ class HomeContentScreenState extends State<HomeContentScreen>
                 );
               }),
 
-              // Calls already use root context in _startCall()
               item(Icons.call, 'Audio call', () {
                 _startCall(
                   toUid: otherUserId,
@@ -355,7 +348,6 @@ class HomeContentScreenState extends State<HomeContentScreen>
                           videoUrl: videoUrl,
                           videoThumbUrl: videoThumbUrl,
                           mediaAspect: aspect,
-                          // ✅ TAB push for profile
                           onOpenProfile: authorId.isEmpty
                               ? null
                               : () {
@@ -365,6 +357,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
                                           ProfileScreen(userID: authorId),
                                     ),
                                   );
+                                  // or: Navigator.of(context).pushNamed('/profile/$authorId');
                                 },
                           onConnect: isOwnPost
                               ? null
@@ -375,7 +368,6 @@ class HomeContentScreenState extends State<HomeContentScreen>
                                     otherUserName: authorName,
                                   );
                                 },
-                          // ✅ TAB push for video viewer (keeps scroll)
                           onOpenVideo: videoUrl.isEmpty
                               ? null
                               : () {
@@ -427,7 +419,6 @@ class _HomeTopBar extends StatelessWidget {
               ),
               tooltip: 'Messages',
               onPressed: () {
-                // Messages screen is a page → tab push is fine
                 Navigator.of(context).push(
                   CupertinoPageRoute(builder: (_) => const MessagesScreen()),
                 );
@@ -439,6 +430,7 @@ class _HomeTopBar extends StatelessWidget {
     );
   }
 }
+
 
 // ===== Welcome Card =====
 class _WelcomeCard extends StatelessWidget {

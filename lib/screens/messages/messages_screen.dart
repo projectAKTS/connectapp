@@ -9,6 +9,7 @@ class MessagesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final rootNav = Navigator.of(context, rootNavigator: true);
 
     return Scaffold(
       backgroundColor: AppColors.canvas,
@@ -58,7 +59,6 @@ class MessagesScreen extends StatelessWidget {
                 return const SizedBox.shrink();
               }
 
-              // Fetch other user's profile from /users/{uid}
               return FutureBuilder<DocumentSnapshot>(
                 future: FirebaseFirestore.instance
                     .collection('users')
@@ -122,7 +122,7 @@ class MessagesScreen extends StatelessWidget {
                         final last = msgSnap.data!.docs.first.data()
                             as Map<String, dynamic>;
                         return Text(
-                          last['text'] ?? '',
+                          (last['text'] ?? '').toString(),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -130,8 +130,10 @@ class MessagesScreen extends StatelessWidget {
                         );
                       },
                     ),
+
+                    // ✅ Always open chat via ROOT named route
                     onTap: () {
-                      Navigator.of(context).pushNamed('/chat', arguments: {
+                      rootNav.pushNamed('/chat', arguments: {
                         'chatId': chatId,
                         'otherUserId': otherId,
                         'otherUserName': otherName,

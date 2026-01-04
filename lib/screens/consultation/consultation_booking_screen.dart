@@ -9,7 +9,6 @@ import '/services/payment_service.dart';
 import 'package:connect_app/screens/pricing/pricing_config.dart';
 import '/services/interaction_service.dart';
 
-
 class ConsultationBookingScreen extends StatefulWidget {
   final String targetUserId;
   final String targetUserName;
@@ -101,7 +100,6 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
     if (picked != null) setState(() => _selectedTime = picked);
   }
 
-  // --- main booking logic with debug ---
   Future<void> _bookConsultation() async {
     debugPrint('🟢 [Booking] Start booking flow for ${widget.targetUserName}');
     debugPrint('💰 Selected duration: $_selectedDuration min | Type: $_callType | Price: $_price');
@@ -138,6 +136,8 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
     debugPrint('👤 [Booking] Current user: ${user.uid}');
     if (!mounted) return;
     setState(() => _isProcessing = true);
+
+    final rootNav = Navigator.of(context, rootNavigator: true);
 
     try {
       debugPrint('🔑 [Booking] Refreshing Firebase ID token...');
@@ -184,7 +184,8 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
               ),
             );
             if (go == true) {
-              await Navigator.pushNamed(context, '/paymentSetup');
+              // ✅ Global route -> ROOT
+              await rootNav.pushNamed('/paymentSetup');
             }
             if (mounted) setState(() => _isProcessing = false);
             return;
@@ -225,7 +226,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
         _selectedDuration,
         scheduledAt: _scheduledAt!,
       );
-      
+
       await InteractionService.recordInteraction(widget.targetUserId);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

@@ -1,4 +1,5 @@
 // lib/services/notification_service.dart
+import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
@@ -6,7 +7,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../screens/call/agora_call_screen.dart';
-import '../screens/call/incoming_call_screen.dart';
 import '../screens/chat/chat_screen.dart';
 import 'current_chat.dart';
 
@@ -26,6 +26,7 @@ class NotificationService {
   );
 
   bool _initialized = false;
+  StreamSubscription<String>? _tokenSub;
 
   /// Call once after Firebase is initialized and user signed in.
   Future<void> initialize() async {
@@ -34,15 +35,21 @@ class NotificationService {
 
     // Ask permission (iOS)
     final settings = await _fcm.requestPermission(
-      alert: true, badge: true, sound: true, provisional: false,
+      alert: true,
+      badge: true,
+      sound: true,
+      provisional: false,
     );
+
     if (settings.authorizationStatus != AuthorizationStatus.authorized) {
       debugPrint('❌ Notification permission not granted');
     }
 
-    // iOS foreground behavior (show alerts while app is open)
+    // iOS foreground behavior
     await _fcm.setForegroundNotificationPresentationOptions(
-      alert: true, badge: true, sound: true,
+      alert: true,
+      badge: true,
+      sound: true,
     );
 
     // iOS categories (for call actions)
@@ -74,7 +81,7 @@ class NotificationService {
         final payload = resp.payload ?? '';
         final actionId = resp.actionId;
 
-        // Deep-link: incoming call banner tapped
+        // Deep-link: incoming call
         if (payload.startsWith('incoming_call|')) {
           final parts = payload.split('|'); // incoming_call|channel|isVideo|fromName
           if (parts.length >= 4) {
@@ -115,22 +122,19 @@ class NotificationService {
       await _handleMessage(initial, showLocal: false);
     }
 
-    // Try to stabilize APNs token (iOS) – optional loop
-    String? apnsToken;
-    int retries = 0;
-    while (apnsToken == null && retries < 10) {
-      apnsToken = await _fcm.getAPNSToken();
-      await Future.delayed(const Duration(milliseconds: 300));
-      retries++;
-    }
-
-    // Register FCM token on user doc
+    // Register token now
     await _registerFcmToken();
 
     // Keep user doc in sync on token refresh
-    _fcm.onTokenRefresh.listen((newToken) async {
+    _tokenSub?.cancel();
+    _tokenSub = _fcm.onTokenRefresh.listen((newToken) async {
       await _registerFcmToken(forceToken: newToken);
     });
+  }
+
+  Future<void> dispose() async {
+    await _tokenSub?.cancel();
+    _tokenSub = null;
   }
 
   Future<void> _registerFcmToken({String? forceToken}) async {
@@ -144,9 +148,6 @@ class NotificationService {
       final app = FirebaseFirestore.instance.app;
       debugPrint('📡 registerFcmToken() project=${app.options.projectId}, appId=${app.options.appId}');
 
-      final before = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      debugPrint('📡 user doc exists=${before.exists} keys=${before.data()?.keys.toList()}');
-
       await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
         {
           'fcmToken': token,
@@ -154,10 +155,11 @@ class NotificationService {
         },
         SetOptions(merge: true),
       );
-      debugPrint('✅ FCM token write OK for uid=${user.uid}');
+
+      debugPrint('✅ FCM token saved uid=${user.uid}');
     } on FirebaseException catch (e) {
       if (e.code == 'permission-denied') {
-        debugPrint('⚠️ Skipping FCM token write (permission denied). Check /users keys allowlist.');
+        debugPrint('⚠️ Skipping FCM token write (permission denied). Check /users allowlist.');
         return;
       }
       debugPrint('❌ FCM token write failed: code=${e.code} message=${e.message}');
@@ -181,7 +183,7 @@ class NotificationService {
 
       if (showLocal) {
         await _local.show(
-          0,
+          1000, // stable id for call invites
           isVideo ? 'Incoming Video Call' : 'Incoming Audio Call',
           'From $fromName',
           NotificationDetails(
@@ -193,7 +195,12 @@ class NotificationService {
               priority: Priority.high,
               actions: <AndroidNotificationAction>[
                 const AndroidNotificationAction('ACCEPT_CALL', 'Accept', showsUserInterface: true),
-                const AndroidNotificationAction('DECLINE_CALL', 'Decline', showsUserInterface: false, cancelNotification: true),
+                const AndroidNotificationAction(
+                  'DECLINE_CALL',
+                  'Decline',
+                  showsUserInterface: false,
+                  cancelNotification: true,
+                ),
               ],
             ),
             iOS: const DarwinNotificationDetails(categoryIdentifier: 'INCOMING_CALL'),
@@ -208,8 +215,9 @@ class NotificationService {
 
     // ===== CHAT MESSAGE =====================================================
     if (data['type'] == 'chat_message') {
-      // 👇 REQUIRE your server payload to include authorId of the sender
       final me = FirebaseAuth.instance.currentUser?.uid;
+
+      // REQUIRE your server payload to include authorId
       final authorId = (data['authorId'] ?? '') as String;
       if (me != null && authorId.isNotEmpty && authorId == me) {
         // 🛑 Don't notify for my own messages
@@ -218,7 +226,7 @@ class NotificationService {
 
       final otherUserId = (data['otherUserId'] ?? '') as String;
 
-      // If user is already inside this chat, don't show a banner
+      // If already inside this chat, don't show a banner
       if (CurrentChat.otherUserId == otherUserId) return;
 
       // If system push already shows a foreground banner (iOS), avoid double banner
@@ -226,17 +234,18 @@ class NotificationService {
 
       if (showLocal && !systemAlreadyShowing) {
         await _local.show(
-          2,
+          2000, // stable id for chat notifications
           message.notification?.title ?? 'New Message',
           message.notification?.body ?? '',
-          const NotificationDetails(
+          NotificationDetails(
             android: AndroidNotificationDetails(
-              'high_importance_channel',
-              'High Importance Notifications',
+              _androidChannel.id,
+              _androidChannel.name,
+              channelDescription: _androidChannel.description,
               importance: Importance.max,
               priority: Priority.high,
             ),
-            iOS: DarwinNotificationDetails(),
+            iOS: const DarwinNotificationDetails(),
           ),
           payload: 'open_chat|$otherUserId',
         );
@@ -246,41 +255,54 @@ class NotificationService {
       return;
     }
 
-    // ===== GENERIC FCM WITH NOTIFICATION PAYLOAD ============================
+    // ===== GENERIC ==========================================================
     if (showLocal && message.notification != null) {
       await _local.show(
-        3,
+        3000,
         message.notification?.title ?? 'Notification',
         message.notification?.body ?? '',
-        const NotificationDetails(
+        NotificationDetails(
           android: AndroidNotificationDetails(
-            'high_importance_channel',
-            'High Importance Notifications',
+            _androidChannel.id,
+            _androidChannel.name,
+            channelDescription: _androidChannel.description,
             importance: Importance.max,
             priority: Priority.high,
           ),
-          iOS: DarwinNotificationDetails(),
+          iOS: const DarwinNotificationDetails(),
         ),
       );
     }
   }
 
-  void _pushCallScreen({required String channel, required bool isVideo, required String fromName}) {
+  void _pushCallScreen({
+    required String channel,
+    required bool isVideo,
+    required String fromName,
+  }) {
     final nav = navigatorKey?.currentState;
     if (nav == null) return;
-    nav.push(MaterialPageRoute(
-      fullscreenDialog: true,
-      builder: (_) => AgoraCallScreen(
-        channelName: channel,
-        isVideo: isVideo,
-        otherUserName: fromName,
+
+    nav.push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => AgoraCallScreen(
+          channelName: channel,
+          isVideo: isVideo,
+          otherUserName: fromName,
+        ),
       ),
-    ));
+    );
   }
 
   void _openChat(String otherUserId) {
     final nav = navigatorKey?.currentState;
     if (nav == null || otherUserId.isEmpty) return;
-    nav.push(MaterialPageRoute(builder: (_) => ChatScreen(otherUserId: otherUserId)));
+
+    nav.push(
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(otherUserId: otherUserId),
+      ),
+    );
   }
 }

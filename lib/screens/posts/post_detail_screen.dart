@@ -8,7 +8,6 @@ class PostDetailScreen extends StatelessWidget {
   final String postId;
   const PostDetailScreen({Key? key, required this.postId}) : super(key: key);
 
-  // ---- Pull "**Something Post**" from the first non-empty line.
   (String?, String) _extractBadgeAndBody(String raw) {
     final lines = raw.split('\n');
     int idx = 0;
@@ -16,7 +15,7 @@ class PostDetailScreen extends StatelessWidget {
     if (idx >= lines.length) return (null, raw);
 
     final first = lines[idx].trim();
-    final reg = RegExp(r'^\*\*(.+?)\*\*$'); // **Something**
+    final reg = RegExp(r'^\*\*(.+?)\*\*$');
     final m = reg.firstMatch(first);
     if (m != null && m.group(1) != null) {
       final label = m.group(1)!.trim();
@@ -31,7 +30,6 @@ class PostDetailScreen extends StatelessWidget {
     return (null, raw);
   }
 
-  // Simple markdown (**bold** only)
   TextSpan _parseSimpleMarkdownToSpan(
     String text, {
     required TextStyle base,
@@ -45,7 +43,9 @@ class PostDetailScreen extends StatelessWidget {
         spans.add(TextSpan(text: text.substring(i), style: base));
         break;
       }
-      if (start > i) spans.add(TextSpan(text: text.substring(i, start), style: base));
+      if (start > i) {
+        spans.add(TextSpan(text: text.substring(i, start), style: base));
+      }
       final end = text.indexOf('**', start + 2);
       if (end == -1) {
         spans.add(TextSpan(text: text.substring(start), style: base));
@@ -79,7 +79,6 @@ class PostDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Smaller “template” minimum height:
     final screenH = MediaQuery.of(context).size.height;
     final double minCardHeight = screenH * 0.30 < 220 ? 220 : screenH * 0.30;
 
@@ -102,36 +101,39 @@ class PostDetailScreen extends StatelessWidget {
 
           final data = snapshot.data!.data() as Map<String, dynamic>;
           final dt = parseFirestoreTimestamp(data['timestamp']);
-          final date = dt != null ? DateFormat.yMMMd().add_jm().format(dt) : 'Unknown date';
+          final date =
+              dt != null ? DateFormat.yMMMd().add_jm().format(dt) : 'Unknown date';
           final content = (data['content'] ?? '').toString();
           final (maybeBadge, body) = _extractBadgeAndBody(content);
           final badge = maybeBadge ?? 'Quick Post';
 
-          final base = const TextStyle(fontSize: 16, height: 1.4, color: AppColors.text);
+          final base = const TextStyle(
+              fontSize: 16, height: 1.4, color: AppColors.text);
           final strong = const TextStyle(
             fontSize: 16,
             height: 1.4,
             color: AppColors.text,
             fontWeight: FontWeight.w700,
           );
-          final span = _parseSimpleMarkdownToSpan(body, base: base, strong: strong);
+          final span =
+              _parseSimpleMarkdownToSpan(body, base: base, strong: strong);
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: ConstrainedBox(
               constraints: BoxConstraints(minHeight: minCardHeight),
               child: SizedBox(
-                width: double.infinity, // fixed left/right edges
+                width: double.infinity,
                 child: Container(
                   decoration: BoxDecoration(
                     color: AppColors.card,
                     borderRadius: BorderRadius.circular(16),
-                    border: const Border.fromBorderSide(BorderSide(color: AppColors.border)),
+                    border: const Border.fromBorderSide(
+                        BorderSide(color: AppColors.border)),
                     boxShadow: const [AppShadows.soft],
                   ),
                   child: Stack(
                     children: [
-                      // Main content with bottom padding for the footer
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 16, 16, 56),
                         child: Column(
@@ -140,10 +142,10 @@ class PostDetailScreen extends StatelessWidget {
                           children: [
                             Text(
                               (data['userName'] ?? 'Anonymous').toString(),
-                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.bold),
                             ),
                             const SizedBox(height: 10),
-
                             if ((data['imageUrl'] ?? '').toString().isNotEmpty) ...[
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(12),
@@ -151,15 +153,12 @@ class PostDetailScreen extends StatelessWidget {
                               ),
                               const SizedBox(height: 12),
                             ],
-
                             _postTypeBadge(badge),
                             const SizedBox(height: 8),
                             RichText(text: span),
                           ],
                         ),
                       ),
-
-                      // Footer pinned to bottom
                       Positioned(
                         left: 16,
                         right: 16,

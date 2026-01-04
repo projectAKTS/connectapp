@@ -3,11 +3,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-// ✅ point to the screen under lib/screens/call/
 import 'package:connect_app/screens/call/agora_call_screen.dart';
 
 class CallService {
-  /// Short, Agora-safe channel name (<= 64 chars).
   static String generateChannelName(String uid1, String uid2) {
     String clean(String s) => s.replaceAll(RegExp(r'[^A-Za-z0-9_]'), '');
     final a = clean(uid1);
@@ -23,8 +21,6 @@ class CallService {
     return name;
   }
 
-  /// Creates a call invite in Firestore and navigates the caller into the call UI.
-  /// Cloud Function on `callInvites` will push-notify the callee.
   Future<void> startCall(
     BuildContext context, {
     required String toUid,
@@ -43,7 +39,6 @@ class CallService {
 
     final channel = generateChannelName(me.uid, toUid);
 
-    // ✅ must be 'callInvites' to match your Cloud Function trigger
     await FirebaseFirestore.instance.collection('callInvites').add({
       'fromUid': me.uid,
       'fromName': fromName,
@@ -56,14 +51,17 @@ class CallService {
     });
 
     if (navigateCaller) {
+      final nav = Navigator.of(context, rootNavigator: true);
       // ignore: use_build_context_synchronously
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => AgoraCallScreen(
-          channelName: channel,
-          isVideo: isVideo,
-          otherUserName: toName,
+      nav.push(
+        MaterialPageRoute(
+          builder: (_) => AgoraCallScreen(
+            channelName: channel,
+            isVideo: isVideo,
+            otherUserName: toName,
+          ),
         ),
-      ));
+      );
     }
   }
 }

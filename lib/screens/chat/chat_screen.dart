@@ -12,13 +12,12 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:chewie/chewie.dart';
 import 'package:video_player/video_player.dart';
 import '../../theme/tokens.dart';
-import '../profile/profile_screen.dart'; // ✅ added for navigation
+import '../profile/profile_screen.dart';
 import '/services/interaction_service.dart';
-
 
 class ChatScreen extends StatefulWidget {
   final String otherUserId;
-  final String? otherUserName;   // 👈 optional again
+  final String? otherUserName;
   final String? otherUserAvatar;
 
   const ChatScreen({
@@ -42,7 +41,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _picker = ImagePicker();
   bool _sending = false;
 
-  String? _titleName; // 👈 resolved name for AppBar
+  String? _titleName;
 
   @override
   void initState() {
@@ -64,7 +63,6 @@ class _ChatScreenState extends State<ChatScreen> {
     }, SetOptions(merge: true));
   }
 
-  // Load name if not provided
   Future<void> _resolveTitleName() async {
     final passed = widget.otherUserName?.trim();
     if (passed != null && passed.isNotEmpty) {
@@ -73,8 +71,10 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
     try {
-      final snap =
-          await FirebaseFirestore.instance.collection('users').doc(widget.otherUserId).get();
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.otherUserId)
+          .get();
       final d = snap.data();
       final name = (d?['displayName'] ??
               d?['fullName'] ??
@@ -84,9 +84,7 @@ class _ChatScreenState extends State<ChatScreen> {
           .toString()
           .trim();
       if (mounted) setState(() => _titleName = name.isEmpty ? null : name);
-    } catch (_) {
-      // ignore; fall back to 'Chat'
-    }
+    } catch (_) {}
   }
 
   @override
@@ -163,7 +161,6 @@ class _ChatScreenState extends State<ChatScreen> {
     });
 
     await InteractionService.recordInteraction(widget.otherUserId);
-
     await chatRef.set({'updatedAt': now}, SetOptions(merge: true));
   }
 
@@ -226,13 +223,12 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final bytes = await x.readAsBytes();
       final name = p.basename(x.path);
-      final mime =
-          lookupMimeType(name, headerBytes: bytes) ?? (isImage ? 'image/jpeg' : 'video/mp4');
+      final mime = lookupMimeType(name, headerBytes: bytes) ??
+          (isImage ? 'image/jpeg' : 'video/mp4');
 
       final folder = isImage ? 'images' : 'videos';
-      final ref = FirebaseStorage.instance
-          .ref()
-          .child('chats/$_chatId/$folder/${DateTime.now().millisecondsSinceEpoch}_$name');
+      final ref = FirebaseStorage.instance.ref().child(
+          'chats/$_chatId/$folder/${DateTime.now().millisecondsSinceEpoch}_$name');
 
       final task = await ref.putData(
         bytes,
@@ -251,6 +247,7 @@ class _ChatScreenState extends State<ChatScreen> {
         'size': bytes.length,
         'mime': mime,
       });
+
       await InteractionService.recordInteraction(widget.otherUserId);
       await chatRef.set({'updatedAt': Timestamp.now()}, SetOptions(merge: true));
     } finally {
@@ -272,12 +269,23 @@ class _ChatScreenState extends State<ChatScreen> {
       primaryColor: AppColors.button,
       secondaryColor: AppColors.button,
       messageBorderRadius: 16,
-      sentMessageBodyTextStyle: TextStyle(color: AppColors.text, fontSize: 16, height: 1.35),
-      receivedMessageBodyTextStyle: TextStyle(color: AppColors.text, fontSize: 16, height: 1.35),
+      sentMessageBodyTextStyle:
+          TextStyle(color: AppColors.text, fontSize: 16, height: 1.35),
+      receivedMessageBodyTextStyle:
+          TextStyle(color: AppColors.text, fontSize: 16, height: 1.35),
       inputBackgroundColor: AppColors.button,
       inputTextColor: AppColors.text,
       inputTextStyle: TextStyle(color: AppColors.text, fontSize: 16),
     );
+
+    void openProfile() {
+      if (widget.otherUserId.isEmpty) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ProfileScreen(userID: widget.otherUserId),
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: AppColors.canvas,
@@ -287,39 +295,22 @@ class _ChatScreenState extends State<ChatScreen> {
         titleSpacing: 0,
         title: Row(
           children: [
-            // ✅ Avatar now clickable
             GestureDetector(
-              onTap: () {
-                if (widget.otherUserId.isNotEmpty) {
-                  Navigator.of(context, rootNavigator: true).push(
-                    MaterialPageRoute(
-                      builder: (_) => ProfileScreen(userID: widget.otherUserId),
-                    ),
-                  );
-                }
-              },
+              onTap: openProfile,
               child: CircleAvatar(
                 radius: 16,
                 backgroundColor: AppColors.avatarBg,
                 foregroundImage: (widget.otherUserAvatar?.isNotEmpty ?? false)
                     ? NetworkImage(widget.otherUserAvatar!)
                     : null,
-                child: const Icon(Icons.person_outline, color: AppColors.avatarFg, size: 18),
+                child: const Icon(Icons.person_outline,
+                    color: AppColors.avatarFg, size: 18),
               ),
             ),
             const SizedBox(width: 10),
-            // ✅ Name now clickable
             Flexible(
               child: GestureDetector(
-                onTap: () {
-                  if (widget.otherUserId.isNotEmpty) {
-                    Navigator.of(context, rootNavigator: true).push(
-                      MaterialPageRoute(
-                        builder: (_) => ProfileScreen(userID: widget.otherUserId),
-                      ),
-                    );
-                  }
-                },
+                onTap: openProfile,
                 child: Text(
                   _titleName?.isNotEmpty == true ? _titleName! : 'Chat',
                   maxLines: 1,
@@ -535,7 +526,8 @@ class _VideoBubbleState extends State<_VideoBubble> {
   @override
   Widget build(BuildContext context) {
     final radius = BorderRadius.circular(16);
-    final aspect = _video.value.isInitialized ? _video.value.aspectRatio : (16 / 9);
+    final aspect =
+        _video.value.isInitialized ? _video.value.aspectRatio : (16 / 9);
 
     return ClipRRect(
       borderRadius: radius,
@@ -552,9 +544,13 @@ class _VideoBubbleState extends State<_VideoBubble> {
               )
             : Stack(
                 children: [
-                  AspectRatio(aspectRatio: aspect, child: Chewie(controller: _chewie!)),
+                  AspectRatio(
+                      aspectRatio: aspect, child: Chewie(controller: _chewie!)),
                   Positioned.fill(
-                    child: Material(color: Colors.transparent, child: InkWell(onTap: _togglePlay)),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(onTap: _togglePlay),
+                    ),
                   ),
                   if (!_video.value.isPlaying)
                     Positioned.fill(
@@ -569,24 +565,40 @@ class _VideoBubbleState extends State<_VideoBubble> {
                               color: Colors.black54,
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.play_arrow, color: Colors.white, size: 36),
+                            child: const Icon(Icons.play_arrow,
+                                color: Colors.white, size: 36),
                           ),
                         ),
                       ),
                     ),
-                  Positioned(top: 8, left: 8, child: _ChromeIconButton(icon: Icons.fullscreen, onPressed: _openFullscreen)),
-                  Positioned(top: 8, right: 8, child: _ChromeIconButton(icon: _muted ? Icons.volume_off : Icons.volume_up, onPressed: _toggleMute)),
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: _ChromeIconButton(
+                        icon: Icons.fullscreen, onPressed: _openFullscreen),
+                  ),
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: _ChromeIconButton(
+                        icon: _muted ? Icons.volume_off : Icons.volume_up,
+                        onPressed: _toggleMute),
+                  ),
                   Positioned(
                     left: 0,
                     right: 0,
                     bottom: 0,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
                           begin: Alignment.bottomCenter,
                           end: Alignment.topCenter,
-                          colors: [Colors.black.withOpacity(0.45), Colors.transparent],
+                          colors: [
+                            Colors.black.withOpacity(0.45),
+                            Colors.transparent
+                          ],
                         ),
                       ),
                       child: VideoProgressIndicator(
@@ -623,7 +635,8 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.initialUrl));
+    _controller =
+        VideoPlayerController.networkUrl(Uri.parse(widget.initialUrl));
     _controller.initialize().then((_) {
       if (!mounted) return;
       _chewie = ChewieController(
@@ -647,7 +660,8 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
 
   @override
   Widget build(BuildContext context) {
-    final aspect = _controller.value.isInitialized ? _controller.value.aspectRatio : 16 / 9;
+    final aspect =
+        _controller.value.isInitialized ? _controller.value.aspectRatio : 16 / 9;
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
@@ -656,12 +670,14 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
             Center(
               child: _chewie == null
                   ? const CircularProgressIndicator()
-                  : AspectRatio(aspectRatio: aspect, child: Chewie(controller: _chewie!)),
+                  : AspectRatio(
+                      aspectRatio: aspect, child: Chewie(controller: _chewie!)),
             ),
             Positioned(
               top: 12,
               left: 12,
-              child: _ChromeIconButton(icon: Icons.close, onPressed: () => Navigator.of(context).pop()),
+              child: _ChromeIconButton(
+                  icon: Icons.close, onPressed: () => Navigator.of(context).pop()),
             ),
           ],
         ),

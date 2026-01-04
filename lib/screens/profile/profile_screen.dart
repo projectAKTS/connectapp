@@ -8,10 +8,10 @@ import 'package:intl/intl.dart';
 
 import 'package:connect_app/utils/time_utils.dart';
 import '../onboarding_screen.dart';
-import '../chat/chat_screen.dart';
 import '../posts/post_detail_screen.dart';
 import 'package:connect_app/services/call_service.dart';
 import 'package:connect_app/theme/tokens.dart';
+import '../consultation/my_consultation_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String userID;
@@ -162,8 +162,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (previous) {
         await ref.delete();
       } else {
-        await ref.set({'timestamp': FieldValue.serverTimestamp()},
-            SetOptions(merge: true));
+        await ref.set(
+          {'timestamp': FieldValue.serverTimestamp()},
+          SetOptions(merge: true),
+        );
       }
     } catch (e) {
       setState(() => isFollowing = previous);
@@ -175,8 +177,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _startCall({required bool isVideo}) async {
     final otherName = _s(userData?['fullName'], 'Unknown');
+
+    // ✅ Always start calls from ROOT context (prevents tab-navigator side effects)
+    final rootCtx = Navigator.of(context, rootNavigator: true).context;
+
     await CallService().startCall(
-      context,
+      rootCtx,
       toUid: widget.userID,
       toName: otherName,
       isVideo: isVideo,
@@ -186,6 +192,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _signOut() async {
     await FirebaseAuth.instance.signOut();
     if (!mounted) return;
+
+    // ✅ Auth flows always on ROOT navigator
     Navigator.of(context, rootNavigator: true)
         .pushNamedAndRemoveUntil('/login', (route) => false);
   }
@@ -196,13 +204,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ? (userData!['ratePerMinute'] as num).toInt()
         : 0;
 
+    final rootNav = Navigator.of(context, rootNavigator: true);
+
     showModalBottomSheet(
       context: context,
       backgroundColor: AppColors.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
-      builder: (_) {
+      builder: (sheetCtx) {
         Widget item(IconData icon, String label, VoidCallback onTap) {
           return ListTile(
             leading: CircleAvatar(
@@ -212,7 +222,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             title: Text(label, style: const TextStyle(color: AppColors.text)),
             onTap: () {
-              Navigator.pop(context);
+              Navigator.pop(sheetCtx);
               onTap();
             },
           );
@@ -232,8 +242,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
               const SizedBox(height: 10),
+
+              // ✅ Global route -> ROOT
               item(Icons.event_available_outlined, 'Book a call', () {
-                Navigator.of(context).pushNamed(
+                rootNav.pushNamed(
                   '/consultation',
                   arguments: {
                     'targetUserId': widget.userID,
@@ -242,13 +254,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   },
                 );
               }),
+
+              // ✅ Global route -> ROOT (keeps chat behavior consistent everywhere)
               item(Icons.chat_bubble_outline, 'Message', () {
-                Navigator.of(context).push(
-                  CupertinoPageRoute(
-                    builder: (_) => ChatScreen(otherUserId: widget.userID),
-                  ),
+                rootNav.pushNamed(
+                  '/chat',
+                  arguments: {
+                    'otherUserId': widget.userID,
+                    'otherUserName': otherName,
+                    'otherUserAvatar':
+                        (userData?['profilePicture'] ?? '').toString(),
+                  },
                 );
               }),
+
               item(Icons.call, 'Audio call', () => _startCall(isVideo: false)),
               item(Icons.videocam, 'Video call', () => _startCall(isVideo: true)),
               const SizedBox(height: 8),
@@ -256,6 +275,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         );
       },
+    );
+  }
+
+  // ✅ ADD: open My Consultations (from current user profile)
+  void _openMyConsultations() {
+    Navigator.of(context, rootNavigator: true).push(
+      CupertinoPageRoute(builder: (_) => const MyConsultationsScreen()),
     );
   }
 
@@ -297,7 +323,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       decoration: BoxDecoration(
         color: AppColors.card,
         borderRadius: BorderRadius.circular(16),
-        border: const Border.fromBorderSide(BorderSide(color: AppColors.border)),
+        border:
+            const Border.fromBorderSide(BorderSide(color: AppColors.border)),
         boxShadow: const [AppShadows.soft],
       ),
       child: Padding(padding: padding, child: child),
@@ -310,7 +337,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       decoration: BoxDecoration(
         color: AppColors.button,
         borderRadius: BorderRadius.circular(10),
-        border: const Border.fromBorderSide(BorderSide(color: AppColors.border)),
+        border:
+            const Border.fromBorderSide(BorderSide(color: AppColors.border)),
       ),
       child: Text(
         text,
@@ -343,7 +371,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final rawContent = (map['content'] ?? '').toString();
 
     final lblFromContent = _firstBoldLineLabel(rawContent);
-    if (lblFromContent != null && lblFromContent.toLowerCase().endsWith(' post')) {
+    if (lblFromContent != null &&
+        lblFromContent.toLowerCase().endsWith(' post')) {
       final lower = lblFromContent.toLowerCase();
 
       String slug;
@@ -423,6 +452,63 @@ class _ProfileScreenState extends State<ProfileScreen> {
           fontWeight: FontWeight.w700,
           fontSize: 13,
           letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
+
+  // ✅ ADD: a nice “menu row” card that matches your UI
+  Widget _menuRow({
+    required IconData icon,
+    required String title,
+    String? subtitle,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: _softCard(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: AppColors.button,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Icon(icon, color: AppColors.text),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: AppColors.text,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                    ),
+                  ),
+                  if (subtitle != null && subtitle.trim().isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(color: AppColors.muted, fontSize: 13),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+          ],
         ),
       ),
     );
@@ -509,7 +595,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 icon: const Icon(Icons.edit),
                 tooltip: "Edit Profile",
                 onPressed: () {
-                  Navigator.of(context).push(
+                  Navigator.of(context, rootNavigator: true).push(
                     CupertinoPageRoute(
                       builder: (_) => const OnboardingScreen(),
                     ),
@@ -589,6 +675,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       expanded: _bioExpanded,
                       onToggle: () =>
                           setState(() => _bioExpanded = !_bioExpanded),
+                    ),
+                  ],
+
+                  // ✅ ADD: My Consultations entry (only for current user)
+                  if (isCurrentUser) ...[
+                    const SizedBox(height: 14),
+                    _menuRow(
+                      icon: Icons.event_note_outlined,
+                      title: 'My Consultations',
+                      subtitle: 'Upcoming calls you booked or received',
+                      onTap: _openMyConsultations,
                     ),
                   ],
 
@@ -712,7 +809,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       stream: _postsStream,
                       builder: (ctx, snap) {
                         if (snap.connectionState == ConnectionState.waiting) {
-                          return const Center(child: CircularProgressIndicator());
+                          return const Center(
+                              child: CircularProgressIndicator());
                         }
                         if (snap.hasError) {
                           return Center(
@@ -747,7 +845,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           itemBuilder: (c, i) {
                             final doc = featured[i];
                             final data = doc.data() as Map<String, dynamic>;
-                            final date = parseFirestoreTimestamp(data['timestamp']);
+                            final date =
+                                parseFirestoreTimestamp(data['timestamp']);
                             final (_, badgeText, body) = _classifyPost(data);
 
                             return Padding(
@@ -760,13 +859,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 onTap: () {
                                   Navigator.of(context).push(
                                     CupertinoPageRoute(
-                                      builder: (_) => PostDetailScreen(postId: doc.id),
+                                      builder: (_) =>
+                                          PostDetailScreen(postId: doc.id),
                                     ),
                                   );
                                 },
                                 child: _softCard(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       _postTypeBadge(badgeText),
                                       const SizedBox(height: 8),
@@ -843,7 +944,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     stream: _postsStream,
                     builder: (ctx, snap) {
                       if (snap.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
+                        return const Center(
+                            child: CircularProgressIndicator());
                       }
                       if (snap.hasError) {
                         return Center(
@@ -899,7 +1001,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
                         itemCount: filtered.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 12),
+                        separatorBuilder: (_, __) =>
+                            const SizedBox(height: 12),
                         itemBuilder: (c, i) {
                           final row = filtered[i];
                           final doc = row.$1;
@@ -912,12 +1015,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             onTap: () {
                               Navigator.of(context).push(
                                 CupertinoPageRoute(
-                                  builder: (_) => PostDetailScreen(postId: doc.id),
+                                  builder: (_) =>
+                                      PostDetailScreen(postId: doc.id),
                                 ),
                               );
                             },
                             child: _softCard(
-                              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                              padding:
+                                  const EdgeInsets.fromLTRB(14, 12, 14, 12),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -996,11 +1101,24 @@ class _StatsStrip extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        Expanded(child: Center(child: cell(Icons.local_fire_department_rounded, 'Streak', streakText))),
+        Expanded(
+          child: Center(
+            child:
+                cell(Icons.local_fire_department_rounded, 'Streak', streakText),
+          ),
+        ),
         divider(),
-        Expanded(child: Center(child: cell(Icons.emoji_events_outlined, 'XP', xpText))),
+        Expanded(
+          child: Center(
+            child: cell(Icons.emoji_events_outlined, 'XP', xpText),
+          ),
+        ),
         divider(),
-        Expanded(child: Center(child: cell(Icons.thumb_up_alt_outlined, 'Helpful', helpfulText))),
+        Expanded(
+          child: Center(
+            child: cell(Icons.thumb_up_alt_outlined, 'Helpful', helpfulText),
+          ),
+        ),
       ],
     );
   }
