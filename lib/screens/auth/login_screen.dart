@@ -25,6 +25,11 @@ class _LoginScreenState extends State<LoginScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
+  void _goHome() {
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil('/home', (r) => false);
+  }
+
   Future<void> _login() async {
     FocusScope.of(context).unfocus();
     if (_isLoading) return;
@@ -38,8 +43,7 @@ class _LoginScreenState extends State<LoginScreen> {
         _showSnack('Login failed. Please try again.');
         return;
       }
-      if (!mounted) return;
-      Navigator.pushReplacementNamed(context, '/home');
+      _goHome();
     } catch (e) {
       _showSnack('Error: $e');
     } finally {
@@ -51,15 +55,15 @@ class _LoginScreenState extends State<LoginScreen> {
     if (_isLoading) return;
     setState(() => _isLoading = true);
     try {
-      // Service has its own timeout & throws on failure/cancel.
-      final user = await _authService.signInWithGoogle();
+      // ✅ ALWAYS SHOW PICKER
+      final user = await _authService.signInWithGoogleAlwaysAsk();
       if (!mounted) return;
+
       if (user == null) {
-        // User cancelled the picker/browser
         _showSnack('Google sign-in was cancelled.');
         return;
-        }
-      Navigator.pushReplacementNamed(context, '/home');
+      }
+      _goHome();
     } on TimeoutException {
       _showSnack('Google sign-in timed out. Please try again.');
     } catch (e) {
@@ -79,15 +83,15 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final user = await _authService.signInWithApple();
       if (!mounted) return;
+
       if (user == null) {
         _showSnack('Apple sign-in was cancelled.');
         return;
       }
-      Navigator.pushReplacementNamed(context, '/home');
+      _goHome();
     } on TimeoutException {
       _showSnack('Apple sign-in timed out. Please try again.');
     } catch (e) {
-      // Common cause for “error 1000” is missing Apple capability / Services ID.
       _showSnack('Apple sign-in failed: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -144,7 +148,10 @@ class _LoginScreenState extends State<LoginScreen> {
         onPressed: _isLoading ? null : _login,
         child: _isLoading
             ? const SizedBox(
-                height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              )
             : const Text('Log in'),
       ),
     );
@@ -157,7 +164,6 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
     );
 
-    // Softer social buttons that match your palette (not too green)
     Widget socialBtn({
       required Widget icon,
       required String label,
@@ -197,7 +203,9 @@ class _LoginScreenState extends State<LoginScreen> {
         Text('New here?', style: Theme.of(context).textTheme.bodyMedium),
         const SizedBox(width: 6),
         TextButton(
-          onPressed: _isLoading ? null : () => Navigator.pushReplacementNamed(context, '/register'),
+          onPressed: _isLoading
+              ? null
+              : () => Navigator.pushReplacementNamed(context, '/register'),
           child: const Text('Create an account'),
         ),
       ],
@@ -223,8 +231,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 6),
                   subtitle,
                   const SizedBox(height: 24),
-
-                  // Card-like surface for inputs
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
@@ -245,7 +251,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       ],
                     ),
                   ),
-
                   const SizedBox(height: 20),
                   Row(
                     children: const [
@@ -258,11 +263,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
-
                   googleBtn,
                   const SizedBox(height: 10),
                   if (Platform.isIOS || Platform.isMacOS) appleBtn,
-
                   const SizedBox(height: 16),
                   toSignup,
                 ],

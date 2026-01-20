@@ -1,20 +1,23 @@
-// lib/main.dart
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/material.dart';
+
+// Firebase
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:firebase_dynamic_links/firebase_dynamic_links.dart';
 
-import 'screens/search/search_screen.dart';
+// Payments
+import 'package:flutter_stripe/flutter_stripe.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
+
+// Screens
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/signup_screen.dart';
 import 'screens/auth/forgot_password_screen.dart';
+import 'screens/search/search_screen.dart';
 import 'screens/posts/create_post_screen.dart';
 import 'screens/posts/edit_post_screen.dart';
 import 'screens/posts/post_detail_screen.dart';
@@ -24,49 +27,44 @@ import 'screens/profile/profile_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/chat/chat_screen.dart';
 import 'screens/payment/payment_setup_screen.dart';
-
-// ✅ NEW: your new screens
-import 'screens/credits/credits_screen.dart';
 import 'screens/premium/premium_screen.dart';
+import 'screens/credits/credits_screen.dart';
 
+// Core
+import 'widgets/main_scaffold.dart';
 import 'services/firebase_options.dart';
 import 'services/notification_service.dart';
 import 'services/subscription_service.dart';
-import 'widgets/main_scaffold.dart';
-import 'theme/theme.dart';
 import 'debug/firestore_probe.dart';
+import 'theme/theme.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 late final NotificationService notificationService;
 
 @pragma('vm:entry-point')
-Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // Handle background FCM messages if needed
-}
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1) Firebase init
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
 
-  // 2) AppCheck
   try {
     await FirebaseAppCheck.instance.activate(
       appleProvider: AppleProvider.appAttestWithDeviceCheckFallback,
       androidProvider: AndroidProvider.playIntegrity,
     );
-  } catch (e, st) {
-    debugPrint('⚠️ AppCheck init failed: $e\n$st');
+  } catch (e) {
+    debugPrint('⚠️ AppCheck failed: $e');
   }
 
-  // 3) Stripe
   Stripe.publishableKey = 'pk_live_xxxxxxxxxxxxxxxxxxxxx';
   Stripe.merchantIdentifier = 'merchant.com.connectapp';
   Stripe.urlScheme = 'connectapp';
   await Stripe.instance.applySettings();
 
-  // 4) FCM
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
     alert: true,
@@ -74,11 +72,10 @@ Future<void> main() async {
     sound: true,
   );
 
-  // 5) Notifications + Subscriptions
   notificationService = NotificationService(navigatorKey: navigatorKey);
 
-  final iapAvailable = await SubscriptionService.init();
-  if (iapAvailable) {
+  final available = await SubscriptionService.init();
+  if (available) {
     SubscriptionService.setupListener(_handlePurchaseUpdates);
   }
 
@@ -133,18 +130,18 @@ class _MyAppState extends State<MyApp> {
   }
 
   Future<void> _initDynamicLinks() async {
-    FirebaseDynamicLinks.instance.onLink.listen((PendingDynamicLinkData data) {
+    FirebaseDynamicLinks.instance.onLink.listen((data) {
       final uri = data.link;
       final ctx = navigatorKey.currentContext;
       if (ctx == null) return;
 
       if (uri.path == '/success') {
         ScaffoldMessenger.of(ctx).showSnackBar(
-          const SnackBar(content: Text('✅ Payment successful!')),
+          const SnackBar(content: Text('✅ Payment successful')),
         );
       } else if (uri.path == '/cancel') {
         ScaffoldMessenger.of(ctx).showSnackBar(
-          const SnackBar(content: Text('❌ Payment canceled.')),
+          const SnackBar(content: Text('❌ Payment cancelled')),
         );
       }
     }).onError((e) {
@@ -157,10 +154,11 @@ class _MyAppState extends State<MyApp> {
       if (uri.path == '/success') {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           final ctx = navigatorKey.currentContext;
-          if (ctx == null) return;
-          ScaffoldMessenger.of(ctx).showSnackBar(
-            const SnackBar(content: Text('✅ Payment successful!')),
-          );
+          if (ctx != null) {
+            ScaffoldMessenger.of(ctx).showSnackBar(
+              const SnackBar(content: Text('✅ Payment successful')),
+            );
+          }
         });
       }
     }
@@ -179,11 +177,14 @@ class _MyAppState extends State<MyApp> {
         child: child,
       ),
 
-      // ✅ AuthGate decides login vs MainScaffold
-      home: const AuthGate(),
-
-      // ✅ Global routes (root navigator)
+      // Start from AuthGate
+      initialRoute: '/',
       routes: {
+        '/': (_) => const AuthGate(),
+
+        // ✅ IMPORTANT: define /home explicitly
+        '/home': (_) => const MainScaffold(),
+
         '/login': (_) => const LoginScreen(),
         '/register': (_) => const SignupScreen(),
         '/forgot-password': (_) => const ForgotPasswordScreen(),
@@ -194,53 +195,13 @@ class _MyAppState extends State<MyApp> {
 
         '/my_consultations': (_) => const MyConsultationsScreen(),
 
-        // ✅ Swap these to your NEW screens
         '/credits': (_) => CreditsStoreScreen(),
         '/premium': (_) => PremiumScreen(),
 
         '/onboarding': (_) => const OnboardingScreen(),
         '/paymentSetup': (_) => const PaymentSetupScreen(),
-
-        '/consultation': (ctx) {
-          final args =
-              ModalRoute.of(ctx)!.settings.arguments as Map<String, dynamic>?;
-          final id = args?['targetUserId'] as String?;
-          final name = args?['targetUserName'] as String?;
-
-          if (id == null || id.isEmpty || name == null || name.isEmpty) {
-            return const Scaffold(
-              body: Center(child: Text('Invalid consultation arguments')),
-            );
-          }
-
-          return ConsultationBookingScreen(
-            targetUserId: id,
-            targetUserName: name,
-          );
-        },
-
-        '/chat': (ctx) {
-          final args =
-              ModalRoute.of(ctx)!.settings.arguments as Map<String, dynamic>?;
-          final otherUserId = args?['otherUserId'] as String?;
-          final otherUserName = args?['otherUserName'] as String?;
-          final otherUserAvatar = args?['otherUserAvatar'] as String?;
-
-          if (otherUserId == null || otherUserId.isEmpty) {
-            return const Scaffold(
-              body: Center(child: Text('Missing otherUserId')),
-            );
-          }
-
-          return ChatScreen(
-            otherUserId: otherUserId,
-            otherUserName: otherUserName,
-            otherUserAvatar: otherUserAvatar,
-          );
-        },
       },
 
-      // ✅ Only deep links here
       onGenerateRoute: (settings) {
         final name = settings.name;
         if (name == null) return null;
@@ -263,14 +224,45 @@ class _MyAppState extends State<MyApp> {
           );
         }
 
+        if (settings.name == '/consultation') {
+          final args = settings.arguments as Map<String, dynamic>?;
+          if (args == null) return null;
+
+          return MaterialPageRoute(
+            builder: (_) => ConsultationBookingScreen(
+              targetUserId: args['targetUserId'],
+              targetUserName: args['targetUserName'],
+            ),
+            settings: settings,
+          );
+        }
+
+        if (settings.name == '/chat') {
+          final args = settings.arguments as Map<String, dynamic>?;
+          if (args == null) return null;
+
+          return MaterialPageRoute(
+            builder: (_) => ChatScreen(
+              otherUserId: args['otherUserId'],
+              otherUserName: args['otherUserName'],
+              otherUserAvatar: args['otherUserAvatar'],
+            ),
+            settings: settings,
+          );
+        }
+
         return null;
       },
 
-      onUnknownRoute: (_) => MaterialPageRoute(
-        builder: (_) => const Scaffold(
-          body: Center(child: Text('Route not found')),
-        ),
-      ),
+      onUnknownRoute: (settings) {
+        return MaterialPageRoute(
+          builder: (_) => Scaffold(
+            body: Center(
+              child: Text('Route not found: ${settings.name}'),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -283,20 +275,14 @@ class AuthGate extends StatefulWidget {
 
 class _AuthGateState extends State<AuthGate> {
   bool _notifInitDone = false;
-
-  final Widget _cachedHome = const MainScaffold();
-  final Widget _cachedLogin = const LoginScreen();
-
   late final StreamSubscription<User?> _sub;
 
   @override
   void initState() {
     super.initState();
-
-    _sub = FirebaseAuth.instance.authStateChanges().listen((user) async {
+    _sub = FirebaseAuth.instance.authStateChanges().listen((user) {
       if (user != null && !_notifInitDone) {
         _notifInitDone = true;
-
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           try {
             await notificationService.initialize();
@@ -324,15 +310,15 @@ class _AuthGateState extends State<AuthGate> {
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
-      builder: (context, snap) {
+      builder: (_, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
 
-        if (snap.hasData) return _cachedHome;
-        return _cachedLogin;
+        // If already signed in, go straight to home
+        return snap.hasData ? const MainScaffold() : const LoginScreen();
       },
     );
   }

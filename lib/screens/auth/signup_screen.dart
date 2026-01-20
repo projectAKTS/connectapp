@@ -16,10 +16,10 @@ class SignupScreen extends StatefulWidget {
 class _SignupScreenState extends State<SignupScreen> {
   final _authService = FirebaseAuthService();
   final _firstNameCtrl = TextEditingController();
-  final _lastNameCtrl  = TextEditingController();
-  final _emailCtrl     = TextEditingController();
-  final _passwordCtrl  = TextEditingController();
-  final _confirmCtrl   = TextEditingController();
+  final _lastNameCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+  final _confirmCtrl = TextEditingController();
 
   bool _isLoading = false;
   bool _isSocialLoading = false;
@@ -38,12 +38,22 @@ class _SignupScreenState extends State<SignupScreen> {
     super.dispose();
   }
 
+  void _goHome() {
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil('/home', (r) => false);
+  }
+
+  void _goOnboarding() {
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil('/onboarding', (r) => false);
+  }
+
   Future<void> _register() async {
     final first = _firstNameCtrl.text.trim();
-    final last  = _lastNameCtrl.text.trim();
+    final last = _lastNameCtrl.text.trim();
     final email = _emailCtrl.text.trim();
-    final pass  = _passwordCtrl.text.trim();
-    final conf  = _confirmCtrl.text.trim();
+    final pass = _passwordCtrl.text.trim();
+    final conf = _confirmCtrl.text.trim();
 
     if (first.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -67,7 +77,6 @@ class _SignupScreenState extends State<SignupScreen> {
     setState(() => _isLoading = true);
     try {
       final fullName = '$first ${last.isEmpty ? '' : last}'.trim();
-
       final user = await _authService.registerWithEmail(email, pass, fullName);
       if (user == null) throw Exception('Registration failed');
 
@@ -91,22 +100,22 @@ class _SignupScreenState extends State<SignupScreen> {
           .doc(user.uid)
           .set(userData, SetOptions(merge: true));
 
-      await user.getIdToken(true);
-
       // Optional Stripe customer
       try {
         final callable = _functions.httpsCallable('createStripeCustomer');
         await callable();
-      } catch (_) {/* ignore */}
+      } catch (_) {
+        // ignore
+      }
 
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Registered! Let’s finish onboarding.')),
       );
-      Navigator.pushReplacementNamed(context, '/onboarding');
+      _goOnboarding();
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
-      setState(() => _isLoading = false);
       final msg = switch (e.code) {
         'email-already-in-use' => 'That email is already registered.',
         'invalid-email' => 'Invalid email address.',
@@ -116,51 +125,58 @@ class _SignupScreenState extends State<SignupScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     } catch (e) {
       if (!mounted) return;
-      setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _signUpWithGoogle() async {
+    if (_isSocialLoading) return;
     setState(() => _isSocialLoading = true);
     try {
-      final u = await _authService.signInWithGoogle();
+      // ✅ ALWAYS ASK (account picker every time)
+      final u = await _authService.signInWithGoogleAlwaysAsk();
       if (!mounted) return;
-      setState(() => _isSocialLoading = false);
-      if (u != null) {
-        Navigator.pushReplacementNamed(context, '/home');
-      } else {
-        // User cancelled; just show a soft message
+
+      if (u == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Google sign-in was cancelled.')),
         );
+        return;
       }
+
+      // After social sign-up, go onboarding (recommended)
+      _goOnboarding();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _isSocialLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Google sign-in failed: $e')),
       );
+    } finally {
+      if (mounted) setState(() => _isSocialLoading = false);
     }
   }
 
   Future<void> _signUpWithApple() async {
+    if (_isSocialLoading) return;
     setState(() => _isSocialLoading = true);
     try {
       final u = await _authService.signInWithApple();
       if (!mounted) return;
-      setState(() => _isSocialLoading = false);
-      if (u != null) {
-        Navigator.pushReplacementNamed(context, '/home');
-      }
+
+      if (u == null) return; // canceled
+
+      _goOnboarding();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _isSocialLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Apple sign-in failed: $e')),
       );
+    } finally {
+      if (mounted) setState(() => _isSocialLoading = false);
     }
   }
 
@@ -182,11 +198,12 @@ class _SignupScreenState extends State<SignupScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('Join the community and start connecting.',
-                  style: t.textTheme.bodyMedium),
+              Text(
+                'Join the community and start connecting.',
+                style: t.textTheme.bodyMedium,
+              ),
               const SizedBox(height: 16),
 
-              // Soft card container
               Container(
                 padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
                 decoration: BoxDecoration(
@@ -197,7 +214,6 @@ class _SignupScreenState extends State<SignupScreen> {
                 ),
                 child: Column(
                   children: [
-                    // Names row with labels ABOVE fields (no truncation)
                     Row(
                       children: [
                         Expanded(
@@ -208,8 +224,10 @@ class _SignupScreenState extends State<SignupScreen> {
                               textInputAction: TextInputAction.next,
                               decoration: const InputDecoration(
                                 hintText: 'First name',
-                                prefixIcon: Icon(Icons.person_outline,
-                                    color: AppColors.muted),
+                                prefixIcon: Icon(
+                                  Icons.person_outline,
+                                  color: AppColors.muted,
+                                ),
                               ),
                             ),
                           ),
@@ -223,8 +241,10 @@ class _SignupScreenState extends State<SignupScreen> {
                               textInputAction: TextInputAction.next,
                               decoration: const InputDecoration(
                                 hintText: 'Last name',
-                                prefixIcon: Icon(Icons.person_outline,
-                                    color: AppColors.muted),
+                                prefixIcon: Icon(
+                                  Icons.person_outline,
+                                  color: AppColors.muted,
+                                ),
                               ),
                             ),
                           ),
@@ -242,8 +262,10 @@ class _SignupScreenState extends State<SignupScreen> {
                         textInputAction: TextInputAction.next,
                         decoration: const InputDecoration(
                           hintText: 'you@domain.com',
-                          prefixIcon: Icon(Icons.alternate_email,
-                              color: AppColors.muted),
+                          prefixIcon: Icon(
+                            Icons.alternate_email,
+                            color: AppColors.muted,
+                          ),
                         ),
                       ),
                     ),
@@ -258,11 +280,14 @@ class _SignupScreenState extends State<SignupScreen> {
                         textInputAction: TextInputAction.next,
                         decoration: InputDecoration(
                           hintText: 'Min 8 characters',
-                          prefixIcon: const Icon(Icons.lock_outline,
-                              color: AppColors.muted),
+                          prefixIcon: const Icon(
+                            Icons.lock_outline,
+                            color: AppColors.muted,
+                          ),
                           suffixIcon: IconButton(
                             icon: Icon(
-                                _obscure1 ? Icons.visibility : Icons.visibility_off),
+                              _obscure1 ? Icons.visibility : Icons.visibility_off,
+                            ),
                             onPressed: () => setState(() => _obscure1 = !_obscure1),
                           ),
                         ),
@@ -278,11 +303,14 @@ class _SignupScreenState extends State<SignupScreen> {
                         textInputAction: TextInputAction.done,
                         decoration: InputDecoration(
                           hintText: 'Repeat password',
-                          prefixIcon: const Icon(Icons.lock_outline,
-                              color: AppColors.muted),
+                          prefixIcon: const Icon(
+                            Icons.lock_outline,
+                            color: AppColors.muted,
+                          ),
                           suffixIcon: IconButton(
                             icon: Icon(
-                                _obscure2 ? Icons.visibility : Icons.visibility_off),
+                              _obscure2 ? Icons.visibility : Icons.visibility_off,
+                            ),
                             onPressed: () => setState(() => _obscure2 = !_obscure2),
                           ),
                         ),
@@ -307,7 +335,6 @@ class _SignupScreenState extends State<SignupScreen> {
               const _OrDivider(),
               const SizedBox(height: 12),
 
-              // Social
               _SoftButton(
                 icon: Icons.g_mobiledata,
                 label: 'Sign up with Google',
@@ -353,8 +380,10 @@ class _LabeledField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: t.textTheme.bodyMedium?.copyWith(color: AppColors.muted)),
+        Text(
+          label,
+          style: t.textTheme.bodyMedium?.copyWith(color: AppColors.muted),
+        ),
         const SizedBox(height: 6),
         child,
       ],
@@ -367,14 +396,16 @@ class _OrDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(children: [
-      const Expanded(child: Divider()),
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: Text('or', style: Theme.of(context).textTheme.bodyMedium),
-      ),
-      const Expanded(child: Divider()),
-    ]);
+    return Row(
+      children: [
+        const Expanded(child: Divider()),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Text('or', style: Theme.of(context).textTheme.bodyMedium),
+        ),
+        const Expanded(child: Divider()),
+      ],
+    );
   }
 }
 
@@ -398,7 +429,10 @@ class _SoftButton extends StatelessWidget {
       icon: Icon(icon, color: AppColors.text),
       label: loading
           ? const SizedBox(
-              height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+              height: 20,
+              width: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
           : Text(label),
       style: TextButton.styleFrom(
         backgroundColor: AppColors.button,

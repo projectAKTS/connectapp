@@ -1,7 +1,8 @@
-import 'dart:async';
+// lib/services/firebase_auth_service.dart
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -10,6 +11,14 @@ import 'package:crypto/crypto.dart' as crypto;
 
 class FirebaseAuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  /// ✅ Keep ONE instance (iOS stable)
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    scopes: <String>['email', 'profile'],
+  );
+
+  /// ✅ Prevent overlapping flows (double-tap)
+  Future<User?>? _googleInFlight;
 
   // -------------------------
   // Initialize Firestore user
@@ -20,40 +29,43 @@ class FirebaseAuthService {
     String email,
   ) async {
     try {
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-        'fullName': fullName,
-        'email': email,
-        'bio': 'No bio available yet.',
-        'followers': [],
-        'following': [],
-        'postsCount': 0,
-        'profilePicture': '',
-        'createdAt': FieldValue.serverTimestamp(),
-        'xpPoints': 0,
-        'badges': [],
-        'postCount': 0,
-        'commentCount': 0,
-        'helpfulMarks': 0,
-        'dailyLoginStreak': 0,
-        'postingStreak': 0,
-        'lastLoginDate': null,
-        'lastPostDate': null,
-        'referralCount': 0,
-        'categoryPosts': {
-          'Career': 0,
-          'Travel': 0,
-          'Finance': 0,
-          'Technology': 0,
-          'Health': 0,
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
+        {
+          'fullName': fullName,
+          'email': email,
+          'bio': 'No bio available yet.',
+          'followers': [],
+          'following': [],
+          'postsCount': 0,
+          'profilePicture': '',
+          'createdAt': FieldValue.serverTimestamp(),
+          'xpPoints': 0,
+          'badges': [],
+          'postCount': 0,
+          'commentCount': 0,
+          'helpfulMarks': 0,
+          'dailyLoginStreak': 0,
+          'postingStreak': 0,
+          'lastLoginDate': null,
+          'lastPostDate': null,
+          'referralCount': 0,
+          'categoryPosts': {
+            'Career': 0,
+            'Travel': 0,
+            'Finance': 0,
+            'Technology': 0,
+            'Health': 0,
+          },
+          'activePerks': {
+            'priorityPostBoost': null,
+            'profileHighlight': null,
+            'commentBoost': null,
+          },
+          'premiumStatus': 'none',
+          'trialUsed': false,
         },
-        'activePerks': {
-          'priorityPostBoost': null,
-          'profileHighlight': null,
-          'commentBoost': null,
-        },
-        'premiumStatus': 'none',
-        'trialUsed': false,
-      }, SetOptions(merge: true));
+        SetOptions(merge: true),
+      );
     } catch (e) {
       print('🔥 Error initializing user in Firestore: $e');
       rethrow;
@@ -82,8 +94,10 @@ class FirebaseAuthService {
     );
     final user = creds.user;
     if (user == null) throw Exception('Failed to create user');
+
     await user.updateDisplayName(fullName);
     await user.reload();
+
     await initializeUserInFirestore(user, fullName, email);
     return _auth.currentUser;
   }
@@ -93,25 +107,47 @@ class FirebaseAuthService {
   }
 
   // -------------------------
-  // Google Sign-in
+  // Google Sign-in (ALWAYS ASK / ALWAYS PICKER)
   // -------------------------
-  Future<User?> signInWithGoogle() async {
+  /// ✅ Always shows Google account chooser every time.
+  /// ✅ Allows "Use another account".
+  /// ✅ No silent sign-in.
+  /// ✅ No automatic reuse.
+  ///
+  /// NOTE: We do NOT signOut Firebase before this.
+  Future<User?> signInWithGoogleAlwaysAsk() {
+    _googleInFlight ??= _signInWithGoogleAlwaysAskInternal();
+    return _googleInFlight!.whenComplete(() => _googleInFlight = null);
+  }
+
+  Future<User?> _signInWithGoogleAlwaysAskInternal() async {
     try {
-      final gsi = GoogleSignIn();
-      await gsi.signOut();
-      await _auth.signOut();
+      // Force chooser:
+      // - disconnect removes previous consent (strongest)
+      // - signOut clears cached user for this app session
+      try {
+        await _googleSignIn.disconnect();
+      } catch (_) {}
+      try {
+        await _googleSignIn.signOut();
+      } catch (_) {}
 
-      final googleUser = await gsi.signIn().timeout(const Duration(seconds: 25));
-      if (googleUser == null) return null;
+      final googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) return null; // cancelled
 
-      final googleAuth = await googleUser.authentication.timeout(const Duration(seconds: 15));
+      final googleAuth = await googleUser.authentication;
+      if (googleAuth.idToken == null) {
+        throw Exception('Google sign-in failed: missing idToken');
+      }
+
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
 
-      final creds = await _auth.signInWithCredential(credential).timeout(const Duration(seconds: 20));
+      final creds = await _auth.signInWithCredential(credential);
       final user = creds.user;
+
       if (user != null) {
         await initializeUserInFirestore(
           user,
@@ -119,6 +155,7 @@ class FirebaseAuthService {
           user.email ?? '',
         );
       }
+
       return user;
     } catch (e) {
       print('🔥 Error during Google sign-in: $e');
@@ -127,7 +164,7 @@ class FirebaseAuthService {
   }
 
   // -------------------------
-  // Apple Sign-in (Fixed)
+  // Apple Sign-in (keep as-is)
   // -------------------------
   Future<User?> signInWithApple() async {
     if (!Platform.isIOS && !Platform.isMacOS) {
@@ -152,21 +189,20 @@ class FirebaseAuthService {
           AppleIDAuthorizationScopes.fullName,
         ],
         nonce: hashedNonce,
-      ).timeout(const Duration(seconds: 35));
+      );
 
       print('\n🧾 Identity Token: ${appleCred.identityToken}');
       print('🔑 Authorization Code: ${appleCred.authorizationCode}');
       print('📧 Email: ${appleCred.email}');
       print('👤 User ID: ${appleCred.userIdentifier}');
 
-      // ✅ FIX: pass BOTH idToken + authorizationCode to Firebase
       final oauthCred = OAuthProvider('apple.com').credential(
         idToken: appleCred.identityToken,
-        accessToken: appleCred.authorizationCode, // 👈 critical fix
+        accessToken: appleCred.authorizationCode,
         rawNonce: rawNonce,
       );
 
-      final creds = await _auth.signInWithCredential(oauthCred).timeout(const Duration(seconds: 20));
+      final creds = await _auth.signInWithCredential(oauthCred);
       final user = creds.user;
 
       if (user != null) {
@@ -188,9 +224,6 @@ class FirebaseAuthService {
 
       print('✅ ----- APPLE SIGN-IN SUCCESS -----');
       return user;
-    } on TimeoutException {
-      print('⏳ Apple sign-in timeout.');
-      rethrow;
     } on SignInWithAppleAuthorizationException catch (e) {
       if (e.code == AuthorizationErrorCode.canceled) {
         print('🚫 Apple sign-in canceled by user.');
@@ -211,11 +244,9 @@ class FirebaseAuthService {
   // -------------------------
   Future<void> signOut() async {
     try {
-      await GoogleSignIn().signOut();
-      await _auth.signOut();
-    } catch (e) {
-      print('⚠️ Error signing out: $e');
-    }
+      await _googleSignIn.signOut();
+    } catch (_) {}
+    await _auth.signOut();
   }
 
   User? getCurrentUser() => _auth.currentUser;
@@ -224,10 +255,12 @@ class FirebaseAuthService {
   // Helpers for Nonce
   // -------------------------
   String _randomNonce([int length = 32]) {
-    const charset = '0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._';
+    const charset =
+        '0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._';
     final rand = Random.secure();
     return List.generate(length, (_) => charset[rand.nextInt(charset.length)]).join();
   }
 
-  String _sha256(String input) => crypto.sha256.convert(utf8.encode(input)).toString();
+  String _sha256(String input) =>
+      crypto.sha256.convert(utf8.encode(input)).toString();
 }
