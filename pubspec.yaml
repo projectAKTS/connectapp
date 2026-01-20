@@ -60,3 +60,6 @@ flutter:
 
   assets:
     - assets/default_profile.png
+
+  config:
+    enable-swift-package-manager: false

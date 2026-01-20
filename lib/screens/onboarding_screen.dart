@@ -36,8 +36,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   String _role = 'seeker'; // seeker | helper | both
 
   final List<String> _allTopics = const [
-    'Immigration','Moving to Canada','PR Pathways','Quebec-specific help',
-    'Job hunting','Refugee claim process','Student life','Parenting support','Language learning',
+    'Immigration',
+    'Moving to Canada',
+    'PR Pathways',
+    'Quebec-specific help',
+    'Job hunting',
+    'Refugee claim process',
+    'Student life',
+    'Parenting support',
+    'Language learning',
   ];
   final Set<String> _selectedTopics = {};
 
@@ -120,8 +127,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       setState(() => _loading = false);
       return;
     }
-    final snap =
-        await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+
+    final snap = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
     if (!snap.exists) {
       setState(() => _loading = false);
       return;
@@ -133,29 +140,31 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       _profilePhotoUrl =
           (d['profilePicture']?.toString().isNotEmpty ?? false) ? d['profilePicture'] : null;
 
-      _country  = (d['country']?.toString().isNotEmpty ?? false) ? d['country'] : null;
+      _country = (d['country']?.toString().isNotEmpty ?? false) ? d['country'] : null;
       _language = (d['language']?.toString().isNotEmpty ?? false) ? d['language'] : null;
       _countryCtrl.text = _country ?? '';
       _languageCtrl.text = _language ?? '';
-      _role     = d['role'] ?? 'seeker';
+      _role = d['role'] ?? 'seeker';
 
       _selectedTopics
         ..clear()
         ..addAll((d['interestTags'] is List) ? List<String>.from(d['interestTags']) : const []);
 
-      _bioCtrl.text = (d['bio'] == null || d['bio'] == 'No bio available yet.')
-          ? '' : (d['bio'] ?? '');
+      _bioCtrl.text = (d['bio'] == null || d['bio'] == 'No bio available yet.') ? '' : (d['bio'] ?? '');
       _skillsCtrl.text =
           (d['skills'] is List) ? (d['skills'] as List).join(', ') : (d['skills'] ?? '');
       _expCtrl.text = d['experience'] ?? '';
 
       _journeys = (d['journeys'] is List) ? List<String>.from(d['journeys']) : [];
 
-      if (d['availability'] != null && d['availability'].toString().contains('–')) {
-        final parts = d['availability'].toString().split('–');
+      // ✅ accepts both "–" and "-"
+      final avail = (d['availability'] ?? '').toString();
+      final sep = avail.contains('–') ? '–' : (avail.contains('-') ? '-' : null);
+      if (sep != null) {
+        final parts = avail.split(sep);
         if (parts.length == 2) {
           _startTime = _parseTimeOfDay(parts[0].trim());
-          _endTime   = _parseTimeOfDay(parts[1].trim());
+          _endTime = _parseTimeOfDay(parts[1].trim());
         }
       }
 
@@ -193,10 +202,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }..removeWhere((k, v) => v == null);
 
     try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .set(data, SetOptions(merge: true));
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set(data, SetOptions(merge: true));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -208,6 +214,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Future<void> _complete({required bool skipped}) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
+
     final data = {
       'displayName': _displayNameCtrl.text.trim(),
       'country': _country ?? '',
@@ -232,10 +239,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }..removeWhere((k, v) => v == null);
 
     try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .set(data, SetOptions(merge: true));
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set(data, SetOptions(merge: true));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -261,11 +265,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         curve: Curves.easeOutCubic,
       );
     } else {
+      // ✅ never stuck in loading if something fails
       setState(() => _loading = true);
-      await _complete(skipped: false);
-      if (!mounted) return;
-      // Always proceed to home; Firestore errors were handled with a snackbar.
-      Navigator.of(context).pushReplacementNamed('/home');
+      try {
+        await _complete(skipped: false);
+        if (!mounted) return;
+        // ✅ go to AuthGate, NOT /home
+        Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+      } finally {
+        if (mounted) setState(() => _loading = false);
+      }
     }
   }
 
@@ -314,8 +323,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       );
       if (source == null) return;
 
-      final XFile? xfile =
-          await picker.pickImage(source: source, maxWidth: 1024, imageQuality: 88);
+      final XFile? xfile = await picker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        imageQuality: 88,
+      );
       if (xfile == null) return;
 
       final file = File(xfile.path);
@@ -363,9 +375,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   ? null
                   : () async {
                       setState(() => _loading = true);
-                      await _complete(skipped: true);
-                      if (!mounted) return;
-                      Navigator.of(context).pushReplacementNamed('/home');
+                      try {
+                        await _complete(skipped: true);
+                        if (!mounted) return;
+                        // ✅ go to AuthGate, NOT /home
+                        Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+                      } finally {
+                        if (mounted) setState(() => _loading = false);
+                      }
                     },
               child: const Text('Skip for now'),
             ),
@@ -415,7 +432,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     ),
                   ),
 
-                  // Bottom controls (same styling)
+                  // Bottom controls
                   AnimatedPadding(
                     duration: const Duration(milliseconds: 150),
                     padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + (bottomInset > 0 ? 8 : 0)),
@@ -455,16 +472,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
-  // ---------- Steps (pages) ----------
+  // ---------- Steps ----------
   Widget _stepProfile() {
-    // Stretch fields full-width of the content area.
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       child: Form(
         key: _formKey,
         child: Column(
           children: [
-            // Avatar with real picker
             GestureDetector(
               onTap: _pickProfilePhoto,
               child: Stack(
@@ -473,9 +488,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     radius: 44,
                     backgroundColor: AppColors.avatarBg,
                     foregroundColor: AppColors.avatarFg,
-                    backgroundImage: (_profilePhotoUrl?.isNotEmpty ?? false)
-                        ? NetworkImage(_profilePhotoUrl!)
-                        : null,
+                    backgroundImage: (_profilePhotoUrl?.isNotEmpty ?? false) ? NetworkImage(_profilePhotoUrl!) : null,
                     child: (_profilePhotoUrl?.isEmpty ?? true)
                         ? const Icon(Icons.camera_alt, size: 30, color: AppColors.text)
                         : null,
@@ -484,10 +497,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     right: 0,
                     bottom: 0,
                     child: Container(
-                      decoration: const BoxDecoration(
-                        color: AppColors.button,
-                        shape: BoxShape.circle,
-                      ),
+                      decoration: const BoxDecoration(color: AppColors.button, shape: BoxShape.circle),
                       padding: const EdgeInsets.all(6),
                       child: const Icon(Icons.edit, size: 16, color: AppColors.text),
                     ),
@@ -512,7 +522,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
             const SizedBox(height: 12),
 
-            // Country (anchored dropdown) — full width
             Align(
               alignment: Alignment.centerLeft,
               child: _LabeledField(
@@ -522,16 +531,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   controller: _countryCtrl,
                   value: _country,
                   hint: 'Select country',
-                  options: const ['Canada','USA','Other'],
-                  onChanged: (v) {
-                    setState(() { _country = v; _countryCtrl.text = v ?? ''; });
-                  },
+                  options: const ['Canada', 'USA', 'Other'],
+                  onChanged: (v) => setState(() {
+                    _country = v;
+                    _countryCtrl.text = v ?? '';
+                  }),
                 ),
               ),
             ),
             const SizedBox(height: 12),
 
-            // Language (anchored dropdown) — full width
             Align(
               alignment: Alignment.centerLeft,
               child: _LabeledField(
@@ -541,10 +550,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   controller: _languageCtrl,
                   value: _language,
                   hint: 'Select language',
-                  options: const ['English','French','Other'],
-                  onChanged: (v) {
-                    setState(() { _language = v; _languageCtrl.text = v ?? ''; });
-                  },
+                  options: const ['English', 'French', 'Other'],
+                  onChanged: (v) => setState(() {
+                    _language = v;
+                    _languageCtrl.text = v ?? '';
+                  }),
                 ),
               ),
             ),
@@ -562,43 +572,48 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         children: [
           const Text('How would you like to use the app?', style: TextStyle(fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
-
-          // Keep tick + stable width
           Wrap(
-            spacing: 8, runSpacing: 8,
+            spacing: 8,
+            runSpacing: 8,
             children: [
               _roleChip('seeker', Icons.help_outline, 'I’m here to get help'),
               _roleChip('helper', Icons.volunteer_activism_outlined, 'I’m here to give help'),
               _roleChip('both', Icons.all_inclusive, 'I’m open to both'),
             ],
           ),
-
           const SizedBox(height: 16),
           const Text('Preferred mode', style: TextStyle(fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
-
-          // Booking-style for chat/call/video
           Wrap(
-            spacing: 8, runSpacing: 8,
+            spacing: 8,
+            runSpacing: 8,
             children: [
               _bookingPill(
                 label: 'CHAT',
                 selected: _mode == 'chat',
-                onTap: () { HapticFeedback.selectionClick(); setState(() => _mode = 'chat'); },
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  setState(() => _mode = 'chat');
+                },
               ),
               _bookingPill(
                 label: 'CALL',
                 selected: _mode == 'call',
-                onTap: () { HapticFeedback.selectionClick(); setState(() => _mode = 'call'); },
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  setState(() => _mode = 'call');
+                },
               ),
               _bookingPill(
                 label: 'VIDEO',
                 selected: _mode == 'video',
-                onTap: () { HapticFeedback.selectionClick(); setState(() => _mode = 'video'); },
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  setState(() => _mode = 'video');
+                },
               ),
             ],
           ),
-
           const SizedBox(height: 16),
           _SoftCard(
             child: ListTile(
@@ -606,9 +621,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               leading: const Icon(Icons.access_time, color: AppColors.text),
               title: const Text('Availability'),
               subtitle: Text(
-                _startTime == null || _endTime == null
-                    ? 'Not set'
-                    : '${_startTime!.format(context)} – ${_endTime!.format(context)}',
+                _startTime == null || _endTime == null ? 'Not set' : '${_startTime!.format(context)} – ${_endTime!.format(context)}',
                 style: const TextStyle(color: AppColors.muted),
               ),
               trailing: const Icon(Icons.edit_calendar_outlined),
@@ -623,7 +636,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   initialTime: _endTime ?? const TimeOfDay(hour: 17, minute: 0),
                 );
                 if (en == null) return;
-                setState(() { _startTime = st; _endTime = en; });
+                setState(() {
+                  _startTime = st;
+                  _endTime = en;
+                });
               },
             ),
           ),
@@ -640,23 +656,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         children: [
           const Text('Pick a few topics', style: TextStyle(fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
-
           Wrap(
-            spacing: 8, runSpacing: 8,
+            spacing: 8,
+            runSpacing: 8,
             children: _allTopics.map((t) {
               final selected = _selectedTopics.contains(t);
               return ChoiceChip(
-                avatar: Icon(Icons.check,
-                    size: 18,
-                    color: selected ? AppColors.text : Colors.transparent), // tick kept
+                avatar: Icon(Icons.check, size: 18, color: selected ? AppColors.text : Colors.transparent),
                 label: Text(t),
                 selected: selected,
                 showCheckmark: false,
                 onSelected: (_) {
                   HapticFeedback.selectionClick();
-                  setState(() {
-                    selected ? _selectedTopics.remove(t) : _selectedTopics.add(t);
-                  });
+                  setState(() => selected ? _selectedTopics.remove(t) : _selectedTopics.add(t));
                 },
                 selectedColor: AppColors.button,
                 backgroundColor: AppColors.card,
@@ -669,25 +681,22 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               );
             }).toList(),
           ),
-
           const SizedBox(height: 16),
           const Text('Journeys you’ve been through', style: TextStyle(fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
-
           Wrap(
-            spacing: 8, runSpacing: 8,
-            children: ['Refugee claim approved','Student','Worker'].map((j) {
+            spacing: 8,
+            runSpacing: 8,
+            children: ['Refugee claim approved', 'Student', 'Worker'].map((j) {
               final sel = _journeys.contains(j);
               return FilterChip(
-                avatar: Icon(Icons.check,
-                    size: 18,
-                    color: sel ? AppColors.text : Colors.transparent),
+                avatar: Icon(Icons.check, size: 18, color: sel ? AppColors.text : Colors.transparent),
                 label: Text(j),
                 selected: sel,
                 showCheckmark: false,
                 onSelected: (_) {
                   HapticFeedback.selectionClick();
-                  setState(() { sel ? _journeys.remove(j) : _journeys.add(j); });
+                  setState(() => sel ? _journeys.remove(j) : _journeys.add(j));
                 },
                 selectedColor: AppColors.button,
                 backgroundColor: AppColors.card,
@@ -708,7 +717,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Short bio: hint-only, no floating label, clipped safely
           ClipRRect(
             borderRadius: BorderRadius.circular(14),
             child: TextFormField(
@@ -721,13 +729,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
           ),
           const SizedBox(height: 12),
-
           _SoftCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('If you plan to help others',
-                    style: TextStyle(fontWeight: FontWeight.w700)),
+                const Text('If you plan to help others', style: TextStyle(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 12),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(14),
@@ -759,7 +765,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   // ---------- helpers ----------
-  // Anchored M3 dropdown (opens directly below its field, and now stretches full width)
   Widget _anchoredDropdown({
     required TextEditingController controller,
     required List<String> options,
@@ -771,10 +776,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       controller: controller,
       initialSelection: value,
       hintText: hint,
-      dropdownMenuEntries: options
-          .map((e) => DropdownMenuEntry<String>(value: e, label: e))
-          .toList(),
-      width: double.infinity,       // <- match field width exactly
+      dropdownMenuEntries: options.map((e) => DropdownMenuEntry<String>(value: e, label: e)).toList(),
+      width: double.infinity,
       menuHeight: 240,
       inputDecorationTheme: InputDecorationTheme(
         isDense: true,
@@ -850,9 +853,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Widget _roleChip(String value, IconData icon, String label) {
     final sel = _role == value;
     return ChoiceChip(
-      avatar: Icon(Icons.check,
-          size: 18,
-          color: sel ? AppColors.text : Colors.transparent), // tick kept + stable width
+      avatar: Icon(Icons.check, size: 18, color: sel ? AppColors.text : Colors.transparent),
       label: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(icon, size: 18, color: AppColors.muted),
         const SizedBox(width: 6),
@@ -881,7 +882,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       if (lower.contains('pm') && hour < 12) hour += 12;
       if (lower.contains('am') && hour == 12) hour = 0;
       return TimeOfDay(hour: hour, minute: minute);
-    } catch (_) { return null; }
+    } catch (_) {
+      return null;
+    }
   }
 }
 
@@ -939,13 +942,15 @@ class _LabeledField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              color: AppColors.text,
-              fontSize: compact ? 13 : 14,
-              height: 1.15,
-            )),
+        Text(
+          label,
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            color: AppColors.text,
+            fontSize: compact ? 13 : 14,
+            height: 1.15,
+          ),
+        ),
         const SizedBox(height: 6),
         child,
       ],

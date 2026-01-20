@@ -1,5 +1,7 @@
 // lib/services/notification_service.dart
 import 'dart:async';
+import 'dart:io' show Platform;
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
@@ -43,6 +45,7 @@ class NotificationService {
 
     if (settings.authorizationStatus != AuthorizationStatus.authorized) {
       debugPrint('❌ Notification permission not granted');
+      // Don't crash. App can still run without push.
     }
 
     // iOS foreground behavior
@@ -122,13 +125,13 @@ class NotificationService {
       await _handleMessage(initial, showLocal: false);
     }
 
-    // Register token now
-    await _registerFcmToken();
+    // Register token now (safe on iOS)
+    await _registerFcmTokenSafe();
 
     // Keep user doc in sync on token refresh
     _tokenSub?.cancel();
     _tokenSub = _fcm.onTokenRefresh.listen((newToken) async {
-      await _registerFcmToken(forceToken: newToken);
+      await _registerFcmTokenSafe(forceToken: newToken);
     });
   }
 
@@ -137,12 +140,27 @@ class NotificationService {
     _tokenSub = null;
   }
 
-  Future<void> _registerFcmToken({String? forceToken}) async {
+  /// On iOS: wait for APNS token before calling getToken() to avoid crash
+  Future<void> _registerFcmTokenSafe({String? forceToken}) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      final token = forceToken ?? await _fcm.getToken();
+      // If we are forcing a token (from onTokenRefresh), no need for APNS check
+      String? token = forceToken;
+
+      if (token == null) {
+        if (Platform.isIOS) {
+          final ready = await _waitForApnsToken(maxAttempts: 10, delayMs: 400);
+          if (!ready) {
+            debugPrint('⚠️ APNS token not ready yet. Skipping FCM token for now.');
+            return; // Don't crash; try later (token refresh / next app open)
+          }
+        }
+
+        token = await _fcm.getToken(); // safe now
+      }
+
       if (token == null || token.isEmpty) return;
 
       final app = FirebaseFirestore.instance.app;
@@ -162,9 +180,27 @@ class NotificationService {
         debugPrint('⚠️ Skipping FCM token write (permission denied). Check /users allowlist.');
         return;
       }
+
+      // IMPORTANT: don't rethrow (this was crashing your app)
       debugPrint('❌ FCM token write failed: code=${e.code} message=${e.message}');
-      rethrow;
+      return;
+    } catch (e, st) {
+      // Also don't crash for any other unexpected error
+      debugPrint('❌ FCM token register unexpected error: $e\n$st');
+      return;
     }
+  }
+
+  Future<bool> _waitForApnsToken({int maxAttempts = 10, int delayMs = 400}) async {
+    if (!Platform.isIOS) return true;
+
+    for (int i = 0; i < maxAttempts; i++) {
+      final apns = await _fcm.getAPNSToken();
+      if (apns != null && apns.isNotEmpty) return true;
+      await Future.delayed(Duration(milliseconds: delayMs));
+    }
+    final apns = await _fcm.getAPNSToken();
+    return apns != null && apns.isNotEmpty;
   }
 
   /// Central handler for all incoming FCMs.

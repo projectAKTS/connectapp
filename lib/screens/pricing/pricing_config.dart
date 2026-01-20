@@ -1,18 +1,19 @@
-/// Centralized pricing and monetization configuration
-/// Currency: CAD (Canadian Dollars)
-///
-/// This ensures consistent pricing across all parts of the app:
-/// - Consultation booking
-/// - Checkout / Stripe integration
-/// - Earnings / analytics
-/// - Display in UI components
+// lib/screens/pricing/pricing_config.dart
+import 'dart:math';
 
 class PricingConfig {
-  /// Available consultation durations in minutes
+  /// Finalized durations (minutes)
   static const List<int> durations = [5, 10, 15, 30, 45, 60];
 
-  /// Seeker-facing retail prices (in CAD) for AUDIO sessions
-  static const Map<int, double> audioPrices = {
+  /// PDF: Video is +30% over audio. :contentReference[oaicite:2]{index=2}
+  static const double videoMultiplier = 1.30;
+
+  /// PDF: Helper net ~80%, platform ~20%. :contentReference[oaicite:3]{index=3}
+  static const double helperShare = 0.80;
+  static const double platformShare = 0.20;
+
+  /// Audio base prices (CAD) from the finalized pricing table. :contentReference[oaicite:4]{index=4}
+  static const Map<int, double> _audioBase = {
     5: 2.99,
     10: 4.49,
     15: 6.99,
@@ -21,52 +22,41 @@ class PricingConfig {
     60: 22.99,
   };
 
-  /// Video sessions cost 30% more (premium tier)
-  static double getVideoPrice(int duration) {
-    final base = audioPrices[duration] ?? 0;
-    return double.parse((base * 1.3).toStringAsFixed(2));
+  /// Some video values in the PDF have cents rounding (e.g. 15 min = 9.09, 45 = 23.39).
+  /// We keep an explicit table to match the doc exactly. :contentReference[oaicite:5]{index=5}
+  static const Map<int, double> _videoExact = {
+    5: 3.89,
+    10: 5.89,
+    15: 9.09,
+    30: 16.89,
+    45: 23.39,
+    60: 29.89,
+  };
+
+  static double getPrice(int minutes, String callType) {
+    final audio = _audioBase[minutes] ?? 0.0;
+    if (callType == 'video') {
+      // Use exact values so UI matches the PDFs.
+      return _videoExact[minutes] ?? _round2(audio * videoMultiplier);
+    }
+    return audio;
   }
 
-  /// Platform fee percentage (default 20%)
-  static const double platformFee = 0.20;
-
-  /// Returns the price for given duration & call type
-  static double getPrice(int duration, String callType) {
-    if (callType == 'video') return getVideoPrice(duration);
-    return audioPrices[duration] ?? 0;
+  static double getHelperPayout(int minutes, String callType) {
+    final price = getPrice(minutes, callType);
+    return _round2(price * helperShare);
   }
 
-  /// Returns the helper payout (after platform fee)
-  static double getHelperPayout(int duration, String callType) {
-    final price = getPrice(duration, callType);
-    final payout = price * (1 - platformFee);
-    return double.parse(payout.toStringAsFixed(2));
+  static double getPlatformFee(int minutes, String callType) {
+    final price = getPrice(minutes, callType);
+    return _round2(price * platformShare);
   }
 
-  /// Returns the platform’s share for a given session
-  static double getPlatformCut(int duration, String callType) {
-    final price = getPrice(duration, callType);
-    final cut = price * platformFee;
-    return double.parse(cut.toStringAsFixed(2));
-  }
+  static double _round2(double v) => (v * 100).roundToDouble() / 100.0;
 
-  /// Returns the rate per minute (rounded)
-  static double getRatePerMinute(int duration, String callType) {
-    final price = getPrice(duration, callType);
-    if (duration <= 0) return 0;
-    return double.parse((price / duration).toStringAsFixed(2));
-  }
-
-  /// Summary for logs or analytics
-  static Map<String, dynamic> getSummary(int duration, String callType) {
-    return {
-      'duration': '$duration min',
-      'callType': callType,
-      'price (CAD)': getPrice(duration, callType),
-      'rate/min (CAD)': getRatePerMinute(duration, callType),
-      'platform fee %': platformFee * 100,
-      'helper payout (CAD)': getHelperPayout(duration, callType),
-      'platform cut (CAD)': getPlatformCut(duration, callType),
-    };
+  /// Optional: for sorting / safety
+  static int clampDuration(int minutes) {
+    if (_audioBase.containsKey(minutes)) return minutes;
+    return durations.reduce((a, b) => (minutes - a).abs() < (minutes - b).abs() ? a : b);
   }
 }

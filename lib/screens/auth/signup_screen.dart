@@ -1,3 +1,4 @@
+// lib/screens/auth/signup_screen.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
@@ -16,10 +17,10 @@ class SignupScreen extends StatefulWidget {
 class _SignupScreenState extends State<SignupScreen> {
   final _authService = FirebaseAuthService();
   final _firstNameCtrl = TextEditingController();
-  final _lastNameCtrl  = TextEditingController();
-  final _emailCtrl     = TextEditingController();
-  final _passwordCtrl  = TextEditingController();
-  final _confirmCtrl   = TextEditingController();
+  final _lastNameCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+  final _confirmCtrl = TextEditingController();
 
   bool _isLoading = false;
   bool _isSocialLoading = false;
@@ -27,6 +28,11 @@ class _SignupScreenState extends State<SignupScreen> {
   bool _obscure2 = true;
 
   final _functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+
+  void _goRoot() {
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+  }
 
   @override
   void dispose() {
@@ -40,10 +46,10 @@ class _SignupScreenState extends State<SignupScreen> {
 
   Future<void> _register() async {
     final first = _firstNameCtrl.text.trim();
-    final last  = _lastNameCtrl.text.trim();
+    final last = _lastNameCtrl.text.trim();
     final email = _emailCtrl.text.trim();
-    final pass  = _passwordCtrl.text.trim();
-    final conf  = _confirmCtrl.text.trim();
+    final pass = _passwordCtrl.text.trim();
+    final conf = _confirmCtrl.text.trim();
 
     if (first.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -67,7 +73,6 @@ class _SignupScreenState extends State<SignupScreen> {
     setState(() => _isLoading = true);
     try {
       final fullName = '$first ${last.isEmpty ? '' : last}'.trim();
-
       final user = await _authService.registerWithEmail(email, pass, fullName);
       if (user == null) throw Exception('Registration failed');
 
@@ -84,6 +89,7 @@ class _SignupScreenState extends State<SignupScreen> {
         'xpPoints': 0,
         'helpfulVotesGiven': <Map<String, dynamic>>[],
         'helpfulMarks': 0,
+        'onboardingComplete': false,
       };
 
       await FirebaseFirestore.instance
@@ -91,22 +97,21 @@ class _SignupScreenState extends State<SignupScreen> {
           .doc(user.uid)
           .set(userData, SetOptions(merge: true));
 
-      await user.getIdToken(true);
-
       // Optional Stripe customer
       try {
         final callable = _functions.httpsCallable('createStripeCustomer');
         await callable();
-      } catch (_) {/* ignore */}
+      } catch (_) {}
 
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Registered! Let’s finish onboarding.')),
       );
+
       Navigator.pushReplacementNamed(context, '/onboarding');
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
-      setState(() => _isLoading = false);
       final msg = switch (e.code) {
         'email-already-in-use' => 'That email is already registered.',
         'invalid-email' => 'Invalid email address.',
@@ -116,51 +121,52 @@ class _SignupScreenState extends State<SignupScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     } catch (e) {
       if (!mounted) return;
-      setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _signUpWithGoogle() async {
+    if (_isSocialLoading) return;
     setState(() => _isSocialLoading = true);
     try {
       final u = await _authService.signInWithGoogle();
       if (!mounted) return;
-      setState(() => _isSocialLoading = false);
+
       if (u != null) {
-        Navigator.pushReplacementNamed(context, '/home');
+        _goRoot();
       } else {
-        // User cancelled; just show a soft message
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Google sign-in was cancelled.')),
         );
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() => _isSocialLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Google sign-in failed: $e')),
       );
+    } finally {
+      if (mounted) setState(() => _isSocialLoading = false);
     }
   }
 
   Future<void> _signUpWithApple() async {
+    if (_isSocialLoading) return;
     setState(() => _isSocialLoading = true);
     try {
       final u = await _authService.signInWithApple();
       if (!mounted) return;
-      setState(() => _isSocialLoading = false);
-      if (u != null) {
-        Navigator.pushReplacementNamed(context, '/home');
-      }
+      if (u != null) _goRoot();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _isSocialLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Apple sign-in failed: $e')),
       );
+    } finally {
+      if (mounted) setState(() => _isSocialLoading = false);
     }
   }
 
@@ -185,8 +191,6 @@ class _SignupScreenState extends State<SignupScreen> {
               Text('Join the community and start connecting.',
                   style: t.textTheme.bodyMedium),
               const SizedBox(height: 16),
-
-              // Soft card container
               Container(
                 padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
                 decoration: BoxDecoration(
@@ -197,7 +201,6 @@ class _SignupScreenState extends State<SignupScreen> {
                 ),
                 child: Column(
                   children: [
-                    // Names row with labels ABOVE fields (no truncation)
                     Row(
                       children: [
                         Expanded(
@@ -232,7 +235,6 @@ class _SignupScreenState extends State<SignupScreen> {
                       ],
                     ),
                     const SizedBox(height: 12),
-
                     _LabeledField(
                       label: 'Email',
                       child: TextField(
@@ -248,7 +250,6 @@ class _SignupScreenState extends State<SignupScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-
                     _LabeledField(
                       label: 'Password',
                       child: TextField(
@@ -261,15 +262,16 @@ class _SignupScreenState extends State<SignupScreen> {
                           prefixIcon: const Icon(Icons.lock_outline,
                               color: AppColors.muted),
                           suffixIcon: IconButton(
-                            icon: Icon(
-                                _obscure1 ? Icons.visibility : Icons.visibility_off),
-                            onPressed: () => setState(() => _obscure1 = !_obscure1),
+                            icon: Icon(_obscure1
+                                ? Icons.visibility
+                                : Icons.visibility_off),
+                            onPressed: () =>
+                                setState(() => _obscure1 = !_obscure1),
                           ),
                         ),
                       ),
                     ),
                     const SizedBox(height: 12),
-
                     _LabeledField(
                       label: 'Confirm password',
                       child: TextField(
@@ -281,15 +283,16 @@ class _SignupScreenState extends State<SignupScreen> {
                           prefixIcon: const Icon(Icons.lock_outline,
                               color: AppColors.muted),
                           suffixIcon: IconButton(
-                            icon: Icon(
-                                _obscure2 ? Icons.visibility : Icons.visibility_off),
-                            onPressed: () => setState(() => _obscure2 = !_obscure2),
+                            icon: Icon(_obscure2
+                                ? Icons.visibility
+                                : Icons.visibility_off),
+                            onPressed: () =>
+                                setState(() => _obscure2 = !_obscure2),
                           ),
                         ),
                       ),
                     ),
                     const SizedBox(height: 16),
-
                     _isLoading
                         ? const Center(child: CircularProgressIndicator())
                         : SizedBox(
@@ -302,12 +305,9 @@ class _SignupScreenState extends State<SignupScreen> {
                   ],
                 ),
               ),
-
               const SizedBox(height: 18),
               const _OrDivider(),
               const SizedBox(height: 12),
-
-              // Social
               _SoftButton(
                 icon: Icons.g_mobiledata,
                 label: 'Sign up with Google',
@@ -321,13 +321,12 @@ class _SignupScreenState extends State<SignupScreen> {
                 onPressed: _isSocialLoading ? null : _signUpWithApple,
                 loading: _isSocialLoading,
               ),
-
               const SizedBox(height: 16),
               TextButton(
-                onPressed: () => Navigator.pushReplacementNamed(context, '/login'),
+                onPressed: () =>
+                    Navigator.pushReplacementNamed(context, '/login'),
                 child: const Text('Already have an account? Log in'),
               ),
-
               const SizedBox(height: 8),
               Text(
                 'By creating an account, you agree to our Terms & Privacy.',
@@ -398,7 +397,10 @@ class _SoftButton extends StatelessWidget {
       icon: Icon(icon, color: AppColors.text),
       label: loading
           ? const SizedBox(
-              height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+              height: 20,
+              width: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
           : Text(label),
       style: TextButton.styleFrom(
         backgroundColor: AppColors.button,

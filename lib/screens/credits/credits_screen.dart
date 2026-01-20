@@ -1,45 +1,79 @@
+// lib/screens/credits/credits_screen.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:intl/intl.dart';
-import 'package:in_app_purchase/in_app_purchase.dart';
 
+import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:connect_app/services/subscription_service.dart';
 import 'package:connect_app/theme/tokens.dart';
 
-class CreditsStoreScreen extends StatefulWidget {
-  const CreditsStoreScreen({Key? key}) : super(key: key);
+class CreditsScreen extends StatefulWidget {
+  const CreditsScreen({super.key});
 
   @override
-  State<CreditsStoreScreen> createState() => _CreditsStoreScreenState();
+  State<CreditsScreen> createState() => _CreditsScreenState();
 }
 
-class _CreditsStoreScreenState extends State<CreditsStoreScreen> {
-  Future<List<ProductDetails>>? _packsFuture;
+class _CreditsScreenState extends State<CreditsScreen> {
+  bool _loading = true;
+  String? _error;
+  List<ProductDetails> _products = [];
 
   @override
   void initState() {
     super.initState();
-    _reload();
+    _load();
   }
 
-  void _reload() {
+  Future<void> _load() async {
     setState(() {
-      _packsFuture = SubscriptionService.fetchCredits();
+      _loading = true;
+      _error = null;
     });
+
+    try {
+      final list = await SubscriptionService.fetchCredits();
+      list.sort((a, b) => _minutesFromId(a.id).compareTo(_minutesFromId(b.id)));
+
+      setState(() {
+        _products = list;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
   }
 
-  void _snack(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  int _minutesFromId(String id) {
+    final s = id.toLowerCase();
+    if (s.contains('5')) return 5;
+    if (s.contains('30')) return 30;
+    if (s.contains('60')) return 60;
+    final digits = RegExp(r'\d+').firstMatch(s)?.group(0);
+    return int.tryParse(digits ?? '') ?? 5;
+    }
+
+  String _badgeFor(int minutes) {
+    if (minutes >= 60) return 'Best value';
+    if (minutes >= 30) return 'Popular';
+    return 'Quick';
   }
 
   Future<void> _buy(ProductDetails p) async {
     try {
       await SubscriptionService.buyCredits(p);
-      _snack('Purchase started…');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Purchase started…')),
+      );
     } catch (e) {
-      _snack('Could not start purchase: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Couldn’t start purchase: $e')),
+      );
     }
   }
 
@@ -47,264 +81,228 @@ class _CreditsStoreScreenState extends State<CreditsStoreScreen> {
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
 
-    final theme = Theme.of(context).copyWith(
-      scaffoldBackgroundColor: AppColors.canvas,
-      appBarTheme: const AppBarTheme(
+    return Scaffold(
+      backgroundColor: AppColors.canvas,
+      appBar: AppBar(
         backgroundColor: AppColors.canvas,
         elevation: 0,
-        foregroundColor: AppColors.text,
-        iconTheme: IconThemeData(color: AppColors.text),
-        titleTextStyle: TextStyle(
-          color: AppColors.text,
-          fontSize: 20,
-          fontWeight: FontWeight.w800,
+        centerTitle: true,
+        title: const Text(
+          'Credits',
+          style: TextStyle(color: AppColors.text, fontWeight: FontWeight.w900),
         ),
+        actions: [
+          IconButton(
+            onPressed: _load,
+            icon: const Icon(Icons.refresh_rounded, color: AppColors.text),
+          ),
+        ],
+      ),
+      body: uid == null
+          ? const Center(child: Text('Please log in'))
+          : StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+              stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+              builder: (context, snap) {
+                final data = snap.data?.data();
+                final minutes = (data?['freeConsultationMinutes'] as num?)?.toInt() ?? 0;
+
+                return ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                  children: [
+                    _BalanceCard(minutes: minutes),
+                    const SizedBox(height: 14),
+
+                    const Text(
+                      'Top up',
+                      style: TextStyle(
+                        color: AppColors.text,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 18,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    if (_loading) const _LoadingCard(label: 'Loading…'),
+                    if (!_loading && _error != null) _ErrorCard(error: _error!, onRetry: _load),
+                    if (!_loading && _error == null && _products.isEmpty)
+                      const _EmptyCard(
+                        title: 'No options found',
+                        body: 'Make sure your credit products exist in App Store Connect.',
+                      ),
+
+                    if (!_loading && _error == null && _products.isNotEmpty) ...[
+                      ..._products.map((p) {
+                        final m = _minutesFromId(p.id);
+                        final accent = m >= 60;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _OptionCard(
+                            title: '$m minutes',
+                            badge: _badgeFor(m),
+                            price: p.price,
+                            accent: accent,
+                            onTap: () => _buy(p),
+                          ),
+                        );
+                      }),
+                    ],
+
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Credits are used automatically when you book a call.',
+                      style: TextStyle(
+                        color: AppColors.muted,
+                        fontWeight: FontWeight.w700,
+                        height: 1.25,
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+    );
+  }
+}
+
+class _BalanceCard extends StatelessWidget {
+  final int minutes;
+  const _BalanceCard({required this.minutes});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.primary.withOpacity(0.20)),
+            ),
+            child: const Icon(Icons.account_balance_wallet_rounded, color: AppColors.primary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Your balance',
+                  style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '$minutes minutes',
+                  style: const TextStyle(
+                    color: AppColors.text,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
+  }
+}
 
-    if (uid == null) {
-      return Theme(
-        data: theme,
-        child: Scaffold(
-          appBar: AppBar(title: const Text('Credits')),
-          body: const Center(child: Text('Please log in.')),
-        ),
-      );
-    }
+class _OptionCard extends StatelessWidget {
+  final String title;
+  final String badge;
+  final String price;
+  final bool accent;
+  final VoidCallback onTap;
 
-    return Theme(
-      data: theme,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Credits'),
-          actions: [
-            IconButton(
-              tooltip: 'Refresh',
-              icon: const Icon(Icons.refresh_rounded),
-              onPressed: _reload,
-            ),
-          ],
-        ),
-        body: RefreshIndicator.adaptive(
-          onRefresh: () async => _reload(),
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+  const _OptionCard({
+    required this.title,
+    required this.badge,
+    required this.price,
+    required this.accent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final border = accent ? AppColors.primary.withOpacity(0.35) : AppColors.border;
+    final bg = accent ? AppColors.primary.withOpacity(0.06) : AppColors.card;
+
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: border),
+          ),
+          child: Row(
             children: [
-              StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
-                builder: (ctx, snap) {
-                  final data = snap.data?.data() ?? const <String, dynamic>{};
-                  final minutes = (data['freeConsultationMinutes'] is num)
-                      ? (data['freeConsultationMinutes'] as num).toInt()
-                      : 0;
-
-                  final empty = minutes <= 0;
-
-                  return _SoftCard(
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: AppColors.button,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: AppColors.border),
-                          ),
-                          child: const Icon(Icons.account_balance_wallet_outlined, color: AppColors.text),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Your balance',
-                                style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '$minutes minutes',
-                                style: const TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: -0.3,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: AppColors.button,
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(color: AppColors.border),
-                          ),
-                          child: Text(
-                            empty ? 'Empty' : 'Available',
-                            style: const TextStyle(
-                              color: AppColors.text,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: accent ? AppColors.primary.withOpacity(0.12) : AppColors.button,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: accent ? AppColors.primary.withOpacity(0.25) : AppColors.border,
+                  ),
+                ),
+                child: Icon(
+                  accent ? Icons.bolt_rounded : Icons.add_circle_rounded,
+                  color: accent ? AppColors.primary : AppColors.muted,
+                ),
               ),
-
-              const SizedBox(height: 12),
-
-              _SoftCard(
+              const SizedBox(width: 12),
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
+                  children: [
                     Text(
-                      'How credits work',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                      title,
+                      style: const TextStyle(color: AppColors.text, fontWeight: FontWeight.w900, fontSize: 15),
                     ),
-                    SizedBox(height: 6),
-                    Text(
-                      'Credits are used for consultations. Your balance increases after a successful purchase.',
-                      style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600, height: 1.35),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: AppColors.button,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: Text(
+                        badge,
+                        style: const TextStyle(color: AppColors.text, fontWeight: FontWeight.w900, fontSize: 12),
+                      ),
                     ),
                   ],
                 ),
               ),
-
-              const SizedBox(height: 18),
-              const Text(
-                'Buy credit packs',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
-              ),
-              const SizedBox(height: 10),
-
-              FutureBuilder<List<ProductDetails>>(
-                future: _packsFuture,
-                builder: (ctx, snap) {
-                  if (snap.connectionState == ConnectionState.waiting) {
-                    return _LoadingPacks();
-                  }
-
-                  if (snap.hasError) {
-                    return _SoftCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Couldn’t load packs',
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            _friendlyIapError(snap.error),
-                            style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600, height: 1.35),
-                          ),
-                          const SizedBox(height: 12),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: _SmallButton(
-                              label: 'Retry',
-                              onTap: _reload,
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-
-                  final packs = (snap.data ?? []).toList()
-                    ..sort((a, b) => a.rawPrice.compareTo(b.rawPrice));
-
-                  if (packs.isEmpty) {
-                    return _SoftCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Text('No packs found', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
-                          SizedBox(height: 6),
-                          Text(
-                            'Make sure your products exist in App Store Connect and match the IDs in code.',
-                            style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-
-                  return Column(
-                    children: packs.map((p) {
-                      final minutes = _minutesFromProductId(p.id);
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: _SoftCard(
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 46,
-                                height: 46,
-                                decoration: BoxDecoration(
-                                  color: AppColors.primary.withOpacity(0.10),
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(color: AppColors.primary.withOpacity(0.20)),
-                                ),
-                                child: const Icon(Icons.timer_outlined, color: AppColors.primary),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      minutes != null ? '$minutes minutes' : p.title,
-                                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      p.description.isNotEmpty ? p.description : 'Use for consultations',
-                                      style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              _PrimaryButton(
-                                label: p.price,
-                                onTap: () => _buy(p),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  );
-                },
-              ),
-
-              const SizedBox(height: 18),
-              const Text(
-                'History',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
-              ),
-              const SizedBox(height: 10),
-
-              _SoftCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text(
-                      'Coming next',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-                    ),
-                    SizedBox(height: 6),
-                    Text(
-                      'Optional next step: store a credits ledger (purchases + spends) and show history here.',
-                      style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600, height: 1.35),
-                    ),
-                  ],
+              const SizedBox(width: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.primary.withOpacity(0.25)),
+                ),
+                child: Text(
+                  price,
+                  style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w900),
                 ),
               ),
             ],
@@ -313,141 +311,94 @@ class _CreditsStoreScreenState extends State<CreditsStoreScreen> {
       ),
     );
   }
-
-  static String _friendlyIapError(Object? e) {
-    final s = e.toString();
-    // Keep it user-friendly + short, but still helpful for you.
-    if (s.contains('storekit_no_response')) {
-      return 'StoreKit didn’t respond. Check Apple ID / Sandbox login, In-App Purchase capability, and App Store Connect product setup. Then retry.';
-    }
-    return s;
-  }
-
-  static int? _minutesFromProductId(String id) {
-    // Your IDs: credits_5min, credits_30min, credits_60min
-    if (id.contains('5min')) return 5;
-    if (id.contains('30min')) return 30;
-    if (id.contains('60min')) return 60;
-    return null;
-  }
 }
 
-// ---------------- UI bits ----------------
+/// ---------- shared UI cards ----------
 
-class _SoftCard extends StatelessWidget {
-  final Widget child;
-  const _SoftCard({required this.child});
+class _LoadingCard extends StatelessWidget {
+  final String label;
+  const _LoadingCard({required this.label});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.card,
-        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border),
-        boxShadow: const [AppShadows.soft],
+        borderRadius: BorderRadius.circular(18),
       ),
-      padding: const EdgeInsets.all(14),
-      child: child,
-    );
-  }
-}
-
-class _PrimaryButton extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-  const _PrimaryButton({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 40,
-      child: ElevatedButton(
-        onPressed: onTap,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.primary,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          textStyle: const TextStyle(fontWeight: FontWeight.w900),
-        ),
-        child: Text(label),
-      ),
-    );
-  }
-}
-
-class _SmallButton extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-  const _SmallButton({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 40,
-      child: OutlinedButton(
-        onPressed: onTap,
-        style: OutlinedButton.styleFrom(
-          backgroundColor: AppColors.button,
-          foregroundColor: AppColors.text,
-          side: const BorderSide(color: AppColors.border),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          textStyle: const TextStyle(fontWeight: FontWeight.w900),
-        ),
-        child: Text(label),
-      ),
-    );
-  }
-}
-
-class _LoadingPacks extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    Widget line(double w) => Container(
-          width: w,
-          height: 10,
-          decoration: BoxDecoration(
-            color: AppColors.button,
-            borderRadius: BorderRadius.circular(99),
-          ),
-        );
-
-    return _SoftCard(
+      padding: const EdgeInsets.all(18),
       child: Row(
         children: [
-          Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              color: AppColors.button,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppColors.border),
-            ),
-          ),
+          const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
           const SizedBox(width: 12),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                line(120),
-                const SizedBox(height: 10),
-                line(180),
-              ],
+            child: Text(label, style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrorCard extends StatelessWidget {
+  final String error;
+  final VoidCallback onRetry;
+  const _ErrorCard({required this.error, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Couldn’t load', style: TextStyle(color: AppColors.text, fontWeight: FontWeight.w900, fontSize: 15)),
+          const SizedBox(height: 6),
+          Text(error, style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600, height: 1.25)),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 44,
+            child: TextButton(
+              onPressed: onRetry,
+              style: TextButton.styleFrom(
+                backgroundColor: AppColors.button,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              child: const Text('Retry', style: TextStyle(color: AppColors.text, fontWeight: FontWeight.w900)),
             ),
           ),
-          const SizedBox(width: 12),
-          Container(
-            width: 72,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.button,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.border),
-            ),
-          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyCard extends StatelessWidget {
+  final String title;
+  final String body;
+  const _EmptyCard({required this.title, required this.body});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: const TextStyle(color: AppColors.text, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 6),
+          Text(body, style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600, height: 1.25)),
         ],
       ),
     );

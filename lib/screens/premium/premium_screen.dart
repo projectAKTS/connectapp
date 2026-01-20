@@ -1,299 +1,519 @@
+// lib/screens/premium/premium_screen.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:intl/intl.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 
 import 'package:connect_app/services/subscription_service.dart';
 import 'package:connect_app/theme/tokens.dart';
 
 class PremiumScreen extends StatefulWidget {
-  const PremiumScreen({Key? key}) : super(key: key);
+  const PremiumScreen({super.key});
 
   @override
   State<PremiumScreen> createState() => _PremiumScreenState();
 }
 
 class _PremiumScreenState extends State<PremiumScreen> {
-  Future<List<ProductDetails>>? _subsFuture;
+  bool _loading = true;
+  String? _error;
+  List<ProductDetails> _products = [];
 
   @override
   void initState() {
     super.initState();
-    _reload();
+    _load();
   }
 
-  void _reload() {
+  Future<void> _load() async {
     setState(() {
-      _subsFuture = SubscriptionService.fetchSubscriptions();
+      _loading = true;
+      _error = null;
     });
-  }
 
-  void _snack(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    try {
+      final list = await SubscriptionService.fetchSubscriptions();
+
+      int rank(ProductDetails p) {
+        final id = p.id.toLowerCase();
+        if (id.contains('yearly') || id.contains('annual')) return 0;
+        if (id.contains('monthly')) return 1;
+        return 9;
+      }
+
+      list.sort((a, b) => rank(a).compareTo(rank(b)));
+
+      setState(() {
+        _products = list;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
   }
 
   Future<void> _buy(ProductDetails p) async {
     try {
       await SubscriptionService.buySubscription(p);
-      _snack('Purchase started…');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Subscription started…')),
+      );
     } catch (e) {
-      _snack('Could not start purchase: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Couldn’t start subscription: $e')),
+      );
     }
   }
 
   Future<void> _restore() async {
     try {
-      await InAppPurchase.instance.restorePurchases();
-      _snack('Restore requested…');
+      await SubscriptionService.restore();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Restoring purchases…')),
+      );
     } catch (e) {
-      _snack('Restore failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Restore failed: $e')),
+      );
     }
+  }
+
+  bool _isActive(String status, DateTime? expiresAt) {
+    if (status.trim().isEmpty || status.toLowerCase() == 'free') return false;
+    if (expiresAt == null) return false;
+    return expiresAt.isAfter(DateTime.now());
+  }
+
+  int _discountPercent(Map<String, dynamic>? data) {
+    final v = (data?['premiumDiscountPercent'] ?? data?['discountPercent']);
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return 0;
   }
 
   @override
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
 
-    final theme = Theme.of(context).copyWith(
-      scaffoldBackgroundColor: AppColors.canvas,
-      appBarTheme: const AppBarTheme(
+    return Scaffold(
+      backgroundColor: AppColors.canvas,
+      appBar: AppBar(
         backgroundColor: AppColors.canvas,
         elevation: 0,
-        foregroundColor: AppColors.text,
-        iconTheme: IconThemeData(color: AppColors.text),
-        titleTextStyle: TextStyle(
-          color: AppColors.text,
-          fontSize: 20,
-          fontWeight: FontWeight.w800,
+        centerTitle: true,
+        title: const Text(
+          'Premium',
+          style: TextStyle(color: AppColors.text, fontWeight: FontWeight.w900),
         ),
+        actions: [
+          TextButton(
+            onPressed: _restore,
+            child: const Text(
+              'Restore',
+              style: TextStyle(color: AppColors.text, fontWeight: FontWeight.w900),
+            ),
+          ),
+        ],
+      ),
+      body: uid == null
+          ? const Center(child: Text('Please log in'))
+          : StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+              stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+              builder: (context, snap) {
+                final data = snap.data?.data();
+                final status = (data?['premiumStatus'] as String?) ?? 'Free';
+                final expiresAt = (data?['premiumExpiresAt'] as Timestamp?)?.toDate();
+                final active = _isActive(status, expiresAt);
+                final discount = _discountPercent(data);
+
+                return ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                  children: [
+                    _HeroCard(
+                      active: active,
+                      status: status,
+                      expiresAt: expiresAt,
+                      discountPercent: discount,
+                    ),
+                    const SizedBox(height: 12),
+
+                    const _SimpleBenefitsCard(),
+                    const SizedBox(height: 16),
+
+                    const Text(
+                      'Choose a plan',
+                      style: TextStyle(
+                        color: AppColors.text,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 18,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    if (_loading) const _LoadingCard(label: 'Loading plans…'),
+                    if (!_loading && _error != null) _ErrorCard(error: _error!, onRetry: _load),
+                    if (!_loading && _error == null && _products.isEmpty)
+                      const _EmptyCard(
+                        title: 'No plans found',
+                        body: 'The store didn’t return any subscription products. Check your product IDs and store setup.',
+                      ),
+
+                    if (!_loading && _error == null && _products.isNotEmpty) ...[
+                      ..._buildPlanCards(_products),
+                    ],
+
+                    const SizedBox(height: 14),
+                    const _FinePrint(),
+                  ],
+                );
+              },
+            ),
+    );
+  }
+
+  List<Widget> _buildPlanCards(List<ProductDetails> products) {
+    ProductDetails? yearly;
+    ProductDetails? monthly;
+
+    for (final p in products) {
+      final id = p.id.toLowerCase();
+      if (id.contains('yearly') || id.contains('annual')) yearly ??= p;
+      if (id.contains('monthly')) monthly ??= p;
+    }
+
+    final out = <Widget>[];
+
+    if (yearly != null) {
+      out.add(
+        _PlanCard(
+          title: 'Yearly',
+          badge: 'Best value',
+          subtitle: 'Save more over the year',
+          price: yearly.price,
+          accent: true,
+          onTap: () => _buy(yearly!),
+        ),
+      );
+      out.add(const SizedBox(height: 10));
+    }
+
+    if (monthly != null) {
+      out.add(
+        _PlanCard(
+          title: 'Monthly',
+          badge: 'Flexible',
+          subtitle: 'Cancel anytime (per store policy)',
+          price: monthly.price,
+          accent: false,
+          onTap: () => _buy(monthly!),
+        ),
+      );
+      out.add(const SizedBox(height: 10));
+    }
+
+    // fallback for any extra products
+    for (final p in products) {
+      if (p == yearly || p == monthly) continue;
+      out.add(
+        _PlanCard(
+          title: p.title.isNotEmpty ? p.title : 'Premium',
+          badge: 'Plan',
+          subtitle: p.description.isNotEmpty ? p.description : 'Premium subscription',
+          price: p.price,
+          accent: false,
+          onTap: () => _buy(p),
+        ),
+      );
+      out.add(const SizedBox(height: 10));
+    }
+
+    return out;
+  }
+}
+
+class _HeroCard extends StatelessWidget {
+  final bool active;
+  final String status;
+  final DateTime? expiresAt;
+  final int discountPercent;
+
+  const _HeroCard({
+    required this.active,
+    required this.status,
+    required this.expiresAt,
+    required this.discountPercent,
+  });
+
+  String _dateLabel(DateTime? d) {
+    if (d == null) return 'No expiry date';
+    final y = d.year.toString().padLeft(4, '0');
+    final m = d.month.toString().padLeft(2, '0');
+    final day = d.day.toString().padLeft(2, '0');
+    return '$y-$m-$day';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final label = active ? 'Active' : 'Not active';
+    final detail = active ? 'Renews/ends on ${_dateLabel(expiresAt)}' : 'Upgrade to unlock Premium';
+    final discountLine = (discountPercent > 0) ? '$discountPercent% consultation discount' : null;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.primary.withOpacity(0.20)),
+            ),
+            child: const Icon(Icons.workspace_premium_rounded, color: AppColors.primary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  active ? 'You’re Premium' : 'Premium',
+                  style: const TextStyle(
+                    color: AppColors.text,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  active ? 'Plan: $status • $detail' : detail,
+                  style: const TextStyle(
+                    color: AppColors.muted,
+                    fontWeight: FontWeight.w700,
+                    height: 1.2,
+                  ),
+                ),
+                if (discountLine != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    discountLine,
+                    style: const TextStyle(
+                      color: AppColors.muted,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.button,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Text(
+              label,
+              style: const TextStyle(color: AppColors.text, fontWeight: FontWeight.w900),
+            ),
+          ),
+        ],
       ),
     );
+  }
+}
 
-    if (uid == null) {
-      return Theme(
-        data: theme,
-        child: Scaffold(
-          appBar: AppBar(title: const Text('Premium')),
-          body: const Center(child: Text('Please log in.')),
+class _SimpleBenefitsCard extends StatelessWidget {
+  const _SimpleBenefitsCard();
+
+  @override
+  Widget build(BuildContext context) {
+    Widget row(IconData icon, String text) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: AppColors.button,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Icon(icon, color: AppColors.text, size: 18),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                text,
+                style: const TextStyle(
+                  color: AppColors.text,
+                  fontWeight: FontWeight.w700,
+                  height: 1.2,
+                ),
+              ),
+            ),
+          ],
         ),
       );
     }
 
-    return Theme(
-      data: theme,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Premium'),
-          actions: [
-            IconButton(
-              tooltip: 'Refresh',
-              icon: const Icon(Icons.refresh_rounded),
-              onPressed: _reload,
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'What you get',
+            style: TextStyle(
+              color: AppColors.text,
+              fontWeight: FontWeight.w900,
+              fontSize: 15,
             ),
-          ],
-        ),
-        body: RefreshIndicator.adaptive(
-          onRefresh: () async => _reload(),
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+          ),
+          const SizedBox(height: 12),
+          row(Icons.trending_up_rounded, 'Priority visibility on your posts'),
+          row(Icons.block_rounded, 'Ad-free experience'),
+          row(Icons.star_rounded, 'Access to Premium posts'),
+          row(Icons.local_offer_rounded, 'Consultation discounts applied at booking'),
+        ],
+      ),
+    );
+  }
+}
+
+class _PlanCard extends StatelessWidget {
+  final String title;
+  final String badge;
+  final String subtitle;
+  final String price;
+  final bool accent;
+  final VoidCallback onTap;
+
+  const _PlanCard({
+    required this.title,
+    required this.badge,
+    required this.subtitle,
+    required this.price,
+    required this.accent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final border = accent ? AppColors.primary.withOpacity(0.35) : AppColors.border;
+    final bg = accent ? AppColors.primary.withOpacity(0.06) : Colors.white;
+
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: border),
+          ),
+          child: Row(
             children: [
-              StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
-                builder: (ctx, snap) {
-                  final data = snap.data?.data() ?? const <String, dynamic>{};
-                  final status = (data['premiumStatus'] ?? 'Free').toString();
-                  final expiresAt = data['premiumExpiresAt'];
-                  DateTime? expires;
-                  if (expiresAt is Timestamp) expires = expiresAt.toDate();
-
-                  final active = status != 'Free' && (expires == null || expires.isAfter(DateTime.now()));
-
-                  return _SoftCard(
-                    child: Row(
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: accent ? AppColors.primary.withOpacity(0.12) : AppColors.button,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: accent ? AppColors.primary.withOpacity(0.25) : AppColors.border,
+                  ),
+                ),
+                child: Icon(
+                  accent ? Icons.auto_awesome_rounded : Icons.star_rounded,
+                  color: accent ? AppColors.primary : AppColors.muted,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       children: [
-                        Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: AppColors.primary.withOpacity(0.10),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: AppColors.primary.withOpacity(0.20)),
-                          ),
-                          child: const Icon(Icons.workspace_premium_outlined, color: AppColors.primary),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Current plan',
-                                style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                active ? status : 'Free',
-                                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
-                              ),
-                              if (active && expires != null) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Renews/ends: ${DateFormat.yMMMd().format(expires)}',
-                                  style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600),
-                                ),
-                              ],
-                            ],
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            color: AppColors.text,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 15,
                           ),
                         ),
+                        const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           decoration: BoxDecoration(
                             color: AppColors.button,
                             borderRadius: BorderRadius.circular(999),
                             border: Border.all(color: AppColors.border),
                           ),
                           child: Text(
-                            active ? 'Active' : 'Free',
-                            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13),
+                            badge,
+                            style: const TextStyle(
+                              color: AppColors.text,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 12,
+                            ),
                           ),
                         ),
                       ],
                     ),
-                  );
-                },
-              ),
-
-              const SizedBox(height: 12),
-
-              _SoftCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text('What you get', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
-                    SizedBox(height: 10),
-                    _BenefitRow(text: 'Priority visibility for your posts'),
-                    _BenefitRow(text: 'Premium badge on profile'),
-                    _BenefitRow(text: 'More boosts / perks (future)'),
-                    _BenefitRow(text: 'Early access to new features'),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        color: AppColors.muted,
+                        fontWeight: FontWeight.w700,
+                        height: 1.1,
+                      ),
+                    ),
                   ],
                 ),
               ),
-
-              const SizedBox(height: 18),
-              const Text(
-                'Choose a plan',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
-              ),
-              const SizedBox(height: 10),
-
-              FutureBuilder<List<ProductDetails>>(
-                future: _subsFuture,
-                builder: (ctx, snap) {
-                  if (snap.connectionState == ConnectionState.waiting) {
-                    return _LoadingPlans();
-                  }
-                  if (snap.hasError) {
-                    return _SoftCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('Couldn’t load plans',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
-                          const SizedBox(height: 6),
-                          Text(
-                            snap.error.toString(),
-                            style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600, height: 1.35),
-                          ),
-                          const SizedBox(height: 12),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: _SmallButton(label: 'Retry', onTap: _reload),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-
-                  final plans = (snap.data ?? []).toList()
-                    ..sort((a, b) => a.rawPrice.compareTo(b.rawPrice));
-
-                  if (plans.isEmpty) {
-                    return _SoftCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Text('No plans found', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
-                          SizedBox(height: 6),
-                          Text(
-                            'Make sure premium_monthly and premium_yearly exist in App Store Connect.',
-                            style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-
-                  return Column(
-                    children: plans.map((p) {
-                      final isYearly = p.id.contains('year');
-                      final title = isYearly ? 'Yearly' : 'Monthly';
-                      final subtitle = isYearly ? 'Best value' : 'Cancel anytime';
-
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: _SoftCard(
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 46,
-                                height: 46,
-                                decoration: BoxDecoration(
-                                  color: AppColors.button,
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(color: AppColors.border),
-                                ),
-                                child: Icon(
-                                  isYearly ? Icons.calendar_month_outlined : Icons.date_range_outlined,
-                                  color: AppColors.text,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(title, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
-                                    const SizedBox(height: 4),
-                                    Text(subtitle,
-                                        style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600)),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              _PrimaryButton(label: p.price, onTap: () => _buy(p)),
-                            ],
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  );
-                },
-              ),
-
-              const SizedBox(height: 12),
-              _SoftCard(
-                child: Row(
-                  children: [
-                    const Expanded(
-                      child: Text(
-                        'Already purchased?',
-                        style: TextStyle(fontWeight: FontWeight.w900),
-                      ),
-                    ),
-                    _SmallButton(label: 'Restore', onTap: _restore),
-                  ],
+              const SizedBox(width: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.primary.withOpacity(0.25)),
+                ),
+                child: Text(
+                  price,
+                  style: const TextStyle(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ),
             ],
@@ -304,155 +524,104 @@ class _PremiumScreenState extends State<PremiumScreen> {
   }
 }
 
-class _BenefitRow extends StatelessWidget {
-  final String text;
-  const _BenefitRow({required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        children: [
-          Container(
-            width: 22,
-            height: 22,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: AppColors.primary.withOpacity(0.20)),
-            ),
-            child: const Icon(Icons.check_rounded, size: 16, color: AppColors.primary),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(color: AppColors.text, fontWeight: FontWeight.w700),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SoftCard extends StatelessWidget {
-  final Widget child;
-  const _SoftCard({required this.child});
+class _LoadingCard extends StatelessWidget {
+  final String label;
+  const _LoadingCard({required this.label});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(16),
+        color: Colors.white,
         border: Border.all(color: AppColors.border),
-        boxShadow: const [AppShadows.soft],
+        borderRadius: BorderRadius.circular(18),
       ),
-      padding: const EdgeInsets.all(14),
-      child: child,
-    );
-  }
-}
-
-class _PrimaryButton extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-  const _PrimaryButton({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 40,
-      child: ElevatedButton(
-        onPressed: onTap,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.primary,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          textStyle: const TextStyle(fontWeight: FontWeight.w900),
-        ),
-        child: Text(label),
-      ),
-    );
-  }
-}
-
-class _SmallButton extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-  const _SmallButton({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 40,
-      child: OutlinedButton(
-        onPressed: onTap,
-        style: OutlinedButton.styleFrom(
-          backgroundColor: AppColors.button,
-          foregroundColor: AppColors.text,
-          side: const BorderSide(color: AppColors.border),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          textStyle: const TextStyle(fontWeight: FontWeight.w900),
-        ),
-        child: Text(label),
-      ),
-    );
-  }
-}
-
-class _LoadingPlans extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    Widget line(double w) => Container(
-          width: w,
-          height: 10,
-          decoration: BoxDecoration(
-            color: AppColors.button,
-            borderRadius: BorderRadius.circular(99),
-          ),
-        );
-
-    return _SoftCard(
+      padding: const EdgeInsets.all(18),
       child: Row(
         children: [
-          Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              color: AppColors.button,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppColors.border),
-            ),
-          ),
+          const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
           const SizedBox(width: 12),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                line(120),
-                const SizedBox(height: 10),
-                line(180),
-              ],
-            ),
+            child: Text(label, style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700)),
           ),
-          const SizedBox(width: 12),
-          Container(
-            width: 72,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.button,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.border),
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrorCard extends StatelessWidget {
+  final String error;
+  final VoidCallback onRetry;
+  const _ErrorCard({required this.error, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Couldn’t load plans', style: TextStyle(color: AppColors.text, fontWeight: FontWeight.w900, fontSize: 15)),
+          const SizedBox(height: 6),
+          Text(error, style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600, height: 1.25)),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 44,
+            child: TextButton(
+              onPressed: onRetry,
+              style: TextButton.styleFrom(
+                backgroundColor: AppColors.button,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              child: const Text('Retry', style: TextStyle(color: AppColors.text, fontWeight: FontWeight.w900)),
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _EmptyCard extends StatelessWidget {
+  final String title;
+  final String body;
+  const _EmptyCard({required this.title, required this.body});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: const TextStyle(color: AppColors.text, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 6),
+          Text(body, style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600, height: 1.25)),
+        ],
+      ),
+    );
+  }
+}
+
+class _FinePrint extends StatelessWidget {
+  const _FinePrint();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Text(
+      'Subscriptions are billed through Apple. You can manage or cancel anytime in your Apple ID subscription settings.',
+      style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600, height: 1.25),
     );
   }
 }

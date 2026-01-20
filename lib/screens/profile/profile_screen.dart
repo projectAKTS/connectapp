@@ -572,16 +572,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final xpPoints = _i(userData!['xpPoints']);
     final helpfulMarks = _i(userData!['helpfulMarks']);
 
-    // For Account section status (safe defaults)
-    final premiumStatus = _s(userData!['premiumStatus']);
+    // Account section status (safe defaults)
+    final premiumStatus = _s(userData!['premiumStatus']); // e.g. Monthly/Yearly/Free
     final premiumExpiresAt = parseFirestoreTimestamp(userData!['premiumExpiresAt']);
     final hasCard = _s(userData!['defaultPaymentMethodId']).isNotEmpty;
-    final credits = _i(userData!['freeConsultationMinutes']); // you already use this for credits IAP
+
+    bool premiumActive() {
+      if (premiumExpiresAt == null) return false;
+      return premiumExpiresAt.isAfter(DateTime.now());
+    }
 
     String premiumSubtitle() {
-      if (premiumStatus.isEmpty) return 'Not active';
-      final exp = premiumExpiresAt != null ? DateFormat.yMMMd().format(premiumExpiresAt) : null;
-      return exp == null ? premiumStatus : '$premiumStatus • Expires $exp';
+      if (premiumStatus.trim().isEmpty || premiumStatus.toLowerCase() == 'free') {
+        return 'Not active';
+      }
+      if (premiumExpiresAt == null) return premiumStatus;
+      final exp = DateFormat.yMMMd().format(premiumExpiresAt);
+      return premiumActive() ? '$premiumStatus • Renews/Ends $exp' : '$premiumStatus • Expired $exp';
     }
 
     return Theme(
@@ -628,6 +635,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   // Avatar
                   Center(
                     child: Stack(
+                      clipBehavior: Clip.none,
                       alignment: Alignment.topRight,
                       children: [
                         CircleAvatar(
@@ -647,6 +655,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               radius: 14,
                               backgroundColor: Colors.orange,
                               child: Icon(Icons.star, color: Colors.white, size: 18),
+                            ),
+                          ),
+
+                        // ✅ Premium badge (small, clean)
+                        if (premiumActive())
+                          Positioned(
+                            right: -2,
+                            bottom: -2,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary,
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(color: Colors.white.withOpacity(0.9), width: 2),
+                                boxShadow: const [AppShadows.soft],
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.workspace_premium_rounded, size: 14, color: Colors.white),
+                                  SizedBox(width: 6),
+                                  Text(
+                                    'Premium',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: 12,
+                                      letterSpacing: -0.1,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                       ],
@@ -736,33 +776,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             },
                           ),
                           const Divider(height: 1, color: AppColors.border),
+
                           _accountRow(
                             icon: Icons.credit_card_rounded,
                             title: 'Billing',
-                            subtitle: hasCard ? 'Card on file' : 'Add a card for consultations',
+                            subtitle: hasCard
+                                ? 'Card on file'
+                                : 'Add a card for consultations',
                             onTap: () {
                               Navigator.of(context, rootNavigator: true)
                                   .pushNamed('/paymentSetup');
                             },
                           ),
                           const Divider(height: 1, color: AppColors.border),
-                          _accountRow(
-                            icon: Icons.local_atm_outlined,
-                            title: 'Credits',
-                            subtitle: credits > 0 ? '$credits minutes available' : 'No credits yet',
-                            onTap: () {
-                              Navigator.of(context, rootNavigator: true).pushNamed('/credits');
-                            },
-                          ),
-                          const Divider(height: 1, color: AppColors.border),
+
                           _accountRow(
                             icon: Icons.workspace_premium_outlined,
                             title: 'Premium',
                             subtitle: premiumSubtitle(),
                             onTap: () {
-                              // If you have a premium screen route later, switch this.
                               Navigator.of(context, rootNavigator: true)
-                                  .pushNamed('/credits'); // placeholder
+                                  .pushNamed('/premium');
                             },
                           ),
                         ],
@@ -878,8 +912,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       if (date != null)
                                         Text(
                                           DateFormat.yMMMd().format(date),
-                                          style: const TextStyle(fontSize: 12, color: AppColors.muted),
-                                        ),
+                                          style: const TextStyle(fontSize: 12, color: AppColors.muted)),
                                     ],
                                   ),
                                 ),

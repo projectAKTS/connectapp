@@ -1,12 +1,15 @@
+// lib/screens/consultation/consultation_booking_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:intl/intl.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 import 'package:connect_app/theme/tokens.dart';
+import 'package:connect_app/screens/pricing/pricing_config.dart';
+
 import '/services/consultation_service.dart';
 import '/services/payment_service.dart';
-import 'package:connect_app/screens/pricing/pricing_config.dart';
 import '/services/interaction_service.dart';
 
 class ConsultationBookingScreen extends StatefulWidget {
@@ -26,7 +29,9 @@ class ConsultationBookingScreen extends StatefulWidget {
 
 class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
   final ConsultationService _consultationService = ConsultationService();
-  final PaymentService _paymentService = PaymentService();
+
+  // ✅ FIX: PaymentService is a singleton (PaymentService.instance)
+  final PaymentService _paymentService = PaymentService.instance;
 
   final List<int> _durationOptions = PricingConfig.durations;
   int _selectedDuration = 15;
@@ -34,12 +39,13 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
 
   DateTime? _selectedDate;
   TimeOfDay? _selectedTime;
-  bool _isProcessing = false;
 
-  static const _evergreen = Color(0xFF0F4C46);
+  bool _isProcessing = false;
 
   User? _user;
   late final StreamSubscription<User?> _authSub;
+
+  static const _evergreen = Color(0xFF0F4C46);
 
   @override
   void initState() {
@@ -56,8 +62,11 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
     super.dispose();
   }
 
+  // --- labels/prices ---------------------------------------------------------
+
   String get _availabilityLabel {
-    final simulatedHours = 2;
+    // TODO: replace with real helper availability later
+    const simulatedHours = 2;
     if (simulatedHours <= 1) return 'Usually responds within an hour';
     if (simulatedHours <= 3) return 'Usually responds within 2 hours';
     if (simulatedHours <= 6) return 'Usually responds today';
@@ -65,8 +74,8 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
   }
 
   double get _price => PricingConfig.getPrice(_selectedDuration, _callType);
-  double get _payout =>
-      PricingConfig.getHelperPayout(_selectedDuration, _callType);
+  double get _payout => PricingConfig.getHelperPayout(_selectedDuration, _callType);
+
   String get _priceLabel => '\$${_price.toStringAsFixed(2)} CAD';
   String get _payoutLabel => '\$${_payout.toStringAsFixed(2)} to helper';
 
@@ -81,6 +90,8 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
     );
   }
 
+  // --- pickers ---------------------------------------------------------------
+
   Future<void> _pickDate() async {
     final now = DateTime.now();
     final picked = await showDatePicker(
@@ -89,7 +100,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
       firstDate: now,
       lastDate: DateTime(now.year + 2),
     );
-    if (picked != null) setState(() => _selectedDate = picked);
+    if (picked != null && mounted) setState(() => _selectedDate = picked);
   }
 
   Future<void> _pickTime() async {
@@ -97,80 +108,121 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
       context: context,
       initialTime: TimeOfDay.now(),
     );
-    if (picked != null) setState(() => _selectedTime = picked);
+    if (picked != null && mounted) setState(() => _selectedTime = picked);
   }
 
+  // --- helpers ---------------------------------------------------------------
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<User?> _requireUser() async {
+    final u = _user ?? FirebaseAuth.instance.currentUser;
+    if (u != null) return u;
+
+    try {
+      return await FirebaseAuth.instance
+          .authStateChanges()
+          .firstWhere((x) => x != null, orElse: () => null);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ✅ Premium discount helpers (minimal)
+  bool _premiumActiveFrom(Map<String, dynamic>? data) {
+    final status = (data?['premiumStatus'] as String?) ?? 'Free';
+    final expiresAt = (data?['premiumExpiresAt'] as Timestamp?)?.toDate();
+    if (status.trim().isEmpty || status.toLowerCase() == 'free') return false;
+    if (expiresAt == null) return false;
+    return expiresAt.isAfter(DateTime.now());
+  }
+
+  int _premiumDiscountPercentFrom(Map<String, dynamic>? data) {
+    final v = (data?['premiumDiscountPercent'] ?? data?['discountPercent']);
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return 0;
+  }
+
+  double _applyDiscount(double amount, int percent) {
+    if (percent <= 0) return amount;
+    final d = (amount * percent) / 100.0;
+    final out = amount - d;
+    return out < 0 ? 0 : out;
+  }
+
+  String _money(double v) => '\$${v.toStringAsFixed(2)} CAD';
+
+  // --- booking flow ----------------------------------------------------------
+
   Future<void> _bookConsultation() async {
-    debugPrint('🟢 [Booking] Start booking flow for ${widget.targetUserName}');
-    debugPrint('💰 Selected duration: $_selectedDuration min | Type: $_callType | Price: $_price');
+    if (_isProcessing) return;
 
-    if (_scheduledAt == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please pick a date and time.')),
-      );
+    final scheduled = _scheduledAt;
+    if (scheduled == null) {
+      _toast('Please pick a date and time.');
       return;
     }
 
-    User? user = _user ?? FirebaseAuth.instance.currentUser;
+    final user = await _requireUser();
     if (user == null) {
-      try {
-        debugPrint('🟡 [Booking] Waiting for user auth state...');
-        user = await FirebaseAuth.instance.authStateChanges().firstWhere(
-          (u) => u != null,
-          orElse: () => null,
-        );
-      } catch (e) {
-        debugPrint('❌ [Booking] Auth state error: $e');
-      }
-    }
-
-    if (user == null) {
-      debugPrint('❌ [Booking] No authenticated user found.');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please sign in to continue.')),
-      );
+      _toast('Please sign in to continue.');
       return;
     }
 
-    debugPrint('👤 [Booking] Current user: ${user.uid}');
     if (!mounted) return;
     setState(() => _isProcessing = true);
 
+    // Use ROOT navigator for global routes (so tab navigator doesn’t trap it)
     final rootNav = Navigator.of(context, rootNavigator: true);
 
     try {
-      debugPrint('🔑 [Booking] Refreshing Firebase ID token...');
-      await user.getIdToken(true);
-      debugPrint('🔒 [Booking] Refreshing Firebase App Check token...');
-      final appCheckToken = await FirebaseAppCheck.instance.getToken(true);
-      debugPrint('🧾 [Booking] App Check token: ${appCheckToken?.substring(0, 12)}...');
+      // ✅ Fetch premium status once for payment amount
+      double amountToCharge = _price;
+      try {
+        final uSnap = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+        final data = uSnap.data();
+        final isPremium = _premiumActiveFrom(data);
+        final pct = isPremium ? _premiumDiscountPercentFrom(data) : 0;
+        amountToCharge = _applyDiscount(_price, pct);
+      } catch (_) {
+        // If anything fails, fall back to normal price
+        amountToCharge = _price;
+      }
 
-      debugPrint('💳 [Booking] Ensuring Stripe customer exists...');
-      await _paymentService.ensureStripeCustomer();
+      // (1) Payment (if needed)
+      if (amountToCharge > 0) {
+        // ensure customer exists (PaymentService handles tokens/appcheck inside)
+        final okCustomer = await _paymentService.ensureStripeCustomer();
+        if (!okCustomer) {
+          _toast('Please sign in again and retry.');
+          return;
+        }
 
-      if (_price > 0) {
-        debugPrint('🧾 [Booking] Starting payment flow. Amount: $_price CAD');
-        var result = await _paymentService.processPayment(amount: _price);
-        debugPrint('📤 [Booking] processPayment() returned: $result');
+        var result = await _paymentService.processPayment(amount: amountToCharge);
 
+        // If unauthenticated, try 1 retry (token refresh) then stop.
         if (result == PaymentResult.unauthenticated) {
-          debugPrint('🔁 [Booking] Retrying payment after refreshing tokens...');
           await user.getIdToken(true);
-          await FirebaseAppCheck.instance.getToken(true);
-          result = await _paymentService.processPayment(amount: _price);
-          debugPrint('📤 [Booking] Retry result: $result');
+          result = await _paymentService.processPayment(amount: amountToCharge);
         }
 
         switch (result) {
+          case PaymentResult.success:
+            // continue
+            break;
+
           case PaymentResult.needsSetup:
-            debugPrint('⚠️ [Booking] User needs to add a card.');
             final go = await showDialog<bool>(
               context: context,
               builder: (ctx) => AlertDialog(
                 title: const Text('Add a card to continue'),
                 content: const Text(
-                    'You don’t have a saved payment method yet. Add one now to complete the booking.'),
+                  'You don’t have a saved payment method yet. Add one now to complete the booking.',
+                ),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.pop(ctx, false),
@@ -183,70 +235,47 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                 ],
               ),
             );
+
             if (go == true) {
-              // ✅ Global route -> ROOT
               await rootNav.pushNamed('/paymentSetup');
             }
-            if (mounted) setState(() => _isProcessing = false);
+            return;
+
+          case PaymentResult.blocked:
+            _toast('Payments temporarily unavailable (App Check). Try again later.');
             return;
 
           case PaymentResult.unauthenticated:
-            debugPrint('❌ [Booking] Payment failed — unauthenticated.');
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                    content: Text('Session expired. Please sign in again.')),
-              );
-              setState(() => _isProcessing = false);
-            }
+            _toast('Session expired. Please sign in again.');
             return;
 
           case PaymentResult.failed:
-            debugPrint('❌ [Booking] Payment failed at Stripe layer.');
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                    content: Text('Payment failed. Please try again.')),
-              );
-              setState(() => _isProcessing = false);
-            }
+            _toast('Payment failed. Please try again.');
             return;
-
-          case PaymentResult.success:
-            debugPrint('✅ [Booking] Payment succeeded!');
-            break;
         }
-      } else {
-        debugPrint('🟢 [Booking] Price is 0 — skipping payment step.');
       }
 
-      debugPrint('🗓️ [Booking] Saving consultation in Firestore...');
+      // (2) Save consultation
       await _consultationService.bookConsultation(
         widget.targetUserId,
         _selectedDuration,
-        scheduledAt: _scheduledAt!,
+        scheduledAt: scheduled,
       );
 
+      // (3) Interaction tracking
       await InteractionService.recordInteraction(widget.targetUserId);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Consultation booked successfully.')),
-      );
-      debugPrint('✅ [Booking] Consultation booked successfully!');
-      Navigator.pop(context);
-    } catch (e, st) {
-      debugPrint('❌ [Booking] Exception caught: $e');
-      debugPrint('🪵 Stack trace:\n$st');
 
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not book: $e')));
-      }
+      if (!mounted) return;
+      _toast('Consultation booked successfully.');
+      Navigator.pop(context);
+    } catch (e) {
+      _toast('Could not book: $e');
     } finally {
-      debugPrint('🏁 [Booking] Flow finished.');
       if (mounted) setState(() => _isProcessing = false);
     }
   }
+
+  // --- UI --------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -254,17 +283,20 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
     final scheduledText =
         dt == null ? 'Not set' : DateFormat('EEE, MMM d • h:mm a').format(dt);
 
+    final uid = _user?.uid;
+
     return Scaffold(
       backgroundColor: AppColors.canvas,
       appBar: AppBar(
         title: const Text('Book a Consultation'),
         backgroundColor: AppColors.canvas,
+        elevation: 0,
       ),
       body: SafeArea(
         child: Stack(
           children: [
             SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -289,24 +321,26 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                                 widget.targetUserName,
                                 style: const TextStyle(
                                   fontSize: 16,
-                                  fontWeight: FontWeight.bold,
+                                  fontWeight: FontWeight.w800,
                                   color: AppColors.text,
+                                  letterSpacing: -0.2,
                                 ),
                               ),
-                              const SizedBox(height: 2),
+                              const SizedBox(height: 4),
                               Row(
                                 children: [
-                                  const Icon(
-                                    Icons.schedule,
-                                    size: 13,
-                                    color: AppColors.muted,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    _availabilityLabel,
-                                    style: const TextStyle(
-                                      color: AppColors.muted,
-                                      fontSize: 12,
+                                  const Icon(Icons.schedule,
+                                      size: 13, color: AppColors.muted),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      _availabilityLabel,
+                                      style: const TextStyle(
+                                        color: AppColors.muted,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
                                 ],
@@ -314,47 +348,58 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                             ],
                           ),
                         ),
-                        _pill(child: Text('$_selectedDuration min')),
+                        _pill(
+                          child: Text(
+                            '$_selectedDuration min',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.text,
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 20),
+
+                  const SizedBox(height: 18),
+
                   Text('Select duration',
                       style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
                   Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                    spacing: 10,
+                    runSpacing: 10,
                     children: _durationOptions.map((m) {
                       final sel = m == _selectedDuration;
                       return ChoiceChip(
                         label: Text(
                           '$m min',
                           style: TextStyle(
-                            color: sel
-                                ? Colors.black
-                                : AppColors.text.withOpacity(0.8),
+                            fontWeight: FontWeight.w700,
+                            color: sel ? _evergreen : AppColors.text,
                           ),
                         ),
                         selected: sel,
                         onSelected: (_) => setState(() => _selectedDuration = m),
-                        selectedColor: Colors.white,
+                        selectedColor: _evergreen.withOpacity(0.10),
                         backgroundColor: Colors.white,
                         side: BorderSide(
                           color: sel
-                              ? Colors.black
-                              : AppColors.border.withOpacity(0.4),
+                              ? _evergreen.withOpacity(0.35)
+                              : AppColors.border,
                         ),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(14),
                         ),
                       );
                     }).toList(),
                   ),
-                  const SizedBox(height: 20),
+
+                  const SizedBox(height: 18),
+
                   Text('Call type',
                       style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
                   Row(
                     children: [
                       Expanded(
@@ -376,9 +421,12 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 20),
+
+                  const SizedBox(height: 18),
+
                   Text('Pick a time',
                       style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 10),
                   Row(
                     children: [
                       Expanded(
@@ -387,10 +435,16 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text(_selectedDate == null
-                                  ? 'Pick date'
-                                  : DateFormat('MMM d, yyyy')
-                                      .format(_selectedDate!)),
+                              Text(
+                                _selectedDate == null
+                                    ? 'Pick date'
+                                    : DateFormat('MMM d, yyyy')
+                                        .format(_selectedDate!),
+                                style: const TextStyle(
+                                  color: AppColors.text,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                               const Icon(Icons.calendar_today_outlined,
                                   color: AppColors.muted, size: 18),
                             ],
@@ -404,9 +458,15 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text(_selectedTime == null
-                                  ? 'Pick time'
-                                  : _selectedTime!.format(context)),
+                              Text(
+                                _selectedTime == null
+                                    ? 'Pick time'
+                                    : _selectedTime!.format(context),
+                                style: const TextStyle(
+                                  color: AppColors.text,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                               const Icon(Icons.schedule,
                                   color: AppColors.muted, size: 18),
                             ],
@@ -415,57 +475,228 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                       ),
                     ],
                   ),
+
                   const SizedBox(height: 10),
                   Text('Scheduled: $scheduledText',
-                      style: const TextStyle(color: AppColors.muted)),
-                  const SizedBox(height: 20),
-                  _card(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Summary',
+                      style: const TextStyle(
+                        color: AppColors.muted,
+                        fontWeight: FontWeight.w600,
+                      )),
+
+                  const SizedBox(height: 18),
+
+                  // ✅ Summary with Premium discount (no other UI changes)
+                  if (uid == null)
+                    _card(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Summary',
                             style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.text)),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Type: ${_callType.toUpperCase()} • Duration: $_selectedDuration min',
-                          style: const TextStyle(color: AppColors.muted),
-                        ),
-                        const SizedBox(height: 6),
-                        Text('Total: $_priceLabel',
-                            style: const TextStyle(color: AppColors.text)),
-                        Text(_payoutLabel,
-                            style: const TextStyle(color: AppColors.muted)),
-                      ],
+                              fontWeight: FontWeight.w900,
+                              color: AppColors.text,
+                              letterSpacing: -0.2,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Type: ${_callType.toUpperCase()} • Duration: $_selectedDuration min',
+                            style: const TextStyle(
+                              color: AppColors.muted,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'Total',
+                                style: TextStyle(
+                                  color: AppColors.text,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              Text(
+                                _priceLabel,
+                                style: const TextStyle(
+                                  color: AppColors.text,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            _payoutLabel,
+                            style: const TextStyle(
+                              color: AppColors.muted,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                      stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+                      builder: (context, snap) {
+                        final data = snap.data?.data();
+                        final isPremium = _premiumActiveFrom(data);
+                        final pct = isPremium ? _premiumDiscountPercentFrom(data) : 0;
+
+                        final subtotal = _price;
+                        final total = _applyDiscount(subtotal, pct);
+                        final discountAmount = subtotal - total;
+
+                        return _card(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Summary',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  color: AppColors.text,
+                                  letterSpacing: -0.2,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Type: ${_callType.toUpperCase()} • Duration: $_selectedDuration min',
+                                style: const TextStyle(
+                                  color: AppColors.muted,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text(
+                                    'Subtotal',
+                                    style: TextStyle(
+                                      color: AppColors.text,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  Text(
+                                    _money(subtotal),
+                                    style: const TextStyle(
+                                      color: AppColors.text,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ],
+                              ),
+
+                              if (isPremium && pct > 0) ...[
+                                const SizedBox(height: 6),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'Premium −$pct%',
+                                      style: const TextStyle(
+                                        color: AppColors.text,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    Text(
+                                      '-${_money(discountAmount)}',
+                                      style: const TextStyle(
+                                        color: AppColors.primary,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+
+                              const SizedBox(height: 8),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text(
+                                    'Total',
+                                    style: TextStyle(
+                                      color: AppColors.text,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  Text(
+                                    _money(total),
+                                    style: const TextStyle(
+                                      color: AppColors.text,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ],
+                              ),
+
+                              const SizedBox(height: 6),
+                              Text(
+                                _payoutLabel,
+                                style: const TextStyle(
+                                  color: AppColors.muted,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
                     ),
-                  ),
                 ],
               ),
             ),
+
             Positioned(
               left: 16,
               right: 16,
               bottom: 16,
               child: SafeArea(
                 top: false,
-                child: ElevatedButton(
-                  onPressed: _isProcessing ? null : _bookConsultation,
-                  style: ElevatedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                    backgroundColor: _evergreen,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                  child: _isProcessing
-                      ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Text('Book consultation ($_priceLabel)'),
+                child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                  stream: (uid == null)
+                      ? null
+                      : FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+                  builder: (context, snap) {
+                    final data = snap.data?.data();
+                    final isPremium = _premiumActiveFrom(data);
+                    final pct = isPremium ? _premiumDiscountPercentFrom(data) : 0;
+
+                    final total = _applyDiscount(_price, pct);
+                    final buttonLabel = 'Book consultation (${_money(total)})';
+
+                    return ElevatedButton(
+                      onPressed: _isProcessing ? null : _bookConsultation,
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(52),
+                        backgroundColor: _evergreen,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        elevation: 0,
+                      ),
+                      child: _isProcessing
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Text(
+                              buttonLabel,
+                              style: const TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                    );
+                  },
                 ),
               ),
             ),
@@ -475,29 +706,36 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
     );
   }
 
+  // --- UI helpers ------------------------------------------------------------
+
   Widget _card({required Widget child}) => Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: AppColors.card,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppColors.border),
         ),
         child: child,
       );
 
   Widget _pill({required Widget child, VoidCallback? onTap}) {
-    final c = Container(
+    final content = Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       decoration: BoxDecoration(
-        color: AppColors.card,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
       ),
       child: child,
     );
-    if (onTap == null) return c;
+
+    if (onTap == null) return content;
+
     return InkWell(
-        onTap: onTap, borderRadius: BorderRadius.circular(14), child: c);
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: content,
+    );
   }
 
   Widget _choicePill({
@@ -513,9 +751,11 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: selected ? _evergreen.withOpacity(0.1) : AppColors.card,
+          color: selected ? _evergreen.withOpacity(0.10) : Colors.white,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: fg.withOpacity(0.4)),
+          border: Border.all(
+            color: selected ? _evergreen.withOpacity(0.35) : AppColors.border,
+          ),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -524,8 +764,13 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
               Icon(icon, size: 18, color: fg),
               const SizedBox(width: 6),
             ],
-            Text(label,
-                style: TextStyle(fontWeight: FontWeight.w600, color: fg)),
+            Text(
+              label,
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                color: fg,
+              ),
+            ),
           ],
         ),
       ),
