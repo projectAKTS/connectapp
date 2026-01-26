@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_dynamic_links/firebase_dynamic_links.dart';
+import 'package:flutter/foundation.dart';
 
 // Payments
 import 'package:flutter_stripe/flutter_stripe.dart';
@@ -28,7 +29,6 @@ import 'screens/onboarding_screen.dart';
 import 'screens/chat/chat_screen.dart';
 import 'screens/payment/payment_setup_screen.dart';
 import 'screens/premium/premium_screen.dart';
-import 'screens/credits/credits_screen.dart';
 
 // Core
 import 'widgets/main_scaffold.dart';
@@ -51,16 +51,27 @@ Future<void> main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
+  const useDebugAppCheck =
+      kDebugMode || bool.fromEnvironment('APP_CHECK_DEBUG', defaultValue: false);
   try {
     await FirebaseAppCheck.instance.activate(
-      appleProvider: AppleProvider.appAttestWithDeviceCheckFallback,
-      androidProvider: AndroidProvider.playIntegrity,
+      appleProvider: useDebugAppCheck
+          ? AppleProvider.debug
+          : AppleProvider.appAttestWithDeviceCheckFallback,
+      androidProvider: useDebugAppCheck ? AndroidProvider.debug : AndroidProvider.playIntegrity,
     );
+    if (useDebugAppCheck) {
+      final token = await FirebaseAppCheck.instance.getToken(true);
+      if (token != null && token.isNotEmpty) {
+        debugPrint('🧪 AppCheck debug token: $token');
+      }
+    }
   } catch (e) {
     debugPrint('⚠️ AppCheck failed: $e');
   }
 
-  Stripe.publishableKey = 'pk_live_xxxxxxxxxxxxxxxxxxxxx';
+  Stripe.publishableKey =
+      'pk_live_51Kke4CFsXOZFrRZs9EBuzMeKRdmsrWdHEqx7oEBzbZm3kygcvNboaQkuTu2EXZQ87DDVmTvN4cu2QKkrw8hKxlMr00NHQfAdAp';
   Stripe.merchantIdentifier = 'merchant.com.connectapp';
   Stripe.urlScheme = 'connectapp';
   await Stripe.instance.applySettings();
@@ -100,16 +111,6 @@ void _handlePurchaseUpdates(List<PurchaseDetails> details) {
         doc.set({
           'premiumStatus': isMonthly ? 'Monthly' : 'Yearly',
           'premiumExpiresAt': Timestamp.fromDate(expires),
-        }, SetOptions(merge: true));
-      } else if (pd.productID.startsWith('credits_')) {
-        final minutes = pd.productID == 'credits_5min'
-            ? 5
-            : pd.productID == 'credits_30min'
-                ? 30
-                : 60;
-
-        doc.set({
-          'freeConsultationMinutes': FieldValue.increment(minutes),
         }, SetOptions(merge: true));
       }
     }
@@ -195,7 +196,6 @@ class _MyAppState extends State<MyApp> {
 
         '/my_consultations': (_) => const MyConsultationsScreen(),
 
-        '/credits': (_) => CreditsStoreScreen(),
         '/premium': (_) => PremiumScreen(),
 
         '/onboarding': (_) => const OnboardingScreen(),

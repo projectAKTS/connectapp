@@ -5,20 +5,24 @@
 const { onRequest, onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
-const functions = require("firebase-functions"); // legacy compat
+const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 admin.initializeApp();
 
 const db = admin.firestore();
 const fcm = admin.messaging();
+const STRIPE_SECRET = defineSecret("STRIPE_SECRET");
 
 // --- Stripe Client Helper ---
 function getStripeClient() {
-  const secret =
-    process.env.STRIPE_SECRET ||
-    (functions.config().stripe && functions.config().stripe.secret);
+  const secret = STRIPE_SECRET.value();
   if (!secret) throw new Error("Stripe secret missing");
   return require("stripe")(secret);
+}
+
+function getStripeMode() {
+  const secret = STRIPE_SECRET.value() || "";
+  return secret.startsWith("sk_live_") ? "live" : "test";
 }
 
 // --- Get User Tokens ---
@@ -44,16 +48,28 @@ async function getOrCreateCustomer(uid) {
   const doc = await ref.get();
   if (!doc.exists) throw new HttpsError("not-found", "User not found");
   const data = doc.data() || {};
-  if (data.stripeCustomerId) return data.stripeCustomerId;
-
   const stripe = getStripeClient();
+  const mode = getStripeMode();
+  if (data.stripeCustomerId) {
+    try {
+      await stripe.customers.retrieve(data.stripeCustomerId);
+      return data.stripeCustomerId;
+    } catch (e) {
+      if (e && e.code === "resource_missing") {
+        // Customer exists in other mode; create a new one for this mode.
+      } else {
+        throw e;
+      }
+    }
+  }
+
   const customer = await stripe.customers.create({
     email: data.email || undefined,
     name: data.fullName || data.name || undefined,
     metadata: { firebaseUID: uid },
   });
 
-  await ref.update({ stripeCustomerId: customer.id });
+  await ref.update({ stripeCustomerId: customer.id, stripeCustomerMode: mode });
   return customer.id;
 }
 
@@ -108,38 +124,200 @@ exports.scheduledConsultationReminder = onSchedule(
 
 // 1️⃣ Create Stripe Customer
 exports.createStripeCustomer = onCall(
-  { region: "us-central1" },
-  async (_data, context) => {
-    if (!context.auth) throw new HttpsError("unauthenticated");
-    const id = await getOrCreateCustomer(context.auth.uid);
+  { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated");
+    const id = await getOrCreateCustomer(request.auth.uid);
     return { stripeCustomerId: id };
   }
 );
 
 // 2️⃣ Create Setup Intent
 exports.createSetupIntent = onCall(
-  { region: "us-central1" },
-  async (_data, context) => {
-    if (!context.auth) throw new HttpsError("unauthenticated");
+  { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated");
     const stripe = getStripeClient();
-    const uid = context.auth.uid;
+    const uid = request.auth.uid;
     const customerId = await getOrCreateCustomer(uid);
+    const ephKey = await stripe.ephemeralKeys.create(
+      { customer: customerId },
+      { apiVersion: "2023-10-16" }
+    );
     const si = await stripe.setupIntents.create({
       customer: customerId,
       payment_method_types: ["card"],
     });
-    return { clientSecret: si.client_secret };
+    return {
+      clientSecret: si.client_secret,
+      customerId,
+      ephemeralKeySecret: ephKey.secret,
+    };
   }
 );
 
-// 3️⃣ Charge Stored Payment Method
-exports.chargeStoredPaymentMethod = onCall(
-  { region: "us-central1" },
-  async (data, context) => {
-    if (!context.auth) throw new HttpsError("unauthenticated");
+// 3️⃣ List saved payment methods
+exports.listPaymentMethods = onCall(
+  { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated");
+    const uid = request.auth.uid;
+
+    const userDoc = await db.collection("users").doc(uid).get();
+    const userData = userDoc.data() || {};
+    const defaultPaymentMethodId = userData.defaultPaymentMethodId || null;
+
     const stripe = getStripeClient();
-    const uid = context.auth.uid;
-    const { amount, currency = "cad" } = data;
+    const customerId = await getOrCreateCustomer(uid);
+    const methods = await stripe.paymentMethods.list({
+      customer: customerId,
+      type: "card",
+    });
+
+    return {
+      defaultPaymentMethodId,
+      paymentMethods: methods.data.map((pm) => ({
+        id: pm.id,
+        brand: pm.card?.brand || null,
+        last4: pm.card?.last4 || null,
+        expMonth: pm.card?.exp_month || null,
+        expYear: pm.card?.exp_year || null,
+        funding: pm.card?.funding || null,
+      })),
+    };
+  }
+);
+
+// 3️⃣ Set default payment method
+exports.setDefaultPaymentMethod = onCall(
+  { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated");
+    const { paymentMethodId } = request.data || {};
+    if (!paymentMethodId)
+      throw new HttpsError("invalid-argument", "paymentMethodId required");
+
+    const uid = request.auth.uid;
+    const stripe = getStripeClient();
+    const customerId = await getOrCreateCustomer(uid);
+
+    await stripe.customers.update(customerId, {
+      invoice_settings: { default_payment_method: paymentMethodId },
+    });
+
+    await db
+      .collection("users")
+      .doc(uid)
+      .set({ defaultPaymentMethodId: paymentMethodId }, { merge: true });
+
+    return { ok: true };
+  }
+);
+
+// 4️⃣ Remove payment method
+exports.removePaymentMethod = onCall(
+  { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated");
+    const { paymentMethodId } = request.data || {};
+    if (!paymentMethodId)
+      throw new HttpsError("invalid-argument", "paymentMethodId required");
+
+    const uid = request.auth.uid;
+    const stripe = getStripeClient();
+    const customerId = await getOrCreateCustomer(uid);
+
+    await stripe.paymentMethods.detach(paymentMethodId);
+
+    const userRef = db.collection("users").doc(uid);
+    const userDoc = await userRef.get();
+    const userData = userDoc.data() || {};
+    if (userData.defaultPaymentMethodId === paymentMethodId) {
+      await stripe.customers.update(customerId, {
+        invoice_settings: { default_payment_method: null },
+      });
+      await userRef.set({ defaultPaymentMethodId: null }, { merge: true });
+    }
+
+    return { ok: true };
+  }
+);
+
+// 5️⃣ Cancel consultation + refund
+exports.cancelConsultation = onCall(
+  { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated");
+    const { consultationId } = request.data || {};
+    if (!consultationId)
+      throw new HttpsError("invalid-argument", "consultationId required");
+
+    const uid = request.auth.uid;
+    const ref = db.collection("consultations").doc(consultationId);
+    const doc = await ref.get();
+    if (!doc.exists) throw new HttpsError("not-found", "Consultation not found");
+
+    const data = doc.data() || {};
+    if (data.userId !== uid) throw new HttpsError("permission-denied");
+    if (data.status === "cancelled") {
+      return {
+        ok: true,
+        refundAmount: data.refundAmount || 0,
+        refundPercent: data.refundPercent || 0,
+      };
+    }
+
+    const scheduledAt = data.scheduledAt?.toDate?.() || null;
+    const now = new Date();
+    let refundPercent = 0;
+    if (scheduledAt) {
+      const diffMs = scheduledAt.getTime() - now.getTime();
+      if (diffMs >= 24 * 60 * 60 * 1000) refundPercent = 100;
+      else if (diffMs >= 60 * 60 * 1000) refundPercent = 50;
+    }
+
+    const cost = Number(data.cost || 0);
+    const amountCents = Math.round(cost * 100);
+    const refundCents = Math.round((amountCents * refundPercent) / 100);
+    let refundId = null;
+
+    const stripe = getStripeClient();
+    if (refundCents > 0 && data.paymentIntentId) {
+      const refund = await stripe.refunds.create({
+        payment_intent: data.paymentIntentId,
+        amount: refundCents,
+      });
+      refundId = refund.id;
+    }
+
+    await ref.set(
+      {
+        status: "cancelled",
+        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+        refundAmount: refundCents / 100,
+        refundPercent,
+        refundId,
+      },
+      { merge: true }
+    );
+
+    return {
+      ok: true,
+      refundAmount: refundCents / 100,
+      refundPercent,
+      refundId,
+    };
+  }
+);
+
+// 6️⃣ Charge Stored Payment Method
+exports.chargeStoredPaymentMethod = onCall(
+  { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated");
+    const stripe = getStripeClient();
+    const uid = request.auth.uid;
+    const { amount, currency = "cad" } = request.data || {};
 
     if (!amount || amount <= 0)
       throw new HttpsError("invalid-argument", "Invalid amount");
@@ -168,11 +346,11 @@ exports.chargeStoredPaymentMethod = onCall(
 
 // 4️⃣ Create Express Account for Helpers
 exports.createExpressAccountLink = onCall(
-  { region: "us-central1" },
-  async (_data, context) => {
-    if (!context.auth) throw new HttpsError("unauthenticated");
+  { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated");
     const stripe = getStripeClient();
-    const uid = context.auth.uid;
+    const uid = request.auth.uid;
     const ref = db.collection("users").doc(uid);
     const data = (await ref.get()).data() || {};
 
@@ -200,11 +378,11 @@ exports.createExpressAccountLink = onCall(
 
 // 5️⃣ Create Stripe Checkout Session
 exports.createStripeCheckoutSession = onCall(
-  { region: "us-central1" },
-  async (data, context) => {
-    if (!context.auth) throw new HttpsError("unauthenticated");
+  { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated");
     const stripe = getStripeClient();
-    const uid = context.auth.uid;
+    const uid = request.auth.uid;
     const {
       consultationId,
       cost,
@@ -212,7 +390,7 @@ exports.createStripeCheckoutSession = onCall(
       currency = "cad",
       successUrl,
       cancelUrl,
-    } = data;
+    } = request.data || {};
 
     if (!consultationId || !cost || !helperStripeAccountId)
       throw new HttpsError("invalid-argument", "Missing required fields");
@@ -249,7 +427,7 @@ exports.createStripeCheckoutSession = onCall(
 
 // 6️⃣ Stripe Webhook
 exports.handleStripeWebhook = onRequest(
-  { region: "us-central1" },
+  { region: "us-central1", secrets: [STRIPE_SECRET] },
   async (req, res) => {
     const stripe = getStripeClient();
     const sig = req.headers["stripe-signature"];

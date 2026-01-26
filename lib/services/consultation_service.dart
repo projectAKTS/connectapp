@@ -1,18 +1,20 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
-import 'package:connect_app/utils/time_utils.dart';
 
 class ConsultationService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   /// Books a consultation with the given target user for a specified number of minutes.
   /// Optionally takes a scheduledAt DateTime for future appointments.
-  /// Applies free minutes and discount if the booking user is premium (trial or active).
+  /// Applies discount if the booking user is premium (trial or active).
   Future<void> bookConsultation(
     String targetUserId,
     int minutesRequested, {
     DateTime? scheduledAt,
+    double? costOverride,
+    String? paymentIntentId,
+    String? currency,
   }) async {
     final User? currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
@@ -43,23 +45,13 @@ class ConsultationService {
 
     // Check booking user's premium status and benefits.
     final String premiumStatus = userData['premiumStatus'] ?? 'none';
-    int freeMinutes = userData['freeConsultationMinutes'] ?? 0;
     int discountPercent = userData['discountPercent'] ?? 0;
 
-    int cost = baseCost;
-    int appliedFreeMinutes = 0;
-
-    // If user is trial or active premium, apply free minutes and discount.
+    double cost = costOverride ?? baseCost.toDouble();
+    // If user is trial or active premium, apply discount.
     if (premiumStatus == 'trial' || premiumStatus == 'active') {
-      if (freeMinutes > 0) {
-        appliedFreeMinutes = (minutesRequested <= freeMinutes)
-            ? minutesRequested
-            : freeMinutes;
-        final int reduction = ratePerMinute * appliedFreeMinutes;
-        cost -= reduction;
-      }
       if (cost > 0 && discountPercent > 0) {
-        cost -= ((cost * discountPercent) ~/ 100);
+        cost -= (cost * discountPercent / 100);
       }
     }
 
@@ -75,11 +67,6 @@ class ConsultationService {
     final String roomId = const Uuid().v4();
 
     await _firestore.runTransaction((transaction) async {
-      // Update free minutes if applied.
-      if (appliedFreeMinutes > 0) {
-        int newFreeMinutes = freeMinutes - appliedFreeMinutes;
-        transaction.update(userRef, {'freeConsultationMinutes': newFreeMinutes});
-      }
       // Create the consultation document with extra fields.
       transaction.set(consultationRef, {
         'consultationId': consultationRef.id,
@@ -89,6 +76,9 @@ class ConsultationService {
         'roomId': roomId, // Unique room ID for joining the call.
         'minutesRequested': minutesRequested,
         'cost': cost,
+        'currency': currency ?? 'cad',
+        'paymentIntentId': paymentIntentId,
+        'status': 'scheduled',
         'timestamp': FieldValue.serverTimestamp(),
         'scheduledAt': finalScheduledAt,
       });

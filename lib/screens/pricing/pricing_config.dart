@@ -9,10 +9,11 @@
 
 class PricingConfig {
   /// Available consultation durations in minutes
-  static const List<int> durations = [5, 10, 15, 30, 45, 60];
+  static const List<int> durations = [1, 5, 10, 15, 30, 45, 60];
 
   /// Seeker-facing retail prices (in CAD) for AUDIO sessions
   static const Map<int, double> audioPrices = {
+    1: 0.00,
     5: 2.99,
     10: 4.49,
     15: 6.99,

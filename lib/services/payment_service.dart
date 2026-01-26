@@ -13,6 +13,56 @@ enum PaymentResult {
   failed,           // generic failure
 }
 
+class PaymentChargeResult {
+  final PaymentResult result;
+  final String? paymentIntentId;
+
+  const PaymentChargeResult({
+    required this.result,
+    this.paymentIntentId,
+  });
+}
+
+class SetupIntentData {
+  final String clientSecret;
+  final String? customerId;
+  final String? ephemeralKeySecret;
+
+  const SetupIntentData({
+    required this.clientSecret,
+    this.customerId,
+    this.ephemeralKeySecret,
+  });
+}
+
+class PaymentMethodInfo {
+  final String id;
+  final String? brand;
+  final String? last4;
+  final int? expMonth;
+  final int? expYear;
+  final String? funding;
+
+  const PaymentMethodInfo({
+    required this.id,
+    this.brand,
+    this.last4,
+    this.expMonth,
+    this.expYear,
+    this.funding,
+  });
+}
+
+class PaymentMethodsData {
+  final String? defaultPaymentMethodId;
+  final List<PaymentMethodInfo> paymentMethods;
+
+  const PaymentMethodsData({
+    required this.defaultPaymentMethodId,
+    required this.paymentMethods,
+  });
+}
+
 class PaymentService {
   FirebaseFunctions get _functions =>
       FirebaseFunctions.instanceFor(region: 'us-central1');
@@ -54,7 +104,7 @@ class PaymentService {
         options: HttpsCallableOptions(timeout: Duration(seconds: 30)),
       );
       final resp = await callable.call();
-      final data = Map<String, dynamic>.from(resp.data);
+      final data = Map<String, dynamic>.from(resp.data as Map);
       final id = data['stripeCustomerId'] as String?;
       debugPrint('📦 [PaymentService] Stripe customer ID: $id');
       return id?.isNotEmpty == true;
@@ -69,7 +119,7 @@ class PaymentService {
   }
 
   /// Creates a SetupIntent for adding a new payment method.
-  Future<String?> createSetupIntent() async {
+  Future<SetupIntentData?> createSetupIntent() async {
     try {
       final functions = await _getAuthedFunctions();
       debugPrint('🪄 [PaymentService] Calling createSetupIntent...');
@@ -78,12 +128,47 @@ class PaymentService {
         options: HttpsCallableOptions(timeout: Duration(seconds: 30)),
       );
       final resp = await callable.call();
-      final data = Map<String, dynamic>.from(resp.data);
-      final clientSecret = data['clientSecret'] as String?;
+      final raw = resp.data;
+      debugPrint('🧾 [PaymentService] createSetupIntent raw type: ${raw.runtimeType}');
+      if (raw is Map) {
+        debugPrint('🧾 [PaymentService] createSetupIntent raw keys: ${(raw as Map).keys}');
+      } else {
+        debugPrint('🧾 [PaymentService] createSetupIntent raw: $raw');
+      }
+      if (raw is String) {
+        final clientSecret = raw;
+        debugPrint('🎫 [PaymentService] SetupIntent clientSecret: ${clientSecret.substring(0, 10)}...');
+        return SetupIntentData(clientSecret: clientSecret);
+      }
+      if (raw is! Map) {
+        debugPrint('❌ [PaymentService] createSetupIntent unexpected response type.');
+        return null;
+      }
+      final data = Map<String, dynamic>.from(raw);
+      String? clientSecret = data['clientSecret'] as String?;
+      clientSecret ??= data['client_secret'] as String?;
+      clientSecret ??= data['setupIntentClientSecret'] as String?;
+      clientSecret ??= data['setup_intent_client_secret'] as String?;
+      if (clientSecret == null && data['setupIntent'] is Map) {
+        final setupIntent = Map<String, dynamic>.from(data['setupIntent'] as Map);
+        clientSecret = setupIntent['client_secret'] as String?;
+      }
+
+      final customerId = data['customerId'] as String? ?? data['customer'] as String?;
+      final ephemeralKey =
+          data['ephemeralKeySecret'] as String? ?? data['ephemeralKey'] as String?;
       debugPrint('🎫 [PaymentService] SetupIntent clientSecret: ${clientSecret?.substring(0, 10)}...');
-      return clientSecret;
+      debugPrint('👤 [PaymentService] customerId: ${customerId ?? 'null'}');
+      debugPrint('🔐 [PaymentService] ephemeralKeySecret: ${ephemeralKey != null ? 'present' : 'null'}');
+
+      if (clientSecret == null || clientSecret.isEmpty) return null;
+      return SetupIntentData(
+        clientSecret: clientSecret,
+        customerId: customerId,
+        ephemeralKeySecret: ephemeralKey,
+      );
     } on FirebaseFunctionsException catch (e) {
-      debugPrint('❌ [PaymentService] createSetupIntent FirebaseError: ${e.code}');
+      debugPrint('❌ [PaymentService] createSetupIntent FirebaseError: ${e.code} | ${e.message}');
       if (e.code == 'unauthenticated') return null;
       rethrow;
     } catch (e, st) {
@@ -92,8 +177,63 @@ class PaymentService {
     }
   }
 
+  /// Fetch saved payment methods for the current user.
+  Future<PaymentMethodsData> listPaymentMethods() async {
+    final functions = await _getAuthedFunctions();
+    debugPrint('💳 [PaymentService] Calling listPaymentMethods...');
+    final callable = functions.httpsCallable(
+      'listPaymentMethods',
+      options: HttpsCallableOptions(timeout: Duration(seconds: 30)),
+    );
+    final response = await callable.call();
+    final data = Map<String, dynamic>.from(response.data as Map);
+
+    final defaultId = data['defaultPaymentMethodId'] as String?;
+    final rawMethods = (data['paymentMethods'] as List?) ?? const [];
+    final methods = rawMethods
+        .whereType<Map>()
+        .map((m) {
+          final map = Map<String, dynamic>.from(m);
+          return PaymentMethodInfo(
+            id: (map['id'] ?? '').toString(),
+            brand: map['brand'] as String?,
+            last4: map['last4'] as String?,
+            expMonth: map['expMonth'] as int?,
+            expYear: map['expYear'] as int?,
+            funding: map['funding'] as String?,
+          );
+        })
+        .where((m) => m.id.isNotEmpty)
+        .toList();
+
+    return PaymentMethodsData(
+      defaultPaymentMethodId: defaultId,
+      paymentMethods: methods,
+    );
+  }
+
+  Future<void> setDefaultPaymentMethod(String paymentMethodId) async {
+    final functions = await _getAuthedFunctions();
+    debugPrint('💳 [PaymentService] Calling setDefaultPaymentMethod...');
+    final callable = functions.httpsCallable(
+      'setDefaultPaymentMethod',
+      options: HttpsCallableOptions(timeout: Duration(seconds: 30)),
+    );
+    await callable.call({'paymentMethodId': paymentMethodId});
+  }
+
+  Future<void> removePaymentMethod(String paymentMethodId) async {
+    final functions = await _getAuthedFunctions();
+    debugPrint('💳 [PaymentService] Calling removePaymentMethod...');
+    final callable = functions.httpsCallable(
+      'removePaymentMethod',
+      options: HttpsCallableOptions(timeout: Duration(seconds: 30)),
+    );
+    await callable.call({'paymentMethodId': paymentMethodId});
+  }
+
   /// Charges the user’s stored default payment method.
-  Future<PaymentResult> processPayment({required double amount}) async {
+  Future<PaymentChargeResult> processPayment({required double amount}) async {
     debugPrint('💳 [PaymentService] processPayment() started. Amount: $amount');
     try {
       final functions = await _getAuthedFunctions();
@@ -114,28 +254,42 @@ class PaymentService {
       final ok = data['success'] == true;
       if (ok) {
         debugPrint('✅ [PaymentService] Payment succeeded.');
-        return PaymentResult.success;
+        return PaymentChargeResult(
+          result: PaymentResult.success,
+          paymentIntentId: data['id'] as String?,
+        );
       }
 
       debugPrint('⚠️ [PaymentService] chargeStoredPaymentMethod returned success=false.');
-      return PaymentResult.failed;
+      return const PaymentChargeResult(result: PaymentResult.failed);
     } on FirebaseFunctionsException catch (e) {
       debugPrint('❌ [PaymentService] FirebaseFunctionsException: ${e.code} | ${e.message}');
       switch (e.code) {
         case 'failed-precondition':
           debugPrint('⚠️ [PaymentService] User needs to add a payment method.');
-          return PaymentResult.needsSetup;
+          return const PaymentChargeResult(result: PaymentResult.needsSetup);
         case 'unauthenticated':
           debugPrint('🚫 [PaymentService] Unauthenticated — tokens invalid.');
-          return PaymentResult.unauthenticated;
+          return const PaymentChargeResult(result: PaymentResult.unauthenticated);
         default:
-          return PaymentResult.failed;
+          return const PaymentChargeResult(result: PaymentResult.failed);
       }
     } catch (e, st) {
       debugPrint('❌ [PaymentService] processPayment() Exception: $e');
       debugPrint('🪵 Stack trace:\n$st');
-      return PaymentResult.failed;
+      return const PaymentChargeResult(result: PaymentResult.failed);
     }
+  }
+
+  Future<Map<String, dynamic>> cancelConsultation(String consultationId) async {
+    final functions = await _getAuthedFunctions();
+    debugPrint('💳 [PaymentService] Calling cancelConsultation...');
+    final callable = functions.httpsCallable(
+      'cancelConsultation',
+      options: HttpsCallableOptions(timeout: Duration(seconds: 30)),
+    );
+    final response = await callable.call({'consultationId': consultationId});
+    return Map<String, dynamic>.from(response.data as Map);
   }
 
   /// Creates a Stripe Checkout session (optional hosted flow).

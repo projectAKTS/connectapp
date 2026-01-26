@@ -33,11 +33,11 @@ class _BoostPostScreenState extends State<BoostPostScreen> {
 
     try {
       // 💳 Process payment via stored card
-      final paymentResult = await _paymentService.processPayment(
+      final paymentCharge = await _paymentService.processPayment(
         amount: _getBoostPrice(selectedBoostHours),
       );
 
-      switch (paymentResult) {
+      switch (paymentCharge.result) {
         case PaymentResult.success:
           // 🚀 Boost post after successful payment
           await _postService.boostPost(widget.postId, selectedBoostHours);

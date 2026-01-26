@@ -29,9 +29,14 @@ class FirebaseAuthService {
     String email,
   ) async {
     try {
+      final displayName = fullName.trim();
+      final displayNameLc = displayName.toLowerCase();
       await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
         {
           'fullName': fullName,
+          'fullNameLower': fullName.toLowerCase(),
+          'displayName': displayName,
+          'displayName_lc': displayNameLc,
           'email': email,
           'bio': 'No bio available yet.',
           'followers': [],
@@ -211,14 +216,21 @@ class FirebaseAuthService {
           appleCred.familyName ?? '',
         ].where((n) => n.isNotEmpty).join(' ').trim();
 
-        if (fullName.isNotEmpty && user.displayName != fullName) {
-          await user.updateDisplayName(fullName);
+        final email = user.email ?? appleCred.email ?? '';
+        var resolvedName = fullName.isNotEmpty ? fullName : (user.displayName ?? '').trim();
+        if (resolvedName.isEmpty) {
+          resolvedName = _fallbackNameFromEmail(email);
+        }
+        if (resolvedName.isEmpty) resolvedName = 'User';
+
+        if (user.displayName != resolvedName) {
+          await user.updateDisplayName(resolvedName);
         }
 
         await initializeUserInFirestore(
           user,
-          fullName.isNotEmpty ? fullName : (user.displayName ?? 'Anonymous'),
-          user.email ?? appleCred.email ?? '',
+          resolvedName,
+          email,
         );
       }
 
@@ -263,4 +275,15 @@ class FirebaseAuthService {
 
   String _sha256(String input) =>
       crypto.sha256.convert(utf8.encode(input)).toString();
+
+  String _fallbackNameFromEmail(String email) {
+    if (email.isEmpty || !email.contains('@')) return '';
+    final base = email.split('@').first;
+    final cleaned = base.replaceAll(RegExp(r'[^A-Za-z0-9]+'), ' ').trim();
+    if (cleaned.isEmpty) return '';
+    return cleaned.split(' ').map((p) {
+      if (p.isEmpty) return '';
+      return p[0].toUpperCase() + p.substring(1);
+    }).join(' ').trim();
+  }
 }

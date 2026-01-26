@@ -5,7 +5,6 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 class SubscriptionService {
   static final InAppPurchase _iap = InAppPurchase.instance;
   static const _subscriptionIds = <String>['premium_monthly', 'premium_yearly'];
-  static const _consumableIds = <String>['credits_5min', 'credits_30min', 'credits_60min'];
 
   /// Initialize in-app purchases. Returns true if the store is available.
   static Future<bool> init() async {
@@ -24,23 +23,10 @@ class SubscriptionService {
     return response.productDetails;
   }
 
-  /// Fetch consumable credit products.
-  static Future<List<ProductDetails>> fetchCredits() async {
-    final response = await _iap.queryProductDetails(_consumableIds.toSet());
-    if (response.error != null) throw response.error!;
-    return response.productDetails;
-  }
-
   /// Buy a subscription (non-consumable).
   static Future<void> buySubscription(ProductDetails product) async {
     final param = PurchaseParam(productDetails: product);
     await _iap.buyNonConsumable(purchaseParam: param);
-  }
-
-  /// Buy credits (consumable).
-  static Future<void> buyCredits(ProductDetails product) async {
-    final param = PurchaseParam(productDetails: product);
-    await _iap.buyConsumable(purchaseParam: param, autoConsume: true);
   }
 
   /// Listen to purchase updates.

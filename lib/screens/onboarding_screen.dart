@@ -25,6 +25,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   // Profile
   final _displayNameCtrl = TextEditingController();
+  final _cityCtrl = TextEditingController();
+  final _timeZoneCtrl = TextEditingController();
   String? _profilePhotoUrl;
 
   // Country / Language (anchored dropdowns use controllers)
@@ -40,6 +42,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     'Job hunting','Refugee claim process','Student life','Parenting support','Language learning',
   ];
   final Set<String> _selectedTopics = {};
+  final List<String> _allExpertise = const [
+    'Resume review',
+    'Interview prep',
+    'PR guidance',
+    'School applications',
+    'Language practice',
+    'Settlement tips',
+    'Mental health support',
+    'Career transitions',
+  ];
+  final Set<String> _selectedExpertise = {};
 
   final _bioCtrl = TextEditingController();
   final _skillsCtrl = TextEditingController();
@@ -105,6 +118,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   void dispose() {
     _pageCtrl.dispose();
     _displayNameCtrl.dispose();
+    _cityCtrl.dispose();
+    _timeZoneCtrl.dispose();
     _countryCtrl.dispose();
     _languageCtrl.dispose();
     _bioCtrl.dispose();
@@ -133,6 +148,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       _profilePhotoUrl =
           (d['profilePicture']?.toString().isNotEmpty ?? false) ? d['profilePicture'] : null;
 
+      _cityCtrl.text = d['city'] ?? '';
+      _timeZoneCtrl.text = d['timeZone'] ?? '';
+
       _country  = (d['country']?.toString().isNotEmpty ?? false) ? d['country'] : null;
       _language = (d['language']?.toString().isNotEmpty ?? false) ? d['language'] : null;
       _countryCtrl.text = _country ?? '';
@@ -142,6 +160,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       _selectedTopics
         ..clear()
         ..addAll((d['interestTags'] is List) ? List<String>.from(d['interestTags']) : const []);
+
+      _selectedExpertise
+        ..clear()
+        ..addAll((d['expertiseTags'] is List) ? List<String>.from(d['expertiseTags']) : const []);
 
       _bioCtrl.text = (d['bio'] == null || d['bio'] == 'No bio available yet.')
           ? '' : (d['bio'] ?? '');
@@ -169,12 +191,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
+    final displayName = _displayNameCtrl.text.trim();
     final data = {
-      'displayName': _displayNameCtrl.text.trim(),
+      'displayName': displayName,
+      'displayName_lc': displayName.toLowerCase(),
+      'fullName': displayName,
+      'fullNameLower': displayName.toLowerCase(),
+      'city': _cityCtrl.text.trim(),
+      'timeZone': _timeZoneCtrl.text.trim(),
       'country': _country ?? '',
       'language': _language ?? '',
       'role': _role,
       'interestTags': _selectedTopics.toList(),
+      'expertiseTags': _selectedExpertise.toList(),
       'bio': _bioCtrl.text.trim(),
       'skills': _skillsCtrl.text
           .trim()
@@ -197,6 +226,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           .collection('users')
           .doc(user.uid)
           .set(data, SetOptions(merge: true));
+      if (displayName.isNotEmpty && user.displayName != displayName) {
+        await user.updateDisplayName(displayName);
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -208,12 +240,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Future<void> _complete({required bool skipped}) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
+    final displayName = _displayNameCtrl.text.trim();
     final data = {
-      'displayName': _displayNameCtrl.text.trim(),
+      'displayName': displayName,
+      'displayName_lc': displayName.toLowerCase(),
+      'fullName': displayName,
+      'fullNameLower': displayName.toLowerCase(),
+      'city': _cityCtrl.text.trim(),
+      'timeZone': _timeZoneCtrl.text.trim(),
       'country': _country ?? '',
       'language': _language ?? '',
       'role': _role,
       'interestTags': _selectedTopics.toList(),
+      'expertiseTags': _selectedExpertise.toList(),
       'bio': _bioCtrl.text.trim(),
       'skills': _skillsCtrl.text
           .trim()
@@ -236,6 +275,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           .collection('users')
           .doc(user.uid)
           .set(data, SetOptions(merge: true));
+      if (displayName.isNotEmpty && user.displayName != displayName) {
+        await user.updateDisplayName(displayName);
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -463,7 +505,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       child: Form(
         key: _formKey,
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            _stepHeader(
+              title: 'Profile basics',
+              subtitle: 'Add a name and location so helpers recognize you.',
+            ),
+            const SizedBox(height: 12),
             // Avatar with real picker
             GestureDetector(
               onTap: _pickProfilePhoto,
@@ -502,11 +550,39 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               child: _LabeledField(
                 label: 'Display name',
                 compact: true,
-                child: TextFormField(
+              child: TextFormField(
                   controller: _displayNameCtrl,
-                  decoration: _compactInput(hint: 'Your name'),
+                  decoration: _compactInput(hint: 'Your name', fill: AppColors.card),
                   style: const TextStyle(fontSize: 14, color: AppColors.text, fontWeight: FontWeight.w600),
                   validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            Align(
+              alignment: Alignment.centerLeft,
+              child: _LabeledField(
+                label: 'City',
+                compact: true,
+                child: TextFormField(
+                  controller: _cityCtrl,
+                  decoration: _compactInput(hint: 'e.g. Toronto', fill: AppColors.card),
+                  style: const TextStyle(fontSize: 14, color: AppColors.text, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            Align(
+              alignment: Alignment.centerLeft,
+              child: _LabeledField(
+                label: 'Time zone',
+                compact: true,
+                child: TextFormField(
+                  controller: _timeZoneCtrl,
+                  decoration: _compactInput(hint: 'e.g. GMT-5', fill: AppColors.card),
+                  style: const TextStyle(fontSize: 14, color: AppColors.text, fontWeight: FontWeight.w600),
                 ),
               ),
             ),
@@ -523,6 +599,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   value: _country,
                   hint: 'Select country',
                   options: const ['Canada','USA','Other'],
+                  fill: AppColors.card,
                   onChanged: (v) {
                     setState(() { _country = v; _countryCtrl.text = v ?? ''; });
                   },
@@ -542,6 +619,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   value: _language,
                   hint: 'Select language',
                   options: const ['English','French','Other'],
+                  fill: AppColors.card,
                   onChanged: (v) {
                     setState(() { _language = v; _languageCtrl.text = v ?? ''; });
                   },
@@ -560,8 +638,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('How would you like to use the app?', style: TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
+          _stepHeader(
+            title: 'Your intent',
+            subtitle: 'Tell us how you want to use Connect.',
+          ),
+          const SizedBox(height: 12),
 
           // Keep tick + stable width
           Wrap(
@@ -574,7 +655,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ),
 
           const SizedBox(height: 16),
-          const Text('Preferred mode', style: TextStyle(fontWeight: FontWeight.w700)),
+          _sectionLabel('Preferred mode'),
           const SizedBox(height: 8),
 
           // Booking-style for chat/call/video
@@ -638,7 +719,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Pick a few topics', style: TextStyle(fontWeight: FontWeight.w700)),
+          _stepHeader(
+            title: 'Topics & journeys',
+            subtitle: 'Pick what you need help with or can help others with.',
+          ),
+          const SizedBox(height: 12),
+          _sectionLabel('Pick a few topics'),
           const SizedBox(height: 8),
 
           Wrap(
@@ -671,7 +757,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ),
 
           const SizedBox(height: 16),
-          const Text('Journeys you’ve been through', style: TextStyle(fontWeight: FontWeight.w700)),
+          _sectionLabel('Journeys you’ve been through'),
           const SizedBox(height: 8),
 
           Wrap(
@@ -708,6 +794,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _stepHeader(
+            title: 'About you',
+            subtitle: 'Add a short intro. This helps build trust.',
+          ),
+          const SizedBox(height: 12),
           // Short bio: hint-only, no floating label, clipped safely
           ClipRRect(
             borderRadius: BorderRadius.circular(14),
@@ -728,6 +819,40 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               children: [
                 const Text('If you plan to help others',
                     style: TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 10),
+                _sectionLabel('Areas of expertise'),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _allExpertise.map((e) {
+                    final selected = _selectedExpertise.contains(e);
+                    return ChoiceChip(
+                      avatar: Icon(
+                        Icons.check,
+                        size: 18,
+                        color: selected ? AppColors.text : Colors.transparent,
+                      ),
+                      label: Text(e),
+                      selected: selected,
+                      showCheckmark: false,
+                      onSelected: (_) {
+                        HapticFeedback.selectionClick();
+                        setState(() {
+                          selected ? _selectedExpertise.remove(e) : _selectedExpertise.add(e);
+                        });
+                      },
+                      selectedColor: AppColors.button,
+                      backgroundColor: AppColors.card,
+                      side: const BorderSide(color: AppColors.border),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      labelStyle: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: selected ? AppColors.text : AppColors.text.withOpacity(0.9),
+                      ),
+                    );
+                  }).toList(),
+                ),
                 const SizedBox(height: 12),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(14),
@@ -766,6 +891,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     required ValueChanged<String?> onChanged,
     String? value,
     String? hint,
+    Color? fill,
   }) {
     return DropdownMenu<String>(
       controller: controller,
@@ -779,7 +905,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       inputDecorationTheme: InputDecorationTheme(
         isDense: true,
         filled: true,
-        fillColor: AppColors.button,
+        fillColor: fill ?? AppColors.card,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         border: OutlineInputBorder(
           borderSide: const BorderSide(color: AppColors.border),
@@ -801,12 +927,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
-  InputDecoration _compactInput({String? label, String? hint}) => InputDecoration(
+  InputDecoration _compactInput({String? label, String? hint, Color? fill}) => InputDecoration(
         labelText: label,
         hintText: hint,
         isDense: true,
         filled: true,
-        fillColor: AppColors.button,
+        fillColor: fill ?? AppColors.card,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         border: OutlineInputBorder(
           borderSide: const BorderSide(color: AppColors.border),
@@ -952,3 +1078,34 @@ class _LabeledField extends StatelessWidget {
     );
   }
 }
+
+class _StepHeader extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  const _StepHeader({required this.title, required this.subtitle});
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 6),
+        Text(subtitle, style: textTheme.bodyMedium),
+      ],
+    );
+  }
+}
+
+Widget _stepHeader({required String title, required String subtitle}) =>
+    _StepHeader(title: title, subtitle: subtitle);
+
+Widget _sectionLabel(String text) => Text(
+      text,
+      style: const TextStyle(
+        fontWeight: FontWeight.w700,
+        color: AppColors.text,
+        fontSize: 14,
+      ),
+    );

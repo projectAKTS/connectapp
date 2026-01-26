@@ -245,8 +245,13 @@ class HomeContentScreenState extends State<HomeContentScreen>
     super.build(context);
 
     final user = FirebaseAuth.instance.currentUser;
-    final firstName = (user?.displayName ?? 'Maria').split(' ').first;
     final currentUid = user?.uid ?? '';
+    final fallbackName = (user?.displayName ?? '').trim();
+    String firstFrom(String name) {
+      final n = name.trim();
+      if (n.isEmpty) return 'there';
+      return n.split(' ').first;
+    }
 
     return Scaffold(
       backgroundColor: AppColors.canvas,
@@ -264,12 +269,32 @@ class HomeContentScreenState extends State<HomeContentScreen>
             slivers: [
               const SliverToBoxAdapter(child: _HomeTopBar()),
               SliverToBoxAdapter(
-                child: _WelcomeCard(
-                  name: firstName,
-                  onFindHelper: () => Navigator.of(context).push(
-                    CupertinoPageRoute(builder: (_) => const FindHelperScreen()),
-                  ),
-                ),
+                child: currentUid.isEmpty
+                    ? _WelcomeCard(
+                        name: firstFrom(fallbackName),
+                        onFindHelper: () => Navigator.of(context).push(
+                          CupertinoPageRoute(builder: (_) => const FindHelperScreen()),
+                        ),
+                      )
+                    : StreamBuilder<DocumentSnapshot>(
+                        stream: FirebaseFirestore.instance
+                            .collection('users')
+                            .doc(currentUid)
+                            .snapshots(),
+                        builder: (context, snap) {
+                          final data = snap.data?.data() as Map<String, dynamic>? ?? {};
+                          final name = (data['displayName'] ??
+                                  data['fullName'] ??
+                                  fallbackName)
+                              .toString();
+                          return _WelcomeCard(
+                            name: firstFrom(name),
+                            onFindHelper: () => Navigator.of(context).push(
+                              CupertinoPageRoute(builder: (_) => const FindHelperScreen()),
+                            ),
+                          );
+                        },
+                      ),
               ),
               const SliverToBoxAdapter(child: _SectionTitle('Recent posts')),
               SliverToBoxAdapter(

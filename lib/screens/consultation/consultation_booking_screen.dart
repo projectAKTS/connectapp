@@ -149,20 +149,21 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
       debugPrint('💳 [Booking] Ensuring Stripe customer exists...');
       await _paymentService.ensureStripeCustomer();
 
+      var charge = const PaymentChargeResult(result: PaymentResult.failed);
       if (_price > 0) {
         debugPrint('🧾 [Booking] Starting payment flow. Amount: $_price CAD');
-        var result = await _paymentService.processPayment(amount: _price);
-        debugPrint('📤 [Booking] processPayment() returned: $result');
+        var charge = await _paymentService.processPayment(amount: _price);
+        debugPrint('📤 [Booking] processPayment() returned: ${charge.result}');
 
-        if (result == PaymentResult.unauthenticated) {
+        if (charge.result == PaymentResult.unauthenticated) {
           debugPrint('🔁 [Booking] Retrying payment after refreshing tokens...');
           await user.getIdToken(true);
           await FirebaseAppCheck.instance.getToken(true);
-          result = await _paymentService.processPayment(amount: _price);
-          debugPrint('📤 [Booking] Retry result: $result');
+          charge = await _paymentService.processPayment(amount: _price);
+          debugPrint('📤 [Booking] Retry result: ${charge.result}');
         }
 
-        switch (result) {
+        switch (charge.result) {
           case PaymentResult.needsSetup:
             debugPrint('⚠️ [Booking] User needs to add a card.');
             final go = await showDialog<bool>(
@@ -225,6 +226,9 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
         widget.targetUserId,
         _selectedDuration,
         scheduledAt: _scheduledAt!,
+        costOverride: _price,
+        paymentIntentId: _price > 0 ? charge.paymentIntentId : null,
+        currency: 'cad',
       );
 
       await InteractionService.recordInteraction(widget.targetUserId);

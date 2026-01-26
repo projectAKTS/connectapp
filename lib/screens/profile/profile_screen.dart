@@ -451,6 +451,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     required VoidCallback onTap,
     Color? iconBg,
     Color? iconFg,
+    int? badgeCount,
   }) {
     return Material(
       color: Colors.transparent,
@@ -499,6 +500,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ],
                 ),
               ),
+              if (badgeCount != null && badgeCount > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  margin: const EdgeInsets.only(right: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '$badgeCount',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
               const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
             ],
           ),
@@ -576,7 +594,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final premiumStatus = _s(userData!['premiumStatus']);
     final premiumExpiresAt = parseFirestoreTimestamp(userData!['premiumExpiresAt']);
     final hasCard = _s(userData!['defaultPaymentMethodId']).isNotEmpty;
-    final credits = _i(userData!['freeConsultationMinutes']); // you already use this for credits IAP
 
     String premiumSubtitle() {
       if (premiumStatus.isEmpty) return 'Not active';
@@ -726,13 +743,50 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
                       child: Column(
                         children: [
-                          _accountRow(
-                            icon: Icons.event_note_outlined,
-                            title: 'My consultations',
-                            subtitle: 'Upcoming & past sessions',
-                            onTap: () {
-                              Navigator.of(context, rootNavigator: true)
-                                  .pushNamed('/my_consultations');
+                          StreamBuilder<DocumentSnapshot>(
+                            stream: FirebaseFirestore.instance
+                                .collection('users')
+                                .doc(widget.userID)
+                                .snapshots(),
+                            builder: (context, userSnap) {
+                              DateTime? lastSeen;
+                              if (userSnap.hasData) {
+                                final d =
+                                    userSnap.data!.data() as Map<String, dynamic>?;
+                                lastSeen = parseFirestoreTimestamp(
+                                    d?['lastConsultationsSeenAt']);
+                              }
+
+                              return StreamBuilder<QuerySnapshot>(
+                                stream: FirebaseFirestore.instance
+                                    .collection('consultations')
+                                    .where('participants', arrayContains: widget.userID)
+                                    .snapshots(),
+                                builder: (context, consultSnap) {
+                                  int recentCount = 0;
+                                  if (consultSnap.hasData) {
+                                    for (final doc in consultSnap.data!.docs) {
+                                      final data = doc.data() as Map<String, dynamic>;
+                                      final ts = parseFirestoreTimestamp(data['timestamp']);
+                                      if (ts == null) continue;
+                                      if (lastSeen == null || ts.isAfter(lastSeen)) {
+                                        recentCount++;
+                                      }
+                                    }
+                                  }
+
+                                  return _accountRow(
+                                    icon: Icons.event_note_outlined,
+                                    title: 'My consultations',
+                                    subtitle: 'Upcoming & past sessions',
+                                    badgeCount: recentCount,
+                                    onTap: () {
+                                      Navigator.of(context, rootNavigator: true)
+                                          .pushNamed('/my_consultations');
+                                    },
+                                  );
+                                },
+                              );
                             },
                           ),
                           const Divider(height: 1, color: AppColors.border),
@@ -747,22 +801,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                           const Divider(height: 1, color: AppColors.border),
                           _accountRow(
-                            icon: Icons.local_atm_outlined,
-                            title: 'Credits',
-                            subtitle: credits > 0 ? '$credits minutes available' : 'No credits yet',
-                            onTap: () {
-                              Navigator.of(context, rootNavigator: true).pushNamed('/credits');
-                            },
-                          ),
-                          const Divider(height: 1, color: AppColors.border),
-                          _accountRow(
                             icon: Icons.workspace_premium_outlined,
                             title: 'Premium',
                             subtitle: premiumSubtitle(),
                             onTap: () {
-                              // If you have a premium screen route later, switch this.
                               Navigator.of(context, rootNavigator: true)
-                                  .pushNamed('/credits'); // placeholder
+                                  .pushNamed('/premium');
                             },
                           ),
                         ],

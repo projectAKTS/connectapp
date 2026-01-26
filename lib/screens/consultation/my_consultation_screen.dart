@@ -12,6 +12,7 @@ import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/screens/consultation/consultation_call_screen.dart';
 import 'package:connect_app/screens/chat/chat_screen.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
+import 'package:connect_app/services/payment_service.dart';
 
 class MyConsultationsScreen extends StatefulWidget {
   const MyConsultationsScreen({Key? key}) : super(key: key);
@@ -33,10 +34,22 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
 
   // Collapse/expand Past section
   bool _pastExpanded = false;
+  final PaymentService _paymentService = PaymentService();
+
+  final Map<String, Map<String, dynamic>> _userCache = {};
+  final Set<String> _userLoading = {};
 
   @override
   void initState() {
     super.initState();
+    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (currentUid.isNotEmpty) {
+      FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUid)
+          .update({'lastConsultationsSeenAt': FieldValue.serverTimestamp()})
+          .catchError((_) {});
+    }
     _ticker = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) setState(() {});
     });
@@ -51,6 +64,75 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
   void _snack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _cancelConsultation(String consultationId) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancel consultation?'),
+        content: const Text(
+          'Canceling may trigger a refund based on the cancellation policy.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Cancel')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      final result = await _paymentService.cancelConsultation(consultationId);
+      final refundAmount = (result['refundAmount'] as num?)?.toDouble() ?? 0;
+      final refundPercent = (result['refundPercent'] as num?)?.toInt() ?? 0;
+      final msg = refundAmount > 0
+          ? 'Canceled. Refund: \$${refundAmount.toStringAsFixed(2)} ($refundPercent%).'
+          : 'Canceled. No refund (within 1 hour).';
+      _snack(msg);
+    } catch (e) {
+      _snack('Cancel failed: $e');
+    }
+  }
+
+  void _ensureUserLoaded(String uid) {
+    final id = uid.trim();
+    if (id.isEmpty || _userCache.containsKey(id) || _userLoading.contains(id)) {
+      return;
+    }
+    _userLoading.add(id);
+    FirebaseFirestore.instance.collection('users').doc(id).get().then((snap) {
+      if (!mounted) return;
+      final data = snap.data() as Map<String, dynamic>?;
+      if (data != null) _userCache[id] = data;
+      _userLoading.remove(id);
+      if (mounted) setState(() {});
+    }).catchError((_) {
+      if (!mounted) return;
+      _userLoading.remove(id);
+    });
+  }
+
+  String _resolveName(Map<String, dynamic>? data, String fallback) {
+    final name = (data?['displayName'] ??
+            data?['fullName'] ??
+            data?['name'] ??
+            data?['userName'] ??
+            '')
+        .toString()
+        .trim();
+    return name.isNotEmpty ? name : fallback;
+  }
+
+  String _resolveAvatar(Map<String, dynamic>? data) {
+    final avatar = (data?['avatar'] ??
+            data?['photoUrl'] ??
+            data?['profilePicture'] ??
+            data?['userAvatar'] ??
+            '')
+        .toString()
+        .trim();
+    return avatar;
   }
 
   bool _isJoinEnabled(DateTime now, DateTime? scheduledAt) {
@@ -69,11 +151,22 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
     if (now.isBefore(start)) {
       final mins = start.difference(now).inMinutes;
       if (mins <= 0) return 'Join soon';
-      if (mins == 1) return 'Join available in 1 min';
-      return 'Join available in $mins min';
+      return 'Join available in ${_formatWait(mins)}';
     }
     if (now.isAfter(end)) return 'Expired';
     return 'Ready to join';
+  }
+
+  String _formatWait(int mins) {
+    if (mins < 60) return '$mins min';
+    if (mins < 1440) {
+      final h = mins ~/ 60;
+      final m = mins % 60;
+      return m == 0 ? '${h}h' : '${h}h ${m}m';
+    }
+    final d = mins ~/ 1440;
+    final h = (mins % 1440) ~/ 60;
+    return h == 0 ? '${d}d' : '${d}d ${h}h';
   }
 
   bool _isPast(DateTime now, DateTime scheduledAt, int minutes) {
@@ -93,6 +186,7 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
       );
     }
     final myUid = currentUser.uid;
+    final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
       backgroundColor: AppColors.canvas,
@@ -128,12 +222,17 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
           for (final d in docs) {
             final data = d.data() as Map<String, dynamic>;
             final scheduledAt = parseFirestoreTimestamp(data['scheduledAt']);
-            if (scheduledAt == null) continue;
+            final status = (data['status'] ?? 'scheduled').toString();
+            final isCancelled = status == 'cancelled';
 
             final minsRaw = (data['minutesRequested'] ?? data['minutes'] ?? 0);
             final mins = (minsRaw is num) ? minsRaw.toInt() : 0;
 
-            if (_isPast(now, scheduledAt, mins)) {
+            if (isCancelled) {
+              past.add(d);
+            } else if (scheduledAt == null) {
+              upcoming.add(d);
+            } else if (_isPast(now, scheduledAt, mins)) {
               past.add(d);
             } else {
               upcoming.add(d);
@@ -141,10 +240,8 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
           }
 
           upcoming.sort((a, b) {
-            final aDt = parseFirestoreTimestamp((a.data() as Map)['scheduledAt']) ??
-                DateTime.fromMillisecondsSinceEpoch(0);
-            final bDt = parseFirestoreTimestamp((b.data() as Map)['scheduledAt']) ??
-                DateTime.fromMillisecondsSinceEpoch(0);
+            final aDt = parseFirestoreTimestamp((a.data() as Map)['scheduledAt']) ?? DateTime(9999);
+            final bDt = parseFirestoreTimestamp((b.data() as Map)['scheduledAt']) ?? DateTime(9999);
             return aDt.compareTo(bDt);
           });
 
@@ -166,13 +263,9 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Row(
                     children: [
-                      const Text(
+                      Text(
                         'Upcoming',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.text,
-                        ),
+                        style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
                       ),
                       const SizedBox(width: 8),
                       _CountPill(count: upcoming.length),
@@ -180,9 +273,8 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                       if (upcoming.isNotEmpty)
                         Text(
                           'Join opens ${_joinEarlyWindow.inMinutes} min early',
-                          style: const TextStyle(
+                          style: textTheme.bodyMedium?.copyWith(
                             color: AppColors.muted,
-                            fontSize: 12.5,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -218,6 +310,7 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                       final consultationId =
                           (data['consultationId'] ?? doc.id).toString();
                       final scheduledAt = parseFirestoreTimestamp(data['scheduledAt']);
+                      final canCancel = (data['userId'] ?? '') == myUid;
 
                       final minsRaw = (data['minutesRequested'] ?? data['minutes'] ?? 0);
                       final minutes = (minsRaw is num) ? minsRaw.toInt() : 0;
@@ -238,6 +331,11 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                               'Helper')
                           .toString();
 
+                      _ensureUserLoaded(otherUserId);
+                      final userData = _userCache[otherUserId];
+                      final resolvedName = _resolveName(userData, fallbackName);
+                      final avatarUrl = _resolveAvatar(userData);
+
                       return _ConsultationCard(
                         isPast: false,
                         consultationId: consultationId,
@@ -246,11 +344,13 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                         cost: cost,
                         roomId: roomId,
                         otherUserId: otherUserId,
-                        fallbackName: fallbackName,
+                        displayName: resolvedName,
+                        avatarUrl: avatarUrl,
                         joinEnabled: _isJoinEnabled(now, scheduledAt),
                         joinHint: _joinHint(now, scheduledAt),
                         fmtWhen: _fmtWhen,
                         fmtMoney: _fmtMoney,
+                        canCancel: canCancel,
                         onOpenProfile: (uid) {
                           if (uid.trim().isEmpty) return;
                           Navigator.of(context).push(
@@ -284,6 +384,7 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                             ),
                           );
                         },
+                        onCancel: () => _cancelConsultation(consultationId),
                       );
                     },
                   ),
@@ -386,6 +487,12 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                                             'Helper')
                                         .toString();
 
+                                    _ensureUserLoaded(otherUserId);
+                                    final userData = _userCache[otherUserId];
+                                    final resolvedName =
+                                        _resolveName(userData, fallbackName);
+                                    final avatarUrl = _resolveAvatar(userData);
+
                                     return _ConsultationCard(
                                       isPast: true,
                                       consultationId: consultationId,
@@ -394,11 +501,15 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                                       cost: cost,
                                       roomId: roomId,
                                       otherUserId: otherUserId,
-                                      fallbackName: fallbackName,
+                                      displayName: resolvedName,
+                                      avatarUrl: avatarUrl,
                                       joinEnabled: false,
-                                      joinHint: 'Completed',
+                                      joinHint: (data['status'] ?? '') == 'cancelled'
+                                          ? 'Canceled'
+                                          : 'Completed',
                                       fmtWhen: _fmtWhen,
                                       fmtMoney: _fmtMoney,
+                                      canCancel: false,
                                       onOpenProfile: (uid) {
                                         if (uid.trim().isEmpty) return;
                                         Navigator.of(context).push(
@@ -420,6 +531,7 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                                         );
                                       },
                                       onJoin: (_, __) {},
+                                      onCancel: () {},
                                     );
                                   },
                                 ),
@@ -475,10 +587,12 @@ class _ConsultationCard extends StatelessWidget {
   final String roomId;
 
   final String otherUserId;
-  final String fallbackName;
+  final String displayName;
+  final String avatarUrl;
 
   final bool joinEnabled;
   final String joinHint;
+  final bool canCancel;
 
   final String Function(DateTime) fmtWhen;
   final String Function(num) fmtMoney;
@@ -486,6 +600,7 @@ class _ConsultationCard extends StatelessWidget {
   final void Function(String uid) onOpenProfile;
   final void Function(String uid, String resolvedName, String avatarUrl) onMessage;
   final void Function(String uid, String resolvedName) onJoin;
+  final VoidCallback onCancel;
 
   const _ConsultationCard({
     required this.isPast,
@@ -495,14 +610,17 @@ class _ConsultationCard extends StatelessWidget {
     required this.cost,
     required this.roomId,
     required this.otherUserId,
-    required this.fallbackName,
+    required this.displayName,
+    required this.avatarUrl,
     required this.joinEnabled,
     required this.joinHint,
+    required this.canCancel,
     required this.fmtWhen,
     required this.fmtMoney,
     required this.onOpenProfile,
     required this.onMessage,
     required this.onJoin,
+    required this.onCancel,
   });
 
   @override
@@ -523,14 +641,14 @@ class _ConsultationCard extends StatelessWidget {
           children: [
             _UserPreview(
               uid: otherUserId,
-              fallbackName: fallbackName,
+              avatarUrl: avatarUrl,
               onOpenProfile: onOpenProfile,
             ),
             const SizedBox(width: 12),
             Expanded(
               child: _ConsultationMeta(
                 uid: otherUserId,
-                fallbackName: fallbackName,
+                displayName: displayName,
                 whenText: whenText,
                 minutes: minutes,
                 costText: fmtMoney(cost),
@@ -543,9 +661,12 @@ class _ConsultationCard extends StatelessWidget {
               isPast: isPast,
               joinEnabled: joinEnabled,
               uid: otherUserId,
-              fallbackName: fallbackName,
+              displayName: displayName,
+              avatarUrl: avatarUrl,
+              canCancel: canCancel,
               onMessage: onMessage,
               onJoin: onJoin,
+              onCancel: onCancel,
             ),
           ],
         ),
@@ -556,12 +677,12 @@ class _ConsultationCard extends StatelessWidget {
 
 class _UserPreview extends StatelessWidget {
   final String uid;
-  final String fallbackName;
+  final String avatarUrl;
   final void Function(String uid) onOpenProfile;
 
   const _UserPreview({
     required this.uid,
-    required this.fallbackName,
+    required this.avatarUrl,
     required this.onOpenProfile,
   });
 
@@ -581,37 +702,23 @@ class _UserPreview extends StatelessWidget {
       );
     }
 
-    return FutureBuilder<DocumentSnapshot>(
-      future: FirebaseFirestore.instance.collection('users').doc(id).get(),
-      builder: (context, snap) {
-        final d = snap.data?.data() as Map<String, dynamic>?;
-        final avatar = (d?['avatar'] ??
-                d?['photoUrl'] ??
-                d?['profilePicture'] ??
-                d?['userAvatar'] ??
-                '')
-            .toString()
-            .trim();
-
-        return GestureDetector(
-          onTap: () => onOpenProfile(id),
-          child: CircleAvatar(
-            radius: avatarRadius,
-            backgroundColor: AppColors.avatarBg,
-            backgroundImage: avatar.isNotEmpty ? NetworkImage(avatar) : null,
-            child: avatar.isEmpty
-                ? const Icon(Icons.person_outline, color: AppColors.avatarFg)
-                : null,
-          ),
-        );
-      },
+    return GestureDetector(
+      onTap: () => onOpenProfile(id),
+      child: CircleAvatar(
+        radius: avatarRadius,
+        backgroundColor: AppColors.avatarBg,
+        backgroundImage: avatarUrl.isNotEmpty ? NetworkImage(avatarUrl) : null,
+        child: avatarUrl.isEmpty
+            ? const Icon(Icons.person_outline, color: AppColors.avatarFg)
+            : null,
+      ),
     );
   }
 }
 
 class _ConsultationMeta extends StatelessWidget {
   final String uid;
-  final String fallbackName;
+  final String displayName;
 
   final String whenText;
   final int minutes;
@@ -622,7 +729,7 @@ class _ConsultationMeta extends StatelessWidget {
 
   const _ConsultationMeta({
     required this.uid,
-    required this.fallbackName,
+    required this.displayName,
     required this.whenText,
     required this.minutes,
     required this.costText,
@@ -634,39 +741,22 @@ class _ConsultationMeta extends StatelessWidget {
   Widget build(BuildContext context) {
     final id = uid.trim();
 
+    final textTheme = Theme.of(context).textTheme;
+
     Widget nameText(String name) {
-      final n = name.trim().isNotEmpty ? name.trim() : fallbackName;
+      final n = name.trim().isNotEmpty ? name.trim() : displayName;
       return GestureDetector(
         onTap: id.isEmpty ? null : () => onOpenProfile(id),
         child: Text(
           n,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w800,
-            color: AppColors.text,
-          ),
+          style: textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700),
         ),
       );
     }
 
-    final nameWidget = id.isEmpty
-        ? nameText(fallbackName)
-        : FutureBuilder<DocumentSnapshot>(
-            future: FirebaseFirestore.instance.collection('users').doc(id).get(),
-            builder: (context, snap) {
-              final d = snap.data?.data() as Map<String, dynamic>?;
-              final resolved = (d?['displayName'] ??
-                      d?['fullName'] ??
-                      d?['name'] ??
-                      d?['userName'] ??
-                      '')
-                  .toString()
-                  .trim();
-              return nameText(resolved.isNotEmpty ? resolved : fallbackName);
-            },
-          );
+    final nameWidget = nameText(displayName);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -682,7 +772,7 @@ class _ConsultationMeta extends StatelessWidget {
                 whenText,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: AppColors.muted, fontSize: 13),
+                style: textTheme.bodyMedium?.copyWith(color: AppColors.muted),
               ),
             ),
           ],
@@ -699,9 +789,8 @@ class _ConsultationMeta extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           hint,
-          style: const TextStyle(
+          style: textTheme.bodyMedium?.copyWith(
             color: AppColors.muted,
-            fontSize: 12.5,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -715,49 +804,25 @@ class _ActionsColumn extends StatelessWidget {
   final bool joinEnabled;
 
   final String uid;
-  final String fallbackName;
+  final String displayName;
+  final String avatarUrl;
+  final bool canCancel;
 
   final void Function(String uid, String resolvedName, String avatarUrl) onMessage;
   final void Function(String uid, String resolvedName) onJoin;
+  final VoidCallback onCancel;
 
   const _ActionsColumn({
     required this.isPast,
     required this.joinEnabled,
     required this.uid,
-    required this.fallbackName,
+    required this.displayName,
+    required this.avatarUrl,
+    required this.canCancel,
     required this.onMessage,
     required this.onJoin,
+    required this.onCancel,
   });
-
-  Future<(String name, String avatar)> _resolveUser() async {
-    final id = uid.trim();
-    if (id.isEmpty) return (fallbackName, '');
-
-    try {
-      final snap = await FirebaseFirestore.instance.collection('users').doc(id).get();
-      final d = snap.data();
-
-      final name = (d?['displayName'] ??
-              d?['fullName'] ??
-              d?['name'] ??
-              d?['userName'] ??
-              '')
-          .toString()
-          .trim();
-
-      final avatar = (d?['avatar'] ??
-              d?['photoUrl'] ??
-              d?['profilePicture'] ??
-              d?['userAvatar'] ??
-              '')
-          .toString()
-          .trim();
-
-      return (name.isNotEmpty ? name : fallbackName, avatar);
-    } catch (_) {
-      return (fallbackName, '');
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -773,8 +838,7 @@ class _ActionsColumn extends StatelessWidget {
             onPressed: id.isEmpty
                 ? null
                 : () async {
-                    final (name, avatar) = await _resolveUser();
-                    onMessage(id, name, avatar);
+                    onMessage(id, displayName, avatarUrl);
                   },
             style: OutlinedButton.styleFrom(
               backgroundColor: AppColors.button,
@@ -798,8 +862,7 @@ class _ActionsColumn extends StatelessWidget {
               onPressed: (!joinEnabled || id.isEmpty)
                   ? null
                   : () async {
-                      final (name, _) = await _resolveUser();
-                      onJoin(id, name);
+                      onJoin(id, displayName);
                     },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
@@ -814,6 +877,18 @@ class _ActionsColumn extends StatelessWidget {
               child: const Text('Join'),
             ),
           ),
+
+        if (!isPast && canCancel) ...[
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: onCancel,
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.danger,
+              textStyle: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            child: const Text('Cancel'),
+          ),
+        ],
       ],
     );
   }
