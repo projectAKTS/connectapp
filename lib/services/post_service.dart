@@ -12,6 +12,7 @@ class PostService {
     List<String> tags,
     String postType, {
     String? imageUrl,
+    List<String>? imageUrls,
     String? videoUrl,
     String? videoThumbUrl,
     double? mediaAspectRatio,
@@ -50,6 +51,10 @@ class PostService {
     if (imageUrl != null && imageUrl.isNotEmpty) {
       postData['imageUrl'] = imageUrl;
     }
+    if (imageUrls != null && imageUrls.isNotEmpty) {
+      postData['imageUrls'] = imageUrls;
+      postData['imageUrl'] ??= imageUrls.first;
+    }
     if (videoUrl != null && videoUrl.isNotEmpty) {
       postData['videoUrl'] = videoUrl;
     }
@@ -64,6 +69,57 @@ class PostService {
 
     // Award XP (if you keep this mechanic)
     await _gamificationService.awardXP(user.uid, 10, isPost: true);
+  }
+
+  /// Creates a post shell quickly so media can upload in the background.
+  Future<String> createPostShell(
+    String content,
+    List<String> tags,
+    String postType, {
+    bool mediaUploading = false,
+    int mediaCount = 0,
+    bool hasVideo = false,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) throw Exception('User must be logged in');
+
+    final docRef = _firestore.collection('posts').doc();
+    final String postId = docRef.id;
+
+    final userSnap = await _firestore.collection('users').doc(user.uid).get();
+    final String userName = userSnap.data()?['fullName'] ?? 'Unknown User';
+    final String userAvatar = userSnap.data()?['profilePicture'] ?? '';
+
+    final Map<String, dynamic> postData = {
+      'id':            postId,
+      'userID':        user.uid,
+      'userName':      userName,
+      'userAvatar':    userAvatar,
+      'content':       content,
+      'postType':      postType,
+      'tags':          tags,
+      'timestamp':     FieldValue.serverTimestamp(),
+      'likes':         0,
+      'commentsCount': 0,
+      'helpfulVotes':  0,
+      'engagementScore': 0,
+      'isBoosted':     false,
+      'boostExpiresAt': null,
+      'boostScore':    0,
+      'likedBy':       <String>[],
+      'isFeatured':    false,
+      'mediaUploadStatus': mediaUploading ? 'uploading' : 'ready',
+      'mediaCount': mediaCount,
+      'hasVideo': hasVideo,
+      if (mediaUploading) 'mediaUploadStartedAt': FieldValue.serverTimestamp(),
+    };
+
+    await docRef.set(postData);
+
+    // Award XP (if you keep this mechanic)
+    await _gamificationService.awardXP(user.uid, 10, isPost: true);
+
+    return postId;
   }
 
   Future<void> boostPost(String postId, int boostDurationHours) async {

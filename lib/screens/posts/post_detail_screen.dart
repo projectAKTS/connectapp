@@ -77,6 +77,20 @@ class PostDetailScreen extends StatelessWidget {
     );
   }
 
+  List<String> _extractImageUrls(Map<String, dynamic> data) {
+    final v = data['imageUrls'];
+    if (v is List) {
+      return v
+          .whereType<String>()
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+    }
+    final single = (data['imageUrl'] ?? '').toString().trim();
+    if (single.isNotEmpty) return [single];
+    return [];
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenH = MediaQuery.of(context).size.height;
@@ -117,6 +131,7 @@ class PostDetailScreen extends StatelessWidget {
           );
           final span =
               _parseSimpleMarkdownToSpan(body, base: base, strong: strong);
+          final imageUrls = _extractImageUrls(data);
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(16),
@@ -146,11 +161,8 @@ class PostDetailScreen extends StatelessWidget {
                                   fontSize: 18, fontWeight: FontWeight.bold),
                             ),
                             const SizedBox(height: 10),
-                            if ((data['imageUrl'] ?? '').toString().isNotEmpty) ...[
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: Image.network(data['imageUrl']),
-                              ),
+                            if (imageUrls.isNotEmpty) ...[
+                              _DetailMediaCarousel(urls: imageUrls),
                               const SizedBox(height: 12),
                             ],
                             _postTypeBadge(badge),
@@ -175,6 +187,75 @@ class PostDetailScreen extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _DetailMediaCarousel extends StatefulWidget {
+  final List<String> urls;
+  const _DetailMediaCarousel({required this.urls});
+
+  @override
+  State<_DetailMediaCarousel> createState() => _DetailMediaCarouselState();
+}
+
+class _DetailMediaCarouselState extends State<_DetailMediaCarousel> {
+  int _index = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.urls.length == 1) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Image.network(widget.urls.first, fit: BoxFit.cover),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Stack(
+        children: [
+          AspectRatio(
+            aspectRatio: 4 / 5,
+            child: PageView.builder(
+              itemCount: widget.urls.length,
+              onPageChanged: (i) => setState(() => _index = i),
+              itemBuilder: (_, i) => Image.network(
+                widget.urls[i],
+                fit: BoxFit.cover,
+                loadingBuilder: (c, w, p) =>
+                    p == null ? w : Container(color: AppColors.button),
+                errorBuilder: (_, __, ___) => Container(
+                  color: AppColors.button,
+                  alignment: Alignment.center,
+                  child: const Icon(Icons.broken_image, color: AppColors.muted),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 10,
+            left: 0,
+            right: 0,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(widget.urls.length, (i) {
+                final active = i == _index;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  width: active ? 14 : 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(active ? 0.55 : 0.25),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                );
+              }),
+            ),
+          ),
+        ],
       ),
     );
   }

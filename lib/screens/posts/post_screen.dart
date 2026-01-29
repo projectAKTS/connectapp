@@ -62,7 +62,19 @@ class _PostScreenState extends State<PostScreen> {
   Widget build(BuildContext context) {
     final post = widget.postData;
     List<String> tags = (post['tags'] as List<dynamic>?)?.cast<String>() ?? [];
-    final String? imageUrl = post['imageUrl'];
+    final List<String> imageUrls = (() {
+      final v = post['imageUrls'];
+      if (v is List) {
+        return v
+            .whereType<String>()
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
+      }
+      final single = (post['imageUrl'] ?? '').toString().trim();
+      if (single.isNotEmpty) return [single];
+      return <String>[];
+    })();
     final bool isProTip = post['isProTip'] ?? false;
 
     return Scaffold(
@@ -89,11 +101,8 @@ class _PostScreenState extends State<PostScreen> {
             ),
             const SizedBox(height: 16),
 
-            if (imageUrl != null && imageUrl.isNotEmpty)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.network(imageUrl, height: 200, width: double.infinity, fit: BoxFit.cover),
-              ),
+            if (imageUrls.isNotEmpty)
+              _PostMediaCarousel(urls: imageUrls),
 
             if (tags.isNotEmpty) ...[
               const SizedBox(height: 16),
@@ -186,6 +195,81 @@ class _PostScreenState extends State<PostScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _PostMediaCarousel extends StatefulWidget {
+  final List<String> urls;
+  const _PostMediaCarousel({required this.urls});
+
+  @override
+  State<_PostMediaCarousel> createState() => _PostMediaCarouselState();
+}
+
+class _PostMediaCarouselState extends State<_PostMediaCarousel> {
+  int _index = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.urls.length == 1) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Image.network(
+          widget.urls.first,
+          height: 220,
+          width: double.infinity,
+          fit: BoxFit.cover,
+        ),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Stack(
+        children: [
+          SizedBox(
+            height: 240,
+            width: double.infinity,
+            child: PageView.builder(
+              itemCount: widget.urls.length,
+              onPageChanged: (i) => setState(() => _index = i),
+              itemBuilder: (_, i) => Image.network(
+                widget.urls[i],
+                fit: BoxFit.cover,
+                loadingBuilder: (c, w, p) =>
+                    p == null ? w : Container(color: Colors.black12),
+                errorBuilder: (_, __, ___) => Container(
+                  color: Colors.black12,
+                  alignment: Alignment.center,
+                  child: const Icon(Icons.broken_image, color: Colors.black45),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 10,
+            left: 0,
+            right: 0,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(widget.urls.length, (i) {
+                final active = i == _index;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  width: active ? 14 : 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(active ? 0.55 : 0.25),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                );
+              }),
+            ),
+          ),
+        ],
       ),
     );
   }

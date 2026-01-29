@@ -20,25 +20,30 @@ service cloud.firestore {
       // — Editing content/tags/timestamp (by owner)
       allow update: if request.auth != null
         && request.auth.uid == resource.data.userID
-        && request.resource.data.keys().hasOnly([
-          'content', 'timestamp', 'tags'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'content', 'timestamp', 'tags',
+          'imageUrl', 'imageUrls',
+          'videoUrl', 'videoThumbUrl',
+          'mediaAspectRatio',
+          'mediaUploadStatus', 'mediaUploadUpdatedAt', 'mediaUploadStartedAt',
+          'mediaCount', 'hasVideo'
         ]);
       
       // — Like/Unlike (no self-likes)
       allow update: if request.auth != null
         && request.auth.uid != resource.data.userID
-        && request.resource.data.keys().hasAny([
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'likes', 'likedBy'
         ]);
       
       // — Report post
       allow update: if request.auth != null
-        && request.resource.data.keys().hasAny(['reports']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reports']);
       
       // — Boost (admins only)
       allow update: if request.auth != null
         && request.auth.token.admin == true
-        && request.resource.data.keys().hasAny([
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'isBoosted', 'boostExpiresAt'
         ]);
       

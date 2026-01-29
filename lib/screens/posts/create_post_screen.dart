@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
@@ -225,9 +226,62 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     });
   }
 
+  Future<void> _takePhoto({required bool addMore}) async {
+    final picked = await picker.pickImage(
+      source: ImageSource.camera,
+      maxWidth: 1600,
+      imageQuality: 85,
+    );
+    if (picked == null) return;
+
+    final photo = File(picked.path);
+    setState(() {
+      if (!addMore) _imageFiles.clear();
+      _imageFiles.add(photo);
+
+      _videoFile = null;
+      _videoThumbPath = null;
+      _mediaAspect = 1.0;
+    });
+  }
+
   Future<void> _pickVideo() async {
     final picked = await picker.pickVideo(
       source: ImageSource.gallery,
+      maxDuration: const Duration(minutes: 3),
+    );
+    if (picked == null) return;
+
+    final video = File(picked.path);
+
+    String? thumbPath;
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final out = await VideoThumbnail.thumbnailFile(
+        video: video.path,
+        thumbnailPath: tempDir.path,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: 900,
+        quality: 80,
+        timeMs: 0,
+      );
+      thumbPath = out;
+    } catch (_) {
+      thumbPath = null;
+    }
+
+    setState(() {
+      _videoFile = video;
+      _videoThumbPath = thumbPath;
+      _mediaAspect = 16 / 9;
+
+      _imageFiles.clear();
+    });
+  }
+
+  Future<void> _recordVideo() async {
+    final picked = await picker.pickVideo(
+      source: ImageSource.camera,
       maxDuration: const Duration(minutes: 3),
     );
     if (picked == null) return;
@@ -303,8 +357,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 if (mounted) setSheetState(() {}); // ✅ instant
               }
 
+              Future<void> takePhotoFromSheet({required bool addMore}) async {
+                await _takePhoto(addMore: addMore);
+                if (mounted) setSheetState(() {});
+              }
+
               Future<void> pickVideoFromSheet() async {
                 await _pickVideo();
+                if (mounted) setSheetState(() {});
+              }
+
+              Future<void> recordVideoFromSheet() async {
+                await _recordVideo();
                 if (mounted) setSheetState(() {});
               }
 
@@ -330,11 +394,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   videoFile: _videoFile,
                   videoThumbPath: _videoThumbPath,
                   onAddPhotos: () => pickPhotosFromSheet(addMore: false),
+                  onTakePhoto: () => takePhotoFromSheet(addMore: false),
                   onAddVideo: pickVideoFromSheet,
+                  onRecordVideo: recordVideoFromSheet,
                   onRemoveAll: removeAllFromSheet,
                   onRemovePhotoAt: removePhotoAtFromSheet,
                   onRemoveVideo: removeVideoFromSheet,
                   onAddMorePhotos: () => pickPhotosFromSheet(addMore: true),
+                  onTakeMorePhotos: () => takePhotoFromSheet(addMore: true),
                 ),
               );
             },
@@ -475,6 +542,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       return;
     }
 
+    FocusScope.of(context).unfocus();
+
     String content = '';
     if (_selectedTemplate == null) {
       content = _quickController.text.trim();
@@ -496,49 +565,54 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
     setState(() => _isPosting = true);
 
-    String? imageUrl;
-    String? videoUrl;
-    String? videoThumbUrl;
+    final type = _selectedTemplate ?? 'Quick';
 
     try {
-      if (_imageFiles.isNotEmpty) {
-        final first = _imageFiles.first;
-        final ref = FirebaseStorage.instance
-            .ref()
-            .child('post_images')
-            .child('${DateTime.now().millisecondsSinceEpoch}.jpg');
-        await ref.putFile(first);
-        imageUrl = await ref.getDownloadURL();
+      if (_hasMedia) {
+        final imageFiles = List<File>.from(_imageFiles);
+        final videoFile = _videoFile;
+        final videoThumbPath = _videoThumbPath;
+        final mediaAspect = _mediaAspect;
+        final mediaCount =
+            imageFiles.length + (videoFile != null ? 1 : 0);
+
+        final postId = await _postService.createPostShell(
+          content,
+          selectedTags,
+          type,
+          mediaUploading: true,
+          mediaCount: mediaCount,
+          hasVideo: videoFile != null,
+        );
+
+        await _streakService.updateStreak(currentUser.uid);
+
+        if (!mounted) return;
+        _resetComposer();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Posting media in background…')),
+        );
+
+        Future.delayed(const Duration(milliseconds: 150), () {
+          if (mounted) Navigator.of(context).maybePop('posted');
+        });
+
+        _uploadMediaAndUpdatePost(
+          postId: postId,
+          imageFiles: imageFiles,
+          videoFile: videoFile,
+          videoThumbPath: videoThumbPath,
+          mediaAspect: mediaAspect,
+        );
+
+        return;
       }
-
-      if (_videoFile != null) {
-        final vRef = FirebaseStorage.instance
-            .ref()
-            .child('post_videos')
-            .child('${DateTime.now().millisecondsSinceEpoch}.mp4');
-        await vRef.putFile(_videoFile!);
-        videoUrl = await vRef.getDownloadURL();
-
-        if (_videoThumbPath != null) {
-          final tRef = FirebaseStorage.instance
-              .ref()
-              .child('post_video_thumbs')
-              .child('${DateTime.now().millisecondsSinceEpoch}.jpg');
-          await tRef.putFile(File(_videoThumbPath!));
-          videoThumbUrl = await tRef.getDownloadURL();
-        }
-      }
-
-      final type = _selectedTemplate ?? 'Quick';
 
       await _postService.createPost(
         content,
         selectedTags,
         type,
-        imageUrl: imageUrl,
-        videoUrl: videoUrl,
-        videoThumbUrl: videoThumbUrl,
-        mediaAspectRatio: _mediaAspect,
       );
 
       await _streakService.updateStreak(currentUser.uid);
@@ -561,6 +635,76 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       );
     } finally {
       if (mounted) setState(() => _isPosting = false);
+    }
+  }
+
+  Future<void> _uploadMediaAndUpdatePost({
+    required String postId,
+    required List<File> imageFiles,
+    required File? videoFile,
+    required String? videoThumbPath,
+    required double? mediaAspect,
+  }) async {
+    String? imageUrl;
+    final List<String> imageUrls = [];
+    String? videoUrl;
+    String? videoThumbUrl;
+
+    try {
+      if (imageFiles.isNotEmpty) {
+        for (var i = 0; i < imageFiles.length; i++) {
+          final file = imageFiles[i];
+          final ref = FirebaseStorage.instance
+              .ref()
+              .child('post_images')
+              .child('${DateTime.now().millisecondsSinceEpoch}_$i.jpg');
+          await ref.putFile(file).timeout(const Duration(minutes: 3));
+          imageUrls.add(await ref.getDownloadURL());
+        }
+        if (imageUrls.isNotEmpty) imageUrl = imageUrls.first;
+      }
+
+      if (videoFile != null) {
+        final vRef = FirebaseStorage.instance
+            .ref()
+            .child('post_videos')
+            .child('${DateTime.now().millisecondsSinceEpoch}.mp4');
+        await vRef.putFile(videoFile).timeout(const Duration(minutes: 5));
+        videoUrl = await vRef.getDownloadURL();
+
+        if (videoThumbPath != null) {
+          final tRef = FirebaseStorage.instance
+              .ref()
+              .child('post_video_thumbs')
+              .child('${DateTime.now().millisecondsSinceEpoch}.jpg');
+          await tRef.putFile(File(videoThumbPath))
+              .timeout(const Duration(minutes: 2));
+          videoThumbUrl = await tRef.getDownloadURL();
+        }
+      }
+
+      await FirebaseFirestore.instance
+          .collection('posts')
+          .doc(postId)
+          .update({
+        if (imageUrl != null && imageUrl.isNotEmpty) 'imageUrl': imageUrl,
+        if (imageUrls.isNotEmpty) 'imageUrls': imageUrls,
+        if (videoUrl != null && videoUrl.isNotEmpty) 'videoUrl': videoUrl,
+        if (videoThumbUrl != null && videoThumbUrl.isNotEmpty)
+          'videoThumbUrl': videoThumbUrl,
+        if (mediaAspect != null && mediaAspect > 0)
+          'mediaAspectRatio': mediaAspect,
+        'mediaUploadStatus': 'ready',
+        'mediaUploadUpdatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      await FirebaseFirestore.instance
+          .collection('posts')
+          .doc(postId)
+          .update({
+        'mediaUploadStatus': 'failed',
+        'mediaUploadUpdatedAt': FieldValue.serverTimestamp(),
+      });
     }
   }
 
@@ -637,84 +781,119 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               ),
             ],
           ),
-          body: Column(
+          body: Stack(
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-                child: Row(
+              AbsorbPointer(
+                absorbing: _isPosting,
+                child: Column(
                   children: [
-                    _ModeChip(
-                      label: 'Quick',
-                      selected: _selectedTemplate == null,
-                      onTap: _setQuickPost,
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                      child: Row(
+                        children: [
+                          _ModeChip(
+                            label: 'Quick',
+                            selected: _selectedTemplate == null,
+                            onTap: _setQuickPost,
+                          ),
+                          const SizedBox(width: 8),
+                          _ModeChip(
+                            label: 'Template',
+                            selected: _selectedTemplate != null,
+                            onTap: _openTemplateSheet,
+                          ),
+                          const Spacer(),
+                        ],
+                      ),
                     ),
-                    const SizedBox(width: 8),
-                    _ModeChip(
-                      label: 'Template',
-                      selected: _selectedTemplate != null,
-                      onTap: _openTemplateSheet,
+                    const SizedBox(height: 10),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+                      child: _selectedTemplate == null
+                          ? _QuickEditor(
+                              controller: _quickController,
+                              focusNode: _quickFocus,
+                              onChanged: () => setState(() {}),
+                              readOnly: _isPosting,
+                            )
+                          : _TemplateEditor(
+                              template: templates[_selectedTemplate]!,
+                              a1: _a1,
+                              a2: _a2,
+                              a3: _a3,
+                              a1Focus: _a1Focus,
+                              a2Focus: _a2Focus,
+                              a3Focus: _a3Focus,
+                              onChanged: () => setState(() {}),
+                              readOnly: _isPosting,
+                            ),
+                      ),
                     ),
-                    const Spacer(),
+
+                    // ✅ keep 2 buttons exactly like before (Media + Tags)
+                    SafeArea(
+                      top: false,
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          border: Border(top: BorderSide(color: AppColors.border)),
+                        ),
+                        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: _PillButton(
+                                label: (_imageFiles.isNotEmpty || _videoFile != null)
+                                    ? 'Media (${_imageFiles.length + (_videoFile != null ? 1 : 0)})'
+                                    : 'Media',
+                                icon: Icons.photo_library_outlined,
+                                onTap: _openMediaSheet,
+                                selected: _hasMedia,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: _PillButton(
+                                label: selectedTags.isNotEmpty ? 'Tags (${selectedTags.length})' : 'Tags',
+                                icon: Icons.tag_outlined,
+                                onTap: _openTagsSheet,
+                                selected: selectedTags.isNotEmpty,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
-              const SizedBox(height: 10),
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-                  child: _selectedTemplate == null
-                      ? _QuickEditor(
-                          controller: _quickController,
-                          focusNode: _quickFocus,
-                          onChanged: () => setState(() {}),
-                        )
-                      : _TemplateEditor(
-                          template: templates[_selectedTemplate]!,
-                          a1: _a1,
-                          a2: _a2,
-                          a3: _a3,
-                          a1Focus: _a1Focus,
-                          a2Focus: _a2Focus,
-                          a3Focus: _a3Focus,
-                          onChanged: () => setState(() {}),
-                        ),
-                ),
-              ),
-
-              // ✅ keep 2 buttons exactly like before (Media + Tags)
-              SafeArea(
-                top: false,
-                child: Container(
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    border: Border(top: BorderSide(color: AppColors.border)),
-                  ),
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _PillButton(
-                          label: (_imageFiles.isNotEmpty || _videoFile != null)
-                              ? 'Media (${_imageFiles.length + (_videoFile != null ? 1 : 0)})'
-                              : 'Media',
-                          icon: Icons.photo_library_outlined,
-                          onTap: _openMediaSheet,
-                          selected: _hasMedia,
-                        ),
+              if (_isPosting)
+                Positioned.fill(
+                  child: Container(
+                    color: Colors.white.withOpacity(0.65),
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: const [
+                          SizedBox(
+                            width: 28,
+                            height: 28,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          SizedBox(height: 12),
+                          Text(
+                            'Posting...',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.text,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _PillButton(
-                          label: selectedTags.isNotEmpty ? 'Tags (${selectedTags.length})' : 'Tags',
-                          icon: Icons.tag_outlined,
-                          onTap: _openTagsSheet,
-                          selected: selectedTags.isNotEmpty,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
         ),
@@ -731,23 +910,29 @@ class _MediaPanel extends StatelessWidget {
   final String? videoThumbPath;
 
   final VoidCallback onAddPhotos;
+  final VoidCallback onTakePhoto;
   final VoidCallback onAddVideo;
+  final VoidCallback onRecordVideo;
 
   final VoidCallback onRemoveAll;
   final ValueChanged<int> onRemovePhotoAt;
   final VoidCallback onRemoveVideo;
   final VoidCallback onAddMorePhotos;
+  final VoidCallback onTakeMorePhotos;
 
   const _MediaPanel({
     required this.imageFiles,
     required this.videoFile,
     required this.videoThumbPath,
     required this.onAddPhotos,
+    required this.onTakePhoto,
     required this.onAddVideo,
+    required this.onRecordVideo,
     required this.onRemoveAll,
     required this.onRemovePhotoAt,
     required this.onRemoveVideo,
     required this.onAddMorePhotos,
+    required this.onTakeMorePhotos,
   });
 
   @override
@@ -801,17 +986,27 @@ class _MediaPanel extends StatelessWidget {
             children: [
               Expanded(
                 child: _SheetAction(
-                  icon: Icons.image_outlined,
-                  label: hasPhotos ? 'Replace photos' : 'Add photos',
-                  onTap: onAddPhotos,
+                  icon: Icons.photo_library_outlined,
+                  label: hasPhotos || hasVideo
+                      ? 'Choose from library'
+                      : 'Add from library',
+                  onTap: () => _chooseMediaType(
+                    context,
+                    onPhoto: hasPhotos ? onAddMorePhotos : onAddPhotos,
+                    onVideo: onAddVideo,
+                  ),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
                 child: _SheetAction(
-                  icon: Icons.videocam_outlined,
-                  label: hasVideo ? 'Replace video' : 'Add video',
-                  onTap: onAddVideo,
+                  icon: Icons.photo_camera_outlined,
+                  label: 'Use camera',
+                  onTap: () => _chooseMediaType(
+                    context,
+                    onPhoto: hasPhotos ? onTakeMorePhotos : onTakePhoto,
+                    onVideo: onRecordVideo,
+                  ),
                 ),
               ),
             ],
@@ -974,6 +1169,57 @@ class _PhotosRow extends StatelessWidget {
       ),
     );
   }
+}
+
+void _chooseMediaType(
+  BuildContext context, {
+  required VoidCallback onPhoto,
+  required VoidCallback onVideo,
+}) {
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+    ),
+    builder: (ctx) {
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 44,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.image_outlined),
+                title: const Text('Photo'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  onPhoto();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.videocam_outlined),
+                title: const Text('Video'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  onVideo();
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class _BigVideoPreview extends StatelessWidget {
@@ -1221,11 +1467,13 @@ class _QuickEditor extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
   final VoidCallback onChanged;
+  final bool readOnly;
 
   const _QuickEditor({
     required this.controller,
     required this.focusNode,
     required this.onChanged,
+    required this.readOnly,
   });
 
   @override
@@ -1233,6 +1481,7 @@ class _QuickEditor extends StatelessWidget {
     return TextField(
       controller: controller,
       focusNode: focusNode,
+      readOnly: readOnly,
       maxLines: null,
       keyboardType: TextInputType.multiline,
       textCapitalization: TextCapitalization.sentences,
@@ -1265,6 +1514,7 @@ class _TemplateEditor extends StatelessWidget {
   final FocusNode a3Focus;
 
   final VoidCallback onChanged;
+  final bool readOnly;
 
   const _TemplateEditor({
     required this.template,
@@ -1275,6 +1525,7 @@ class _TemplateEditor extends StatelessWidget {
     required this.a2Focus,
     required this.a3Focus,
     required this.onChanged,
+    required this.readOnly,
   });
 
   @override
@@ -1298,6 +1549,7 @@ class _TemplateEditor extends StatelessWidget {
             TextField(
               controller: c,
               focusNode: f,
+              readOnly: readOnly,
               maxLines: null,
               keyboardType: TextInputType.multiline,
               textCapitalization: TextCapitalization.sentences,

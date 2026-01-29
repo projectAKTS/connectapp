@@ -18,20 +18,47 @@ class PaymentSetupScreen extends StatefulWidget {
 class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
   bool _isProcessing = false;
   final PaymentService _paymentService = PaymentService();
-  late Future<PaymentMethodsData> _cardsFuture;
+  bool _isLoadingCards = true;
+  String? _cardsError;
   String? _defaultId;
   List<PaymentMethodInfo> _cards = const [];
 
   @override
   void initState() {
     super.initState();
-    _cardsFuture = _paymentService.listPaymentMethods();
+    _loadCachedCards();
+    _refreshCards();
   }
 
-  void _reloadCards() {
+  Future<void> _loadCachedCards() async {
+    final cached = await _paymentService.getCachedPaymentMethods();
+    if (!mounted || cached == null) return;
     setState(() {
-      _cardsFuture = _paymentService.listPaymentMethods();
+      _defaultId = cached.defaultPaymentMethodId;
+      _cards = cached.paymentMethods;
     });
+  }
+
+  Future<void> _refreshCards() async {
+    setState(() {
+      _isLoadingCards = true;
+      _cardsError = null;
+    });
+    try {
+      final data = await _paymentService.listPaymentMethods();
+      if (!mounted) return;
+      setState(() {
+        _defaultId = data.defaultPaymentMethodId;
+        _cards = data.paymentMethods;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _cardsError = e.toString();
+      });
+    } finally {
+      if (mounted) setState(() => _isLoadingCards = false);
+    }
   }
 
   Future<void> _setDefaultCard(String id) async {
@@ -39,7 +66,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
     setState(() => _isProcessing = true);
     try {
       await _paymentService.setDefaultPaymentMethod(id);
-      _reloadCards();
+      await _refreshCards();
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
@@ -62,7 +89,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
     setState(() => _isProcessing = true);
     try {
       await _paymentService.removePaymentMethod(id);
-      _reloadCards();
+      await _refreshCards();
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
@@ -181,7 +208,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('✅ Card added successfully!')),
       );
-      _reloadCards();
+      await _refreshCards();
     } on StripeException catch (e) {
       final rawMsg = e.error.localizedMessage ?? 'Stripe error';
       final code = e.error.code?.toString().toLowerCase() ?? '';
@@ -262,55 +289,49 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
           const SizedBox(height: 18),
           Text('Saved cards', style: textTheme.titleMedium),
           const SizedBox(height: 10),
-          FutureBuilder<PaymentMethodsData>(
-            future: _cardsFuture,
-            builder: (context, snap) {
-              if (snap.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snap.hasError) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Could not load cards', style: textTheme.bodyLarge),
-                    const SizedBox(height: 6),
-                    Text(
-                      snap.error.toString(),
-                      style: textTheme.bodyMedium,
+          if (_isLoadingCards && _cards.isEmpty)
+            const Center(child: CircularProgressIndicator())
+          else if (_cardsError != null && _cards.isEmpty)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Could not load cards', style: textTheme.bodyLarge),
+                const SizedBox(height: 6),
+                Text(
+                  _cardsError!,
+                  style: textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: _refreshCards,
+                  child: const Text('Retry'),
+                ),
+              ],
+            )
+          else if (_cards.isEmpty)
+            Text(
+              'No saved cards yet.',
+              style: textTheme.bodyMedium?.copyWith(color: AppColors.muted),
+            )
+          else
+            Column(
+              children: _cards
+                  .map(
+                    (m) => _CardRow(
+                      info: m,
+                      isDefault: m.id == _defaultId,
+                      onMore: () => _showCardActions(m, m.id == _defaultId),
                     ),
-                    const SizedBox(height: 12),
-                    TextButton(
-                      onPressed: _reloadCards,
-                      child: const Text('Retry'),
-                    ),
-                  ],
-                );
-              }
-
-              final data = snap.data!;
-              _defaultId = data.defaultPaymentMethodId;
-              _cards = data.paymentMethods;
-              final methods = _cards;
-              if (methods.isEmpty) {
-                return Text(
-                  'No saved cards yet.',
-                  style: textTheme.bodyMedium?.copyWith(color: AppColors.muted),
-                );
-              }
-
-              return Column(
-                children: methods
-                    .map(
-                      (m) => _CardRow(
-                        info: m,
-                        isDefault: m.id == _defaultId,
-                        onMore: () => _showCardActions(m, m.id == _defaultId),
-                      ),
-                    )
-                    .toList(),
-              );
-            },
-          ),
+                  )
+                  .toList(),
+            ),
+          if (_isLoadingCards && _cards.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Refreshing cards…',
+              style: textTheme.bodySmall?.copyWith(color: AppColors.muted),
+            ),
+          ],
           const SizedBox(height: 20),
           if (_isProcessing)
             const Center(child: CircularProgressIndicator())

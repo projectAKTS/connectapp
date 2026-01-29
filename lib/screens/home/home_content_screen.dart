@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:video_player/video_player.dart';
 
 import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/theme/tokens.dart';
@@ -53,6 +54,7 @@ class HomeContentScreen extends StatefulWidget {
 class HomeContentScreenState extends State<HomeContentScreen>
     with AutomaticKeepAliveClientMixin {
   final ScrollController _scroll = ScrollController();
+  final Set<String> _markedUploadFailedIds = {};
 
   @override
   void initState() {
@@ -322,15 +324,87 @@ class HomeContentScreenState extends State<HomeContentScreen>
 
                     final posts = snap.data!.docs;
 
-                    return ListView.separated(
-                      physics: const NeverScrollableScrollPhysics(),
-                      shrinkWrap: true,
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-                      itemCount: posts.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 0),
-                      itemBuilder: (_, i) {
+                    final hasUploadingOwn = posts.any((doc) {
+                      final raw = doc.data() as Map<String, dynamic>? ?? {};
+                      final authorId = _extractUserId(raw);
+                      if (authorId != currentUid) return false;
+                      if ((raw['mediaUploadStatus'] ?? '') != 'uploading') return false;
+                      final started = raw['mediaUploadStartedAt'];
+                      final DateTime? startedAt = started is Timestamp
+                          ? started.toDate()
+                          : (raw['timestamp'] is Timestamp
+                              ? (raw['timestamp'] as Timestamp).toDate()
+                              : null);
+                      if (startedAt == null) return true;
+                      return DateTime.now().difference(startedAt) <=
+                          const Duration(minutes: 4);
+                    });
+
+                    final staleUploads = posts.where((doc) {
+                      final raw = doc.data() as Map<String, dynamic>? ?? {};
+                      final authorId = _extractUserId(raw);
+                      if (authorId != currentUid) return false;
+                      if ((raw['mediaUploadStatus'] ?? '') != 'uploading') return false;
+                      final started = raw['mediaUploadStartedAt'];
+                      final DateTime? startedAt = started is Timestamp
+                          ? started.toDate()
+                          : (raw['timestamp'] is Timestamp
+                              ? (raw['timestamp'] as Timestamp).toDate()
+                              : null);
+                      if (startedAt == null) return false;
+                      return DateTime.now().difference(startedAt) >
+                          const Duration(minutes: 4);
+                    }).toList();
+
+                    if (staleUploads.isNotEmpty) {
+                      Future.microtask(() {
+                        for (final doc in staleUploads) {
+                          if (_markedUploadFailedIds.contains(doc.id)) continue;
+                          _markedUploadFailedIds.add(doc.id);
+                          FirebaseFirestore.instance
+                              .collection('posts')
+                              .doc(doc.id)
+                              .update({
+                            'mediaUploadStatus': 'failed',
+                            'mediaUploadUpdatedAt': FieldValue.serverTimestamp(),
+                          });
+                        }
+                      });
+                    }
+
+                    final visiblePosts = posts.where((doc) {
+                      final raw = doc.data() as Map<String, dynamic>? ?? {};
+                      final status = (raw['mediaUploadStatus'] ?? '').toString();
+                      final authorId = _extractUserId(raw);
+                      final mediaCount = (raw['mediaCount'] is num)
+                          ? (raw['mediaCount'] as num).toInt()
+                          : 0;
+                      final hasVideo = raw['hasVideo'] == true;
+                      final hasMedia = mediaCount > 0 || hasVideo;
+                      if (authorId == currentUid &&
+                          status == 'uploading' &&
+                          hasMedia) {
+                        return false;
+                      }
+                      return true;
+                    }).toList();
+
+                    return Column(
+                      children: [
+                        if (hasUploadingOwn)
+                          const Padding(
+                            padding: EdgeInsets.fromLTRB(16, 6, 16, 8),
+                            child: _UploadBanner(),
+                          ),
+                        ListView.separated(
+                          physics: const NeverScrollableScrollPhysics(),
+                          shrinkWrap: true,
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+                          itemCount: visiblePosts.length,
+                          separatorBuilder: (_, __) => const SizedBox(height: 0),
+                          itemBuilder: (_, i) {
                         final raw =
-                            posts[i].data() as Map<String, dynamic>? ?? {};
+                            visiblePosts[i].data() as Map<String, dynamic>? ?? {};
                         final authorName = (raw['userName'] ?? 'User') as String;
                         final authorId = _extractUserId(raw);
                         final avatar = (raw['userAvatar'] ?? '') as String;
@@ -344,6 +418,17 @@ class HomeContentScreenState extends State<HomeContentScreen>
                         final videoUrl = (raw['videoUrl'] ?? '').toString();
                         final videoThumbUrl =
                             (raw['videoThumbUrl'] ?? '').toString();
+                        final mediaStatus =
+                            (raw['mediaUploadStatus'] ?? '').toString();
+                        final mediaCount = (raw['mediaCount'] is num)
+                            ? (raw['mediaCount'] as num).toInt()
+                            : 0;
+                        final mediaStartedAt = raw['mediaUploadStartedAt'];
+                        final DateTime? uploadStartedAt = mediaStartedAt is Timestamp
+                            ? mediaStartedAt.toDate()
+                            : (raw['timestamp'] is Timestamp
+                                ? (raw['timestamp'] as Timestamp).toDate()
+                                : null);
 
                         final type = (raw['type'] ??
                                 raw['postType'] ??
@@ -363,6 +448,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
                         final isOwnPost = (authorId == currentUid);
 
                         return _PostCell(
+                          postId: visiblePosts[i].id,
                           postType: type,
                           authorName: authorName,
                           authorAvatarUrl: avatar,
@@ -373,6 +459,10 @@ class HomeContentScreenState extends State<HomeContentScreen>
                           videoUrl: videoUrl,
                           videoThumbUrl: videoThumbUrl,
                           mediaAspect: aspect,
+                          mediaStatus: mediaStatus,
+                          mediaCount: mediaCount,
+                          mediaUploadStartedAt: uploadStartedAt,
+                          isOwnPost: isOwnPost,
                           onOpenProfile: authorId.isEmpty
                               ? null
                               : () {
@@ -406,6 +496,8 @@ class HomeContentScreenState extends State<HomeContentScreen>
                           showConnect: !isOwnPost,
                         );
                       },
+                        ),
+                      ],
                     );
                   },
                 ),
@@ -651,9 +743,40 @@ class _SectionTitle extends StatelessWidget {
       );
 }
 
+class _UploadBanner extends StatelessWidget {
+  const _UploadBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.button,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        children: const [
+          SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.muted),
+          ),
+          SizedBox(width: 8),
+          Text(
+            'Posting in background…',
+            style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ===== Post cell + media widgets (unchanged) =====
 
 class _PostCell extends StatefulWidget {
+  final String postId;
   final String postType;
   final String authorName;
   final String authorAvatarUrl;
@@ -665,6 +788,10 @@ class _PostCell extends StatefulWidget {
   final String videoUrl;
   final String videoThumbUrl;
   final double mediaAspect;
+  final String mediaStatus;
+  final int mediaCount;
+  final DateTime? mediaUploadStartedAt;
+  final bool isOwnPost;
 
   final VoidCallback? onOpenProfile;
   final VoidCallback? onConnect;
@@ -672,6 +799,7 @@ class _PostCell extends StatefulWidget {
   final bool showConnect;
 
   const _PostCell({
+    required this.postId,
     required this.postType,
     required this.authorName,
     required this.authorAvatarUrl,
@@ -682,6 +810,10 @@ class _PostCell extends StatefulWidget {
     required this.videoUrl,
     required this.videoThumbUrl,
     required this.mediaAspect,
+    required this.mediaStatus,
+    required this.mediaCount,
+    required this.mediaUploadStartedAt,
+    required this.isOwnPost,
     required this.onOpenProfile,
     required this.onConnect,
     required this.onOpenVideo,
@@ -695,6 +827,25 @@ class _PostCell extends StatefulWidget {
 class _PostCellState extends State<_PostCell> {
   static const _collapsedLines = 7;
   bool _expanded = false;
+
+  Future<void> _confirmDelete() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete post?'),
+        content: const Text('This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await FirebaseFirestore.instance
+        .collection('posts')
+        .doc(widget.postId)
+        .delete();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -714,10 +865,11 @@ class _PostCellState extends State<_PostCell> {
         );
       }
       if (widget.videoUrl.isNotEmpty) {
-        return _MediaVideoThumb(
+        return _InlineVideoPlayer(
+          url: widget.videoUrl,
           thumbUrl: widget.videoThumbUrl,
           aspect: widget.mediaAspect,
-          onPlay: widget.onOpenVideo,
+          onTap: widget.onOpenVideo,
         );
       }
       return null;
@@ -740,6 +892,13 @@ class _PostCellState extends State<_PostCell> {
             rightTime: widget.rightTime,
             avatarUrl: widget.authorAvatarUrl,
             onTap: widget.onOpenProfile,
+            trailing: widget.isOwnPost
+                ? IconButton(
+                    onPressed: _confirmDelete,
+                    icon: const Icon(Icons.more_horiz, color: AppColors.muted),
+                    tooltip: 'Post options',
+                  )
+                : null,
           ),
           const SizedBox(height: 8),
           _PostTypeBadge(label: _typeToBadge(widget.postType)),
@@ -793,6 +952,7 @@ class _PostHeader extends StatelessWidget {
   final String rightTime;
   final String avatarUrl;
   final VoidCallback? onTap;
+  final Widget? trailing;
 
   const _PostHeader({
     required this.authorName,
@@ -800,6 +960,7 @@ class _PostHeader extends StatelessWidget {
     required this.rightTime,
     required this.avatarUrl,
     this.onTap,
+    this.trailing,
   });
 
   @override
@@ -843,6 +1004,10 @@ class _PostHeader extends StatelessWidget {
             color: AppColors.muted,
           ),
         ),
+        if (trailing != null) ...[
+          const SizedBox(width: 4),
+          trailing!,
+        ],
       ],
     );
 
@@ -1164,6 +1329,145 @@ class _MediaImage extends StatelessWidget {
     );
   }
 }
+
+class _InlineVideoPlayer extends StatefulWidget {
+  final String url;
+  final String thumbUrl;
+  final double aspect;
+  final VoidCallback? onTap;
+
+  const _InlineVideoPlayer({
+    required this.url,
+    required this.thumbUrl,
+    required this.aspect,
+    this.onTap,
+  });
+
+  @override
+  State<_InlineVideoPlayer> createState() => _InlineVideoPlayerState();
+}
+
+class _InlineVideoPlayerState extends State<_InlineVideoPlayer> {
+  late final VideoPlayerController _controller;
+  bool _ready = false;
+  bool _muted = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+    _controller
+      ..setLooping(true)
+      ..setVolume(0.0);
+    _controller.initialize().then((_) {
+      if (!mounted) return;
+      setState(() => _ready = true);
+      _controller.play();
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fallbackAspect = widget.aspect > 0 ? widget.aspect : (16 / 9);
+    final aspect = _ready && _controller.value.isInitialized
+        ? _controller.value.aspectRatio
+        : fallbackAspect;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: AspectRatio(
+        aspectRatio: (aspect.isFinite && aspect > 0) ? aspect : fallbackAspect,
+        child: InkWell(
+          onTap: widget.onTap,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (_ready)
+                FittedBox(
+                  fit: BoxFit.cover,
+                  child: SizedBox(
+                    width: _controller.value.size.width,
+                    height: _controller.value.size.height,
+                    child: VideoPlayer(_controller),
+                  ),
+                )
+              else if (widget.thumbUrl.isNotEmpty)
+                Image.network(
+                  widget.thumbUrl,
+                  fit: BoxFit.cover,
+                  loadingBuilder: (c, w, p) =>
+                      p == null ? w : Container(color: AppColors.button),
+                  errorBuilder: (_, __, ___) => Container(
+                    color: AppColors.button,
+                    alignment: Alignment.center,
+                    child: const Icon(Icons.play_circle_outline,
+                        color: AppColors.muted, size: 30),
+                  ),
+                )
+              else
+                Container(
+                  color: AppColors.button,
+                  alignment: Alignment.center,
+                  child: const Icon(Icons.play_circle_outline,
+                      color: AppColors.muted, size: 30),
+                ),
+              Positioned(
+                right: 8,
+                bottom: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.45),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: const Text(
+                    'Video',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 8,
+                bottom: 8,
+                child: Material(
+                  color: Colors.black.withOpacity(0.45),
+                  borderRadius: BorderRadius.circular(999),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(999),
+                    onTap: () {
+                      if (!_ready) return;
+                      setState(() => _muted = !_muted);
+                      _controller.setVolume(_muted ? 0.0 : 1.0);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      child: Icon(
+                        _muted ? Icons.volume_off : Icons.volume_up,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 
 class _MediaVideoThumb extends StatelessWidget {
   final String thumbUrl;

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/foundation.dart';
 
@@ -66,6 +67,7 @@ class PaymentMethodsData {
 class PaymentService {
   FirebaseFunctions get _functions =>
       FirebaseFunctions.instanceFor(region: 'us-central1');
+  static PaymentMethodsData? _memoryCache;
 
   /// Ensures the user is signed in and refreshes their ID token.
   Future<User> _requireUser() async {
@@ -206,10 +208,81 @@ class PaymentService {
         .where((m) => m.id.isNotEmpty)
         .toList();
 
-    return PaymentMethodsData(
+    final result = PaymentMethodsData(
       defaultPaymentMethodId: defaultId,
       paymentMethods: methods,
     );
+    _memoryCache = result;
+    await _cachePaymentMethods(result);
+    return result;
+  }
+
+  /// Read cached cards from user doc (fast path, often served from local cache).
+  Future<PaymentMethodsData?> getCachedPaymentMethods() async {
+    if (_memoryCache != null) return _memoryCache;
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return null;
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get(const GetOptions(source: Source.cache));
+      if (!snap.exists) return null;
+      final data = snap.data() ?? {};
+      final rawMethods = data['paymentMethodsCache'];
+      if (rawMethods is! List) return null;
+
+      final methods = rawMethods
+          .whereType<Map>()
+          .map((m) {
+            final map = Map<String, dynamic>.from(m);
+            return PaymentMethodInfo(
+              id: (map['id'] ?? '').toString(),
+              brand: map['brand'] as String?,
+              last4: map['last4'] as String?,
+              expMonth: map['expMonth'] as int?,
+              expYear: map['expYear'] as int?,
+              funding: map['funding'] as String?,
+            );
+          })
+          .where((m) => m.id.isNotEmpty)
+          .toList();
+
+      final cached = PaymentMethodsData(
+        defaultPaymentMethodId:
+            (data['paymentMethodsCacheDefaultId'] ?? data['defaultPaymentMethodId']) as String?,
+        paymentMethods: methods,
+      );
+      _memoryCache = cached;
+      return cached;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _cachePaymentMethods(PaymentMethodsData data) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final payload = {
+      'paymentMethodsCacheDefaultId': data.defaultPaymentMethodId ?? '',
+      'paymentMethodsCacheUpdatedAt': FieldValue.serverTimestamp(),
+      'paymentMethodsCache': data.paymentMethods
+          .map(
+            (m) => {
+              'id': m.id,
+              'brand': m.brand,
+              'last4': m.last4,
+              'expMonth': m.expMonth,
+              'expYear': m.expYear,
+              'funding': m.funding,
+            },
+          )
+          .toList(),
+    };
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .set(payload, SetOptions(merge: true));
   }
 
   Future<void> setDefaultPaymentMethod(String paymentMethodId) async {
