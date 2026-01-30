@@ -1420,25 +1420,6 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> {
               Positioned(
                 right: 8,
                 bottom: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.45),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: const Text(
-                    'Video',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 8,
-                bottom: 8,
                 child: Material(
                   color: Colors.black.withOpacity(0.45),
                   borderRadius: BorderRadius.circular(999),

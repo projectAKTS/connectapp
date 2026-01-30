@@ -136,6 +136,7 @@ class _SearchScreenState extends State<SearchScreen> {
         final content = (m['content'] ?? '').toString();
         final userName = (m['userName'] ?? 'User').toString();
         final userAvatar = (m['userAvatar'] ?? '').toString();
+        final userId = _extractPostUserId(m);
         final tags = (m['tags'] is List)
             ? (m['tags'] as List).map((e) => e.toString()).toList()
             : <String>[];
@@ -144,6 +145,7 @@ class _SearchScreenState extends State<SearchScreen> {
         if (hay.contains(query)) {
           posts.add(_PostHit(
             id: d.id,
+            authorId: userId,
             authorName: userName,
             authorAvatar: userAvatar,
             content: content,
@@ -181,6 +183,24 @@ class _SearchScreenState extends State<SearchScreen> {
       bio: bio,
       avatarUrl: avatar,
     );
+  }
+
+  String _extractPostUserId(Map<String, dynamic> m) {
+    for (final k in ['userID', 'userId', 'uid', 'authorId']) {
+      final v = m[k];
+      if (v is String && v.isNotEmpty) return v;
+    }
+    final ref = m['userRef'];
+    if (ref is DocumentReference) {
+      return ref.id;
+    }
+    try {
+      final path = (ref?.path as String?);
+      if (path != null && path.isNotEmpty) {
+        return path.split('/').last;
+      }
+    } catch (_) {}
+    return '';
   }
 
   // ——— UI ——————————————————————————————————————————————————————————————
@@ -642,6 +662,13 @@ class _PostTile extends StatelessWidget {
       );
     }
 
+    void openProfile() {
+      if (hit.authorId.isEmpty) return;
+      Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute(builder: (_) => ProfileScreen(userID: hit.authorId)),
+      );
+    }
+
     return Card(
       color: AppColors.card,
       shape: RoundedRectangleBorder(
@@ -659,16 +686,24 @@ class _PostTile extends StatelessWidget {
               // Header (avatar + name + time)
               Row(
                 children: [
-                  _Avatar(url: hit.authorAvatar, radius: 18),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(18),
+                    onTap: openProfile,
+                    child: _Avatar(url: hit.authorAvatar, radius: 18),
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: Text(
-                      hit.authorName,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.text,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(6),
+                      onTap: openProfile,
+                      child: Text(
+                        hit.authorName,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.text,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -855,6 +890,7 @@ class _UserHit {
 
 class _PostHit {
   final String id;
+  final String authorId;
   final String authorName;
   final String authorAvatar;
   final String content;
@@ -862,6 +898,7 @@ class _PostHit {
   final dynamic ts;
   _PostHit({
     required this.id,
+    required this.authorId,
     required this.authorName,
     required this.authorAvatar,
     required this.content,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:video_player/video_player.dart';
 import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/theme/tokens.dart';
 
@@ -91,6 +92,20 @@ class PostDetailScreen extends StatelessWidget {
     return [];
   }
 
+  String _extractVideoUrl(Map<String, dynamic> data) {
+    return (data['videoUrl'] ?? '').toString().trim();
+  }
+
+  String _extractVideoThumbUrl(Map<String, dynamic> data) {
+    return (data['videoThumbUrl'] ?? '').toString().trim();
+  }
+
+  double _extractMediaAspect(Map<String, dynamic> data, {required bool hasMedia}) {
+    final raw = data['mediaAspectRatio'];
+    if (raw is num && raw > 0) return raw.toDouble();
+    return hasMedia ? (16 / 9) : 1.0;
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenH = MediaQuery.of(context).size.height;
@@ -103,8 +118,8 @@ class PostDetailScreen extends StatelessWidget {
         elevation: 0,
         title: const Text('Post Detail'),
       ),
-      body: FutureBuilder<DocumentSnapshot>(
-        future: FirebaseFirestore.instance.collection('posts').doc(postId).get(),
+      body: StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance.collection('posts').doc(postId).snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -132,6 +147,10 @@ class PostDetailScreen extends StatelessWidget {
           final span =
               _parseSimpleMarkdownToSpan(body, base: base, strong: strong);
           final imageUrls = _extractImageUrls(data);
+          final videoUrl = _extractVideoUrl(data);
+          final videoThumbUrl = _extractVideoThumbUrl(data);
+          final hasMedia = imageUrls.isNotEmpty || videoUrl.isNotEmpty;
+          final mediaAspect = _extractMediaAspect(data, hasMedia: hasMedia);
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(16),
@@ -162,7 +181,17 @@ class PostDetailScreen extends StatelessWidget {
                             ),
                             const SizedBox(height: 10),
                             if (imageUrls.isNotEmpty) ...[
-                              _DetailMediaCarousel(urls: imageUrls),
+                              _DetailMediaCarousel(
+                                urls: imageUrls,
+                                aspect: mediaAspect,
+                              ),
+                              const SizedBox(height: 12),
+                            ] else if (videoUrl.isNotEmpty) ...[
+                              _DetailVideoPlayer(
+                                url: videoUrl,
+                                thumbUrl: videoThumbUrl,
+                                aspect: mediaAspect,
+                              ),
                               const SizedBox(height: 12),
                             ],
                             _postTypeBadge(badge),
@@ -194,7 +223,11 @@ class PostDetailScreen extends StatelessWidget {
 
 class _DetailMediaCarousel extends StatefulWidget {
   final List<String> urls;
-  const _DetailMediaCarousel({required this.urls});
+  final double aspect;
+  const _DetailMediaCarousel({
+    required this.urls,
+    required this.aspect,
+  });
 
   @override
   State<_DetailMediaCarousel> createState() => _DetailMediaCarouselState();
@@ -206,9 +239,9 @@ class _DetailMediaCarouselState extends State<_DetailMediaCarousel> {
   @override
   Widget build(BuildContext context) {
     if (widget.urls.length == 1) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Image.network(widget.urls.first, fit: BoxFit.cover),
+      return _DetailMediaImage(
+        url: widget.urls.first,
+        aspect: widget.aspect,
       );
     }
 
@@ -217,7 +250,7 @@ class _DetailMediaCarouselState extends State<_DetailMediaCarousel> {
       child: Stack(
         children: [
           AspectRatio(
-            aspectRatio: 4 / 5,
+            aspectRatio: widget.aspect,
             child: PageView.builder(
               itemCount: widget.urls.length,
               onPageChanged: (i) => setState(() => _index = i),
@@ -256,6 +289,174 @@ class _DetailMediaCarouselState extends State<_DetailMediaCarousel> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _DetailMediaImage extends StatelessWidget {
+  final String url;
+  final double aspect;
+
+  const _DetailMediaImage({
+    required this.url,
+    required this.aspect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: AspectRatio(
+        aspectRatio: aspect,
+        child: Image.network(
+          url,
+          fit: BoxFit.cover,
+          loadingBuilder: (c, w, p) =>
+              p == null ? w : Container(color: AppColors.button),
+          errorBuilder: (_, __, ___) => Container(
+            color: AppColors.button,
+            alignment: Alignment.center,
+            child: const Icon(Icons.broken_image, color: AppColors.muted),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DetailVideoPlayer extends StatefulWidget {
+  final String url;
+  final String thumbUrl;
+  final double aspect;
+
+  const _DetailVideoPlayer({
+    required this.url,
+    required this.thumbUrl,
+    required this.aspect,
+  });
+
+  @override
+  State<_DetailVideoPlayer> createState() => _DetailVideoPlayerState();
+}
+
+class _DetailVideoPlayerState extends State<_DetailVideoPlayer> {
+  late final VideoPlayerController _controller;
+  bool _ready = false;
+  bool _playing = false;
+  bool _muted = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.url))
+      ..setVolume(0.0)
+      ..initialize().then((_) {
+        if (!mounted) return;
+        setState(() => _ready = true);
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _toggle() async {
+    if (!_ready) return;
+    if (_controller.value.isPlaying) {
+      await _controller.pause();
+      if (mounted) setState(() => _playing = false);
+    } else {
+      await _controller.play();
+      if (mounted) setState(() => _playing = true);
+    }
+  }
+
+  Future<void> _toggleMute() async {
+    if (!_ready) return;
+    final next = !_muted;
+    await _controller.setVolume(next ? 0.0 : 1.0);
+    if (mounted) {
+      setState(() => _muted = next);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fallbackAspect = widget.aspect > 0 ? widget.aspect : (16 / 9);
+    final aspect = _ready && _controller.value.isInitialized
+        ? _controller.value.aspectRatio
+        : fallbackAspect;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: AspectRatio(
+        aspectRatio: (aspect.isFinite && aspect > 0) ? aspect : fallbackAspect,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (_ready)
+              FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: _controller.value.size.width,
+                  height: _controller.value.size.height,
+                  child: VideoPlayer(_controller),
+                ),
+              )
+            else if (widget.thumbUrl.isNotEmpty)
+              Image.network(
+                widget.thumbUrl,
+                fit: BoxFit.cover,
+              )
+            else
+              Container(color: AppColors.button),
+            Positioned.fill(
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: _toggle,
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.45),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        _playing ? Icons.pause : Icons.play_arrow,
+                        color: Colors.white,
+                        size: 32,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              right: 10,
+              bottom: 10,
+              child: GestureDetector(
+                onTap: _toggleMute,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.45),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Icon(
+                    _muted ? Icons.volume_off : Icons.volume_up,
+                    color: Colors.white,
+                    size: 16,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
