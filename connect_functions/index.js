@@ -6,12 +6,19 @@ const { onRequest, onCall, HttpsError } = require("firebase-functions/v2/https")
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { defineSecret } = require("firebase-functions/params");
+const { RtcTokenBuilder, RtcRole } = require("agora-access-token");
 const admin = require("firebase-admin");
 admin.initializeApp();
 
 const db = admin.firestore();
 const fcm = admin.messaging();
 const STRIPE_SECRET = defineSecret("STRIPE_SECRET");
+const AGORA_APP_ID = defineSecret("AGORA_APP_ID");
+const AGORA_APP_CERTIFICATE = defineSecret("AGORA_APP_CERTIFICATE");
+const APNS_KEY_ID = defineSecret("APNS_KEY_ID");
+const APNS_TEAM_ID = defineSecret("APNS_TEAM_ID");
+const APNS_BUNDLE_ID = defineSecret("APNS_BUNDLE_ID");
+const APNS_VOIP_KEY_P8 = defineSecret("APNS_VOIP_KEY_P8");
 
 // --- Stripe Client Helper ---
 function getStripeClient() {
@@ -35,11 +42,70 @@ async function getUserTokens(uid) {
   return Array.from(new Set([...arr, ...single].filter(Boolean)));
 }
 
+async function getUserVoipTokens(uid) {
+  const snap = await db.collection("users").doc(uid).get();
+  if (!snap.exists) return [];
+  const data = snap.data() || {};
+  const arr = Array.isArray(data.voipTokens) ? data.voipTokens : [];
+  const single = data.voipToken ? [data.voipToken] : [];
+  return Array.from(new Set([...arr, ...single].filter(Boolean)));
+}
+
 // --- Send Notification ---
 async function sendToTokens(tokens, payload) {
   const deduped = Array.from(new Set(tokens.filter(Boolean)));
   if (!deduped.length) return;
   return fcm.sendEachForMulticast({ tokens: deduped, ...payload });
+}
+
+let _apnProvider = null;
+function getApnProvider() {
+  if (_apnProvider) return _apnProvider;
+  const apn = require("apn");
+  const keyId = (APNS_KEY_ID.value() || "").trim();
+  const teamId = (APNS_TEAM_ID.value() || "").trim();
+  const key = (APNS_VOIP_KEY_P8.value() || "").replace(/\\n/g, "\n").trim();
+  if (!keyId || !teamId || !key) {
+    throw new Error("APNS secrets missing");
+  }
+  _apnProvider = new apn.Provider({
+    token: { key, keyId, teamId },
+    production: true,
+  });
+  return _apnProvider;
+}
+
+async function sendVoipPushToTokens(tokens, data) {
+  const deduped = Array.from(new Set(tokens.filter(Boolean)));
+  if (!deduped.length) return { sent: 0, failed: 0, skipped: true };
+
+  const bundleId = (APNS_BUNDLE_ID.value() || "").trim();
+  if (!bundleId) {
+    throw new Error("APNS_BUNDLE_ID missing");
+  }
+
+  const apn = require("apn");
+  const provider = getApnProvider();
+  const notification = new apn.Notification();
+  notification.topic = `${bundleId}.voip`;
+  notification.pushType = "voip";
+  notification.priority = 10;
+  notification.expiry = Math.floor(Date.now() / 1000) + 45;
+  notification.contentAvailable = 1;
+  notification.payload = {
+    type: "call_invite",
+    ...data,
+  };
+
+  const result = await provider.send(notification, deduped);
+  if (result.failed?.length) {
+    console.warn("APNS VoIP failed tokens:", result.failed.map((f) => f.device));
+  }
+  return {
+    sent: result.sent?.length || 0,
+    failed: result.failed?.length || 0,
+    skipped: false,
+  };
 }
 
 // --- Ensure Stripe Customer ---
@@ -460,20 +526,47 @@ exports.handleStripeWebhook = onRequest(
    ============================================================ */
 
 exports.onCallInviteCreated = onDocumentCreated(
-  { document: "callInvites/{inviteId}", region: "us-central1" },
+  {
+    document: "callInvites/{inviteId}",
+    region: "us-central1",
+    secrets: [APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_VOIP_KEY_P8],
+  },
   async (event) => {
     const d = event.data?.data() || {};
     const { fromName, toUid, channel, isVideo } = d;
     if (!toUid || !channel) return;
+    const payloadData = {
+      channel: `${channel}`,
+      isVideo: `${Boolean(isVideo)}`,
+      fromName: `${fromName || "Caller"}`,
+      callId: event.params.inviteId || `${channel}`,
+    };
+
+    // Primary path for iOS incoming-call reliability
+    try {
+      const voipTokens = await getUserVoipTokens(toUid);
+      if (voipTokens.length) {
+        const voipRes = await sendVoipPushToTokens(voipTokens, payloadData);
+        console.log("APNS VoIP result:", voipRes);
+      }
+    } catch (e) {
+      console.error("APNS VoIP send failed:", e);
+    }
+
+    // Fallback path for regular notifications (Android/iOS)
     const tokens = await getUserTokens(toUid);
-    if (!tokens.length) return;
-    await sendToTokens(tokens, {
-      notification: {
-        title: isVideo ? "Incoming Video Call" : "Incoming Audio Call",
-        body: `From ${fromName || "Someone"}`,
-      },
-      data: { type: "call_invite", channel },
-    });
+    if (tokens.length) {
+      await sendToTokens(tokens, {
+        notification: {
+          title: isVideo ? "Incoming Video Call" : "Incoming Audio Call",
+          body: `From ${fromName || "Someone"}`,
+        },
+        data: {
+          type: "call_invite",
+          ...payloadData,
+        },
+      });
+    }
   }
 );
 
@@ -506,4 +599,62 @@ exports.onChatMessageCreated = onDocumentCreated(
 exports.healthCheck = onRequest(
   { region: "us-central1" },
   (_req, res) => res.status(200).send("OK")
+);
+
+/* ============================================================
+   📞 AGORA CALL TOKEN
+   ============================================================ */
+
+exports.getAgoraRtcToken = onCall(
+  {
+    region: "us-central1",
+    invoker: "public",
+    secrets: [AGORA_APP_ID, AGORA_APP_CERTIFICATE],
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Sign in required");
+    }
+
+    const appId = (AGORA_APP_ID.value() || "").trim();
+    const appCertificate = (AGORA_APP_CERTIFICATE.value() || "").trim();
+    if (!appId || !appCertificate) {
+      throw new HttpsError("failed-precondition", "Agora secrets are missing");
+    }
+
+    const channelName = (request.data?.channelName || "").toString().trim();
+    if (!channelName || channelName.length > 64 || !/^[A-Za-z0-9_]+$/.test(channelName)) {
+      throw new HttpsError("invalid-argument", "Invalid channelName");
+    }
+
+    const rawUid = request.data?.uid;
+    const uid = Number.isInteger(rawUid) ? rawUid : Number.parseInt(`${rawUid ?? 0}`, 10);
+    if (!Number.isInteger(uid) || uid < 0) {
+      throw new HttpsError("invalid-argument", "Invalid uid");
+    }
+
+    const role = request.data?.role === "subscriber" ? RtcRole.SUBSCRIBER : RtcRole.PUBLISHER;
+    const expireSeconds = Math.min(
+      Math.max(Number.parseInt(`${request.data?.expireSeconds ?? 3600}`, 10), 60),
+      24 * 60 * 60
+    );
+
+    const now = Math.floor(Date.now() / 1000);
+    const privilegeExpireTs = now + expireSeconds;
+
+    try {
+      const token = RtcTokenBuilder.buildTokenWithUid(
+        appId,
+        appCertificate,
+        channelName,
+        uid,
+        role,
+        privilegeExpireTs
+      );
+      return { token, expireAt: privilegeExpireTs };
+    } catch (e) {
+      console.error("getAgoraRtcToken failed:", e);
+      throw new HttpsError("internal", "Failed to build Agora token");
+    }
+  }
 );

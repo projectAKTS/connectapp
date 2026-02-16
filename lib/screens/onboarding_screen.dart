@@ -7,10 +7,11 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:connect_app/theme/tokens.dart';
+import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 import 'dart:io';
 
 class OnboardingScreen extends StatefulWidget {
-  const OnboardingScreen({Key? key}) : super(key: key);
+  const OnboardingScreen({super.key});
   @override
   State<OnboardingScreen> createState() => _OnboardingScreenState();
 }
@@ -38,8 +39,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   String _role = 'seeker'; // seeker | helper | both
 
   final List<String> _allTopics = const [
-    'Immigration','Moving to Canada','PR Pathways','Quebec-specific help',
-    'Job hunting','Refugee claim process','Student life','Parenting support','Language learning',
+    'Immigration',
+    'Moving to Canada',
+    'PR Pathways',
+    'Quebec-specific help',
+    'Job hunting',
+    'Refugee claim process',
+    'Student life',
+    'Parenting support',
+    'Language learning',
   ];
   final Set<String> _selectedTopics = {};
   final List<String> _allExpertise = const [
@@ -54,14 +62,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   ];
   final Set<String> _selectedExpertise = {};
 
-  final _bioCtrl = TextEditingController();
-  final _skillsCtrl = TextEditingController();
-  final _expCtrl = TextEditingController();
-  List<String> _journeys = [];
   TimeOfDay? _startTime;
   TimeOfDay? _endTime;
   String _mode = 'chat';
   bool _loading = true;
+  bool get _needsHelperSetup => _role == 'helper' || _role == 'both';
 
   // Booking parity (CTA + pills)
   static const _evergreen = Color(0xFF0F4C46);
@@ -70,7 +75,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   ButtonStyle _ctaStyle() => ButtonStyle(
         minimumSize: MaterialStateProperty.all(const Size.fromHeight(48)),
         backgroundColor: MaterialStateProperty.resolveWith((s) {
-          if (s.contains(MaterialState.disabled)) return _evergreen.withOpacity(0.45);
+          if (s.contains(MaterialState.disabled))
+            return _evergreen.withOpacity(0.45);
           if (s.contains(MaterialState.pressed)) return _evergreenPressed;
           return _evergreen;
         }),
@@ -103,7 +109,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: border),
         ),
-        child: Text(label, style: TextStyle(fontWeight: FontWeight.w600, color: fg)),
+        child: Text(label,
+            style: TextStyle(fontWeight: FontWeight.w600, color: fg)),
       ),
     );
   }
@@ -122,9 +129,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _timeZoneCtrl.dispose();
     _countryCtrl.dispose();
     _languageCtrl.dispose();
-    _bioCtrl.dispose();
-    _skillsCtrl.dispose();
-    _expCtrl.dispose();
     super.dispose();
   }
 
@@ -135,8 +139,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       setState(() => _loading = false);
       return;
     }
-    final snap =
-        await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+    final snap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
     if (!snap.exists) {
       setState(() => _loading = false);
       return;
@@ -145,39 +151,40 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final d = snap.data()!;
     setState(() {
       _displayNameCtrl.text = d['displayName'] ?? '';
-      _profilePhotoUrl =
-          (d['profilePicture']?.toString().isNotEmpty ?? false) ? d['profilePicture'] : null;
+      _profilePhotoUrl = (d['profilePicture']?.toString().isNotEmpty ?? false)
+          ? d['profilePicture']
+          : null;
 
       _cityCtrl.text = d['city'] ?? '';
       _timeZoneCtrl.text = d['timeZone'] ?? '';
 
-      _country  = (d['country']?.toString().isNotEmpty ?? false) ? d['country'] : null;
-      _language = (d['language']?.toString().isNotEmpty ?? false) ? d['language'] : null;
+      _country =
+          (d['country']?.toString().isNotEmpty ?? false) ? d['country'] : null;
+      _language = (d['language']?.toString().isNotEmpty ?? false)
+          ? d['language']
+          : null;
       _countryCtrl.text = _country ?? '';
       _languageCtrl.text = _language ?? '';
-      _role     = d['role'] ?? 'seeker';
+      _role = d['role'] ?? 'seeker';
 
       _selectedTopics
         ..clear()
-        ..addAll((d['interestTags'] is List) ? List<String>.from(d['interestTags']) : const []);
+        ..addAll((d['interestTags'] is List)
+            ? List<String>.from(d['interestTags'])
+            : const []);
 
       _selectedExpertise
         ..clear()
-        ..addAll((d['expertiseTags'] is List) ? List<String>.from(d['expertiseTags']) : const []);
+        ..addAll((d['expertiseTags'] is List)
+            ? List<String>.from(d['expertiseTags'])
+            : const []);
 
-      _bioCtrl.text = (d['bio'] == null || d['bio'] == 'No bio available yet.')
-          ? '' : (d['bio'] ?? '');
-      _skillsCtrl.text =
-          (d['skills'] is List) ? (d['skills'] as List).join(', ') : (d['skills'] ?? '');
-      _expCtrl.text = d['experience'] ?? '';
-
-      _journeys = (d['journeys'] is List) ? List<String>.from(d['journeys']) : [];
-
-      if (d['availability'] != null && d['availability'].toString().contains('–')) {
+      if (d['availability'] != null &&
+          d['availability'].toString().contains('–')) {
         final parts = d['availability'].toString().split('–');
         if (parts.length == 2) {
           _startTime = _parseTimeOfDay(parts[0].trim());
-          _endTime   = _parseTimeOfDay(parts[1].trim());
+          _endTime = _parseTimeOfDay(parts[1].trim());
         }
       }
 
@@ -187,12 +194,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   // ---------- SAVE / COMPLETE ----------
-  Future<void> _savePartial() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
+  Map<String, dynamic> _buildOnboardingPayload({required bool completed}) {
     final displayName = _displayNameCtrl.text.trim();
-    final data = {
+    return {
       'displayName': displayName,
       'displayName_lc': displayName.toLowerCase(),
       'fullName': displayName,
@@ -204,22 +208,23 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       'role': _role,
       'interestTags': _selectedTopics.toList(),
       'expertiseTags': _selectedExpertise.toList(),
-      'bio': _bioCtrl.text.trim(),
-      'skills': _skillsCtrl.text
-          .trim()
-          .split(',')
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .toList(),
-      'experience': _expCtrl.text.trim(),
-      'journeys': _journeys,
       'availability': (_startTime != null && _endTime != null)
           ? '${_startTime!.format(context)}–${_endTime!.format(context)}'
           : '',
       'mode': _mode,
-      'profilePicture': (_profilePhotoUrl?.isNotEmpty ?? false) ? _profilePhotoUrl : '',
-      'onboardingComplete': false,
-    }..removeWhere((k, v) => v == null);
+      'profilePicture':
+          (_profilePhotoUrl?.isNotEmpty ?? false) ? _profilePhotoUrl : '',
+      'onboardingComplete': completed,
+    };
+  }
+
+  Future<void> _savePartial() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final displayName = _displayNameCtrl.text.trim();
+    final data = _buildOnboardingPayload(completed: false)
+      ..removeWhere((k, v) => v == null);
 
     try {
       await FirebaseFirestore.instance
@@ -237,38 +242,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
-  Future<void> _complete({required bool skipped}) async {
+  Future<void> _complete() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     final displayName = _displayNameCtrl.text.trim();
-    final data = {
-      'displayName': displayName,
-      'displayName_lc': displayName.toLowerCase(),
-      'fullName': displayName,
-      'fullNameLower': displayName.toLowerCase(),
-      'city': _cityCtrl.text.trim(),
-      'timeZone': _timeZoneCtrl.text.trim(),
-      'country': _country ?? '',
-      'language': _language ?? '',
-      'role': _role,
-      'interestTags': _selectedTopics.toList(),
-      'expertiseTags': _selectedExpertise.toList(),
-      'bio': _bioCtrl.text.trim(),
-      'skills': _skillsCtrl.text
-          .trim()
-          .split(',')
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .toList(),
-      'experience': _expCtrl.text.trim(),
-      'journeys': _journeys,
-      'availability': (_startTime != null && _endTime != null)
-          ? '${_startTime!.format(context)}–${_endTime!.format(context)}'
-          : '',
-      'mode': _mode,
-      'profilePicture': (_profilePhotoUrl?.isNotEmpty ?? false) ? _profilePhotoUrl : '',
-      'onboardingComplete': !skipped,
-    }..removeWhere((k, v) => v == null);
+    final data = _buildOnboardingPayload(completed: true)
+      ..removeWhere((k, v) => v == null);
 
     try {
       await FirebaseFirestore.instance
@@ -288,14 +267,29 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   // ---------- NAV ----------
+  int get _totalSteps => _needsHelperSetup ? 3 : 2;
+  int get _lastStepIndex => _totalSteps - 1;
+
   Future<void> _next() async {
     if (_index == 0) {
       if (!(_formKey.currentState?.validate() ?? false)) return;
+      if (_language == null || _language!.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please select a language.')),
+        );
+        return;
+      }
+    }
+    if (_index == 1 && _selectedTopics.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pick at least one topic.')),
+      );
+      return;
     }
 
     await _savePartial();
 
-    if (_index < 3) {
+    if (_index < _lastStepIndex) {
       setState(() => _index++);
       _pageCtrl.animateToPage(
         _index,
@@ -304,10 +298,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       );
     } else {
       setState(() => _loading = true);
-      await _complete(skipped: false);
+      await _complete();
       if (!mounted) return;
-      // Always proceed to home; Firestore errors were handled with a snackbar.
-      Navigator.of(context).pushReplacementNamed('/home');
+      Navigator.of(context).pushReplacementNamed('/');
+    }
+  }
+
+  void _setRole(String value) {
+    if (_role == value) return;
+    setState(() => _role = value);
+    final last = _lastStepIndex;
+    if (_index > last) {
+      setState(() => _index = last);
+      _pageCtrl.jumpToPage(last);
     }
   }
 
@@ -356,16 +359,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       );
       if (source == null) return;
 
-      final XFile? xfile =
-          await picker.pickImage(source: source, maxWidth: 1024, imageQuality: 88);
+      final XFile? xfile = await picker.pickImage(
+          source: source, maxWidth: 1024, imageQuality: 88);
       if (xfile == null) return;
 
       final file = File(xfile.path);
-      final ref = FirebaseStorage.instance
-          .ref()
-          .child('users/${user.uid}/profile_${DateTime.now().millisecondsSinceEpoch}.jpg');
+      final ref = FirebaseStorage.instance.ref().child(
+          'users/${user.uid}/profile_${DateTime.now().millisecondsSinceEpoch}.jpg');
 
-      final task = await ref.putFile(file, SettableMetadata(contentType: 'image/jpeg'));
+      final task =
+          await ref.putFile(file, SettableMetadata(contentType: 'image/jpeg'));
       final url = await task.ref.getDownloadURL();
 
       setState(() => _profilePhotoUrl = url);
@@ -382,118 +385,105 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom; // keyboard
-    return Scaffold(
-      backgroundColor: AppColors.canvas,
-      appBar: AppBar(
+    final pages = <Widget>[
+      _stepProfile(),
+      _stepInterests(),
+      if (_needsHelperSetup) _stepRole(),
+    ];
+    return FullScreenBackGesture(
+      child: Scaffold(
         backgroundColor: AppColors.canvas,
-        elevation: 0,
-        title: const Text('Onboarding'),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 10),
-            child: TextButton(
-              style: TextButton.styleFrom(
-                backgroundColor: AppColors.button,
-                foregroundColor: AppColors.text,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: const BorderSide(color: AppColors.border),
+        appBar: AppBar(
+          backgroundColor: AppColors.canvas,
+          elevation: 0,
+          title: const Text('Onboarding'),
+        ),
+        body: _loading
+            ? _ExcludedSemanticsSkeleton()
+            : SafeArea(
+                child: Column(
+                  children: [
+                    // Progress dots
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: List.generate(_totalSteps, (i) {
+                          final active = i == _index;
+                          return AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            margin: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 6),
+                            width: active ? 28 : 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: active
+                                  ? _evergreen.withOpacity(.25)
+                                  : AppColors.button,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: active
+                                    ? _evergreen.withOpacity(.5)
+                                    : AppColors.border,
+                              ),
+                            ),
+                          );
+                        }),
+                      ),
+                    ),
+
+                    Expanded(
+                      child: PageView(
+                        controller: _pageCtrl,
+                        physics: const NeverScrollableScrollPhysics(),
+                        onPageChanged: (i) => setState(() => _index = i),
+                        children: pages,
+                      ),
+                    ),
+
+                    // Bottom controls (same styling)
+                    AnimatedPadding(
+                      duration: const Duration(milliseconds: 150),
+                      padding: EdgeInsets.fromLTRB(
+                          16, 0, 16, 16 + (bottomInset > 0 ? 8 : 0)),
+                      child: Row(
+                        children: [
+                          if (_index > 0)
+                            Expanded(
+                              child: TextButton(
+                                onPressed: _back,
+                                style: TextButton.styleFrom(
+                                  backgroundColor: AppColors.button,
+                                  foregroundColor: AppColors.text,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    side: const BorderSide(
+                                        color: AppColors.border),
+                                  ),
+                                ),
+                                child: const Text('Back'),
+                              ),
+                            ),
+                          if (_index > 0) const SizedBox(width: 10),
+                          Expanded(
+                            flex: 2,
+                            child: ElevatedButton(
+                              onPressed: _next,
+                              style: _ctaStyle(),
+                              child: Text(_index < _lastStepIndex
+                                  ? 'Continue'
+                                  : 'Finish'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              onPressed: _loading
-                  ? null
-                  : () async {
-                      setState(() => _loading = true);
-                      await _complete(skipped: true);
-                      if (!mounted) return;
-                      Navigator.of(context).pushReplacementNamed('/home');
-                    },
-              child: const Text('Skip for now'),
-            ),
-          ),
-        ],
       ),
-      body: _loading
-          ? _ExcludedSemanticsSkeleton()
-          : SafeArea(
-              child: Column(
-                children: [
-                  // Progress dots
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: List.generate(4, (i) {
-                        final active = i == _index;
-                        return AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
-                          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                          width: active ? 28 : 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            color: active ? _evergreen.withOpacity(.25) : AppColors.button,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: active ? _evergreen.withOpacity(.5) : AppColors.border,
-                            ),
-                          ),
-                        );
-                      }),
-                    ),
-                  ),
-
-                  Expanded(
-                    child: PageView(
-                      controller: _pageCtrl,
-                      physics: const ClampingScrollPhysics(),
-                      onPageChanged: (i) => setState(() => _index = i),
-                      children: [
-                        _stepProfile(),
-                        _stepRole(),
-                        _stepInterests(),
-                        _stepAbout(),
-                      ],
-                    ),
-                  ),
-
-                  // Bottom controls (same styling)
-                  AnimatedPadding(
-                    duration: const Duration(milliseconds: 150),
-                    padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + (bottomInset > 0 ? 8 : 0)),
-                    child: Row(
-                      children: [
-                        if (_index > 0)
-                          Expanded(
-                            child: TextButton(
-                              onPressed: _back,
-                              style: TextButton.styleFrom(
-                                backgroundColor: AppColors.button,
-                                foregroundColor: AppColors.text,
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                  side: const BorderSide(color: AppColors.border),
-                                ),
-                              ),
-                              child: const Text('Back'),
-                            ),
-                          ),
-                        if (_index > 0) const SizedBox(width: 10),
-                        Expanded(
-                          flex: 2,
-                          child: ElevatedButton(
-                            onPressed: _next,
-                            style: _ctaStyle(),
-                            child: Text(_index < 3 ? 'Continue' : 'Finish'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
     );
   }
 
@@ -509,7 +499,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           children: [
             _stepHeader(
               title: 'Profile basics',
-              subtitle: 'Add a name and location so helpers recognize you.',
+              subtitle: 'Add basics so we can personalize your experience.',
             ),
             const SizedBox(height: 12),
             // Avatar with real picker
@@ -525,7 +515,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         ? NetworkImage(_profilePhotoUrl!)
                         : null,
                     child: (_profilePhotoUrl?.isEmpty ?? true)
-                        ? const Icon(Icons.camera_alt, size: 30, color: AppColors.text)
+                        ? const Icon(Icons.camera_alt,
+                            size: 30, color: AppColors.text)
                         : null,
                   ),
                   Positioned(
@@ -537,7 +528,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         shape: BoxShape.circle,
                       ),
                       padding: const EdgeInsets.all(6),
-                      child: const Icon(Icons.edit, size: 16, color: AppColors.text),
+                      child: const Icon(Icons.edit,
+                          size: 16, color: AppColors.text),
                     ),
                   ),
                 ],
@@ -550,11 +542,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               child: _LabeledField(
                 label: 'Display name',
                 compact: true,
-              child: TextFormField(
+                child: TextFormField(
                   controller: _displayNameCtrl,
-                  decoration: _compactInput(hint: 'Your name', fill: AppColors.card),
-                  style: const TextStyle(fontSize: 14, color: AppColors.text, fontWeight: FontWeight.w600),
-                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  decoration:
+                      _compactInput(hint: 'Your name', fill: AppColors.card),
+                  style: const TextStyle(
+                      fontSize: 14,
+                      color: AppColors.text,
+                      fontWeight: FontWeight.w600),
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Required' : null,
                 ),
               ),
             ),
@@ -567,8 +564,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 compact: true,
                 child: TextFormField(
                   controller: _cityCtrl,
-                  decoration: _compactInput(hint: 'e.g. Toronto', fill: AppColors.card),
-                  style: const TextStyle(fontSize: 14, color: AppColors.text, fontWeight: FontWeight.w600),
+                  decoration:
+                      _compactInput(hint: 'e.g. Toronto', fill: AppColors.card),
+                  style: const TextStyle(
+                      fontSize: 14,
+                      color: AppColors.text,
+                      fontWeight: FontWeight.w600),
                 ),
               ),
             ),
@@ -581,8 +582,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 compact: true,
                 child: TextFormField(
                   controller: _timeZoneCtrl,
-                  decoration: _compactInput(hint: 'e.g. GMT-5', fill: AppColors.card),
-                  style: const TextStyle(fontSize: 14, color: AppColors.text, fontWeight: FontWeight.w600),
+                  decoration:
+                      _compactInput(hint: 'e.g. GMT-5', fill: AppColors.card),
+                  style: const TextStyle(
+                      fontSize: 14,
+                      color: AppColors.text,
+                      fontWeight: FontWeight.w600),
                 ),
               ),
             ),
@@ -598,10 +603,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   controller: _countryCtrl,
                   value: _country,
                   hint: 'Select country',
-                  options: const ['Canada','USA','Other'],
+                  options: const ['Canada', 'USA', 'Other'],
                   fill: AppColors.card,
                   onChanged: (v) {
-                    setState(() { _country = v; _countryCtrl.text = v ?? ''; });
+                    setState(() {
+                      _country = v;
+                      _countryCtrl.text = v ?? '';
+                    });
                   },
                 ),
               ),
@@ -618,13 +626,29 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   controller: _languageCtrl,
                   value: _language,
                   hint: 'Select language',
-                  options: const ['English','French','Other'],
+                  options: const ['English', 'French', 'Other'],
                   fill: AppColors.card,
                   onChanged: (v) {
-                    setState(() { _language = v; _languageCtrl.text = v ?? ''; });
+                    setState(() {
+                      _language = v;
+                      _languageCtrl.text = v ?? '';
+                    });
                   },
                 ),
               ),
+            ),
+            const SizedBox(height: 16),
+            _sectionLabel('How will you use Connect?'),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _roleChip('seeker', Icons.help_outline, 'I’m here to get help'),
+                _roleChip('helper', Icons.volunteer_activism_outlined,
+                    'I’m here to give help'),
+                _roleChip('both', Icons.all_inclusive, 'I’m open to both'),
+              ],
             ),
           ],
         ),
@@ -639,43 +663,80 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _stepHeader(
-            title: 'Your intent',
-            subtitle: 'Tell us how you want to use Connect.',
+            title: 'Helper setup',
+            subtitle: 'Set your preferred support mode and availability.',
           ),
           const SizedBox(height: 12),
-
-          // Keep tick + stable width
+          _sectionLabel('Areas of expertise'),
+          const SizedBox(height: 8),
           Wrap(
-            spacing: 8, runSpacing: 8,
-            children: [
-              _roleChip('seeker', Icons.help_outline, 'I’m here to get help'),
-              _roleChip('helper', Icons.volunteer_activism_outlined, 'I’m here to give help'),
-              _roleChip('both', Icons.all_inclusive, 'I’m open to both'),
-            ],
+            spacing: 8,
+            runSpacing: 8,
+            children: _allExpertise.map((e) {
+              final selected = _selectedExpertise.contains(e);
+              return ChoiceChip(
+                avatar: Icon(
+                  Icons.check,
+                  size: 18,
+                  color: selected ? AppColors.text : Colors.transparent,
+                ),
+                label: Text(e),
+                selected: selected,
+                showCheckmark: false,
+                onSelected: (_) {
+                  HapticFeedback.selectionClick();
+                  setState(() {
+                    selected
+                        ? _selectedExpertise.remove(e)
+                        : _selectedExpertise.add(e);
+                  });
+                },
+                selectedColor: AppColors.button,
+                backgroundColor: AppColors.card,
+                side: const BorderSide(color: AppColors.border),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                labelStyle: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: selected
+                      ? AppColors.text
+                      : AppColors.text.withOpacity(0.9),
+                ),
+              );
+            }).toList(),
           ),
-
           const SizedBox(height: 16),
           _sectionLabel('Preferred mode'),
           const SizedBox(height: 8),
 
           // Booking-style for chat/call/video
           Wrap(
-            spacing: 8, runSpacing: 8,
+            spacing: 8,
+            runSpacing: 8,
             children: [
               _bookingPill(
                 label: 'CHAT',
                 selected: _mode == 'chat',
-                onTap: () { HapticFeedback.selectionClick(); setState(() => _mode = 'chat'); },
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  setState(() => _mode = 'chat');
+                },
               ),
               _bookingPill(
                 label: 'CALL',
                 selected: _mode == 'call',
-                onTap: () { HapticFeedback.selectionClick(); setState(() => _mode = 'call'); },
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  setState(() => _mode = 'call');
+                },
               ),
               _bookingPill(
                 label: 'VIDEO',
                 selected: _mode == 'video',
-                onTap: () { HapticFeedback.selectionClick(); setState(() => _mode = 'video'); },
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  setState(() => _mode = 'video');
+                },
               ),
             ],
           ),
@@ -696,7 +757,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               onTap: () async {
                 final st = await showTimePicker(
                   context: context,
-                  initialTime: _startTime ?? const TimeOfDay(hour: 9, minute: 0),
+                  initialTime:
+                      _startTime ?? const TimeOfDay(hour: 9, minute: 0),
                 );
                 if (st == null) return;
                 final en = await showTimePicker(
@@ -704,7 +766,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   initialTime: _endTime ?? const TimeOfDay(hour: 17, minute: 0),
                 );
                 if (en == null) return;
-                setState(() { _startTime = st; _endTime = en; });
+                setState(() {
+                  _startTime = st;
+                  _endTime = en;
+                });
               },
             ),
           ),
@@ -720,163 +785,47 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _stepHeader(
-            title: 'Topics & journeys',
+            title: 'Topics',
             subtitle: 'Pick what you need help with or can help others with.',
           ),
           const SizedBox(height: 12),
           _sectionLabel('Pick a few topics'),
           const SizedBox(height: 8),
-
           Wrap(
-            spacing: 8, runSpacing: 8,
+            spacing: 8,
+            runSpacing: 8,
             children: _allTopics.map((t) {
               final selected = _selectedTopics.contains(t);
               return ChoiceChip(
                 avatar: Icon(Icons.check,
                     size: 18,
-                    color: selected ? AppColors.text : Colors.transparent), // tick kept
+                    color: selected
+                        ? AppColors.text
+                        : Colors.transparent), // tick kept
                 label: Text(t),
                 selected: selected,
                 showCheckmark: false,
                 onSelected: (_) {
                   HapticFeedback.selectionClick();
                   setState(() {
-                    selected ? _selectedTopics.remove(t) : _selectedTopics.add(t);
+                    selected
+                        ? _selectedTopics.remove(t)
+                        : _selectedTopics.add(t);
                   });
                 },
                 selectedColor: AppColors.button,
                 backgroundColor: AppColors.card,
                 side: const BorderSide(color: AppColors.border),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
                 labelStyle: TextStyle(
                   fontWeight: FontWeight.w600,
-                  color: selected ? AppColors.text : AppColors.text.withOpacity(0.9),
+                  color: selected
+                      ? AppColors.text
+                      : AppColors.text.withOpacity(0.9),
                 ),
               );
             }).toList(),
-          ),
-
-          const SizedBox(height: 16),
-          _sectionLabel('Journeys you’ve been through'),
-          const SizedBox(height: 8),
-
-          Wrap(
-            spacing: 8, runSpacing: 8,
-            children: ['Refugee claim approved','Student','Worker'].map((j) {
-              final sel = _journeys.contains(j);
-              return FilterChip(
-                avatar: Icon(Icons.check,
-                    size: 18,
-                    color: sel ? AppColors.text : Colors.transparent),
-                label: Text(j),
-                selected: sel,
-                showCheckmark: false,
-                onSelected: (_) {
-                  HapticFeedback.selectionClick();
-                  setState(() { sel ? _journeys.remove(j) : _journeys.add(j); });
-                },
-                selectedColor: AppColors.button,
-                backgroundColor: AppColors.card,
-                side: const BorderSide(color: AppColors.border),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                labelStyle: const TextStyle(fontWeight: FontWeight.w600),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _stepAbout() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _stepHeader(
-            title: 'About you',
-            subtitle: 'Add a short intro. This helps build trust.',
-          ),
-          const SizedBox(height: 12),
-          // Short bio: hint-only, no floating label, clipped safely
-          ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: TextFormField(
-              controller: _bioCtrl,
-              style: const TextStyle(color: AppColors.text, fontSize: 14),
-              cursorColor: AppColors.primary,
-              decoration: _textAreaDecoration(hint: 'Short bio'),
-              minLines: 3,
-              maxLines: 5,
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          _SoftCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('If you plan to help others',
-                    style: TextStyle(fontWeight: FontWeight.w700)),
-                const SizedBox(height: 10),
-                _sectionLabel('Areas of expertise'),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: _allExpertise.map((e) {
-                    final selected = _selectedExpertise.contains(e);
-                    return ChoiceChip(
-                      avatar: Icon(
-                        Icons.check,
-                        size: 18,
-                        color: selected ? AppColors.text : Colors.transparent,
-                      ),
-                      label: Text(e),
-                      selected: selected,
-                      showCheckmark: false,
-                      onSelected: (_) {
-                        HapticFeedback.selectionClick();
-                        setState(() {
-                          selected ? _selectedExpertise.remove(e) : _selectedExpertise.add(e);
-                        });
-                      },
-                      selectedColor: AppColors.button,
-                      backgroundColor: AppColors.card,
-                      side: const BorderSide(color: AppColors.border),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      labelStyle: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: selected ? AppColors.text : AppColors.text.withOpacity(0.9),
-                      ),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 12),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
-                  child: TextFormField(
-                    controller: _skillsCtrl,
-                    style: const TextStyle(color: AppColors.text, fontSize: 14),
-                    cursorColor: AppColors.primary,
-                    decoration: _compactInput(hint: 'Skills (comma separated)'),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
-                  child: TextFormField(
-                    controller: _expCtrl,
-                    style: const TextStyle(color: AppColors.text, fontSize: 14),
-                    cursorColor: AppColors.primary,
-                    decoration: _textAreaDecoration(hint: 'Relevant experience'),
-                    minLines: 3,
-                    maxLines: 5,
-                  ),
-                ),
-              ],
-            ),
           ),
         ],
       ),
@@ -900,13 +849,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       dropdownMenuEntries: options
           .map((e) => DropdownMenuEntry<String>(value: e, label: e))
           .toList(),
-      width: double.infinity,       // <- match field width exactly
+      width: double.infinity, // <- match field width exactly
       menuHeight: 240,
       inputDecorationTheme: InputDecorationTheme(
         isDense: true,
         filled: true,
         fillColor: fill ?? AppColors.card,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         border: OutlineInputBorder(
           borderSide: const BorderSide(color: AppColors.border),
           borderRadius: BorderRadius.circular(14),
@@ -922,18 +872,21 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         floatingLabelBehavior: FloatingLabelBehavior.never,
         hintStyle: const TextStyle(color: AppColors.muted, fontSize: 13),
       ),
-      textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text),
+      textStyle: const TextStyle(
+          fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text),
       onSelected: onChanged,
     );
   }
 
-  InputDecoration _compactInput({String? label, String? hint, Color? fill}) => InputDecoration(
+  InputDecoration _compactInput({String? label, String? hint, Color? fill}) =>
+      InputDecoration(
         labelText: label,
         hintText: hint,
         isDense: true,
         filled: true,
         fillColor: fill ?? AppColors.card,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         border: OutlineInputBorder(
           borderSide: const BorderSide(color: AppColors.border),
           borderRadius: BorderRadius.circular(14),
@@ -948,29 +901,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         ),
         floatingLabelBehavior: FloatingLabelBehavior.never,
         hintStyle: const TextStyle(color: AppColors.muted, fontSize: 13),
-        labelStyle: const TextStyle(color: AppColors.muted, fontSize: 13, fontWeight: FontWeight.w600),
-      );
-
-  InputDecoration _textAreaDecoration({String? hint}) => InputDecoration(
-        hintText: hint,
-        isDense: true,
-        filled: true,
-        fillColor: AppColors.card,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        border: OutlineInputBorder(
-          borderSide: const BorderSide(color: AppColors.border),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderSide: const BorderSide(color: AppColors.border),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderSide: const BorderSide(color: AppColors.border),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        floatingLabelBehavior: FloatingLabelBehavior.never,
-        hintStyle: const TextStyle(color: AppColors.muted, fontSize: 13),
+        labelStyle: const TextStyle(
+            color: AppColors.muted, fontSize: 13, fontWeight: FontWeight.w600),
       );
 
   Widget _roleChip(String value, IconData icon, String label) {
@@ -978,7 +910,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     return ChoiceChip(
       avatar: Icon(Icons.check,
           size: 18,
-          color: sel ? AppColors.text : Colors.transparent), // tick kept + stable width
+          color: sel
+              ? AppColors.text
+              : Colors.transparent), // tick kept + stable width
       label: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(icon, size: 18, color: AppColors.muted),
         const SizedBox(width: 6),
@@ -988,13 +922,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       showCheckmark: false,
       onSelected: (_) {
         HapticFeedback.selectionClick();
-        setState(() => _role = value);
+        _setRole(value);
       },
       selectedColor: AppColors.button,
       backgroundColor: AppColors.card,
       side: const BorderSide(color: AppColors.border),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      labelStyle: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.text),
+      labelStyle:
+          const TextStyle(fontWeight: FontWeight.w600, color: AppColors.text),
     );
   }
 
@@ -1007,7 +942,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       if (lower.contains('pm') && hour < 12) hour += 12;
       if (lower.contains('am') && hour == 12) hour = 0;
       return TimeOfDay(hour: hour, minute: minute);
-    } catch (_) { return null; }
+    } catch (_) {
+      return null;
+    }
   }
 }
 
@@ -1047,7 +984,8 @@ class _SoftCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.card,
         borderRadius: BorderRadius.circular(16),
-        border: const Border.fromBorderSide(BorderSide(color: AppColors.border)),
+        border:
+            const Border.fromBorderSide(BorderSide(color: AppColors.border)),
         boxShadow: const [AppShadows.soft],
       ),
       child: child,
@@ -1059,7 +997,8 @@ class _LabeledField extends StatelessWidget {
   final String label;
   final Widget child;
   final bool compact;
-  const _LabeledField({required this.label, required this.child, this.compact = false});
+  const _LabeledField(
+      {required this.label, required this.child, this.compact = false});
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -1090,7 +1029,9 @@ class _StepHeader extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+        Text(title,
+            style:
+                textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
         const SizedBox(height: 6),
         Text(subtitle, style: textTheme.bodyMedium),
       ],

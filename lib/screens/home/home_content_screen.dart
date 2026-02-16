@@ -486,12 +486,13 @@ class HomeContentScreenState extends State<HomeContentScreen>
                           onOpenVideo: videoUrl.isEmpty
                               ? null
                               : () {
-                                  Navigator.of(context).push(
-                                    CupertinoPageRoute(
-                                      builder: (_) =>
-                                          PostVideoPlayer(url: videoUrl),
-                                    ),
-                                  );
+                                      Navigator.of(context).push(
+                                        PageRouteBuilder(
+                                          opaque: false,
+                                          pageBuilder: (_, __, ___) =>
+                                              PostVideoPlayer(url: videoUrl),
+                                        ),
+                                      );
                                 },
                           showConnect: !isOwnPost,
                         );
@@ -857,8 +858,10 @@ class _PostCellState extends State<_PostCell> {
           onOpenIndex: (idx) {
             // ✅ tab push for image viewer
             Navigator.of(context).push(
-              CupertinoPageRoute(
-                builder: (_) => PostImageViewer(url: widget.imageUrls[idx]),
+              PageRouteBuilder(
+                opaque: false,
+                pageBuilder: (_, __, ___) =>
+                    PostImageViewer(url: widget.imageUrls[idx]),
               ),
             );
           },

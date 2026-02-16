@@ -1,10 +1,9 @@
 // lib/screens/consultation/consultation_call_screen.dart
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
-import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 import 'package:connect_app/theme/tokens.dart';
 import '/services/interaction_service.dart';
@@ -13,28 +12,20 @@ const String appId = 'dac900a04a87460c87c3d18b63cac65d';
 
 /// ---- FETCH TOKEN FROM REMOTE SERVER ----
 Future<String> fetchAgoraToken(String channelName, int uid) async {
-  final url = Uri.parse(
-    'https://agora-token-server-production-2a8c.up.railway.app/getToken',
-  );
-
-  final response = await http.post(
-    url,
-    headers: {'Content-Type': 'application/json'},
-    body: jsonEncode({
-      'tokenType': 'rtc',
-      'channel': channelName,
-      'role': 'publisher',
-      'uid': uid.toString(),
-      'expire': 3600,
-    }),
-  );
-
-  if (response.statusCode == 200) {
-    final body = jsonDecode(response.body);
-    return (body['token'] ?? '').toString();
-  } else {
-    throw Exception('Failed to fetch Agora token: ${response.body}');
+  final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+      .httpsCallable('getAgoraRtcToken');
+  final response = await callable.call({
+    'channelName': channelName,
+    'uid': uid,
+    'role': 'publisher',
+    'expireSeconds': 3600,
+  });
+  final data = (response.data as Map?) ?? const {};
+  final token = (data['token'] ?? '').toString().trim();
+  if (token.isEmpty) {
+    throw Exception('Token service returned empty token');
   }
+  return token;
 }
 
 class ConsultationCallScreen extends StatefulWidget {
@@ -78,15 +69,8 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
   Future<void> _setupAgora() async {
     try {
       // Permissions
-      final mic = await Permission.microphone.request();
-      final cam = await Permission.camera.request();
-
-      if (!mic.isGranted) throw Exception('Microphone permission denied.');
-      if (!cam.isGranted) {
-        // You can still do audio-only if you want, but your screen is “video-like”
-        // so we keep it strict.
-        throw Exception('Camera permission denied.');
-      }
+      await _ensurePermission(Permission.microphone, 'Microphone');
+      await _ensurePermission(Permission.camera, 'Camera');
 
       // Fetch token
       _token = await fetchAgoraToken(widget.roomId, 0);
@@ -151,6 +135,15 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
     }
   }
 
+  Future<void> _ensurePermission(Permission permission, String label) async {
+    final status = await permission.status;
+    if (status.isGranted) return;
+    final result = await permission.request();
+    if (!result.isGranted) {
+      throw Exception('$label permission denied ($result).');
+    }
+  }
+
   Future<void> _recordInteractionOnce() async {
     if (_interactionRecorded) return;
     final me = FirebaseAuth.instance.currentUser?.uid;
@@ -211,6 +204,8 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
     }
 
     if (_hasError) {
+      final isPermissionError =
+          (_errorMessage ?? '').toLowerCase().contains('permission');
       return Scaffold(
         backgroundColor: AppColors.canvas,
         appBar: AppBar(
@@ -231,7 +226,14 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 20),
-                ElevatedButton(
+                if (isPermissionError) ...[
+                  OutlinedButton(
+                    onPressed: openAppSettings,
+                    child: const Text('Open Settings'),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                OutlinedButton(
                   onPressed: () => Navigator.of(context).pop(),
                   child: const Text('Close'),
                 ),

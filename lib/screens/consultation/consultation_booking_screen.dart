@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:intl/intl.dart';
 import 'package:connect_app/theme/tokens.dart';
@@ -8,6 +9,7 @@ import '/services/consultation_service.dart';
 import '/services/payment_service.dart';
 import 'package:connect_app/screens/pricing/pricing_config.dart';
 import '/services/interaction_service.dart';
+import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 
 class ConsultationBookingScreen extends StatefulWidget {
   final String targetUserId;
@@ -40,20 +42,74 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
 
   User? _user;
   late final StreamSubscription<User?> _authSub;
+  StreamSubscription<DocumentSnapshot>? _userDocSub;
+
+  bool _premiumActive = false;
+  String _userRole = 'seeker';
+  DateTime? _premiumExpiresAt;
+  DateTime? _freeAudioUsedAt;
+
+  static const int _premiumDiscountPercent = 10;
 
   @override
   void initState() {
     super.initState();
     _user = FirebaseAuth.instance.currentUser;
     _authSub = FirebaseAuth.instance.authStateChanges().listen((u) {
-      if (mounted) setState(() => _user = u);
+      if (!mounted) return;
+      setState(() => _user = u);
+      if (u != null) _listenUserDoc(u.uid);
     });
+    if (_user != null) {
+      _listenUserDoc(_user!.uid);
+    }
   }
 
   @override
   void dispose() {
     _authSub.cancel();
+    _userDocSub?.cancel();
     super.dispose();
+  }
+
+  void _listenUserDoc(String uid) {
+    _userDocSub?.cancel();
+    _userDocSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .listen((doc) {
+      if (!doc.exists) return;
+      final data = doc.data() as Map<String, dynamic>;
+      _applyUserBenefits(data);
+    });
+  }
+
+  DateTime? _tsToDate(dynamic v) {
+    if (v is Timestamp) return v.toDate();
+    return null;
+  }
+
+  bool _isPremiumActive(Map<String, dynamic> data) {
+    final status = (data['premiumStatus'] ?? '').toString().toLowerCase();
+    if (status.isEmpty || status == 'none') return false;
+    final exp = _tsToDate(data['premiumExpiresAt']);
+    if (exp != null && exp.isBefore(DateTime.now())) return false;
+    return true;
+  }
+
+  void _applyUserBenefits(Map<String, dynamic> data) {
+    final role = (data['role'] ?? 'seeker').toString();
+    final active = _isPremiumActive(data);
+    final exp = _tsToDate(data['premiumExpiresAt']);
+    final freeUsedAt = _tsToDate(data['premiumFreeAudioUsedAt']);
+    if (!mounted) return;
+    setState(() {
+      _userRole = role;
+      _premiumActive = active;
+      _premiumExpiresAt = exp;
+      _freeAudioUsedAt = freeUsedAt;
+    });
   }
 
   String get _availabilityLabel {
@@ -64,10 +120,37 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
     return 'Usually responds within a day';
   }
 
-  double get _price => PricingConfig.getPrice(_selectedDuration, _callType);
+  bool get _isSeeker => _userRole != 'helper';
+  bool get _isSeekerPremium => _premiumActive && _isSeeker;
+
+  bool get _freeAudioUsedThisMonth {
+    final used = _freeAudioUsedAt;
+    if (used == null) return false;
+    final now = DateTime.now();
+    return used.year == now.year && used.month == now.month;
+  }
+
+  bool get _freeAudioEligible {
+    return _isSeekerPremium &&
+        _callType == 'audio' &&
+        _selectedDuration == 5 &&
+        !_freeAudioUsedThisMonth;
+  }
+
+  double get _basePrice => PricingConfig.getPrice(_selectedDuration, _callType);
+  double get _finalPrice {
+    if (_freeAudioEligible) return 0.0;
+    if (_isSeekerPremium) {
+      final discounted = _basePrice * (1 - (_premiumDiscountPercent / 100));
+      return double.parse(discounted.toStringAsFixed(2));
+    }
+    return _basePrice;
+  }
+
   double get _payout =>
       PricingConfig.getHelperPayout(_selectedDuration, _callType);
-  String get _priceLabel => '\$${_price.toStringAsFixed(2)} CAD';
+  String get _priceLabel => '\$${_finalPrice.toStringAsFixed(2)} CAD';
+  String get _basePriceLabel => '\$${_basePrice.toStringAsFixed(2)} CAD';
   String get _payoutLabel => '\$${_payout.toStringAsFixed(2)} to helper';
 
   DateTime? get _scheduledAt {
@@ -102,7 +185,8 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
 
   Future<void> _bookConsultation() async {
     debugPrint('🟢 [Booking] Start booking flow for ${widget.targetUserName}');
-    debugPrint('💰 Selected duration: $_selectedDuration min | Type: $_callType | Price: $_price');
+    debugPrint(
+        '💰 Selected duration: $_selectedDuration min | Type: $_callType | Price: $_finalPrice');
 
     if (_scheduledAt == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -150,16 +234,16 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
       await _paymentService.ensureStripeCustomer();
 
       var charge = const PaymentChargeResult(result: PaymentResult.failed);
-      if (_price > 0) {
-        debugPrint('🧾 [Booking] Starting payment flow. Amount: $_price CAD');
-        var charge = await _paymentService.processPayment(amount: _price);
+      if (_finalPrice > 0) {
+        debugPrint('🧾 [Booking] Starting payment flow. Amount: $_finalPrice CAD');
+        var charge = await _paymentService.processPayment(amount: _finalPrice);
         debugPrint('📤 [Booking] processPayment() returned: ${charge.result}');
 
         if (charge.result == PaymentResult.unauthenticated) {
           debugPrint('🔁 [Booking] Retrying payment after refreshing tokens...');
           await user.getIdToken(true);
           await FirebaseAppCheck.instance.getToken(true);
-          charge = await _paymentService.processPayment(amount: _price);
+          charge = await _paymentService.processPayment(amount: _finalPrice);
           debugPrint('📤 [Booking] Retry result: ${charge.result}');
         }
 
@@ -226,10 +310,20 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
         widget.targetUserId,
         _selectedDuration,
         scheduledAt: _scheduledAt!,
-        costOverride: _price,
-        paymentIntentId: _price > 0 ? charge.paymentIntentId : null,
+        costOverride: _finalPrice,
+        paymentIntentId: _finalPrice > 0 ? charge.paymentIntentId : null,
         currency: 'cad',
       );
+
+      if (_freeAudioEligible) {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .set(
+          {'premiumFreeAudioUsedAt': FieldValue.serverTimestamp()},
+          SetOptions(merge: true),
+        );
+      }
 
       await InteractionService.recordInteraction(widget.targetUserId);
       if (!mounted) return;
@@ -258,7 +352,8 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
     final scheduledText =
         dt == null ? 'Not set' : DateFormat('EEE, MMM d • h:mm a').format(dt);
 
-    return Scaffold(
+    return FullScreenBackGesture(
+      child: Scaffold(
       backgroundColor: AppColors.canvas,
       appBar: AppBar(
         title: const Text('Book a Consultation'),
@@ -437,6 +532,31 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                           style: const TextStyle(color: AppColors.muted),
                         ),
                         const SizedBox(height: 6),
+                        if (_isSeekerPremium && !_freeAudioEligible)
+                          Row(
+                            children: [
+                              Text(
+                                _basePriceLabel,
+                                style: const TextStyle(
+                                  color: AppColors.muted,
+                                  decoration: TextDecoration.lineThrough,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                '-$_premiumDiscountPercent%',
+                                style: const TextStyle(
+                                  color: AppColors.primary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        if (_freeAudioEligible)
+                          const Text(
+                            'Premium: 5 min free audio applied',
+                            style: TextStyle(color: AppColors.primary),
+                          ),
                         Text('Total: $_priceLabel',
                             style: const TextStyle(color: AppColors.text)),
                         Text(_payoutLabel,
@@ -476,6 +596,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
           ],
         ),
       ),
+    ),
     );
   }
 

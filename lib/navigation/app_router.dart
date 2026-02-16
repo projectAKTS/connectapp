@@ -6,6 +6,7 @@ import 'package:connect_app/screens/chat/chat_screen.dart';
 import 'package:connect_app/screens/consultation/consultation_booking_screen.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
 import 'package:connect_app/screens/posts/post_detail_screen.dart';
+import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 
 class AppRouter {
   /// Routes that should work BOTH on root navigator AND inside tab navigators.
@@ -20,7 +21,8 @@ class AppRouter {
         final userId = uri.pathSegments[1];
         return CupertinoPageRoute(
           settings: settings,
-          builder: (_) => ProfileScreen(userID: userId),
+          builder: (_) =>
+              FullScreenBackGesture(child: ProfileScreen(userID: userId)),
         );
       }
 
@@ -28,7 +30,8 @@ class AppRouter {
         final postId = uri.pathSegments[1];
         return CupertinoPageRoute(
           settings: settings,
-          builder: (_) => PostDetailScreen(postId: postId),
+          builder: (_) =>
+              FullScreenBackGesture(child: PostDetailScreen(postId: postId)),
         );
       }
     }
@@ -51,10 +54,12 @@ class AppRouter {
 
       return CupertinoPageRoute(
         settings: settings,
-        builder: (_) => ChatScreen(
-          otherUserId: otherUserId,
-          otherUserName: otherUserName,
-          otherUserAvatar: otherUserAvatar,
+        builder: (_) => FullScreenBackGesture(
+          child: ChatScreen(
+            otherUserId: otherUserId,
+            otherUserName: otherUserName,
+            otherUserAvatar: otherUserAvatar,
+          ),
         ),
       );
     }
@@ -75,9 +80,11 @@ class AppRouter {
 
       return CupertinoPageRoute(
         settings: settings,
-        builder: (_) => ConsultationBookingScreen(
-          targetUserId: id,
-          targetUserName: targetName,
+        builder: (_) => FullScreenBackGesture(
+          child: ConsultationBookingScreen(
+            targetUserId: id,
+            targetUserName: targetName,
+          ),
         ),
       );
     }
@@ -95,7 +102,7 @@ class AppRouter {
 
     return CupertinoPageRoute(
       settings: settings,
-      builder: (_) => tabRoot,
+      builder: (_) => FullScreenBackGesture(child: tabRoot),
     );
   }
 }

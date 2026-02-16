@@ -1,12 +1,12 @@
 // lib/call/agora_call_screen.dart
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
+import 'package:connect_app/theme/tokens.dart';
 import '/services/interaction_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 const String appId = 'dac900a04a87460c87c3d18b63cac65d';
 
@@ -15,25 +15,18 @@ Future<String> fetchAgoraToken({
   required String channelName,
   required int uid,
 }) async {
-  final url = Uri.parse('https://agora-token-server-production-2a8c.up.railway.app/getToken');
-  final resp = await http.post(
-    url,
-    headers: {'Content-Type': 'application/json'},
-    body: jsonEncode({
-      'tokenType': 'rtc',
-      'channel': channelName,
-      'role': 'publisher',
-      'uid': uid.toString(),
-      'expire': 3600,
-    }),
-  );
-  if (resp.statusCode != 200) {
-    throw Exception('Token server error (${resp.statusCode}): ${resp.body}');
-  }
-  final body = jsonDecode(resp.body);
-  final token = (body['token'] as String?)?.trim();
+  final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+      .httpsCallable('getAgoraRtcToken');
+  final resp = await callable.call({
+    'channelName': channelName,
+    'uid': uid,
+    'role': 'publisher',
+    'expireSeconds': 3600,
+  });
+  final data = (resp.data as Map?) ?? const {};
+  final token = (data['token'] as String?)?.trim();
   if (token == null || token.isEmpty) {
-    throw Exception('Token server returned empty token');
+    throw Exception('Token service returned empty token');
   }
   return token;
 }
@@ -87,19 +80,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       if (channel.isEmpty) throw Exception('Channel name is empty');
       if (channel.length > 64) throw Exception('Channel name too long');
 
-      // Permissions
+      // Permissions (request sequentially to avoid iOS prompt issues)
+      await _ensurePermission(Permission.microphone, 'Microphone');
       if (widget.isVideo) {
-        final statuses = await [Permission.microphone, Permission.camera].request();
-        if (statuses[Permission.microphone] != PermissionStatus.granted) {
-          throw Exception('Microphone permission not granted');
-        }
-        if (statuses[Permission.camera] != PermissionStatus.granted) {
-          throw Exception('Camera permission not granted');
-        }
-      } else {
-        if (await Permission.microphone.request() != PermissionStatus.granted) {
-          throw Exception('Microphone permission not granted');
-        }
+        await _ensurePermission(Permission.camera, 'Camera');
       }
 
       // Token & engine
@@ -189,6 +173,15 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     }
   }
 
+  Future<void> _ensurePermission(Permission permission, String label) async {
+    final status = await permission.status;
+    if (status.isGranted) return;
+    final result = await permission.request();
+    if (!result.isGranted) {
+      throw Exception('$label permission not granted ($result)');
+    }
+  }
+
   @override
   void dispose() {
     _ringTimeout?.cancel();
@@ -250,23 +243,39 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   }
 
   Widget _audioLayout() {
-    final status = (_remoteUid != null) ? 'Connected to ${widget.otherUserName}' : 'Ringing…';
+    final status = (_remoteUid != null)
+        ? 'Connected'
+        : (_joined ? 'Calling…' : 'Connecting…');
+    final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F0F8),
+      backgroundColor: AppColors.canvas,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: AppColors.canvas,
         elevation: 0,
-        title: const Text('Audio Call'),
+        title: const Text('Audio call'),
         centerTitle: true,
       ),
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.call, size: 72, color: Colors.purple),
-            const SizedBox(height: 16),
-            Text(status, style: const TextStyle(fontSize: 18, color: Colors.grey)),
+            CircleAvatar(
+              radius: 44,
+              backgroundColor: AppColors.avatarBg,
+              child: const Icon(Icons.call, size: 40, color: AppColors.primary),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              widget.otherUserName,
+              style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              status,
+              style: textTheme.bodyMedium?.copyWith(color: AppColors.muted),
+            ),
           ],
         ),
       ),
@@ -284,9 +293,19 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
             ),
           )
         : const Center(
-            child: Text(
-              'Waiting for the other user to join…',
-              style: TextStyle(color: Colors.white70),
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              child: Text(
+                'Waiting for the other user to join…',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 18,
+                  height: 1.25,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           );
 
@@ -320,6 +339,29 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
                 child: ClipRect(child: _localIsBig ? local : remote),
               ),
 
+              Positioned(
+                left: 12,
+                right: 12,
+                top: 6,
+                child: SafeArea(
+                  child: Row(
+                    children: [
+                      _statusPill(
+                        icon: Icons.videocam_rounded,
+                        label: widget.otherUserName,
+                      ),
+                      const SizedBox(width: 8),
+                      _statusPill(
+                        icon: _remoteUid != null
+                            ? Icons.wifi_tethering
+                            : Icons.access_time_rounded,
+                        label: _remoteUid != null ? 'Connected' : 'Calling…',
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
               // Draggable PiP — smooth & free drag, clamped on screen
               Positioned(
                 left: _pipPos.dx,
@@ -329,12 +371,50 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
                     setState(() => _pipPos = clamp(_pipPos + d.delta));
                   },
                   onTap: () => setState(() => _localIsBig = !_localIsBig),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: SizedBox(
-                      width: pipW,
-                      height: pipH,
-                      child: _localIsBig ? remote : local,
+                  child: Container(
+                    width: pipW,
+                    height: pipH,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white70, width: 1.6),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.38),
+                          blurRadius: 14,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Stack(
+                        children: [
+                          Positioned.fill(child: _localIsBig ? remote : local),
+                          Positioned(
+                            left: 8,
+                            top: 8,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.55),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(color: Colors.white24),
+                              ),
+                              child: const Text(
+                                'Tap to swap',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -352,7 +432,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       top: false,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-        color: video ? Colors.black.withOpacity(0.25) : Colors.white,
+        color: video ? Colors.black.withOpacity(0.35) : AppColors.canvas,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
@@ -360,21 +440,50 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
               icon: _muted ? Icons.mic_off : Icons.mic,
               onTap: _toggleMute,
               isActive: !_muted,
+              dark: video,
             ),
             if (video)
               _roundButton(
                 icon: Icons.cameraswitch,
                 onTap: _switchCamera,
                 isActive: _frontCamera,
+                dark: video,
               ),
             _hangupButton(), // big red centered button
             _roundButton(
-              icon: Icons.volume_up,
+              icon: _speakerOn ? Icons.volume_up : Icons.volume_off,
               onTap: _toggleSpeaker,
               isActive: _speakerOn,
+              dark: video,
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _statusPill({required IconData icon, required String label}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.45),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: Colors.white),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -383,18 +492,27 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     required IconData icon,
     required VoidCallback onTap,
     bool isActive = true,
+    bool dark = false,
   }) {
+    final bg = dark
+        ? (isActive ? Colors.white : Colors.white24)
+        : (isActive ? AppColors.button : AppColors.border);
+    final fg = dark
+        ? (isActive ? Colors.black : Colors.white70)
+        : (isActive ? AppColors.text : AppColors.muted);
     return InkResponse(
       onTap: onTap,
       child: Container(
         width: 58,
         height: 58,
         decoration: BoxDecoration(
-          color: isActive ? Colors.white : Colors.grey.shade300,
+          color: bg,
           shape: BoxShape.circle,
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 6)],
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 8)
+          ],
         ),
-        child: Icon(icon, color: Colors.black87),
+        child: Icon(icon, color: fg),
       ),
     );
   }
@@ -406,7 +524,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         width: 76,
         height: 76,
         decoration: const BoxDecoration(
-          color: Colors.redAccent,
+          color: AppColors.danger,
           shape: BoxShape.circle,
         ),
         child: const Icon(Icons.call_end, color: Colors.white, size: 32),
@@ -425,15 +543,21 @@ class _EndedScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(title)),
+      backgroundColor: AppColors.canvas,
+      appBar: AppBar(
+        title: Text(title),
+        backgroundColor: AppColors.canvas,
+      ),
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.info_outline, size: 56, color: Colors.grey),
+            const Icon(Icons.info_outline, size: 56, color: AppColors.muted),
             const SizedBox(height: 12),
-            const Text('Call ended',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Text(
+              'Call ended',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 12),
             ElevatedButton(onPressed: onClose, child: const Text('Close')),
           ],
@@ -456,15 +580,21 @@ class _ErrorScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isPermissionError =
+        message.toLowerCase().contains('permission not granted');
     return Scaffold(
-      appBar: AppBar(title: Text(title)),
+      backgroundColor: AppColors.canvas,
+      appBar: AppBar(
+        title: Text(title),
+        backgroundColor: AppColors.canvas,
+      ),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24.0),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, color: Colors.red, size: 64),
+              const Icon(Icons.error_outline, color: AppColors.danger, size: 64),
               const SizedBox(height: 12),
               const Text('Something went wrong.',
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
@@ -472,10 +602,17 @@ class _ErrorScreen extends StatelessWidget {
               Text(
                 message,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 14, color: Colors.redAccent),
+                style: const TextStyle(fontSize: 14, color: AppColors.muted),
               ),
-              const SizedBox(height: 16),
-              ElevatedButton(onPressed: onClose, child: const Text('Close')),
+            const SizedBox(height: 16),
+              if (isPermissionError) ...[
+                OutlinedButton(
+                  onPressed: openAppSettings,
+                  child: const Text('Open Settings'),
+                ),
+                const SizedBox(height: 10),
+              ],
+              OutlinedButton(onPressed: onClose, child: const Text('Close')),
             ],
           ),
         ),

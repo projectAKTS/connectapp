@@ -32,6 +32,7 @@ import 'screens/premium/premium_screen.dart';
 
 // Core
 import 'widgets/main_scaffold.dart';
+import 'widgets/full_screen_back_gesture.dart';
 import 'services/firebase_options.dart';
 import 'services/notification_service.dart';
 import 'services/subscription_service.dart';
@@ -51,14 +52,16 @@ Future<void> main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  const useDebugAppCheck =
-      kDebugMode || bool.fromEnvironment('APP_CHECK_DEBUG', defaultValue: false);
+  const useDebugAppCheck = kDebugMode ||
+      bool.fromEnvironment('APP_CHECK_DEBUG', defaultValue: false);
   try {
     await FirebaseAppCheck.instance.activate(
       appleProvider: useDebugAppCheck
           ? AppleProvider.debug
           : AppleProvider.appAttestWithDeviceCheckFallback,
-      androidProvider: useDebugAppCheck ? AndroidProvider.debug : AndroidProvider.playIntegrity,
+      androidProvider: useDebugAppCheck
+          ? AndroidProvider.debug
+          : AndroidProvider.playIntegrity,
     );
     if (useDebugAppCheck) {
       final token = await FirebaseAppCheck.instance.getToken(true);
@@ -68,6 +71,14 @@ Future<void> main() async {
     }
   } catch (e) {
     debugPrint('⚠️ AppCheck failed: $e');
+    if (e.toString().contains('exchangeDebugToken') &&
+        e.toString().contains('403')) {
+      debugPrint(
+        '⚠️ AppCheck debug token was rejected by Firebase (403 PERMISSION_DENIED). '
+        'Add this device debug token in Firebase Console -> App Check -> '
+        'Manage debug tokens, then reinstall and run again.',
+      );
+    }
   }
 
   Stripe.publishableKey =
@@ -102,7 +113,8 @@ void _handlePurchaseUpdates(List<PurchaseDetails> details) {
 
       final doc = FirebaseFirestore.instance.collection('users').doc(user.uid);
 
-      if (pd.productID == 'premium_monthly' || pd.productID == 'premium_yearly') {
+      if (pd.productID == 'premium_monthly' ||
+          pd.productID == 'premium_yearly') {
         final isMonthly = pd.productID == 'premium_monthly';
         final expires = DateTime.now().add(
           isMonthly ? const Duration(days: 30) : const Duration(days: 365),
@@ -186,20 +198,26 @@ class _MyAppState extends State<MyApp> {
         // ✅ IMPORTANT: define /home explicitly
         '/home': (_) => const MainScaffold(),
 
-        '/login': (_) => const LoginScreen(),
-        '/register': (_) => const SignupScreen(),
-        '/forgot-password': (_) => const ForgotPasswordScreen(),
+        '/login': (_) => const FullScreenBackGesture(child: LoginScreen()),
+        '/register': (_) => const FullScreenBackGesture(child: SignupScreen()),
+        '/forgot-password': (_) =>
+            const FullScreenBackGesture(child: ForgotPasswordScreen()),
 
-        '/create_post': (_) => const CreatePostScreen(),
-        '/search': (_) => const SearchScreen(),
-        '/edit_post': (_) => const EditPostScreen(),
+        '/create_post': (_) =>
+            const FullScreenBackGesture(child: CreatePostScreen()),
+        '/search': (_) => const FullScreenBackGesture(child: SearchScreen()),
+        '/edit_post': (_) =>
+            const FullScreenBackGesture(child: EditPostScreen()),
 
-        '/my_consultations': (_) => const MyConsultationsScreen(),
+        '/my_consultations': (_) =>
+            const FullScreenBackGesture(child: MyConsultationsScreen()),
 
-        '/premium': (_) => PremiumScreen(),
+        '/premium': (_) => FullScreenBackGesture(child: PremiumScreen()),
 
-        '/onboarding': (_) => const OnboardingScreen(),
-        '/paymentSetup': (_) => const PaymentSetupScreen(),
+        '/onboarding': (_) =>
+            const FullScreenBackGesture(child: OnboardingScreen()),
+        '/paymentSetup': (_) =>
+            const FullScreenBackGesture(child: PaymentSetupScreen()),
       },
 
       onGenerateRoute: (settings) {
@@ -211,7 +229,8 @@ class _MyAppState extends State<MyApp> {
         if (uri.pathSegments.length == 2 && uri.pathSegments[0] == 'profile') {
           final userId = uri.pathSegments[1];
           return MaterialPageRoute(
-            builder: (_) => ProfileScreen(userID: userId),
+            builder: (_) =>
+                FullScreenBackGesture(child: ProfileScreen(userID: userId)),
             settings: settings,
           );
         }
@@ -219,7 +238,8 @@ class _MyAppState extends State<MyApp> {
         if (uri.pathSegments.length == 2 && uri.pathSegments[0] == 'post') {
           final postId = uri.pathSegments[1];
           return MaterialPageRoute(
-            builder: (_) => PostDetailScreen(postId: postId),
+            builder: (_) =>
+                FullScreenBackGesture(child: PostDetailScreen(postId: postId)),
             settings: settings,
           );
         }
@@ -229,9 +249,11 @@ class _MyAppState extends State<MyApp> {
           if (args == null) return null;
 
           return MaterialPageRoute(
-            builder: (_) => ConsultationBookingScreen(
-              targetUserId: args['targetUserId'],
-              targetUserName: args['targetUserName'],
+            builder: (_) => FullScreenBackGesture(
+              child: ConsultationBookingScreen(
+                targetUserId: args['targetUserId'],
+                targetUserName: args['targetUserName'],
+              ),
             ),
             settings: settings,
           );
@@ -242,10 +264,12 @@ class _MyAppState extends State<MyApp> {
           if (args == null) return null;
 
           return MaterialPageRoute(
-            builder: (_) => ChatScreen(
-              otherUserId: args['otherUserId'],
-              otherUserName: args['otherUserName'],
-              otherUserAvatar: args['otherUserAvatar'],
+            builder: (_) => FullScreenBackGesture(
+              child: ChatScreen(
+                otherUserId: args['otherUserId'],
+                otherUserName: args['otherUserName'],
+                otherUserAvatar: args['otherUserAvatar'],
+              ),
             ),
             settings: settings,
           );
@@ -317,8 +341,41 @@ class _AuthGateState extends State<AuthGate> {
           );
         }
 
-        // If already signed in, go straight to home
-        return snap.hasData ? const MainScaffold() : const LoginScreen();
+        if (!snap.hasData) {
+          return const FullScreenBackGesture(child: LoginScreen());
+        }
+
+        final user = snap.data!;
+        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          stream: FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .snapshots(),
+          builder: (_, userSnap) {
+            if (userSnap.connectionState == ConnectionState.waiting) {
+              return const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              );
+            }
+
+            final data = userSnap.data?.data() ?? const <String, dynamic>{};
+            final hasOnboardingFlag = data['onboardingComplete'] == true;
+            final hasName = ((data['displayName'] ?? data['fullName'] ?? '')
+                .toString()
+                .trim()
+                .isNotEmpty);
+            final hasLanguage =
+                (data['language'] ?? '').toString().trim().isNotEmpty;
+            final hasTopics = data['interestTags'] is List &&
+                (data['interestTags'] as List).isNotEmpty;
+
+            final needsOnboarding =
+                !(hasOnboardingFlag && hasName && hasLanguage && hasTopics);
+            return needsOnboarding
+                ? const FullScreenBackGesture(child: OnboardingScreen())
+                : const MainScaffold();
+          },
+        );
       },
     );
   }

@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:video_player/video_player.dart';
 import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/theme/tokens.dart';
+import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 
 class PostDetailScreen extends StatelessWidget {
   final String postId;
@@ -111,16 +112,17 @@ class PostDetailScreen extends StatelessWidget {
     final screenH = MediaQuery.of(context).size.height;
     final double minCardHeight = screenH * 0.30 < 220 ? 220 : screenH * 0.30;
 
-    return Scaffold(
-      backgroundColor: AppColors.canvas,
-      appBar: AppBar(
+    return FullScreenBackGesture(
+      child: Scaffold(
         backgroundColor: AppColors.canvas,
-        elevation: 0,
-        title: const Text('Post Detail'),
-      ),
-      body: StreamBuilder<DocumentSnapshot>(
-        stream: FirebaseFirestore.instance.collection('posts').doc(postId).snapshots(),
-        builder: (context, snapshot) {
+        appBar: AppBar(
+          backgroundColor: AppColors.canvas,
+          elevation: 0,
+          title: const Text('Post Detail'),
+        ),
+        body: StreamBuilder<DocumentSnapshot>(
+          stream: FirebaseFirestore.instance.collection('posts').doc(postId).snapshots(),
+          builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -215,7 +217,8 @@ class PostDetailScreen extends StatelessWidget {
               ),
             ),
           );
-        },
+          },
+        ),
       ),
     );
   }

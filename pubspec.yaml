@@ -27,6 +27,7 @@ dependencies:
   firebase_storage: ^12.4.0
   firebase_messaging: ^15.2.3
   flutter_local_notifications: ^19.2.1
+  flutter_callkit_incoming: ^2.5.8
   firebase_app_check: ^0.3.2+6
   cloud_functions: ^5.3.4
 

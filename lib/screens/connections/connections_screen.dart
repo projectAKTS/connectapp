@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../theme/tokens.dart';
 import '../profile/profile_screen.dart';
+import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 
 class ConnectionsScreen extends StatefulWidget {
   const ConnectionsScreen({super.key});
@@ -63,25 +64,26 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.canvas,
-      appBar: AppBar(
-        backgroundColor: AppColors.card,
-        elevation: 0,
-        centerTitle: true,
-        iconTheme: const IconThemeData(color: AppColors.text),
-        title: const Text(
-          'Connections',
-          style: TextStyle(
-            color: AppColors.text,
-            fontWeight: FontWeight.w600,
-            fontSize: 18,
+    return FullScreenBackGesture(
+      child: Scaffold(
+        backgroundColor: AppColors.canvas,
+        appBar: AppBar(
+          backgroundColor: AppColors.card,
+          elevation: 0,
+          centerTitle: true,
+          iconTheme: const IconThemeData(color: AppColors.text),
+          title: const Text(
+            'Connections',
+            style: TextStyle(
+              color: AppColors.text,
+              fontWeight: FontWeight.w600,
+              fontSize: 18,
+            ),
           ),
         ),
-      ),
-      body: FutureBuilder<List<QueryDocumentSnapshot>>(
-        future: _fetchConnections(),
-        builder: (context, snap) {
+        body: FutureBuilder<List<QueryDocumentSnapshot>>(
+          future: _fetchConnections(),
+          builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -201,7 +203,8 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
               );
             },
           );
-        },
+          },
+        ),
       ),
     );
   }

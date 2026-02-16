@@ -1,10 +1,14 @@
 // lib/services/notification_service.dart
 import 'dart:async';
+import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_callkit_incoming/entities/entities.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:uuid/uuid.dart';
 
 import '../screens/call/agora_call_screen.dart';
 import '../screens/chat/chat_screen.dart';
@@ -27,6 +31,9 @@ class NotificationService {
 
   bool _initialized = false;
   StreamSubscription<String>? _tokenSub;
+  StreamSubscription<CallEvent?>? _callkitSub;
+  final Uuid _uuid = const Uuid();
+  bool _openingCallScreen = false;
 
   /// Call once after Firebase is initialized and user signed in.
   Future<void> initialize() async {
@@ -108,6 +115,20 @@ class NotificationService {
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(_androidChannel);
 
+    // iOS CallKit events
+    _bindCallkitEvents();
+    if (Platform.isIOS) {
+      try {
+        final voipToken = await FlutterCallkitIncoming.getDevicePushTokenVoIP();
+        if (voipToken != null && '$voipToken'.isNotEmpty) {
+          debugPrint('📲 VoIP token (CallKit): $voipToken');
+          await _registerVoipToken('$voipToken');
+        }
+      } catch (e) {
+        debugPrint('⚠️ Could not fetch VoIP token: $e');
+      }
+    }
+
     // Foreground + tap handlers
     FirebaseMessaging.onMessage.listen(
       (RemoteMessage message) => _handleMessage(message, showLocal: true),
@@ -135,6 +156,46 @@ class NotificationService {
   Future<void> dispose() async {
     await _tokenSub?.cancel();
     _tokenSub = null;
+    await _callkitSub?.cancel();
+    _callkitSub = null;
+  }
+
+  void _bindCallkitEvents() {
+    _callkitSub?.cancel();
+    _callkitSub = FlutterCallkitIncoming.onEvent.listen((event) async {
+      if (event == null) return;
+      final body = _eventBody(event.body);
+      final extra = _eventExtra(body);
+      final channel = _stringField(extra, body, 'channel');
+      final fromName = _stringField(extra, body, 'fromName', fallback: 'Caller');
+      final isVideo = _boolField(extra, body, 'isVideo');
+      final id = _stringField(extra, body, 'id', fallback: channel);
+
+      if (event.event == Event.actionDidUpdateDevicePushTokenVoip) {
+        final token = _stringField(extra, body, 'deviceToken');
+        if (token.isNotEmpty) {
+          await _registerVoipToken(token);
+        }
+      }
+
+      if (event.event == Event.actionCallAccept && channel.isNotEmpty) {
+        if (id.isNotEmpty) {
+          try {
+            await FlutterCallkitIncoming.endCall(id);
+          } catch (_) {}
+        }
+        _pushCallScreen(channel: channel, isVideo: isVideo, fromName: fromName);
+      }
+      if (event.event == Event.actionCallDecline ||
+          event.event == Event.actionCallEnded ||
+          event.event == Event.actionCallTimeout) {
+        if (id.isNotEmpty) {
+          try {
+            await FlutterCallkitIncoming.endCall(id);
+          } catch (_) {}
+        }
+      }
+    });
   }
 
   Future<void> _registerFcmToken({String? forceToken}) async {
@@ -167,6 +228,24 @@ class NotificationService {
     }
   }
 
+  Future<void> _registerVoipToken(String token) async {
+    if (!Platform.isIOS) return;
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null || token.isEmpty) return;
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
+        {
+          'voipToken': token,
+          'voipTokens': FieldValue.arrayUnion([token]),
+        },
+        SetOptions(merge: true),
+      );
+      debugPrint('✅ VoIP token saved uid=${user.uid}');
+    } on FirebaseException catch (e) {
+      debugPrint('⚠️ VoIP token write failed: code=${e.code} message=${e.message}');
+    }
+  }
+
   /// Central handler for all incoming FCMs.
   /// - Suppresses **self** chat notifications (authorId == my uid)
   /// - Suppresses notifications when the chat with that user is already open
@@ -182,31 +261,39 @@ class NotificationService {
       final payload = 'incoming_call|$channel|$isVideo|$fromName';
 
       if (showLocal) {
-        await _local.show(
-          1000, // stable id for call invites
-          isVideo ? 'Incoming Video Call' : 'Incoming Audio Call',
-          'From $fromName',
-          NotificationDetails(
-            android: AndroidNotificationDetails(
-              _androidChannel.id,
-              _androidChannel.name,
-              channelDescription: _androidChannel.description,
-              importance: Importance.max,
-              priority: Priority.high,
-              actions: <AndroidNotificationAction>[
-                const AndroidNotificationAction('ACCEPT_CALL', 'Accept', showsUserInterface: true),
-                const AndroidNotificationAction(
-                  'DECLINE_CALL',
-                  'Decline',
-                  showsUserInterface: false,
-                  cancelNotification: true,
-                ),
-              ],
+        if (Platform.isIOS) {
+          await _showIncomingCallKit(
+            channel: channel,
+            isVideo: isVideo,
+            fromName: fromName,
+          );
+        } else {
+          await _local.show(
+            1000, // stable id for call invites
+            isVideo ? 'Incoming Video Call' : 'Incoming Audio Call',
+            'From $fromName',
+            NotificationDetails(
+              android: AndroidNotificationDetails(
+                _androidChannel.id,
+                _androidChannel.name,
+                channelDescription: _androidChannel.description,
+                importance: Importance.max,
+                priority: Priority.high,
+                actions: <AndroidNotificationAction>[
+                  const AndroidNotificationAction('ACCEPT_CALL', 'Accept', showsUserInterface: true),
+                  const AndroidNotificationAction(
+                    'DECLINE_CALL',
+                    'Decline',
+                    showsUserInterface: false,
+                    cancelNotification: true,
+                  ),
+                ],
+              ),
+              iOS: const DarwinNotificationDetails(categoryIdentifier: 'INCOMING_CALL'),
             ),
-            iOS: const DarwinNotificationDetails(categoryIdentifier: 'INCOMING_CALL'),
-          ),
-          payload: payload,
-        );
+            payload: payload,
+          );
+        }
       } else {
         _pushCallScreen(channel: channel, isVideo: isVideo, fromName: fromName);
       }
@@ -281,8 +368,8 @@ class NotificationService {
     required String fromName,
   }) {
     final nav = navigatorKey?.currentState;
-    if (nav == null) return;
-
+    if (nav == null || _openingCallScreen) return;
+    _openingCallScreen = true;
     nav.push(
       MaterialPageRoute(
         fullscreenDialog: true,
@@ -292,7 +379,9 @@ class NotificationService {
           otherUserName: fromName,
         ),
       ),
-    );
+    ).whenComplete(() {
+      _openingCallScreen = false;
+    });
   }
 
   void _openChat(String otherUserId) {
@@ -304,5 +393,92 @@ class NotificationService {
         builder: (_) => ChatScreen(otherUserId: otherUserId),
       ),
     );
+  }
+
+  Future<void> _showIncomingCallKit({
+    required String channel,
+    required bool isVideo,
+    required String fromName,
+  }) async {
+    final id = channel.isNotEmpty ? channel : _uuid.v4();
+    final params = CallKitParams(
+      id: id,
+      nameCaller: fromName,
+      appName: 'Helperly',
+      handle: isVideo ? 'Video call' : 'Audio call',
+      type: isVideo ? 1 : 0,
+      duration: 45000,
+      textAccept: 'Accept',
+      textDecline: 'Decline',
+      extra: <String, dynamic>{
+        'id': id,
+        'channel': channel,
+        'isVideo': isVideo,
+        'fromName': fromName,
+      },
+      ios: IOSParams(
+        iconName: 'AppIcon',
+        handleType: 'generic',
+        supportsVideo: isVideo,
+        supportsDTMF: false,
+        supportsHolding: false,
+        supportsGrouping: false,
+        supportsUngrouping: false,
+      ),
+      android: const AndroidParams(
+        isShowFullLockedScreen: true,
+        isImportant: true,
+        incomingCallNotificationChannelName: 'Incoming Call',
+        missedCallNotificationChannelName: 'Missed Call',
+      ),
+    );
+    try {
+      await FlutterCallkitIncoming.showCallkitIncoming(params);
+    } catch (e) {
+      debugPrint('⚠️ CallKit incoming failed, fallback to local notif: $e');
+      await _local.show(
+        1000,
+        isVideo ? 'Incoming Video Call' : 'Incoming Audio Call',
+        'From $fromName',
+        const NotificationDetails(
+          iOS: DarwinNotificationDetails(categoryIdentifier: 'INCOMING_CALL'),
+        ),
+        payload: 'incoming_call|$channel|$isVideo|$fromName',
+      );
+    }
+  }
+
+  Map<String, dynamic> _eventBody(dynamic rawBody) {
+    if (rawBody is Map) return Map<String, dynamic>.from(rawBody);
+    return <String, dynamic>{};
+  }
+
+  Map<String, dynamic> _eventExtra(Map<String, dynamic> body) {
+    final raw = body['extra'];
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    return <String, dynamic>{};
+  }
+
+  String _stringField(
+    Map<String, dynamic> a,
+    Map<String, dynamic> b,
+    String key, {
+    String fallback = '',
+  }) {
+    final va = a[key];
+    if (va is String && va.isNotEmpty) return va;
+    final vb = b[key];
+    if (vb is String && vb.isNotEmpty) return vb;
+    return fallback;
+  }
+
+  bool _boolField(Map<String, dynamic> a, Map<String, dynamic> b, String key) {
+    final va = a[key];
+    if (va is bool) return va;
+    if (va is String) return va.toLowerCase() == 'true';
+    final vb = b[key];
+    if (vb is bool) return vb;
+    if (vb is String) return vb.toLowerCase() == 'true';
+    return false;
   }
 }

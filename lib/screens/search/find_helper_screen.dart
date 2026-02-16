@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'package:connect_app/theme/tokens.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
+import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 
 /// FindHelperScreen — people-only search with helper-focused filters.
 class FindHelperScreen extends StatefulWidget {
@@ -251,37 +252,38 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
         _maxPrice != null ||
         _sort != _Sort.relevance;
 
-    return Scaffold(
-      backgroundColor: AppColors.canvas,
-      appBar: AppBar(
+    return FullScreenBackGesture(
+      child: Scaffold(
         backgroundColor: AppColors.canvas,
-        elevation: 0,
-        title: const Text('Find a helper'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).maybePop(),
-        ),
-        actions: [
-          if (anyFilterActive)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: TextButton(
-                onPressed: _resetAll,
-                style: TextButton.styleFrom(
-                  foregroundColor: AppColors.text,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    side: const BorderSide(color: AppColors.border),
+        appBar: AppBar(
+          backgroundColor: AppColors.canvas,
+          elevation: 0,
+          title: const Text('Find a helper'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => Navigator.of(context).maybePop(),
+          ),
+          actions: [
+            if (anyFilterActive)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: TextButton(
+                  onPressed: _resetAll,
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.text,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      side: const BorderSide(color: AppColors.border),
+                    ),
+                    backgroundColor: AppColors.card,
                   ),
-                  backgroundColor: AppColors.card,
+                  child: const Text('Reset filters', style: TextStyle(fontWeight: FontWeight.w700)),
                 ),
-                child: const Text('Reset filters', style: TextStyle(fontWeight: FontWeight.w700)),
               ),
-            ),
-        ],
-      ),
-      body: Column(
+          ],
+        ),
+        body: Column(
         children: [
           // Search + Clear
           Padding(
@@ -359,6 +361,7 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
                       ),
           ),
         ],
+        ),
       ),
     );
   }

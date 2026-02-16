@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 
 import 'package:connect_app/services/subscription_service.dart';
@@ -16,6 +17,7 @@ class PremiumScreen extends StatefulWidget {
 
 class _PremiumScreenState extends State<PremiumScreen> {
   Future<List<ProductDetails>>? _subsFuture;
+  static const bool _showTestPlan = true;
 
   @override
   void initState() {
@@ -42,6 +44,20 @@ class _PremiumScreenState extends State<PremiumScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
+  Future<void> _activateTestPremium() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final expires = DateTime.now().add(const Duration(days: 30));
+    await FirebaseFirestore.instance.collection('users').doc(uid).set({
+      'premiumStatus': 'active',
+      'premiumExpiresAt': Timestamp.fromDate(expires),
+      'discountPercent': 10,
+      'premiumPlan': 'test_free',
+      'premiumRole': 'seeker',
+    }, SetOptions(merge: true));
+    _snack('Test Premium enabled for 30 days.');
+  }
+
   Future<void> _buy(ProductDetails p) async {
     try {
       await SubscriptionService.buySubscription(p);
@@ -64,10 +80,15 @@ class _PremiumScreenState extends State<PremiumScreen> {
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     final textTheme = Theme.of(context).textTheme;
-    final sectionTitle = textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800);
+    final sectionTitle =
+        textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800);
     final muted = textTheme.bodyMedium?.copyWith(
       color: AppColors.muted,
       fontWeight: FontWeight.w600,
+    );
+    final headline = textTheme.titleMedium?.copyWith(
+      fontWeight: FontWeight.w800,
+      color: AppColors.text,
     );
 
     if (uid == null) {
@@ -93,10 +114,14 @@ class _PremiumScreenState extends State<PremiumScreen> {
       body: RefreshIndicator.adaptive(
         onRefresh: () async => _reload(),
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
           children: [
-            _HeroCard(),
-            const SizedBox(height: 12),
+            _PremiumHero(
+              title: 'Upgrade to Premium',
+              subtitle:
+                  'Get 1 free 5‑minute audio monthly plus 10% off every consultation.',
+            ),
+            const SizedBox(height: 14),
             StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
               stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
               builder: (ctx, snap) {
@@ -107,11 +132,12 @@ class _PremiumScreenState extends State<PremiumScreen> {
                 DateTime? expires;
                 if (expiresAt is Timestamp) expires = expiresAt.toDate();
 
-                final active = status != 'Free' && (expires == null || expires.isAfter(DateTime.now()));
+                final active = status != 'Free' &&
+                    (expires == null || expires.isAfter(DateTime.now()));
 
                 return _SoftCard(
-                    child: Row(
-                      children: [
+                  child: Row(
+                    children: [
                       Container(
                         width: 48,
                         height: 48,
@@ -127,14 +153,14 @@ class _PremiumScreenState extends State<PremiumScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Current plan', style: muted),
+                  Text('Current plan', style: muted),
                             const SizedBox(height: 4),
-                            Text(active ? status : 'Free',
+                            Text(active ? 'Active' : 'Free',
                                 style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
                             if (active && expires != null) ...[
                               const SizedBox(height: 4),
                               Text(
-                                'Renews/ends: ${DateFormat.yMMMd().format(expires)}',
+                                'Ends: ${DateFormat.yMMMd().format(expires)}',
                                 style: muted,
                               ),
                             ],
@@ -162,25 +188,75 @@ class _PremiumScreenState extends State<PremiumScreen> {
               },
             ),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
 
             _SoftCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('What you get', style: sectionTitle),
+                  Text('What’s included', style: sectionTitle),
                   const SizedBox(height: 10),
-                  const _BenefitRow(text: 'Priority visibility for your posts'),
-                  const _BenefitRow(text: 'Premium badge on profile'),
-                  const _BenefitRow(text: 'More boosts / perks (future)'),
-                  const _BenefitRow(text: 'Early access to new features'),
+                  const _BenefitRow(text: '1 free 5‑minute audio each month'),
+                  const _BenefitRow(text: '10% off every consultation'),
+                  const _BenefitRow(text: 'Premium badge on your profile'),
                 ],
               ),
             ),
 
             const SizedBox(height: 18),
-            Text('Choose a plan', style: sectionTitle?.copyWith(fontSize: 20)),
+            Text('Plans', style: headline),
             const SizedBox(height: 10),
+
+            if (_showTestPlan || kDebugMode) ...[
+              _SoftCard(
+                child: Row(
+                  children: [
+                    Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: AppColors.button,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: const Icon(Icons.bolt, color: AppColors.text),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Test plan', style: sectionTitle),
+                          const SizedBox(height: 4),
+                          Text('30‑day access for testing only.', style: muted),
+                        ],
+                      ),
+                    ),
+                    SizedBox(
+                      width: 120,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            '\$0.00',
+                          style: textTheme.bodyLarge
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 6),
+                        _PrimaryButton(
+                          label: 'Activate',
+                          onTap: _activateTestPremium,
+                          compact: true,
+                          minWidth: 108,
+                        ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
 
             FutureBuilder<List<ProductDetails>>(
               future: _subsFuture,
@@ -191,25 +267,18 @@ class _PremiumScreenState extends State<PremiumScreen> {
                 if (snap.hasError) {
                   final err = snap.error.toString();
                   final storekitHint = err.contains('storekit_no_response')
-                      ? 'StoreKit did not respond. Try again on a real device and ensure the products are active in App Store Connect.'
-                      : null;
+                      ? 'Plans are unavailable on this device. Try again on a real device and ensure products are active in App Store Connect.'
+                      : 'Plans are temporarily unavailable.';
                   return _SoftCard(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Couldn’t load plans', style: sectionTitle),
+                        Text('Plans unavailable', style: sectionTitle),
                         const SizedBox(height: 6),
                         Text(
-                          err,
+                          storekitHint,
                           style: muted?.copyWith(height: 1.35),
                         ),
-                        if (storekitHint != null) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            storekitHint,
-                            style: muted?.copyWith(height: 1.35),
-                          ),
-                        ],
                         const SizedBox(height: 12),
                         Align(
                           alignment: Alignment.centerLeft,
@@ -328,11 +397,11 @@ class _PremiumScreenState extends State<PremiumScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Already purchased?',
+                        Text('Restore purchases',
                             style: sectionTitle?.copyWith(fontSize: 16)),
                         const SizedBox(height: 2),
                         Text(
-                          'Restore purchases made on this Apple ID.',
+                          'Use this if you’ve already subscribed on this Apple ID.',
                           style: muted,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
@@ -364,20 +433,21 @@ class _BenefitRow extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            width: 22,
-            height: 22,
+            width: 20,
+            height: 20,
             decoration: BoxDecoration(
               color: AppColors.primary.withOpacity(0.12),
               borderRadius: BorderRadius.circular(999),
               border: Border.all(color: AppColors.primary.withOpacity(0.20)),
             ),
-            child: const Icon(Icons.check_rounded, size: 16, color: AppColors.primary),
+            child:
+                const Icon(Icons.check_rounded, size: 14, color: AppColors.primary),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               text,
-              style: textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+              style: textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
             ),
           ),
         ],
@@ -441,6 +511,62 @@ class _HeroCard extends StatelessWidget {
   }
 }
 
+class _PremiumHero extends StatelessWidget {
+  final String title;
+  final String subtitle;
+
+  const _PremiumHero({
+    required this.title,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: AppColors.card,
+        border: Border.all(color: AppColors.border),
+        boxShadow: const [AppShadows.soft],
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.primary.withOpacity(0.25)),
+            ),
+            child: const Icon(Icons.workspace_premium_outlined,
+                color: AppColors.primary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w800)),
+                const SizedBox(height: 6),
+                Text(
+                  subtitle,
+                  style: textTheme.bodyMedium?.copyWith(color: AppColors.text),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _SoftCard extends StatelessWidget {
   final Widget child;
   const _SoftCard({required this.child});
@@ -463,14 +589,34 @@ class _SoftCard extends StatelessWidget {
 class _PrimaryButton extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
-  const _PrimaryButton({required this.label, required this.onTap});
+  final bool compact;
+  final double? minWidth;
+  const _PrimaryButton({
+    required this.label,
+    required this.onTap,
+    this.compact = false,
+    this.minWidth,
+  });
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 40,
+      height: compact ? 34 : 40,
       child: ElevatedButton(
         onPressed: onTap,
+        style: ElevatedButton.styleFrom(
+          minimumSize: Size(minWidth ?? 0, compact ? 34 : 40),
+          padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16),
+          textStyle: TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: compact ? 12 : 15,
+          ),
+          visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
         child: Text(label),
       ),
     );

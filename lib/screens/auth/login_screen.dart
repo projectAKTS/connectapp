@@ -27,7 +27,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _goHome() {
     if (!mounted) return;
-    Navigator.of(context).pushNamedAndRemoveUntil('/home', (r) => false);
+    Navigator.of(context).pushNamedAndRemoveUntil('/', (r) => false);
   }
 
   Future<void> _login() async {
@@ -150,7 +150,8 @@ class _LoginScreenState extends State<LoginScreen> {
             ? const SizedBox(
                 height: 20,
                 width: 20,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white),
               )
             : const Text('Log in'),
       ),

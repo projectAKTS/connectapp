@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:connect_app/theme/tokens.dart';
 import 'agora_call_screen.dart';
 
 class IncomingCallScreen extends StatelessWidget {
@@ -18,9 +19,9 @@ class IncomingCallScreen extends StatelessWidget {
     final title = isVideo ? 'Incoming Video Call' : 'Incoming Audio Call';
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F0F8),
+      backgroundColor: AppColors.canvas,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: AppColors.canvas,
         elevation: 0,
         title: Text(title),
         centerTitle: true,
@@ -31,10 +32,23 @@ class IncomingCallScreen extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.ring_volume, size: 80, color: Colors.purple),
+              CircleAvatar(
+                radius: 44,
+                backgroundColor: AppColors.avatarBg,
+                child:
+                    const Icon(Icons.ring_volume, size: 40, color: AppColors.primary),
+              ),
               const SizedBox(height: 16),
-              Text('From $fromName',
-                  style: const TextStyle(fontSize: 18, color: Colors.black87)),
+              Text(
+                fromName,
+                style:
+                    const TextStyle(fontSize: 18, color: AppColors.text, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Incoming ${isVideo ? 'video' : 'audio'} call',
+                style: const TextStyle(fontSize: 14, color: AppColors.muted),
+              ),
               const SizedBox(height: 28),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -54,7 +68,7 @@ class IncomingCallScreen extends StatelessWidget {
                     icon: const Icon(Icons.call),
                     label: const Text('Accept'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
+                      backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
                       minimumSize: const Size(130, 48),
                     ),
@@ -65,7 +79,7 @@ class IncomingCallScreen extends StatelessWidget {
                     icon: const Icon(Icons.call_end),
                     label: const Text('Decline'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.redAccent,
+                      backgroundColor: AppColors.danger,
                       foregroundColor: Colors.white,
                       minimumSize: const Size(130, 48),
                     ),

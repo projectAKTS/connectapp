@@ -44,6 +44,13 @@ post_install do |installer|
 
       # Xcode 16 + older pods: relax strict concurrency to avoid surprises
       config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
+
+      # permission_handler iOS permission gates
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [
+        '$(inherited)',
+        'PERMISSION_MICROPHONE=1',
+        'PERMISSION_CAMERA=1',
+      ]
     end
   end
 end

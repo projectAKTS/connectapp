@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:connect_app/theme/tokens.dart';
+import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 
 class MessagesScreen extends StatelessWidget {
   const MessagesScreen({super.key});
@@ -11,25 +12,26 @@ class MessagesScreen extends StatelessWidget {
     final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
     final rootNav = Navigator.of(context, rootNavigator: true);
 
-    return Scaffold(
-      backgroundColor: AppColors.canvas,
-      appBar: AppBar(
-        backgroundColor: AppColors.card,
-        elevation: 0,
-        centerTitle: true,
-        iconTheme: const IconThemeData(color: AppColors.text),
-        title: const Text(
-          'Messages',
-          style: TextStyle(
-              color: AppColors.text, fontWeight: FontWeight.w600, fontSize: 18),
+    return FullScreenBackGesture(
+      child: Scaffold(
+        backgroundColor: AppColors.canvas,
+        appBar: AppBar(
+          backgroundColor: AppColors.card,
+          elevation: 0,
+          centerTitle: true,
+          iconTheme: const IconThemeData(color: AppColors.text),
+          title: const Text(
+            'Messages',
+            style: TextStyle(
+                color: AppColors.text, fontWeight: FontWeight.w600, fontSize: 18),
+          ),
         ),
-      ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('chats')
-            .where('participants', arrayContains: currentUid)
-            .snapshots(),
-        builder: (context, snap) {
+        body: StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('chats')
+              .where('participants', arrayContains: currentUid)
+              .snapshots(),
+          builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -145,7 +147,8 @@ class MessagesScreen extends StatelessWidget {
               );
             },
           );
-        },
+          },
+        ),
       ),
     );
   }

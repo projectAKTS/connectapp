@@ -1126,8 +1126,10 @@ class _PhotosRow extends StatelessWidget {
                     onTap: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (_) => PostImageViewer(file: imageFiles[i]),
+                        PageRouteBuilder(
+                          opaque: false,
+                          pageBuilder: (_, __, ___) =>
+                              PostImageViewer(file: imageFiles[i]),
                         ),
                       );
                     },
@@ -1240,7 +1242,10 @@ class _BigVideoPreview extends StatelessWidget {
       onTap: () {
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => PostVideoPlayer(file: videoFile)),
+          PageRouteBuilder(
+            opaque: false,
+            pageBuilder: (_, __, ___) => PostVideoPlayer(file: videoFile),
+          ),
         );
       },
       child: Stack(

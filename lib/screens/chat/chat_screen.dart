@@ -14,6 +14,7 @@ import 'package:video_player/video_player.dart';
 import '../../theme/tokens.dart';
 import '../profile/profile_screen.dart';
 import '/services/interaction_service.dart';
+import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 
 class ChatScreen extends StatefulWidget {
   final String otherUserId;
@@ -287,90 +288,93 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     }
 
-    return Scaffold(
-      backgroundColor: AppColors.canvas,
-      appBar: AppBar(
+    return FullScreenBackGesture(
+      child: Scaffold(
         backgroundColor: AppColors.canvas,
-        elevation: 0,
-        titleSpacing: 0,
-        title: Row(
-          children: [
-            GestureDetector(
-              onTap: openProfile,
-              child: CircleAvatar(
-                radius: 16,
-                backgroundColor: AppColors.avatarBg,
-                foregroundImage: (widget.otherUserAvatar?.isNotEmpty ?? false)
-                    ? NetworkImage(widget.otherUserAvatar!)
-                    : null,
-                child: const Icon(Icons.person_outline,
-                    color: AppColors.avatarFg, size: 18),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Flexible(
-              child: GestureDetector(
+        appBar: AppBar(
+          backgroundColor: AppColors.canvas,
+          elevation: 0,
+          titleSpacing: 0,
+          title: Row(
+            children: [
+              GestureDetector(
                 onTap: openProfile,
-                child: Text(
-                  _titleName?.isNotEmpty == true ? _titleName! : 'Chat',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppColors.text,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 20,
+                child: CircleAvatar(
+                  radius: 16,
+                  backgroundColor: AppColors.avatarBg,
+                  foregroundImage: (widget.otherUserAvatar?.isNotEmpty ?? false)
+                      ? NetworkImage(widget.otherUserAvatar!)
+                      : null,
+                  child: const Icon(Icons.person_outline,
+                      color: AppColors.avatarFg, size: 18),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Flexible(
+                child: GestureDetector(
+                  onTap: openProfile,
+                  child: Text(
+                    _titleName?.isNotEmpty == true ? _titleName! : 'Chat',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppColors.text,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 20,
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
-      body: FutureBuilder<void>(
-        future: _ready,
-        builder: (context, s) {
-          if (s.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          return StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('chats')
-                .doc(_chatId)
-                .collection('messages')
-                .orderBy('createdAt', descending: true)
-                .snapshots(),
-            builder: (context, snap) {
-              final msgs = snap.hasData ? _toMessages(snap.data!) : const <types.Message>[];
+        body: FutureBuilder<void>(
+          future: _ready,
+          builder: (context, s) {
+            if (s.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            return StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('chats')
+                  .doc(_chatId)
+                  .collection('messages')
+                  .orderBy('createdAt', descending: true)
+                  .snapshots(),
+              builder: (context, snap) {
+                final msgs =
+                    snap.hasData ? _toMessages(snap.data!) : const <types.Message>[];
 
-              return Chat(
-                messages: msgs,
-                onSendPressed: (_) {},
-                user: types.User(id: _me),
-                theme: _chatTheme,
-                onMessageTap: (ctx, msg) async {
-                  if (msg is types.FileMessage) await _openUri(msg.uri);
-                },
-                customBottomWidget: _Composer(
-                  controller: _inputCtrl,
-                  sending: _sending,
-                  onAttach: _pickAttachment,
-                  onSend: _sendText,
-                ),
-                customMessageBuilder: (message, {required int messageWidth}) {
-                  if (message is types.CustomMessage) {
-                    final meta = message.metadata ?? {};
-                    final uri = (meta['uri'] ?? '') as String;
-                    final mime = (meta['mime'] ?? 'video/mp4') as String;
-                    if (uri.isNotEmpty && mime.startsWith('video/')) {
-                      return _VideoBubble(uri: uri, maxWidth: messageWidth);
+                return Chat(
+                  messages: msgs,
+                  onSendPressed: (_) {},
+                  user: types.User(id: _me),
+                  theme: _chatTheme,
+                  onMessageTap: (ctx, msg) async {
+                    if (msg is types.FileMessage) await _openUri(msg.uri);
+                  },
+                  customBottomWidget: _Composer(
+                    controller: _inputCtrl,
+                    sending: _sending,
+                    onAttach: _pickAttachment,
+                    onSend: _sendText,
+                  ),
+                  customMessageBuilder: (message, {required int messageWidth}) {
+                    if (message is types.CustomMessage) {
+                      final meta = message.metadata ?? {};
+                      final uri = (meta['uri'] ?? '') as String;
+                      final mime = (meta['mime'] ?? 'video/mp4') as String;
+                      if (uri.isNotEmpty && mime.startsWith('video/')) {
+                        return _VideoBubble(uri: uri, maxWidth: messageWidth);
+                      }
                     }
-                  }
-                  return const SizedBox.shrink();
-                },
-              );
-            },
-          );
-        },
+                    return const SizedBox.shrink();
+                  },
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }

@@ -13,6 +13,7 @@ import 'package:connect_app/screens/consultation/consultation_call_screen.dart';
 import 'package:connect_app/screens/chat/chat_screen.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
 import 'package:connect_app/services/payment_service.dart';
+import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 
 class MyConsultationsScreen extends StatefulWidget {
   const MyConsultationsScreen({Key? key}) : super(key: key);
@@ -181,26 +182,29 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
   Widget build(BuildContext context) {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
-      return const Scaffold(
-        body: Center(child: Text('Please log in to view consultations.')),
+      return const FullScreenBackGesture(
+        child: Scaffold(
+          body: Center(child: Text('Please log in to view consultations.')),
+        ),
       );
     }
     final myUid = currentUser.uid;
     final textTheme = Theme.of(context).textTheme;
 
-    return Scaffold(
-      backgroundColor: AppColors.canvas,
-      appBar: AppBar(
-        title: const Text('My Consultations'),
+    return FullScreenBackGesture(
+      child: Scaffold(
         backgroundColor: AppColors.canvas,
-        elevation: 0,
-      ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('consultations')
-            .where('participants', arrayContains: myUid)
-            .snapshots(),
-        builder: (context, snap) {
+        appBar: AppBar(
+          title: const Text('My Consultations'),
+          backgroundColor: AppColors.canvas,
+          elevation: 0,
+        ),
+        body: StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('consultations')
+              .where('participants', arrayContains: myUid)
+              .snapshots(),
+          builder: (context, snap) {
           if (snap.hasError) {
             return const Center(child: Text('Error loading consultations.'));
           }
@@ -546,7 +550,8 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
               ),
             ],
           );
-        },
+          },
+        ),
       ),
     );
   }

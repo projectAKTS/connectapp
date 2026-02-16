@@ -48,8 +48,9 @@ class ConsultationService {
     int discountPercent = userData['discountPercent'] ?? 0;
 
     double cost = costOverride ?? baseCost.toDouble();
-    // If user is trial or active premium, apply discount.
-    if (premiumStatus == 'trial' || premiumStatus == 'active') {
+    // If user is trial or active premium, apply discount when not overridden.
+    if (costOverride == null &&
+        (premiumStatus == 'trial' || premiumStatus == 'active')) {
       if (cost > 0 && discountPercent > 0) {
         cost -= (cost * discountPercent / 100);
       }
