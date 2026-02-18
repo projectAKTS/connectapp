@@ -238,7 +238,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
       final url = await task.ref.getDownloadURL();
 
-      final chatRef = FirebaseFirestore.instance.collection('chats').doc(_chatId);
+      final chatRef =
+          FirebaseFirestore.instance.collection('chats').doc(_chatId);
       await chatRef.collection('messages').add({
         'authorId': _me,
         'createdAt': Timestamp.now(),
@@ -250,7 +251,8 @@ class _ChatScreenState extends State<ChatScreen> {
       });
 
       await InteractionService.recordInteraction(widget.otherUserId);
-      await chatRef.set({'updatedAt': Timestamp.now()}, SetOptions(merge: true));
+      await chatRef
+          .set({'updatedAt': Timestamp.now()}, SetOptions(merge: true));
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -342,8 +344,9 @@ class _ChatScreenState extends State<ChatScreen> {
                   .orderBy('createdAt', descending: true)
                   .snapshots(),
               builder: (context, snap) {
-                final msgs =
-                    snap.hasData ? _toMessages(snap.data!) : const <types.Message>[];
+                final msgs = snap.hasData
+                    ? _toMessages(snap.data!)
+                    : const <types.Message>[];
 
                 return Chat(
                   messages: msgs,
@@ -425,7 +428,8 @@ class _Composer extends StatelessWidget {
                 borderRadius: BorderRadius.circular(14),
               ),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 46, maxHeight: 140),
+                constraints:
+                    const BoxConstraints(minHeight: 46, maxHeight: 140),
                 child: TextField(
                   controller: controller,
                   maxLines: null,
@@ -454,7 +458,8 @@ class _Composer extends StatelessWidget {
               foregroundColor: Colors.white,
               minimumSize: const Size(52, 46),
               elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14)),
             ),
             child: const Icon(Icons.send_rounded, size: 20),
           ),
@@ -478,12 +483,18 @@ class _VideoBubbleState extends State<_VideoBubble> {
   late final VideoPlayerController _video;
   ChewieController? _chewie;
   bool _muted = false;
+  bool _failed = false;
 
   @override
   void initState() {
     super.initState();
     _video = VideoPlayerController.networkUrl(Uri.parse(widget.uri));
-    _video.initialize().then((_) {
+    _initVideo();
+  }
+
+  Future<void> _initVideo() async {
+    try {
+      await _video.initialize();
       if (!mounted) return;
       _video.setVolume(1.0);
       _chewie = ChewieController(
@@ -494,8 +505,13 @@ class _VideoBubbleState extends State<_VideoBubble> {
         allowFullScreen: true,
         allowMuting: true,
       );
-      setState(() {});
-    });
+      setState(() {
+        _failed = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _failed = true);
+    }
   }
 
   @override
@@ -544,7 +560,12 @@ class _VideoBubbleState extends State<_VideoBubble> {
         child: !_video.value.isInitialized || _chewie == null
             ? AspectRatio(
                 aspectRatio: aspect,
-                child: const Center(child: CircularProgressIndicator()),
+                child: Center(
+                  child: _failed
+                      ? const Icon(Icons.videocam_off_outlined,
+                          color: Colors.white70, size: 30)
+                      : const CircularProgressIndicator(),
+                ),
               )
             : Stack(
                 children: [
@@ -593,8 +614,8 @@ class _VideoBubbleState extends State<_VideoBubble> {
                     right: 0,
                     bottom: 0,
                     child: Container(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 6),
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
                           begin: Alignment.bottomCenter,
@@ -635,13 +656,19 @@ class _FullscreenVideoPage extends StatefulWidget {
 class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
   late final VideoPlayerController _controller;
   ChewieController? _chewie;
+  bool _failed = false;
 
   @override
   void initState() {
     super.initState();
     _controller =
         VideoPlayerController.networkUrl(Uri.parse(widget.initialUrl));
-    _controller.initialize().then((_) {
+    _initVideo();
+  }
+
+  Future<void> _initVideo() async {
+    try {
+      await _controller.initialize();
       if (!mounted) return;
       _chewie = ChewieController(
         videoPlayerController: _controller,
@@ -651,8 +678,11 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
         allowMuting: true,
         allowFullScreen: false,
       );
-      setState(() {});
-    });
+      setState(() => _failed = false);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _failed = true);
+    }
   }
 
   @override
@@ -664,8 +694,9 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
 
   @override
   Widget build(BuildContext context) {
-    final aspect =
-        _controller.value.isInitialized ? _controller.value.aspectRatio : 16 / 9;
+    final aspect = _controller.value.isInitialized
+        ? _controller.value.aspectRatio
+        : 16 / 9;
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
@@ -673,7 +704,10 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
           children: [
             Center(
               child: _chewie == null
-                  ? const CircularProgressIndicator()
+                  ? (_failed
+                      ? const Icon(Icons.videocam_off_outlined,
+                          color: Colors.white70, size: 34)
+                      : const CircularProgressIndicator())
                   : AspectRatio(
                       aspectRatio: aspect, child: Chewie(controller: _chewie!)),
             ),
@@ -681,7 +715,8 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
               top: 12,
               left: 12,
               child: _ChromeIconButton(
-                  icon: Icons.close, onPressed: () => Navigator.of(context).pop()),
+                  icon: Icons.close,
+                  onPressed: () => Navigator.of(context).pop()),
             ),
           ],
         ),

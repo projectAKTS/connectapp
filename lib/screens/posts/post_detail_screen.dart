@@ -101,7 +101,8 @@ class PostDetailScreen extends StatelessWidget {
     return (data['videoThumbUrl'] ?? '').toString().trim();
   }
 
-  double _extractMediaAspect(Map<String, dynamic> data, {required bool hasMedia}) {
+  double _extractMediaAspect(Map<String, dynamic> data,
+      {required bool hasMedia}) {
     final raw = data['mediaAspectRatio'];
     if (raw is num && raw > 0) return raw.toDouble();
     return hasMedia ? (16 / 9) : 1.0;
@@ -121,102 +122,106 @@ class PostDetailScreen extends StatelessWidget {
           title: const Text('Post Detail'),
         ),
         body: StreamBuilder<DocumentSnapshot>(
-          stream: FirebaseFirestore.instance.collection('posts').doc(postId).snapshots(),
+          stream: FirebaseFirestore.instance
+              .collection('posts')
+              .doc(postId)
+              .snapshots(),
           builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (!snapshot.hasData || !snapshot.data!.exists) {
-            return const Center(child: Text('Post not found.'));
-          }
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (!snapshot.hasData || !snapshot.data!.exists) {
+              return const Center(child: Text('Post not found.'));
+            }
 
-          final data = snapshot.data!.data() as Map<String, dynamic>;
-          final dt = parseFirestoreTimestamp(data['timestamp']);
-          final date =
-              dt != null ? DateFormat.yMMMd().add_jm().format(dt) : 'Unknown date';
-          final content = (data['content'] ?? '').toString();
-          final (maybeBadge, body) = _extractBadgeAndBody(content);
-          final badge = maybeBadge ?? 'Quick Post';
+            final data = snapshot.data!.data() as Map<String, dynamic>;
+            final dt = parseFirestoreTimestamp(data['timestamp']);
+            final date = dt != null
+                ? DateFormat.yMMMd().add_jm().format(dt)
+                : 'Unknown date';
+            final content = (data['content'] ?? '').toString();
+            final (maybeBadge, body) = _extractBadgeAndBody(content);
+            final badge = maybeBadge ?? 'Quick Post';
 
-          final base = const TextStyle(
-              fontSize: 16, height: 1.4, color: AppColors.text);
-          final strong = const TextStyle(
-            fontSize: 16,
-            height: 1.4,
-            color: AppColors.text,
-            fontWeight: FontWeight.w700,
-          );
-          final span =
-              _parseSimpleMarkdownToSpan(body, base: base, strong: strong);
-          final imageUrls = _extractImageUrls(data);
-          final videoUrl = _extractVideoUrl(data);
-          final videoThumbUrl = _extractVideoThumbUrl(data);
-          final hasMedia = imageUrls.isNotEmpty || videoUrl.isNotEmpty;
-          final mediaAspect = _extractMediaAspect(data, hasMedia: hasMedia);
+            final base = const TextStyle(
+                fontSize: 16, height: 1.4, color: AppColors.text);
+            final strong = const TextStyle(
+              fontSize: 16,
+              height: 1.4,
+              color: AppColors.text,
+              fontWeight: FontWeight.w700,
+            );
+            final span =
+                _parseSimpleMarkdownToSpan(body, base: base, strong: strong);
+            final imageUrls = _extractImageUrls(data);
+            final videoUrl = _extractVideoUrl(data);
+            final videoThumbUrl = _extractVideoThumbUrl(data);
+            final hasMedia = imageUrls.isNotEmpty || videoUrl.isNotEmpty;
+            final mediaAspect = _extractMediaAspect(data, hasMedia: hasMedia);
 
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: minCardHeight),
-              child: SizedBox(
-                width: double.infinity,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: AppColors.card,
-                    borderRadius: BorderRadius.circular(16),
-                    border: const Border.fromBorderSide(
-                        BorderSide(color: AppColors.border)),
-                    boxShadow: const [AppShadows.soft],
-                  ),
-                  child: Stack(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 56),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              (data['userName'] ?? 'Anonymous').toString(),
-                              style: const TextStyle(
-                                  fontSize: 18, fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 10),
-                            if (imageUrls.isNotEmpty) ...[
-                              _DetailMediaCarousel(
-                                urls: imageUrls,
-                                aspect: mediaAspect,
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: minCardHeight),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: AppColors.card,
+                      borderRadius: BorderRadius.circular(16),
+                      border: const Border.fromBorderSide(
+                          BorderSide(color: AppColors.border)),
+                      boxShadow: const [AppShadows.soft],
+                    ),
+                    child: Stack(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 56),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                (data['userName'] ?? 'Anonymous').toString(),
+                                style: const TextStyle(
+                                    fontSize: 18, fontWeight: FontWeight.bold),
                               ),
-                              const SizedBox(height: 12),
-                            ] else if (videoUrl.isNotEmpty) ...[
-                              _DetailVideoPlayer(
-                                url: videoUrl,
-                                thumbUrl: videoThumbUrl,
-                                aspect: mediaAspect,
-                              ),
-                              const SizedBox(height: 12),
+                              const SizedBox(height: 10),
+                              if (imageUrls.isNotEmpty) ...[
+                                _DetailMediaCarousel(
+                                  urls: imageUrls,
+                                  aspect: mediaAspect,
+                                ),
+                                const SizedBox(height: 12),
+                              ] else if (videoUrl.isNotEmpty) ...[
+                                _DetailVideoPlayer(
+                                  url: videoUrl,
+                                  thumbUrl: videoThumbUrl,
+                                  aspect: mediaAspect,
+                                ),
+                                const SizedBox(height: 12),
+                              ],
+                              _postTypeBadge(badge),
+                              const SizedBox(height: 8),
+                              RichText(text: span),
                             ],
-                            _postTypeBadge(badge),
-                            const SizedBox(height: 8),
-                            RichText(text: span),
-                          ],
+                          ),
                         ),
-                      ),
-                      Positioned(
-                        left: 16,
-                        right: 16,
-                        bottom: 16,
-                        child: Text(
-                          'Posted on $date',
-                          style: const TextStyle(color: AppColors.muted),
+                        Positioned(
+                          left: 16,
+                          right: 16,
+                          bottom: 16,
+                          child: Text(
+                            'Posted on $date',
+                            style: const TextStyle(color: AppColors.muted),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          );
+            );
           },
         ),
       ),
@@ -346,6 +351,7 @@ class _DetailVideoPlayer extends StatefulWidget {
 class _DetailVideoPlayerState extends State<_DetailVideoPlayer> {
   late final VideoPlayerController _controller;
   bool _ready = false;
+  bool _failed = false;
   bool _playing = false;
   bool _muted = true;
 
@@ -353,11 +359,22 @@ class _DetailVideoPlayerState extends State<_DetailVideoPlayer> {
   void initState() {
     super.initState();
     _controller = VideoPlayerController.networkUrl(Uri.parse(widget.url))
-      ..setVolume(0.0)
-      ..initialize().then((_) {
-        if (!mounted) return;
-        setState(() => _ready = true);
+      ..setVolume(0.0);
+    _initVideo();
+  }
+
+  Future<void> _initVideo() async {
+    try {
+      await _controller.initialize();
+      if (!mounted) return;
+      setState(() {
+        _ready = true;
+        _failed = false;
       });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _failed = true);
+    }
   }
 
   @override
@@ -407,6 +424,16 @@ class _DetailVideoPlayerState extends State<_DetailVideoPlayer> {
                   width: _controller.value.size.width,
                   height: _controller.value.size.height,
                   child: VideoPlayer(_controller),
+                ),
+              )
+            else if (_failed)
+              Container(
+                color: AppColors.button,
+                alignment: Alignment.center,
+                child: const Icon(
+                  Icons.videocam_off_outlined,
+                  color: AppColors.muted,
+                  size: 30,
                 ),
               )
             else if (widget.thumbUrl.isNotEmpty)

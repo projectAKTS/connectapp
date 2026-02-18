@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connect_app/screens/posts/post_screen.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
+import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 
 class ExploreScreen extends StatefulWidget {
   const ExploreScreen({Key? key}) : super(key: key);
@@ -10,13 +11,20 @@ class ExploreScreen extends StatefulWidget {
   State<ExploreScreen> createState() => _ExploreScreenState();
 }
 
-class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProviderStateMixin {
+class _ExploreScreenState extends State<ExploreScreen>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = "";
   String _selectedTag = "";
   late TabController _tabController;
 
-  final List<String> _tags = ["Career", "Travel", "Health", "Technology", "Education"];
+  final List<String> _tags = [
+    "Career",
+    "Travel",
+    "Health",
+    "Technology",
+    "Education"
+  ];
 
   @override
   void initState() {
@@ -129,7 +137,8 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance.collection('posts').snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        if (!snapshot.hasData)
+          return const Center(child: CircularProgressIndicator());
         final posts = snapshot.data!.docs.toList();
         posts.sort((a, b) {
           final aData = a.data() as Map<String, dynamic>;
@@ -143,7 +152,8 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
           int bScore = computeEngagementScore(bData);
           return bScore.compareTo(aScore);
         });
-        if (posts.isEmpty) return const Center(child: Text('No content available'));
+        if (posts.isEmpty)
+          return const Center(child: Text('No content available'));
         return ListView(
           children: posts.map((post) {
             final postData = post.data() as Map<String, dynamic>;
@@ -155,12 +165,15 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
                 ),
                 title: Text(postData['userName'] ?? 'Anonymous'),
                 subtitle: Text(postData['content'] ?? 'No content'),
-                trailing: postData['priorityBoost'] == true ? const Icon(Icons.star, color: Colors.orange) : null,
+                trailing: postData['priorityBoost'] == true
+                    ? const Icon(Icons.star, color: Colors.orange)
+                    : null,
                 onTap: () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => PostScreen(postData: postData),
+                      builder: (context) => FullScreenBackGesture(
+                          child: PostScreen(postData: postData)),
                     ),
                   );
                 },
@@ -176,7 +189,8 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance.collection('users').snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        if (!snapshot.hasData)
+          return const Center(child: CircularProgressIndicator());
         final users = snapshot.data!.docs.where((doc) {
           final userData = doc.data() as Map<String, dynamic>;
           final name = userData['fullName']?.toString().toLowerCase() ?? '';
@@ -190,8 +204,14 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
         }).toList();
 
         users.sort((a, b) {
-          final aHighlight = ((a.data() as Map<String, dynamic>)['activePerks'] ?? {})['profileHighlight'] != null;
-          final bHighlight = ((b.data() as Map<String, dynamic>)['activePerks'] ?? {})['profileHighlight'] != null;
+          final aHighlight =
+              ((a.data() as Map<String, dynamic>)['activePerks'] ??
+                      {})['profileHighlight'] !=
+                  null;
+          final bHighlight =
+              ((b.data() as Map<String, dynamic>)['activePerks'] ??
+                      {})['profileHighlight'] !=
+                  null;
           return (bHighlight ? 1 : 0) - (aHighlight ? 1 : 0);
         });
 
@@ -202,19 +222,23 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
             final user = users[index];
             final userData = user.data() as Map<String, dynamic>;
             final userId = user.id;
-            final bool hasProfileHighlight = (userData['activePerks'] ?? {}).containsKey('profileHighlight');
+            final bool hasProfileHighlight =
+                (userData['activePerks'] ?? {}).containsKey('profileHighlight');
             return ListTile(
               leading: CircleAvatar(
                 backgroundImage: AssetImage('assets/default_profile.png'),
               ),
               title: Text(userData['fullName'] ?? 'Unknown User'),
               subtitle: Text(userData['bio'] ?? ''),
-              trailing: hasProfileHighlight ? const Icon(Icons.star, color: Colors.orange) : null,
+              trailing: hasProfileHighlight
+                  ? const Icon(Icons.star, color: Colors.orange)
+                  : null,
               onTap: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => ProfileScreen(userID: userId),
+                    builder: (context) => FullScreenBackGesture(
+                        child: ProfileScreen(userID: userId)),
                   ),
                 );
               },
@@ -229,19 +253,23 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance.collection('posts').snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        if (!snapshot.hasData)
+          return const Center(child: CircularProgressIndicator());
         final posts = snapshot.data!.docs.where((doc) {
           final postData = doc.data() as Map<String, dynamic>;
           final content = postData['content']?.toString().toLowerCase() ?? '';
           final tags = (postData['tags'] ?? []) as List<dynamic>;
           final matchesQuery = content.contains(_searchQuery);
-          final matchesTag = _selectedTag.isEmpty || tags.contains(_selectedTag);
+          final matchesTag =
+              _selectedTag.isEmpty || tags.contains(_selectedTag);
           return matchesQuery && matchesTag;
         }).toList();
 
         posts.sort((a, b) {
-          final aBoosted = (a.data() as Map<String, dynamic>)['priorityBoost'] ?? false;
-          final bBoosted = (b.data() as Map<String, dynamic>)['priorityBoost'] ?? false;
+          final aBoosted =
+              (a.data() as Map<String, dynamic>)['priorityBoost'] ?? false;
+          final bBoosted =
+              (b.data() as Map<String, dynamic>)['priorityBoost'] ?? false;
           if (aBoosted != bBoosted) {
             return (bBoosted ? 1 : 0) - (aBoosted ? 1 : 0);
           }
@@ -262,12 +290,15 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
               ),
               title: Text(postData['userName'] ?? 'Anonymous'),
               subtitle: Text(postData['content'] ?? 'No content'),
-              trailing: postData['priorityBoost'] == true ? const Icon(Icons.star, color: Colors.orange) : null,
+              trailing: postData['priorityBoost'] == true
+                  ? const Icon(Icons.star, color: Colors.orange)
+                  : null,
               onTap: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => PostScreen(postData: postData),
+                    builder: (context) => FullScreenBackGesture(
+                        child: PostScreen(postData: postData)),
                   ),
                 );
               },
@@ -286,9 +317,11 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
           .limit(10)
           .snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        if (!snapshot.hasData)
+          return const Center(child: CircularProgressIndicator());
         final users = snapshot.data!.docs;
-        if (users.isEmpty) return const Center(child: Text('No top helpers found'));
+        if (users.isEmpty)
+          return const Center(child: Text('No top helpers found'));
         return ListView.builder(
           itemCount: users.length,
           itemBuilder: (context, index) {
@@ -306,7 +339,8 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => ProfileScreen(userID: userId),
+                    builder: (context) => FullScreenBackGesture(
+                        child: ProfileScreen(userID: userId)),
                   ),
                 );
               },
@@ -318,10 +352,14 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
   }
 
   Widget? _getBadgeIcon(int xpPoints) {
-    if (xpPoints >= 1000) return const Icon(Icons.emoji_events, color: Colors.purple);
-    if (xpPoints >= 500) return const Icon(Icons.emoji_events, color: Colors.orange);
-    if (xpPoints >= 300) return const Icon(Icons.emoji_events, color: Colors.blue);
-    if (xpPoints >= 100) return const Icon(Icons.emoji_events, color: Colors.green);
+    if (xpPoints >= 1000)
+      return const Icon(Icons.emoji_events, color: Colors.purple);
+    if (xpPoints >= 500)
+      return const Icon(Icons.emoji_events, color: Colors.orange);
+    if (xpPoints >= 300)
+      return const Icon(Icons.emoji_events, color: Colors.blue);
+    if (xpPoints >= 100)
+      return const Icon(Icons.emoji_events, color: Colors.green);
     return null;
   }
 }

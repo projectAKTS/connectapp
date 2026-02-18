@@ -8,6 +8,7 @@ import 'package:connect_app/theme/tokens.dart';
 import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
 import 'package:connect_app/screens/posts/post_detail_screen.dart';
+import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({Key? key}) : super(key: key);
@@ -109,8 +110,10 @@ class _SearchScreenState extends State<SearchScreen> {
 
       // Fallback scan (still fast enough for small datasets)
       if (!anyIndexedHit) {
-        final usersSnap =
-            await FirebaseFirestore.instance.collection('users').limit(300).get();
+        final usersSnap = await FirebaseFirestore.instance
+            .collection('users')
+            .limit(300)
+            .get();
         for (final d in usersSnap.docs) {
           final m = d.data();
           final name = (m['displayName'] ?? m['userName'] ?? '').toString();
@@ -141,7 +144,8 @@ class _SearchScreenState extends State<SearchScreen> {
             ? (m['tags'] as List).map((e) => e.toString()).toList()
             : <String>[];
 
-        final hay = '${_norm(content)} ${_norm(userName)} ${_norm(tags.join(" "))}';
+        final hay =
+            '${_norm(content)} ${_norm(userName)} ${_norm(tags.join(" "))}';
         if (hay.contains(query)) {
           posts.add(_PostHit(
             id: d.id,
@@ -261,7 +265,8 @@ class _SearchScreenState extends State<SearchScreen> {
                     ? const _LoadingState()
                     : _ResultsList(people: people, posts: posts, tab: _tab)
                 : SuggestedCategories(
-                    uid: null, // plug in FirebaseAuth.instance.currentUser?.uid if you like
+                    uid:
+                        null, // plug in FirebaseAuth.instance.currentUser?.uid if you like
                     onTap: (term) {
                       _controller.text = term;
                       setState(() {}); // flip to results instantly
@@ -309,8 +314,9 @@ class _SuggestedCategoriesState extends State<SuggestedCategories> {
       try {
         final u = await fs.collection('users').doc(uid).get();
         final data = u.data() ?? {};
-        recentSearches =
-            ((data['searchHistory'] ?? []) as List).map((e) => e.toString()).toList();
+        recentSearches = ((data['searchHistory'] ?? []) as List)
+            .map((e) => e.toString())
+            .toList();
         for (final s in recentSearches) {
           final k = _norm(s);
           if (k.isEmpty) continue;
@@ -354,8 +360,9 @@ class _SuggestedCategoriesState extends State<SuggestedCategories> {
             .limit(60)
             .get();
         for (final d in liked.docs) {
-          final tags =
-              ((d.data()['tags'] ?? []) as List).map((e) => e.toString()).toList();
+          final tags = ((d.data()['tags'] ?? []) as List)
+              .map((e) => e.toString())
+              .toList();
           for (final t in tags) {
             final k = _norm(t);
             score[k] = (score[k] ?? 0) + 2;
@@ -382,8 +389,14 @@ class _SuggestedCategoriesState extends State<SuggestedCategories> {
     }
 
     if (picked.isEmpty) {
-      picked.addAll(
-          ['Study Permit', 'Housing', 'Talk to a Refugee', 'Jobs', 'Healthcare', 'Documents']);
+      picked.addAll([
+        'Study Permit',
+        'Housing',
+        'Talk to a Refugee',
+        'Jobs',
+        'Healthcare',
+        'Documents'
+      ]);
     }
 
     if (!mounted) return;
@@ -401,7 +414,10 @@ class _SuggestedCategoriesState extends State<SuggestedCategories> {
         const SizedBox(height: 8),
         Text(
           'Suggested categories',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(letterSpacing: -0.2),
+          style: Theme.of(context)
+              .textTheme
+              .titleMedium
+              ?.copyWith(letterSpacing: -0.2),
         ),
         const SizedBox(height: 10),
         if (_loading)
@@ -415,10 +431,12 @@ class _SuggestedCategoriesState extends State<SuggestedCategories> {
             runSpacing: 8,
             children: _suggestions
                 .map((s) => ActionChip(
-                      label: Text(s, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      label: Text(s,
+                          style: const TextStyle(fontWeight: FontWeight.w600)),
                       backgroundColor: AppColors.button,
                       onPressed: () => widget.onTap(s),
-                      shape: const StadiumBorder(side: BorderSide(color: AppColors.border)),
+                      shape: const StadiumBorder(
+                          side: BorderSide(color: AppColors.border)),
                     ))
                 .toList(),
           ),
@@ -515,8 +533,10 @@ class _SectionHeader extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(4, 12, 4, 6),
       child: Text(
         text,
-        style:
-            Theme.of(context).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700),
+        style: Theme.of(context)
+            .textTheme
+            .bodyLarge
+            ?.copyWith(fontWeight: FontWeight.w700),
       ),
     );
   }
@@ -538,14 +558,19 @@ class _UserTile extends StatelessWidget {
       child: ListTile(
         leading: _Avatar(url: hit.avatarUrl, radius: 22),
         title: Text(hit.name,
-            style:
-                const TextStyle(fontWeight: FontWeight.w700, color: AppColors.text)),
+            style: const TextStyle(
+                fontWeight: FontWeight.w700, color: AppColors.text)),
         subtitle: hit.handle.isEmpty
             ? null
-            : Text('@${hit.handle}', style: const TextStyle(color: AppColors.muted)),
+            : Text('@${hit.handle}',
+                style: const TextStyle(color: AppColors.muted)),
         onTap: () {
           Navigator.of(context, rootNavigator: true).push(
-            MaterialPageRoute(builder: (_) => ProfileScreen(userID: hit.userId)),
+            MaterialPageRoute(
+              builder: (_) => FullScreenBackGesture(
+                child: ProfileScreen(userID: hit.userId),
+              ),
+            ),
           );
         },
       ),
@@ -658,14 +683,22 @@ class _PostTile extends StatelessWidget {
 
     void openDetail() {
       Navigator.of(context, rootNavigator: true).push(
-        MaterialPageRoute(builder: (_) => PostDetailScreen(postId: hit.id)),
+        MaterialPageRoute(
+          builder: (_) => FullScreenBackGesture(
+            child: PostDetailScreen(postId: hit.id),
+          ),
+        ),
       );
     }
 
     void openProfile() {
       if (hit.authorId.isEmpty) return;
       Navigator.of(context, rootNavigator: true).push(
-        MaterialPageRoute(builder: (_) => ProfileScreen(userID: hit.authorId)),
+        MaterialPageRoute(
+          builder: (_) => FullScreenBackGesture(
+            child: ProfileScreen(userID: hit.authorId),
+          ),
+        ),
       );
     }
 
@@ -709,7 +742,8 @@ class _PostTile extends StatelessWidget {
                   const SizedBox(width: 8),
                   Text(
                     _ago(hit.ts),
-                    style: const TextStyle(fontSize: 13, color: AppColors.muted),
+                    style:
+                        const TextStyle(fontSize: 13, color: AppColors.muted),
                   ),
                 ],
               ),
@@ -917,8 +951,7 @@ class _Avatar extends StatelessWidget {
       ? CircleAvatar(
           radius: radius,
           backgroundColor: AppColors.avatarBg,
-          child:
-              const Icon(Icons.person_outline, color: AppColors.avatarFg))
+          child: const Icon(Icons.person_outline, color: AppColors.avatarFg))
       : CircleAvatar(radius: radius, backgroundImage: NetworkImage(url));
 }
 
@@ -963,7 +996,8 @@ Future<void> _recordSearchTerm(String term) async {
     final doc = FirebaseFirestore.instance.collection('users').doc(uid);
     final snap = await doc.get();
     final data = (snap.data() ?? {});
-    final List<dynamic> current = (data['searchHistory'] ?? []) as List<dynamic>;
+    final List<dynamic> current =
+        (data['searchHistory'] ?? []) as List<dynamic>;
     final List<String> list = current.map((e) => e.toString()).toList();
 
     list.removeWhere((e) => _norm(e) == t);

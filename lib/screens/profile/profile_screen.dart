@@ -654,8 +654,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         body: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onHorizontalDragStart: _handleHorizontalDragStart,
-          onHorizontalDragUpdate: _handleHorizontalDragUpdate,
+          onHorizontalDragStart:
+              Platform.isIOS ? null : _handleHorizontalDragStart,
+          onHorizontalDragUpdate:
+              Platform.isIOS ? null : _handleHorizontalDragUpdate,
           child: RefreshIndicator.adaptive(
             onRefresh: _onRefresh,
             edgeOffset: 0,

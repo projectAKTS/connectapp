@@ -275,7 +275,8 @@ class HomeContentScreenState extends State<HomeContentScreen>
                     ? _WelcomeCard(
                         name: firstFrom(fallbackName),
                         onFindHelper: () => Navigator.of(context).push(
-                          CupertinoPageRoute(builder: (_) => const FindHelperScreen()),
+                          CupertinoPageRoute(
+                              builder: (_) => const FindHelperScreen()),
                         ),
                       )
                     : StreamBuilder<DocumentSnapshot>(
@@ -284,7 +285,8 @@ class HomeContentScreenState extends State<HomeContentScreen>
                             .doc(currentUid)
                             .snapshots(),
                         builder: (context, snap) {
-                          final data = snap.data?.data() as Map<String, dynamic>? ?? {};
+                          final data =
+                              snap.data?.data() as Map<String, dynamic>? ?? {};
                           final name = (data['displayName'] ??
                                   data['fullName'] ??
                                   fallbackName)
@@ -292,7 +294,8 @@ class HomeContentScreenState extends State<HomeContentScreen>
                           return _WelcomeCard(
                             name: firstFrom(name),
                             onFindHelper: () => Navigator.of(context).push(
-                              CupertinoPageRoute(builder: (_) => const FindHelperScreen()),
+                              CupertinoPageRoute(
+                                  builder: (_) => const FindHelperScreen()),
                             ),
                           );
                         },
@@ -328,7 +331,8 @@ class HomeContentScreenState extends State<HomeContentScreen>
                       final raw = doc.data() as Map<String, dynamic>? ?? {};
                       final authorId = _extractUserId(raw);
                       if (authorId != currentUid) return false;
-                      if ((raw['mediaUploadStatus'] ?? '') != 'uploading') return false;
+                      if ((raw['mediaUploadStatus'] ?? '') != 'uploading')
+                        return false;
                       final started = raw['mediaUploadStartedAt'];
                       final DateTime? startedAt = started is Timestamp
                           ? started.toDate()
@@ -344,7 +348,8 @@ class HomeContentScreenState extends State<HomeContentScreen>
                       final raw = doc.data() as Map<String, dynamic>? ?? {};
                       final authorId = _extractUserId(raw);
                       if (authorId != currentUid) return false;
-                      if ((raw['mediaUploadStatus'] ?? '') != 'uploading') return false;
+                      if ((raw['mediaUploadStatus'] ?? '') != 'uploading')
+                        return false;
                       final started = raw['mediaUploadStartedAt'];
                       final DateTime? startedAt = started is Timestamp
                           ? started.toDate()
@@ -366,7 +371,8 @@ class HomeContentScreenState extends State<HomeContentScreen>
                               .doc(doc.id)
                               .update({
                             'mediaUploadStatus': 'failed',
-                            'mediaUploadUpdatedAt': FieldValue.serverTimestamp(),
+                            'mediaUploadUpdatedAt':
+                                FieldValue.serverTimestamp(),
                           });
                         }
                       });
@@ -374,7 +380,8 @@ class HomeContentScreenState extends State<HomeContentScreen>
 
                     final visiblePosts = posts.where((doc) {
                       final raw = doc.data() as Map<String, dynamic>? ?? {};
-                      final status = (raw['mediaUploadStatus'] ?? '').toString();
+                      final status =
+                          (raw['mediaUploadStatus'] ?? '').toString();
                       final authorId = _extractUserId(raw);
                       final mediaCount = (raw['mediaCount'] is num)
                           ? (raw['mediaCount'] as num).toInt()
@@ -401,91 +408,96 @@ class HomeContentScreenState extends State<HomeContentScreen>
                           shrinkWrap: true,
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
                           itemCount: visiblePosts.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 0),
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 0),
                           itemBuilder: (_, i) {
-                        final raw =
-                            visiblePosts[i].data() as Map<String, dynamic>? ?? {};
-                        final authorName = (raw['userName'] ?? 'User') as String;
-                        final authorId = _extractUserId(raw);
-                        final avatar = (raw['userAvatar'] ?? '') as String;
-                        final body = (raw['content'] ?? '').toString();
+                            final raw = visiblePosts[i].data()
+                                    as Map<String, dynamic>? ??
+                                {};
+                            final authorName =
+                                (raw['userName'] ?? 'User') as String;
+                            final authorId = _extractUserId(raw);
+                            final avatar = (raw['userAvatar'] ?? '') as String;
+                            final body = (raw['content'] ?? '').toString();
 
-                        final right = _shortFromTs(raw['timestamp']);
-                        final subtitle = '$right ago';
+                            final right = _shortFromTs(raw['timestamp']);
+                            final subtitle = '$right ago';
 
-                        final imageUrls = _extractImageUrls(raw);
+                            final imageUrls = _extractImageUrls(raw);
 
-                        final videoUrl = (raw['videoUrl'] ?? '').toString();
-                        final videoThumbUrl =
-                            (raw['videoThumbUrl'] ?? '').toString();
-                        final mediaStatus =
-                            (raw['mediaUploadStatus'] ?? '').toString();
-                        final mediaCount = (raw['mediaCount'] is num)
-                            ? (raw['mediaCount'] as num).toInt()
-                            : 0;
-                        final mediaStartedAt = raw['mediaUploadStartedAt'];
-                        final DateTime? uploadStartedAt = mediaStartedAt is Timestamp
-                            ? mediaStartedAt.toDate()
-                            : (raw['timestamp'] is Timestamp
-                                ? (raw['timestamp'] as Timestamp).toDate()
-                                : null);
+                            final videoUrl = (raw['videoUrl'] ?? '').toString();
+                            final videoThumbUrl =
+                                (raw['videoThumbUrl'] ?? '').toString();
+                            final mediaStatus =
+                                (raw['mediaUploadStatus'] ?? '').toString();
+                            final mediaCount = (raw['mediaCount'] is num)
+                                ? (raw['mediaCount'] as num).toInt()
+                                : 0;
+                            final mediaStartedAt = raw['mediaUploadStartedAt'];
+                            final DateTime? uploadStartedAt = mediaStartedAt
+                                    is Timestamp
+                                ? mediaStartedAt.toDate()
+                                : (raw['timestamp'] is Timestamp
+                                    ? (raw['timestamp'] as Timestamp).toDate()
+                                    : null);
 
-                        final type = (raw['type'] ??
-                                raw['postType'] ??
-                                raw['templateType'] ??
-                                raw['template'] ??
-                                'Quick')
-                            .toString();
+                            final type = (raw['type'] ??
+                                    raw['postType'] ??
+                                    raw['templateType'] ??
+                                    raw['template'] ??
+                                    'Quick')
+                                .toString();
 
-                        final aspect = (() {
-                          final v = raw['mediaAspectRatio'];
-                          if (v is num && v > 0) return v.toDouble();
-                          return (imageUrls.isNotEmpty || videoUrl.isNotEmpty)
-                              ? (16 / 9)
-                              : 1.0;
-                        })();
+                            final aspect = (() {
+                              final v = raw['mediaAspectRatio'];
+                              if (v is num && v > 0) return v.toDouble();
+                              return (imageUrls.isNotEmpty ||
+                                      videoUrl.isNotEmpty)
+                                  ? (16 / 9)
+                                  : 1.0;
+                            })();
 
-                        final isOwnPost = (authorId == currentUid);
+                            final isOwnPost = (authorId == currentUid);
 
-                        return _PostCell(
-                          postId: visiblePosts[i].id,
-                          postType: type,
-                          authorName: authorName,
-                          authorAvatarUrl: avatar,
-                          subtitle: subtitle,
-                          rightTime: right,
-                          body: body,
-                          imageUrls: imageUrls,
-                          videoUrl: videoUrl,
-                          videoThumbUrl: videoThumbUrl,
-                          mediaAspect: aspect,
-                          mediaStatus: mediaStatus,
-                          mediaCount: mediaCount,
-                          mediaUploadStartedAt: uploadStartedAt,
-                          isOwnPost: isOwnPost,
-                          onOpenProfile: authorId.isEmpty
-                              ? null
-                              : () {
-                                  Navigator.of(context).push(
-                                    CupertinoPageRoute(
-                                      builder: (_) =>
-                                          ProfileScreen(userID: authorId),
-                                    ),
-                                  );
-                                  // or: Navigator.of(context).pushNamed('/profile/$authorId');
-                                },
-                          onConnect: isOwnPost
-                              ? null
-                              : () {
-                                  HapticFeedback.lightImpact();
-                                  _openConnectSheet(
-                                    otherUserId: authorId,
-                                    otherUserName: authorName,
-                                  );
-                                },
-                          onOpenVideo: videoUrl.isEmpty
-                              ? null
-                              : () {
+                            return _PostCell(
+                              postId: visiblePosts[i].id,
+                              postType: type,
+                              authorName: authorName,
+                              authorAvatarUrl: avatar,
+                              subtitle: subtitle,
+                              rightTime: right,
+                              body: body,
+                              imageUrls: imageUrls,
+                              videoUrl: videoUrl,
+                              videoThumbUrl: videoThumbUrl,
+                              mediaAspect: aspect,
+                              mediaStatus: mediaStatus,
+                              mediaCount: mediaCount,
+                              mediaUploadStartedAt: uploadStartedAt,
+                              isOwnPost: isOwnPost,
+                              onOpenProfile: authorId.isEmpty
+                                  ? null
+                                  : () {
+                                      Navigator.of(context).push(
+                                        CupertinoPageRoute(
+                                          builder: (_) =>
+                                              ProfileScreen(userID: authorId),
+                                        ),
+                                      );
+                                      // or: Navigator.of(context).pushNamed('/profile/$authorId');
+                                    },
+                              onConnect: isOwnPost
+                                  ? null
+                                  : () {
+                                      HapticFeedback.lightImpact();
+                                      _openConnectSheet(
+                                        otherUserId: authorId,
+                                        otherUserName: authorName,
+                                      );
+                                    },
+                              onOpenVideo: videoUrl.isEmpty
+                                  ? null
+                                  : () {
                                       Navigator.of(context).push(
                                         PageRouteBuilder(
                                           opaque: false,
@@ -493,10 +505,10 @@ class HomeContentScreenState extends State<HomeContentScreen>
                                               PostVideoPlayer(url: videoUrl),
                                         ),
                                       );
-                                },
-                          showConnect: !isOwnPost,
-                        );
-                      },
+                                    },
+                              showConnect: !isOwnPost,
+                            );
+                          },
                         ),
                       ],
                     );
@@ -548,7 +560,6 @@ class _HomeTopBar extends StatelessWidget {
     );
   }
 }
-
 
 // ===== Welcome Card =====
 class _WelcomeCard extends StatelessWidget {
@@ -761,12 +772,14 @@ class _UploadBanner extends StatelessWidget {
           SizedBox(
             width: 16,
             height: 16,
-            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.muted),
+            child: CircularProgressIndicator(
+                strokeWidth: 2, color: AppColors.muted),
           ),
           SizedBox(width: 8),
           Text(
             'Posting in background…',
-            style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700),
+            style:
+                TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700),
           ),
         ],
       ),
@@ -836,8 +849,12 @@ class _PostCellState extends State<_PostCell> {
         title: const Text('Delete post?'),
         content: const Text('This cannot be undone.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete')),
         ],
       ),
     );
@@ -1353,6 +1370,7 @@ class _InlineVideoPlayer extends StatefulWidget {
 class _InlineVideoPlayerState extends State<_InlineVideoPlayer> {
   late final VideoPlayerController _controller;
   bool _ready = false;
+  bool _failed = false;
   bool _muted = true;
 
   @override
@@ -1362,11 +1380,22 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> {
     _controller
       ..setLooping(true)
       ..setVolume(0.0);
-    _controller.initialize().then((_) {
+    _initVideo();
+  }
+
+  Future<void> _initVideo() async {
+    try {
+      await _controller.initialize();
       if (!mounted) return;
-      setState(() => _ready = true);
+      setState(() {
+        _ready = true;
+        _failed = false;
+      });
       _controller.play();
-    });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _failed = true);
+    }
   }
 
   @override
@@ -1399,6 +1428,13 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> {
                     height: _controller.value.size.height,
                     child: VideoPlayer(_controller),
                   ),
+                )
+              else if (_failed)
+                Container(
+                  color: AppColors.button,
+                  alignment: Alignment.center,
+                  child: const Icon(Icons.videocam_off_outlined,
+                      color: AppColors.muted, size: 30),
                 )
               else if (widget.thumbUrl.isNotEmpty)
                 Image.network(
@@ -1434,7 +1470,8 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> {
                       _controller.setVolume(_muted ? 0.0 : 1.0);
                     },
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
                       child: Icon(
                         _muted ? Icons.volume_off : Icons.volume_up,
                         color: Colors.white,
@@ -1451,7 +1488,6 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> {
     );
   }
 }
-
 
 class _MediaVideoThumb extends StatelessWidget {
   final String thumbUrl;
@@ -1479,7 +1515,8 @@ class _MediaVideoThumb extends StatelessWidget {
                 fit: BoxFit.cover,
                 loadingBuilder: (c, w, p) =>
                     p == null ? w : Container(color: AppColors.button),
-                errorBuilder: (_, __, ___) => Container(color: AppColors.button),
+                errorBuilder: (_, __, ___) =>
+                    Container(color: AppColors.button),
               )
             else
               Container(color: AppColors.button),

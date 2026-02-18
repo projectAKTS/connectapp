@@ -52,7 +52,7 @@ Future<void> main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  const useDebugAppCheck = kDebugMode ||
+  const useDebugAppCheck =
       bool.fromEnvironment('APP_CHECK_DEBUG', defaultValue: false);
   try {
     await FirebaseAppCheck.instance.activate(
@@ -68,10 +68,16 @@ Future<void> main() async {
       if (token != null && token.isNotEmpty) {
         debugPrint('🧪 AppCheck debug token: $token');
       }
+    } else if (kDebugMode) {
+      debugPrint(
+        'ℹ️ AppCheck running with real attestation in debug build. '
+        'Set --dart-define=APP_CHECK_DEBUG=true only when you intentionally use debug tokens.',
+      );
     }
   } catch (e) {
     debugPrint('⚠️ AppCheck failed: $e');
-    if (e.toString().contains('exchangeDebugToken') &&
+    if (useDebugAppCheck &&
+        e.toString().contains('exchangeDebugToken') &&
         e.toString().contains('403')) {
       debugPrint(
         '⚠️ AppCheck debug token was rejected by Firebase (403 PERMISSION_DENIED). '

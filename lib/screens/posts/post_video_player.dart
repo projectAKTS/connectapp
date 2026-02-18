@@ -5,7 +5,7 @@ import 'package:video_player/video_player.dart';
 
 class PostVideoPlayer extends StatefulWidget {
   final String? url; // ✅ for Home
-  final File? file;  // ✅ for Create preview
+  final File? file; // ✅ for Create preview
 
   const PostVideoPlayer({
     super.key,
@@ -21,6 +21,7 @@ class _PostVideoPlayerState extends State<PostVideoPlayer>
     with SingleTickerProviderStateMixin {
   late final VideoPlayerController _controller;
   ChewieController? _chewie;
+  bool _failed = false;
   late final AnimationController _resetController;
   Animation<double>? _resetAnim;
   double _dragOffset = 0;
@@ -40,8 +41,12 @@ class _PostVideoPlayerState extends State<PostVideoPlayer>
     _controller = widget.file != null
         ? VideoPlayerController.file(widget.file!)
         : VideoPlayerController.networkUrl(Uri.parse(widget.url!));
+    _initVideo();
+  }
 
-    _controller.initialize().then((_) {
+  Future<void> _initVideo() async {
+    try {
+      await _controller.initialize();
       _chewie = ChewieController(
         videoPlayerController: _controller,
         autoPlay: true,
@@ -51,7 +56,10 @@ class _PostVideoPlayerState extends State<PostVideoPlayer>
         showControls: true,
       );
       if (mounted) setState(() {});
-    });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _failed = true);
+    }
   }
 
   @override
@@ -105,7 +113,10 @@ class _PostVideoPlayerState extends State<PostVideoPlayer>
               child: Transform.scale(
                 scale: scale,
                 child: _chewie == null
-                    ? const CircularProgressIndicator(color: Colors.white)
+                    ? (_failed
+                        ? const Icon(Icons.videocam_off_outlined,
+                            color: Colors.white70, size: 36)
+                        : const CircularProgressIndicator(color: Colors.white))
                     : Chewie(controller: _chewie!),
               ),
             ),

@@ -23,9 +23,9 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
 
   // —— Filters
   final Set<String> _selectedCategories = {};
-  final Set<String> _selectedLanguages  = {};
+  final Set<String> _selectedLanguages = {};
   bool _onlyAvailable = false;
-  bool _onlyVerified  = false;
+  bool _onlyVerified = false;
   double? _minPrice;
   double? _maxPrice;
 
@@ -84,22 +84,27 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
         final m = d.data();
 
         // Derive fields from onboarding-style keys when missing
-        final List<String> categoriesRaw =
-            (m['categories'] is List) ? List<String>.from(m['categories']) : const [];
-        final List<String> interestTags =
-            (m['interestTags'] is List) ? List<String>.from(m['interestTags']) : const [];
-        final List<String> languagesRaw =
-            (m['languages'] is List) ? List<String>.from(m['languages']) : const [];
+        final List<String> categoriesRaw = (m['categories'] is List)
+            ? List<String>.from(m['categories'])
+            : const [];
+        final List<String> interestTags = (m['interestTags'] is List)
+            ? List<String>.from(m['interestTags'])
+            : const [];
+        final List<String> languagesRaw = (m['languages'] is List)
+            ? List<String>.from(m['languages'])
+            : const [];
         final String singleLanguage = (m['language'] ?? '').toString().trim();
         final String photo =
-            (m['photoURL'] ?? m['avatar'] ?? m['profilePicture'] ?? '').toString();
+            (m['photoURL'] ?? m['avatar'] ?? m['profilePicture'] ?? '')
+                .toString();
 
         final List<String> categories =
             categoriesRaw.isNotEmpty ? categoriesRaw : interestTags;
-        final List<String> languages =
-            languagesRaw.isNotEmpty
-                ? languagesRaw.map((e) => e.toString()).toList()
-                : (singleLanguage.isNotEmpty ? <String>[singleLanguage] : <String>[]);
+        final List<String> languages = languagesRaw.isNotEmpty
+            ? languagesRaw.map((e) => e.toString()).toList()
+            : (singleLanguage.isNotEmpty
+                ? <String>[singleLanguage]
+                : <String>[]);
 
         final bool availableFlag = (m['isAvailable'] == true);
         final String availabilityStr = (m['availability'] ?? '').toString();
@@ -107,11 +112,14 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
 
         final bool verifiedFlag = (m['isVerified'] == true);
         final bool badgesVerified = (m['badges'] is List) &&
-            (m['badges'] as List).map((e) => e.toString().toLowerCase()).contains('verified');
+            (m['badges'] as List)
+                .map((e) => e.toString().toLowerCase())
+                .contains('verified');
 
         list.add(_Helper(
           id: d.id,
-          name: (m['displayName'] ?? m['fullName'] ?? m['userName'] ?? 'User').toString(),
+          name: (m['displayName'] ?? m['fullName'] ?? m['userName'] ?? 'User')
+              .toString(),
           handle: (m['userName'] ?? '').toString(),
           bio: (m['bio'] ?? '').toString(),
           avatar: photo,
@@ -175,7 +183,7 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
 
     // Availability / Verified
     if (_onlyAvailable) list = list.where((h) => h.isAvailable).toList();
-    if (_onlyVerified)  list = list.where((h) => h.isVerified).toList();
+    if (_onlyVerified) list = list.where((h) => h.isVerified).toList();
 
     // Categories (subset match)
     if (_selectedCategories.isNotEmpty) {
@@ -195,10 +203,14 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
 
     // Price range — exclude null prices whenever a bound is set
     if (_minPrice != null) {
-      list = list.where((h) => h.hourlyRate != null && h.hourlyRate! >= _minPrice!).toList();
+      list = list
+          .where((h) => h.hourlyRate != null && h.hourlyRate! >= _minPrice!)
+          .toList();
     }
     if (_maxPrice != null) {
-      list = list.where((h) => h.hourlyRate != null && h.hourlyRate! <= _maxPrice!).toList();
+      list = list
+          .where((h) => h.hourlyRate != null && h.hourlyRate! <= _maxPrice!)
+          .toList();
     }
 
     // Sorting
@@ -217,6 +229,7 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
             s += (h.rating * 10).round();
             return s;
           }
+
           return score(b).compareTo(score(a));
         });
         break;
@@ -224,11 +237,13 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
         list.sort((a, b) => b.rating.compareTo(a.rating));
         break;
       case _Sort.price:
-        list.sort((a, b) => (a.hourlyRate ?? 1e9).compareTo(b.hourlyRate ?? 1e9));
+        list.sort(
+            (a, b) => (a.hourlyRate ?? 1e9).compareTo(b.hourlyRate ?? 1e9));
         break;
       case _Sort.newest:
         int ms(_Helper h) {
-          final t = _toDate(h.createdAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final t =
+              _toDate(h.createdAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
           return t.millisecondsSinceEpoch;
         }
         list.sort((a, b) => ms(b).compareTo(ms(a)));
@@ -271,96 +286,99 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
                   onPressed: _resetAll,
                   style: TextButton.styleFrom(
                     foregroundColor: AppColors.text,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
                       side: const BorderSide(color: AppColors.border),
                     ),
                     backgroundColor: AppColors.card,
                   ),
-                  child: const Text('Reset filters', style: TextStyle(fontWeight: FontWeight.w700)),
+                  child: const Text('Reset filters',
+                      style: TextStyle(fontWeight: FontWeight.w700)),
                 ),
               ),
           ],
         ),
         body: Column(
-        children: [
-          // Search + Clear
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
-            child: _SearchPill(
-              controller: _q,
-              focusNode: _focus,
-              hint: 'Search helpers by name, bio, or handle…',
-              showClear: hasQuery,
-              onClear: () {
-                _q.clear();
-                _applyFilters();
-                setState(() {});
-              },
+          children: [
+            // Search + Clear
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+              child: _SearchPill(
+                controller: _q,
+                focusNode: _focus,
+                hint: 'Search helpers by name, bio, or handle…',
+                showClear: hasQuery,
+                onClear: () {
+                  _q.clear();
+                  _applyFilters();
+                  setState(() {});
+                },
+              ),
             ),
-          ),
 
-          // Filter rows
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _FilterRow(
-              selectedCategories: _selectedCategories,
-              selectedLanguages: _selectedLanguages,
-              onlyAvailable: _onlyAvailable,
-              onlyVerified: _onlyVerified,
-              minPrice: _minPrice,
-              maxPrice: _maxPrice,
-              sort: _sort,
-              onChanged: ({
-                Set<String>? categories,
-                Set<String>? languages,
-                bool? onlyAvailable,
-                bool? onlyVerified,
-                double? minPrice,
-                double? maxPrice,
-                _Sort? sort,
-              }) {
-                // Preserve every other value; apply what’s provided.
-                if (categories != null) {
-                  _selectedCategories
-                    ..clear()
-                    ..addAll(categories);
-                }
-                if (languages != null) {
-                  _selectedLanguages
-                    ..clear()
-                    ..addAll(languages);
-                }
-                if (onlyAvailable != null) _onlyAvailable = onlyAvailable;
-                if (onlyVerified  != null) _onlyVerified  = onlyVerified;
+            // Filter rows
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _FilterRow(
+                selectedCategories: _selectedCategories,
+                selectedLanguages: _selectedLanguages,
+                onlyAvailable: _onlyAvailable,
+                onlyVerified: _onlyVerified,
+                minPrice: _minPrice,
+                maxPrice: _maxPrice,
+                sort: _sort,
+                onChanged: ({
+                  Set<String>? categories,
+                  Set<String>? languages,
+                  bool? onlyAvailable,
+                  bool? onlyVerified,
+                  double? minPrice,
+                  double? maxPrice,
+                  _Sort? sort,
+                }) {
+                  // Preserve every other value; apply what’s provided.
+                  if (categories != null) {
+                    _selectedCategories
+                      ..clear()
+                      ..addAll(categories);
+                  }
+                  if (languages != null) {
+                    _selectedLanguages
+                      ..clear()
+                      ..addAll(languages);
+                  }
+                  if (onlyAvailable != null) _onlyAvailable = onlyAvailable;
+                  if (onlyVerified != null) _onlyVerified = onlyVerified;
 
-                // Always accept min/max (so Price → Clear truly clears)
-                _minPrice = minPrice;
-                _maxPrice = maxPrice;
+                  // Always accept min/max (so Price → Clear truly clears)
+                  _minPrice = minPrice;
+                  _maxPrice = maxPrice;
 
-                if (sort != null) _sort = sort;
+                  if (sort != null) _sort = sort;
 
-                _applyFilters();
-                setState(() {});
-              },
+                  _applyFilters();
+                  setState(() {});
+                },
+              ),
             ),
-          ),
 
-          const SizedBox(height: 6),
+            const SizedBox(height: 6),
 
-          Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _hits.isEmpty
-                    ? const _EmptyState(text: 'No helpers match your filters.')
-                    : ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(12, 6, 12, 24),
-                        itemCount: _hits.length,
-                        itemBuilder: (_, i) => _HelperTile(helper: _hits[i]),
-                      ),
-          ),
-        ],
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _hits.isEmpty
+                      ? const _EmptyState(
+                          text: 'No helpers match your filters.')
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(12, 6, 12, 24),
+                          itemCount: _hits.length,
+                          itemBuilder: (_, i) => _HelperTile(helper: _hits[i]),
+                        ),
+            ),
+          ],
         ),
       ),
     );
@@ -415,7 +433,11 @@ class _HelperTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         onTap: () {
           Navigator.of(context, rootNavigator: true).push(
-            MaterialPageRoute(builder: (_) => ProfileScreen(userID: helper.id)),
+            MaterialPageRoute(
+              builder: (_) => FullScreenBackGesture(
+                child: ProfileScreen(userID: helper.id),
+              ),
+            ),
           );
         },
         child: Padding(
@@ -446,20 +468,23 @@ class _HelperTile extends StatelessWidget {
                         if (helper.isVerified)
                           const Padding(
                             padding: EdgeInsets.only(left: 6),
-                            child: Icon(Icons.verified, color: AppColors.primary, size: 18),
+                            child: Icon(Icons.verified,
+                                color: AppColors.primary, size: 18),
                           ),
                       ],
                     ),
                     const SizedBox(height: 4),
                     if (helper.handle.isNotEmpty)
-                      Text('@${helper.handle}', style: const TextStyle(color: AppColors.muted)),
+                      Text('@${helper.handle}',
+                          style: const TextStyle(color: AppColors.muted)),
                     if (helper.handle.isNotEmpty) const SizedBox(height: 6),
                     if (helper.bio.isNotEmpty)
                       Text(
                         helper.bio,
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: AppColors.text, height: 1.3),
+                        style:
+                            const TextStyle(color: AppColors.text, height: 1.3),
                       ),
                     const SizedBox(height: 8),
                     Wrap(
@@ -850,7 +875,8 @@ class _PriceSheetState extends State<_PriceSheet> {
   Widget build(BuildContext context) {
     return SafeArea(
       child: Padding(
-        padding: EdgeInsets.fromLTRB(16, 14, 16, 18 + MediaQuery.of(context).viewInsets.bottom),
+        padding: EdgeInsets.fromLTRB(
+            16, 14, 16, 18 + MediaQuery.of(context).viewInsets.bottom),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -868,11 +894,13 @@ class _PriceSheetState extends State<_PriceSheet> {
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: () => Navigator.pop(context, const _PriceRange(null, null)),
+                    onPressed: () =>
+                        Navigator.pop(context, const _PriceRange(null, null)),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: AppColors.border),
                       foregroundColor: AppColors.text,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
                     child: const Text('Clear'),
@@ -940,7 +968,9 @@ class _SortSheet extends StatelessWidget {
             for (final e in items.entries)
               ListTile(
                 title: Text(e.value),
-                trailing: e.key == current ? const Icon(Icons.check, color: AppColors.primary) : null,
+                trailing: e.key == current
+                    ? const Icon(Icons.check, color: AppColors.primary)
+                    : null,
                 onTap: () => Navigator.pop(context, e.key),
               ),
           ],
@@ -1088,7 +1118,8 @@ class _SearchPill extends StatelessWidget {
                 hintText: 'Search helpers…',
                 border: InputBorder.none,
                 isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 8, vertical: 14),
               ),
               textInputAction: TextInputAction.search,
               onSubmitted: (_) {},

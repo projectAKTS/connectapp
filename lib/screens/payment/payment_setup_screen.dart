@@ -23,6 +23,19 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
   String? _defaultId;
   List<PaymentMethodInfo> _cards = const [];
 
+  String _friendlyPaymentError(Object e) {
+    final msg = e.toString();
+    final lower = msg.toLowerCase();
+    if (lower.contains('firebase_app_check') ||
+        lower.contains('exchangeDebugToken'.toLowerCase()) ||
+        lower.contains('app attestation failed') ||
+        lower.contains('permission_denied')) {
+      return 'Payment setup is blocked by App Check. '
+          'If this is a debug build, restart the app after using real attestation or register your debug token in Firebase Console.';
+    }
+    return msg;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -54,7 +67,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _cardsError = e.toString();
+        _cardsError = _friendlyPaymentError(e);
       });
     } finally {
       if (mounted) setState(() => _isLoadingCards = false);
@@ -79,8 +92,12 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
         title: const Text('Remove card?'),
         content: const Text('This card will be removed from your account.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Remove')),
         ],
       ),
     );
@@ -129,7 +146,8 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
                       },
               ),
               ListTile(
-                leading: const Icon(Icons.delete_outline, color: AppColors.danger),
+                leading:
+                    const Icon(Icons.delete_outline, color: AppColors.danger),
                 title: const Text('Remove card'),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -158,7 +176,8 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
       // ✅ Ensure Stripe customer exists (non-blocking; backend may create on SetupIntent)
       final ok = await _paymentService.ensureStripeCustomer();
       if (!ok) {
-        debugPrint('⚠️ Could not confirm Stripe customer; continuing to SetupIntent.');
+        debugPrint(
+            '⚠️ Could not confirm Stripe customer; continuing to SetupIntent.');
       }
 
       // ✅ Create SetupIntent (server should create + return client_secret)
@@ -168,8 +187,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
       }
 
       // ✅ Init PaymentSheet for SetupIntent
-      final hasCustomerKeys =
-          (setupData.customerId?.isNotEmpty == true) &&
+      final hasCustomerKeys = (setupData.customerId?.isNotEmpty == true) &&
           (setupData.ephemeralKeySecret?.isNotEmpty == true);
 
       await Stripe.instance.initPaymentSheet(
@@ -194,7 +212,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
           await Stripe.instance.retrieveSetupIntent(setupData.clientSecret);
       final paymentMethodId = setupIntent.paymentMethodId;
 
-      if (paymentMethodId == null || paymentMethodId.isEmpty) {
+      if (paymentMethodId.isEmpty) {
         throw Exception('No payment method ID returned from Stripe.');
       }
 
@@ -211,10 +229,11 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
       await _refreshCards();
     } on StripeException catch (e) {
       final rawMsg = e.error.localizedMessage ?? 'Stripe error';
-      final code = e.error.code?.toString().toLowerCase() ?? '';
-      final msg = code.contains('canceled') || rawMsg.toLowerCase().contains('cancel')
-          ? 'Card setup canceled.'
-          : rawMsg;
+      final code = e.error.code.toString().toLowerCase();
+      final msg =
+          code.contains('canceled') || rawMsg.toLowerCase().contains('cancel')
+              ? 'Card setup canceled.'
+              : rawMsg;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg)),
@@ -222,12 +241,13 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
     } on FirebaseFunctionsException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Setup failed: ${e.code} ${e.message ?? ''}'.trim())),
+        SnackBar(
+            content: Text('Setup failed: ${e.code} ${e.message ?? ''}'.trim())),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Setup failed: $e')),
+        SnackBar(content: Text('Setup failed: ${_friendlyPaymentError(e)}')),
       );
     } finally {
       if (mounted) setState(() => _isProcessing = false);
@@ -341,7 +361,8 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
               child: ElevatedButton.icon(
                 onPressed: _setupPaymentMethod,
                 icon: const Icon(Icons.lock_outline),
-                label: Text(_cards.isEmpty ? 'Set up card' : 'Add another card'),
+                label:
+                    Text(_cards.isEmpty ? 'Set up card' : 'Add another card'),
               ),
             ),
         ],
@@ -391,7 +412,8 @@ class _CardRow extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppColors.border),
             ),
-            child: const Icon(Icons.credit_card, color: AppColors.text, size: 20),
+            child:
+                const Icon(Icons.credit_card, color: AppColors.text, size: 20),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -400,7 +422,8 @@ class _CardRow extends StatelessWidget {
               children: [
                 Text(
                   '${_brandLabel(info.brand)} •••• ${info.last4 ?? '----'}',
-                  style: textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700),
+                  style: textTheme.bodyLarge
+                      ?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 4),
                 Text(
