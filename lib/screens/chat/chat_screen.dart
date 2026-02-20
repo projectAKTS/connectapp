@@ -1,4 +1,7 @@
 // lib/screens/chat/chat_screen.dart
+import 'dart:async';
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -41,6 +44,8 @@ class _ChatScreenState extends State<ChatScreen> {
   final _inputCtrl = TextEditingController();
   final _picker = ImagePicker();
   bool _sending = false;
+  XFile? _pendingAttachment;
+  bool _pendingIsImage = true;
 
   String? _titleName;
 
@@ -48,20 +53,41 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _me = FirebaseAuth.instance.currentUser!.uid;
+    debugPrint('[Chat] init me=$_me other=${widget.otherUserId}');
     final ids = [_me, widget.otherUserId]..sort();
     _chatId = ids.join('_');
-    _ready = _ensureChatDoc();
+    debugPrint('[Chat] chatId=$_chatId');
+    _ready = _ensureChatDoc().timeout(
+      const Duration(seconds: 12),
+      onTimeout: () {
+        debugPrint('[Chat] ensureChatDoc TIMEOUT chatId=$_chatId');
+        throw TimeoutException('Chat initialization timed out');
+      },
+    );
+    _ready.then((_) {
+      debugPrint('[Chat] ensureChatDoc OK chatId=$_chatId');
+    }).catchError((e, st) {
+      debugPrint('[Chat] ensureChatDoc ERROR: $e');
+      debugPrint('[Chat] ensureChatDoc STACK: $st');
+    });
     _resolveTitleName();
   }
 
   Future<void> _ensureChatDoc() async {
+    if (widget.otherUserId.trim().isEmpty) {
+      debugPrint('[Chat] ensureChatDoc missing otherUserId');
+      throw Exception('Missing otherUserId for chat');
+    }
     final ref = FirebaseFirestore.instance.collection('chats').doc(_chatId);
+    final users = [_me, widget.otherUserId]..sort();
+    debugPrint('[Chat] ensureChatDoc set start users=$users');
     await ref.set({
-      'users': FieldValue.arrayUnion([_me, widget.otherUserId]),
-      'participants': FieldValue.arrayUnion([_me, widget.otherUserId]),
+      'users': users,
+      'participants': users,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+    debugPrint('[Chat] ensureChatDoc set done chatId=$_chatId');
   }
 
   Future<void> _resolveTitleName() async {
@@ -150,6 +176,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _inputCtrl.clear();
 
     await _ready;
+    debugPrint('[Chat] sendText ready OK');
 
     final now = Timestamp.now();
     final chatRef = FirebaseFirestore.instance.collection('chats').doc(_chatId);
@@ -162,7 +189,13 @@ class _ChatScreenState extends State<ChatScreen> {
     });
 
     await InteractionService.recordInteraction(widget.otherUserId);
-    await chatRef.set({'updatedAt': now}, SetOptions(merge: true));
+    await chatRef.set({
+      'updatedAt': now,
+      'lastMessageAt': now,
+      'lastMessageAuthorId': _me,
+      'lastMessageType': 'text',
+    }, SetOptions(merge: true));
+    debugPrint('[Chat] sendText done');
   }
 
   Future<void> _pickAttachment() async {
@@ -202,13 +235,23 @@ class _ChatScreenState extends State<ChatScreen> {
           imageQuality: 92,
           maxWidth: 2000,
         );
-        if (x != null) await _uploadAndSend(x, isImage: true);
+        if (x != null && mounted) {
+          setState(() {
+            _pendingAttachment = x;
+            _pendingIsImage = true;
+          });
+        }
       } else if (action == 'video') {
         final x = await _picker.pickVideo(
           source: ImageSource.gallery,
           maxDuration: const Duration(minutes: 3),
         );
-        if (x != null) await _uploadAndSend(x, isImage: false);
+        if (x != null && mounted) {
+          setState(() {
+            _pendingAttachment = x;
+            _pendingIsImage = false;
+          });
+        }
       }
     } catch (e) {
       if (!mounted) return;
@@ -218,8 +261,24 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _sendPendingAttachment() async {
+    final x = _pendingAttachment;
+    if (x == null) return;
+    try {
+      await _uploadAndSend(x, isImage: _pendingIsImage);
+      if (!mounted) return;
+      setState(() => _pendingAttachment = null);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Couldn’t send attachment: $e')),
+      );
+    }
+  }
+
   Future<void> _uploadAndSend(XFile x, {required bool isImage}) async {
     await _ready;
+    debugPrint('[Chat] upload ready OK isImage=$isImage');
     setState(() => _sending = true);
     try {
       final bytes = await x.readAsBytes();
@@ -235,6 +294,7 @@ class _ChatScreenState extends State<ChatScreen> {
         bytes,
         SettableMetadata(contentType: mime),
       );
+      debugPrint('[Chat] upload putData done path=${ref.fullPath}');
 
       final url = await task.ref.getDownloadURL();
 
@@ -251,8 +311,15 @@ class _ChatScreenState extends State<ChatScreen> {
       });
 
       await InteractionService.recordInteraction(widget.otherUserId);
-      await chatRef
-          .set({'updatedAt': Timestamp.now()}, SetOptions(merge: true));
+      final now = Timestamp.now();
+      await chatRef.set({
+        'updatedAt': now,
+        'lastMessageAt': now,
+        'lastMessageAuthorId': _me,
+        'lastMessageType': isImage ? 'image' : 'video',
+      }, SetOptions(merge: true));
+      debugPrint(
+          '[Chat] uploadAndSend done type=${isImage ? 'image' : 'video'}');
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -336,6 +403,18 @@ class _ChatScreenState extends State<ChatScreen> {
             if (s.connectionState != ConnectionState.done) {
               return const Center(child: CircularProgressIndicator());
             }
+            if (s.hasError) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Text(
+                    'Chat could not initialize. Please reopen this chat.\n${s.error}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: AppColors.muted),
+                  ),
+                ),
+              );
+            }
             return StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
                   .collection('chats')
@@ -361,6 +440,21 @@ class _ChatScreenState extends State<ChatScreen> {
                     sending: _sending,
                     onAttach: _pickAttachment,
                     onSend: _sendText,
+                    pendingAttachmentName: _pendingAttachment == null
+                        ? null
+                        : p.basename(_pendingAttachment!.path),
+                    pendingAttachmentType: _pendingAttachment == null
+                        ? null
+                        : (_pendingIsImage ? 'Photo' : 'Video'),
+                    pendingAttachmentPath: _pendingAttachment == null
+                        ? null
+                        : _pendingAttachment!.path,
+                    pendingIsImage:
+                        _pendingAttachment == null ? null : _pendingIsImage,
+                    onClearPending: () {
+                      setState(() => _pendingAttachment = null);
+                    },
+                    onSendPending: _sendPendingAttachment,
                   ),
                   customMessageBuilder: (message, {required int messageWidth}) {
                     if (message is types.CustomMessage) {
@@ -388,82 +482,260 @@ class _Composer extends StatelessWidget {
   final bool sending;
   final VoidCallback onAttach;
   final ValueChanged<String> onSend;
+  final String? pendingAttachmentName;
+  final String? pendingAttachmentType;
+  final String? pendingAttachmentPath;
+  final bool? pendingIsImage;
+  final VoidCallback onClearPending;
+  final VoidCallback onSendPending;
 
   const _Composer({
     required this.controller,
     required this.sending,
     required this.onAttach,
     required this.onSend,
+    required this.pendingAttachmentName,
+    required this.pendingAttachmentType,
+    required this.pendingAttachmentPath,
+    required this.pendingIsImage,
+    required this.onClearPending,
+    required this.onSendPending,
   });
 
   @override
   Widget build(BuildContext context) {
+    final hasPending = (pendingAttachmentPath ?? '').isNotEmpty;
     return SafeArea(
       top: false,
       minimum: const EdgeInsets.fromLTRB(12, 6, 12, 12),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          InkWell(
-            onTap: sending ? null : onAttach,
-            borderRadius: BorderRadius.circular(14),
-            child: Container(
-              width: 46,
-              height: 46,
-              alignment: Alignment.center,
+          if (hasPending)
+            Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
                 color: AppColors.button,
                 border: Border.all(color: AppColors.border),
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.add, color: AppColors.primary),
+              child: Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: AspectRatio(
+                      aspectRatio: 4 / 3,
+                      child: (pendingIsImage == true)
+                          ? Image.file(
+                              File(pendingAttachmentPath!),
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) => Container(
+                                color: AppColors.canvas,
+                                alignment: Alignment.center,
+                                child: const Icon(
+                                  Icons.broken_image,
+                                  color: AppColors.muted,
+                                  size: 28,
+                                ),
+                              ),
+                            )
+                          : _LocalVideoPreview(path: pendingAttachmentPath!),
+                    ),
+                  ),
+                  Positioned(
+                    right: 6,
+                    top: 6,
+                    child: InkWell(
+                      onTap: sending ? null : onClearPending,
+                      borderRadius: BorderRadius.circular(14),
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        decoration: const BoxDecoration(
+                          color: Colors.black54,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.close,
+                            color: Colors.white, size: 16),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              decoration: BoxDecoration(
-                color: AppColors.button,
-                border: Border.all(color: AppColors.border),
+          Row(
+            children: [
+              InkWell(
+                onTap: sending ? null : onAttach,
                 borderRadius: BorderRadius.circular(14),
+                child: Container(
+                  width: 46,
+                  height: 46,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: AppColors.button,
+                    border: Border.all(color: AppColors.border),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(Icons.add, color: AppColors.primary),
+                ),
               ),
-              child: ConstrainedBox(
-                constraints:
-                    const BoxConstraints(minHeight: 46, maxHeight: 140),
-                child: TextField(
-                  controller: controller,
-                  maxLines: null,
-                  keyboardType: TextInputType.multiline,
-                  style: const TextStyle(color: Colors.black, fontSize: 16),
-                  decoration: const InputDecoration(
-                    isCollapsed: true,
-                    hintText: 'Message',
-                    hintStyle: TextStyle(color: AppColors.muted),
-                    border: InputBorder.none,
+              const SizedBox(width: 8),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: AppColors.button,
+                    border: Border.all(color: AppColors.border),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: ConstrainedBox(
+                    constraints:
+                        const BoxConstraints(minHeight: 46, maxHeight: 140),
+                    child: TextField(
+                      controller: controller,
+                      maxLines: null,
+                      keyboardType: TextInputType.multiline,
+                      style: const TextStyle(color: Colors.black, fontSize: 16),
+                      decoration: const InputDecoration(
+                        isCollapsed: true,
+                        hintText: 'Message',
+                        hintStyle: TextStyle(color: AppColors.muted),
+                        border: InputBorder.none,
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          ElevatedButton(
-            onPressed: sending
-                ? null
-                : () {
-                    final t = controller.text.trim();
-                    if (t.isNotEmpty) onSend(t);
-                  },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              minimumSize: const Size(52, 46),
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14)),
-            ),
-            child: const Icon(Icons.send_rounded, size: 20),
+              const SizedBox(width: 8),
+              ElevatedButton(
+                onPressed: sending
+                    ? null
+                    : () {
+                        if (hasPending) {
+                          onSendPending();
+                          return;
+                        }
+                        final t = controller.text.trim();
+                        if (t.isNotEmpty) onSend(t);
+                      },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(52, 46),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                ),
+                child: const Icon(Icons.send_rounded, size: 20),
+              ),
+            ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _LocalVideoPreview extends StatefulWidget {
+  final String path;
+
+  const _LocalVideoPreview({required this.path});
+
+  @override
+  State<_LocalVideoPreview> createState() => _LocalVideoPreviewState();
+}
+
+class _LocalVideoPreviewState extends State<_LocalVideoPreview> {
+  VideoPlayerController? _controller;
+  bool _failed = false;
+  bool _playing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    try {
+      final c = VideoPlayerController.file(File(widget.path));
+      await c.initialize();
+      await c.setLooping(false);
+      await c.pause();
+      if (!mounted) {
+        c.dispose();
+        return;
+      }
+      setState(() => _controller = c);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _failed = true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_failed) {
+      return Container(
+        color: AppColors.canvas,
+        alignment: Alignment.center,
+        child: const Icon(Icons.videocam_off_outlined,
+            color: AppColors.muted, size: 30),
+      );
+    }
+
+    final c = _controller;
+    if (c == null || !c.value.isInitialized) {
+      return Container(
+        color: AppColors.canvas,
+        alignment: Alignment.center,
+        child: const SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTap: () async {
+        if (!c.value.isInitialized) return;
+        if (c.value.isPlaying) {
+          await c.pause();
+          if (mounted) setState(() => _playing = false);
+        } else {
+          await c.play();
+          if (mounted) setState(() => _playing = true);
+        }
+      },
+      child: Container(
+        color: AppColors.canvas,
+        child: Stack(
+          children: [
+            Center(
+              child: AspectRatio(
+                aspectRatio:
+                    c.value.aspectRatio == 0 ? (16 / 9) : c.value.aspectRatio,
+                child: VideoPlayer(c),
+              ),
+            ),
+            if (!_playing || !c.value.isPlaying)
+              const Positioned.fill(
+                child: Center(
+                  child: Icon(Icons.play_circle_fill_rounded,
+                      color: Colors.white70, size: 54),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

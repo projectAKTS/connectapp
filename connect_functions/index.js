@@ -539,6 +539,8 @@ exports.onCallInviteCreated = onDocumentCreated(
       channel: `${channel}`,
       isVideo: `${Boolean(isVideo)}`,
       fromName: `${fromName || "Caller"}`,
+      fromUid: `${d.fromUid || ""}`,
+      toUid: `${toUid}`,
       callId: event.params.inviteId || `${channel}`,
     };
 
@@ -590,7 +592,12 @@ exports.onChatMessageCreated = onDocumentCreated(
       if (!tokens.length) continue;
       await sendToTokens(tokens, {
         notification: { title: fromName, body },
-        data: { type: "chat_message", chatId },
+        data: {
+          type: "chat_message",
+          chatId,
+          authorId: `${authorId}`,
+          otherUserId: `${authorId}`,
+        },
       });
     }
   }

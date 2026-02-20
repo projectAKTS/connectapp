@@ -42,6 +42,24 @@ import 'theme/theme.dart';
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 late final NotificationService notificationService;
 
+class _RouteLogger extends NavigatorObserver {
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    debugPrint(
+      '[Route] push: ${route.settings.name ?? route.runtimeType} <- ${previousRoute?.settings.name ?? previousRoute?.runtimeType}',
+    );
+    super.didPush(route, previousRoute);
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    debugPrint(
+      '[Route] pop: ${route.settings.name ?? route.runtimeType} -> ${previousRoute?.settings.name ?? previousRoute?.runtimeType}',
+    );
+    super.didPop(route, previousRoute);
+  }
+}
+
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {}
 
@@ -187,6 +205,7 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: navigatorKey,
+      navigatorObservers: [_RouteLogger()],
       title: 'Connect App',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
@@ -268,6 +287,7 @@ class _MyAppState extends State<MyApp> {
         if (settings.name == '/chat') {
           final args = settings.arguments as Map<String, dynamic>?;
           if (args == null) return null;
+          debugPrint('[Route:/chat] args=$args');
 
           return MaterialPageRoute(
             builder: (_) => FullScreenBackGesture(

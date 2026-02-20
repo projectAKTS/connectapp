@@ -1,0 +1,35 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Chat attachments
+    match /chats/{chatId}/{allPaths=**} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Post media
+    match /post_images/{allPaths=**} {
+      allow read, write: if isSignedIn();
+    }
+    match /post_videos/{allPaths=**} {
+      allow read, write: if isSignedIn();
+    }
+    match /post_video_thumbs/{allPaths=**} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Profile photos
+    match /users/{uid}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Deny everything else by default
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

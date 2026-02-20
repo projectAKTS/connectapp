@@ -32,8 +32,10 @@ class NotificationService {
   bool _initialized = false;
   StreamSubscription<String>? _tokenSub;
   StreamSubscription<CallEvent?>? _callkitSub;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _inviteSub;
   final Uuid _uuid = const Uuid();
   bool _openingCallScreen = false;
+  final Set<String> _handledCallInviteIds = <String>{};
 
   /// Call once after Firebase is initialized and user signed in.
   Future<void> initialize() async {
@@ -117,6 +119,7 @@ class NotificationService {
 
     // iOS CallKit events
     _bindCallkitEvents();
+    _bindInviteListener();
     if (Platform.isIOS) {
       try {
         final voipToken = await FlutterCallkitIncoming.getDevicePushTokenVoIP();
@@ -158,6 +161,8 @@ class NotificationService {
     _tokenSub = null;
     await _callkitSub?.cancel();
     _callkitSub = null;
+    await _inviteSub?.cancel();
+    _inviteSub = null;
   }
 
   void _bindCallkitEvents() {
@@ -170,6 +175,8 @@ class NotificationService {
       final fromName = _stringField(extra, body, 'fromName', fallback: 'Caller');
       final isVideo = _boolField(extra, body, 'isVideo');
       final id = _stringField(extra, body, 'id', fallback: channel);
+      final fromUid = _stringField(extra, body, 'fromUid');
+      final inviteId = _stringField(extra, body, 'inviteId', fallback: id);
 
       if (event.event == Event.actionDidUpdateDevicePushTokenVoip) {
         final token = _stringField(extra, body, 'deviceToken');
@@ -184,7 +191,13 @@ class NotificationService {
             await FlutterCallkitIncoming.endCall(id);
           } catch (_) {}
         }
-        _pushCallScreen(channel: channel, isVideo: isVideo, fromName: fromName);
+        _pushCallScreen(
+          channel: channel,
+          isVideo: isVideo,
+          fromName: fromName,
+          fromUid: fromUid,
+          inviteId: inviteId,
+        );
       }
       if (event.event == Event.actionCallDecline ||
           event.event == Event.actionCallEnded ||
@@ -193,6 +206,71 @@ class NotificationService {
           try {
             await FlutterCallkitIncoming.endCall(id);
           } catch (_) {}
+        }
+      }
+    });
+  }
+
+  void _bindInviteListener() {
+    _inviteSub?.cancel();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || uid.isEmpty) return;
+
+    _inviteSub = FirebaseFirestore.instance
+        .collection('callInvites')
+        .where('toUid', isEqualTo: uid)
+        .where('status', isEqualTo: 'ringing')
+        .snapshots()
+        .listen((snapshot) async {
+      for (final change in snapshot.docChanges) {
+        if (change.type != DocumentChangeType.added) continue;
+        final id = change.doc.id;
+        if (_handledCallInviteIds.contains(id)) continue;
+
+        final data = change.doc.data() ?? const <String, dynamic>{};
+        final status = (data['status'] ?? '').toString();
+        if (status.isNotEmpty && status != 'ringing') continue;
+        final createdAt = data['createdAt'];
+        final created = createdAt is Timestamp ? createdAt.toDate() : null;
+        if (created != null &&
+            DateTime.now().difference(created) > const Duration(minutes: 2)) {
+          continue;
+        }
+
+        final channel = (data['channel'] ?? '').toString();
+        if (channel.isEmpty) continue;
+        final isVideo = data['isVideo'] == true;
+        final fromName = (data['fromName'] ?? 'Caller').toString();
+        final fromUid = (data['fromUid'] ?? '').toString();
+
+        _handledCallInviteIds.add(id);
+
+        if (Platform.isIOS) {
+          await _showIncomingCallKit(
+            channel: channel,
+            isVideo: isVideo,
+            fromName: fromName,
+            fromUid: fromUid,
+            inviteId: id,
+          );
+        } else {
+          await _local.show(
+            1000,
+            isVideo ? 'Incoming Video Call' : 'Incoming Audio Call',
+            'From $fromName',
+            NotificationDetails(
+              android: AndroidNotificationDetails(
+                _androidChannel.id,
+                _androidChannel.name,
+                channelDescription: _androidChannel.description,
+                importance: Importance.max,
+                priority: Priority.high,
+              ),
+              iOS: const DarwinNotificationDetails(
+                  categoryIdentifier: 'INCOMING_CALL'),
+            ),
+            payload: 'incoming_call|$channel|$isVideo|$fromName',
+          );
         }
       }
     });
@@ -258,6 +336,12 @@ class NotificationService {
       final channel = (data['channel'] ?? '') as String;
       final isVideo = (data['isVideo'] ?? 'false').toString() == 'true';
       final fromName = (data['fromName'] ?? 'Caller') as String;
+      final fromUid = (data['fromUid'] ?? '').toString();
+      final callId = (data['callId'] ?? channel).toString();
+      if (callId.isNotEmpty && _handledCallInviteIds.contains(callId)) {
+        return;
+      }
+      if (callId.isNotEmpty) _handledCallInviteIds.add(callId);
       final payload = 'incoming_call|$channel|$isVideo|$fromName';
 
       if (showLocal) {
@@ -266,6 +350,8 @@ class NotificationService {
             channel: channel,
             isVideo: isVideo,
             fromName: fromName,
+            fromUid: fromUid,
+            inviteId: callId,
           );
         } else {
           await _local.show(
@@ -295,7 +381,13 @@ class NotificationService {
           );
         }
       } else {
-        _pushCallScreen(channel: channel, isVideo: isVideo, fromName: fromName);
+        _pushCallScreen(
+          channel: channel,
+          isVideo: isVideo,
+          fromName: fromName,
+          fromUid: fromUid,
+          inviteId: callId,
+        );
       }
       return;
     }
@@ -366,9 +458,13 @@ class NotificationService {
     required String channel,
     required bool isVideo,
     required String fromName,
+    String? fromUid,
+    String? inviteId,
   }) {
     final nav = navigatorKey?.currentState;
     if (nav == null || _openingCallScreen) return;
+    final normalizedFromUid = (fromUid ?? '').trim();
+    final normalizedInviteId = (inviteId ?? '').trim();
     _openingCallScreen = true;
     nav.push(
       MaterialPageRoute(
@@ -377,6 +473,9 @@ class NotificationService {
           channelName: channel,
           isVideo: isVideo,
           otherUserName: fromName,
+          otherUserId: normalizedFromUid.isEmpty ? null : normalizedFromUid,
+          inviteId: normalizedInviteId.isEmpty ? null : normalizedInviteId,
+          isCaller: false,
         ),
       ),
     ).whenComplete(() {
@@ -399,8 +498,12 @@ class NotificationService {
     required String channel,
     required bool isVideo,
     required String fromName,
+    String? fromUid,
+    String? inviteId,
   }) async {
-    final id = channel.isNotEmpty ? channel : _uuid.v4();
+    final id = (inviteId != null && inviteId.trim().isNotEmpty)
+        ? inviteId.trim()
+        : (channel.isNotEmpty ? channel : _uuid.v4());
     final params = CallKitParams(
       id: id,
       nameCaller: fromName,
@@ -415,9 +518,12 @@ class NotificationService {
         'channel': channel,
         'isVideo': isVideo,
         'fromName': fromName,
+        'fromUid': fromUid ?? '',
+        'inviteId': inviteId ?? '',
       },
       ios: IOSParams(
-        iconName: 'AppIcon',
+        // Must be a regular image asset name, not AppIcon appiconset.
+        iconName: 'LaunchImage',
         handleType: 'generic',
         supportsVideo: isVideo,
         supportsDTMF: false,

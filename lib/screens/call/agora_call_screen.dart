@@ -6,6 +6,7 @@ import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:connect_app/theme/tokens.dart';
 import '/services/interaction_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
 const String appId = 'dac900a04a87460c87c3d18b63cac65d';
@@ -35,12 +36,18 @@ class AgoraCallScreen extends StatefulWidget {
   final String channelName;
   final bool isVideo;
   final String otherUserName;
+  final String? otherUserId;
+  final String? inviteId;
+  final bool isCaller;
 
   const AgoraCallScreen({
     Key? key,
     required this.channelName,
     required this.isVideo,
     required this.otherUserName,
+    this.otherUserId,
+    this.inviteId,
+    this.isCaller = false,
   }) : super(key: key);
 
   @override
@@ -67,6 +74,8 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   Offset _pipPos = const Offset(12, 120); // PiP top-left corner
 
   Timer? _ringTimeout;
+  bool _remoteEverJoined = false;
+  bool _missedLogged = false;
 
   @override
   void initState() {
@@ -117,13 +126,27 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
             _ringTimeout = Timer(const Duration(seconds: 35), () {
               if (!mounted) return;
               if (_remoteUid == null && !_ended) {
+                _recordMissedCall(reason: 'timeout');
                 setState(() => _fatalError = 'User unavailable');
               }
             });
           },
           onUserJoined: (RtcConnection connection, int uid, int elapsed) async {
           _ringTimeout?.cancel();
+          _remoteEverJoined = true;
           setState(() => _remoteUid = uid);
+
+          if ((widget.inviteId ?? '').isNotEmpty) {
+            try {
+              await FirebaseFirestore.instance
+                  .collection('callInvites')
+                  .doc(widget.inviteId!)
+                  .set({
+                'status': 'connected',
+                'connectedAt': FieldValue.serverTimestamp(),
+              }, SetOptions(merge: true));
+            } catch (_) {}
+          }
 
           // 👇 Add this
           final me = FirebaseAuth.instance.currentUser?.uid;
@@ -139,6 +162,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
           onUserOffline: (RtcConnection connection, int uid, UserOfflineReasonType r) {
             // Remote hung up/declined
+            if (!_remoteEverJoined) {
+              _recordMissedCall(reason: 'declined_or_unavailable');
+            }
             setState(() {
               _remoteUid = null;
               _fatalError = 'User declined or unavailable';
@@ -171,6 +197,59 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  String _chatIdFor(String a, String b) {
+    final ids = [a, b]..sort();
+    return ids.join('_');
+  }
+
+  Future<void> _recordMissedCall({required String reason}) async {
+    if (_missedLogged || !widget.isCaller) return;
+    final other = (widget.otherUserId ?? '').trim();
+    final me = FirebaseAuth.instance.currentUser?.uid;
+    if (me == null || other.isEmpty || me == other) return;
+
+    _missedLogged = true;
+    final now = Timestamp.now();
+    final chatId = _chatIdFor(me, other);
+    final chatRef = FirebaseFirestore.instance.collection('chats').doc(chatId);
+    final callText = widget.isVideo ? 'Missed video call' : 'Missed audio call';
+
+    try {
+      await chatRef.set({
+        'users': FieldValue.arrayUnion([me, other]),
+        'participants': FieldValue.arrayUnion([me, other]),
+        'updatedAt': now,
+        'lastMessageAt': now,
+        'lastMessageAuthorId': me,
+        'lastMessageType': 'missed_call',
+        'createdAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      await chatRef.collection('messages').add({
+        'authorId': me,
+        'createdAt': now,
+        'type': 'text',
+        'text': callText,
+        'system': true,
+        'callStatus': 'missed',
+        'callReason': reason,
+        'channel': widget.channelName,
+      });
+
+      final inviteId = (widget.inviteId ?? '').trim();
+      if (inviteId.isNotEmpty) {
+        await FirebaseFirestore.instance
+            .collection('callInvites')
+            .doc(inviteId)
+            .set({
+          'status': 'missed',
+          'missedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+      await InteractionService.recordInteraction(other);
+    } catch (_) {}
   }
 
   Future<void> _ensurePermission(Permission permission, String label) async {

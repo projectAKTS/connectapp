@@ -131,11 +131,88 @@ service cloud.firestore {
           || resource.data.toUid == request.auth.uid);
     }
 
+    // ✅ Chats
+    match /chats/{chatId} {
+      allow create: if isSignedIn() && (
+        (request.resource.data.keys().hasAny(['participants']) &&
+          request.resource.data.participants is list &&
+          request.resource.data.participants.hasAny([request.auth.uid])) ||
+        (request.resource.data.keys().hasAny(['users']) &&
+          request.resource.data.users is list &&
+          request.resource.data.users.hasAny([request.auth.uid]))
+      );
+
+      allow read: if isSignedIn() && (
+        (resource.data.keys().hasAny(['participants']) &&
+          resource.data.participants is list &&
+          resource.data.participants.hasAny([request.auth.uid])) ||
+        (resource.data.keys().hasAny(['users']) &&
+          resource.data.users is list &&
+          resource.data.users.hasAny([request.auth.uid]))
+      );
+
+      // Allow migration updates for legacy chat docs by checking either
+      // current data OR the incoming updated data.
+      allow update: if isSignedIn() && (
+        (resource.data.keys().hasAny(['participants']) &&
+          resource.data.participants is list &&
+          resource.data.participants.hasAny([request.auth.uid])) ||
+        (resource.data.keys().hasAny(['users']) &&
+          resource.data.users is list &&
+          resource.data.users.hasAny([request.auth.uid])) ||
+        (request.resource.data.keys().hasAny(['participants']) &&
+          request.resource.data.participants is list &&
+          request.resource.data.participants.hasAny([request.auth.uid])) ||
+        (request.resource.data.keys().hasAny(['users']) &&
+          request.resource.data.users is list &&
+          request.resource.data.users.hasAny([request.auth.uid]))
+      );
+
+      allow delete: if isSignedIn() && (
+        (resource.data.keys().hasAny(['participants']) &&
+          resource.data.participants is list &&
+          resource.data.participants.hasAny([request.auth.uid])) ||
+        (resource.data.keys().hasAny(['users']) &&
+          resource.data.users is list &&
+          resource.data.users.hasAny([request.auth.uid]))
+      );
+
+      // ✅ Chat messages
+      match /messages/{messageId} {
+        allow read: if isSignedIn() && (
+          (get(/databases/$(database)/documents/chats/$(chatId)).data.keys().hasAny(['participants']) &&
+            get(/databases/$(database)/documents/chats/$(chatId)).data.participants is list &&
+            get(/databases/$(database)/documents/chats/$(chatId)).data.participants.hasAny([request.auth.uid])) ||
+          (get(/databases/$(database)/documents/chats/$(chatId)).data.keys().hasAny(['users']) &&
+            get(/databases/$(database)/documents/chats/$(chatId)).data.users is list &&
+            get(/databases/$(database)/documents/chats/$(chatId)).data.users.hasAny([request.auth.uid]))
+        );
+
+        allow create: if isSignedIn()
+          && request.resource.data.authorId == request.auth.uid
+          && (
+            (get(/databases/$(database)/documents/chats/$(chatId)).data.keys().hasAny(['participants']) &&
+              get(/databases/$(database)/documents/chats/$(chatId)).data.participants is list &&
+              get(/databases/$(database)/documents/chats/$(chatId)).data.participants.hasAny([request.auth.uid])) ||
+            (get(/databases/$(database)/documents/chats/$(chatId)).data.keys().hasAny(['users']) &&
+              get(/databases/$(database)/documents/chats/$(chatId)).data.users is list &&
+              get(/databases/$(database)/documents/chats/$(chatId)).data.users.hasAny([request.auth.uid]))
+          );
+
+        allow update, delete: if isSignedIn()
+          && resource.data.authorId == request.auth.uid;
+      }
+    }
+
     // ✅ Connections (both schemas supported)
     match /connections/{connectionId} {
       allow create: if isConnectionParticipant(request.resource.data);
       allow read: if isConnectionParticipant(resource.data);
-      allow update, delete: if isConnectionParticipant(resource.data);
+      // Allow legacy connection docs to be migrated by accepting updates
+      // when the user is participant in either current OR incoming data.
+      allow update: if isConnectionParticipant(resource.data)
+        || isConnectionParticipant(request.resource.data);
+      allow delete: if isConnectionParticipant(resource.data);
     }
     
     // ✅ Consultations

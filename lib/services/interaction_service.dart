@@ -16,24 +16,39 @@ class InteractionService {
     final docId = ids.join('_');
     final ref = _db.collection('connections').doc(docId);
 
-    print('[InteractionService] Trying to record connection between $me and $otherUserId');
+    print(
+        '[InteractionService] Trying to record connection between $me and $otherUserId');
 
-    await _db.runTransaction((txn) async {
-      final existing = await txn.get(ref);
-      if (existing.exists) {
-        print('[InteractionService] Updating existing connection: $docId');
-        txn.update(ref, {'connectedAt': FieldValue.serverTimestamp()});
-      } else {
-        print('[InteractionService] Creating new connection: $docId');
-        txn.set(ref, {
-          'userId': me,
-          'connectedUserId': otherUserId,
-          'users': ids,
-          'connectedAt': FieldValue.serverTimestamp(),
-        });
-      }
-    }).catchError((e) {
-      print('[InteractionService] ERROR: $e');
-    });
+    try {
+      await _db.runTransaction((txn) async {
+        final existing = await txn.get(ref);
+        if (existing.exists) {
+          print('[InteractionService] Updating existing connection: $docId');
+          txn.update(ref, {
+            'userId': me,
+            'connectedUserId': otherUserId,
+            'users': ids,
+            'connectedAt': FieldValue.serverTimestamp(),
+          });
+        } else {
+          print('[InteractionService] Creating new connection: $docId');
+          txn.set(ref, {
+            'userId': me,
+            'connectedUserId': otherUserId,
+            'users': ids,
+            'connectedAt': FieldValue.serverTimestamp(),
+          });
+        }
+      });
+    } catch (e) {
+      print('[InteractionService] TX ERROR: $e');
+      // Fallback write to avoid silently losing connection updates.
+      await ref.set({
+        'userId': me,
+        'connectedUserId': otherUserId,
+        'users': ids,
+        'connectedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
   }
 }

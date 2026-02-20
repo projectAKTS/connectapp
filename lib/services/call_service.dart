@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import 'package:connect_app/screens/call/agora_call_screen.dart';
+import 'package:connect_app/services/interaction_service.dart';
 
 class CallService {
   static String generateChannelName(String uid1, String uid2) {
@@ -39,7 +40,7 @@ class CallService {
 
     final channel = generateChannelName(me.uid, toUid);
 
-    await FirebaseFirestore.instance.collection('callInvites').add({
+    final inviteRef = await FirebaseFirestore.instance.collection('callInvites').add({
       'fromUid': me.uid,
       'fromName': fromName,
       'toUid': toUid,
@@ -50,6 +51,11 @@ class CallService {
       'createdAt': FieldValue.serverTimestamp(),
     });
 
+    // Count call attempts as interaction so Home "My connections" updates.
+    try {
+      await InteractionService.recordInteraction(toUid);
+    } catch (_) {}
+
     if (navigateCaller) {
       final nav = Navigator.of(context, rootNavigator: true);
       // ignore: use_build_context_synchronously
@@ -59,6 +65,9 @@ class CallService {
             channelName: channel,
             isVideo: isVideo,
             otherUserName: toName,
+            otherUserId: toUid,
+            inviteId: inviteRef.id,
+            isCaller: true,
           ),
         ),
       );

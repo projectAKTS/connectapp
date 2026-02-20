@@ -13,6 +13,8 @@ import 'edit_profile_screen.dart';
 import 'package:connect_app/services/call_service.dart';
 import 'package:connect_app/theme/tokens.dart';
 import 'package:connect_app/widgets/full_screen_back_gesture.dart';
+import 'package:connect_app/screens/profile/follow_list_screen.dart';
+import 'package:connect_app/screens/messages/messages_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String userID;
@@ -151,6 +153,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         .doc(widget.userID)
         .collection('userFollowers')
         .doc(cur.uid);
+    final myUserRef =
+        FirebaseFirestore.instance.collection('users').doc(cur.uid);
 
     final previous = isFollowing;
 
@@ -162,9 +166,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       if (previous) {
         await ref.delete();
+        await myUserRef.set({
+          'following': FieldValue.arrayRemove([widget.userID])
+        }, SetOptions(merge: true));
       } else {
         await ref.set({'timestamp': FieldValue.serverTimestamp()},
             SetOptions(merge: true));
+        await myUserRef.set({
+          'following': FieldValue.arrayUnion([widget.userID])
+        }, SetOptions(merge: true));
       }
     } catch (e) {
       setState(() => isFollowing = previous);
@@ -771,11 +781,152 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   // ✅ Account hub (ONLY for current user)
                   if (isCurrentUser) ...[
                     const SizedBox(height: 16),
-                    _sectionTitle('Account'),
+                    _sectionTitle('Social'),
                     _softCard(
                       padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
                       child: Column(
                         children: [
+                          StreamBuilder<QuerySnapshot>(
+                            stream: FirebaseFirestore.instance
+                                .collection('followers')
+                                .doc(widget.userID)
+                                .collection('userFollowers')
+                                .snapshots(),
+                            builder: (context, followersSnap) {
+                              final followersCount =
+                                  followersSnap.data?.docs.length ?? 0;
+                              return _accountRow(
+                                icon: Icons.group_outlined,
+                                title: 'Followers',
+                                subtitle: '$followersCount people',
+                                onTap: () {
+                                  Navigator.of(context).push(
+                                    CupertinoPageRoute(
+                                      builder: (_) => FollowListScreen(
+                                        type: FollowListType.followers,
+                                        userId: widget.userID,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                          const Divider(height: 1, color: AppColors.border),
+                          StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                            stream: FirebaseFirestore.instance
+                                .collection('users')
+                                .doc(widget.userID)
+                                .snapshots(),
+                            builder: (context, meSnap) {
+                              final me = meSnap.data?.data() ??
+                                  const <String, dynamic>{};
+                              final followingCount = (me['following'] is List)
+                                  ? (me['following'] as List).length
+                                  : 0;
+                              return _accountRow(
+                                icon: Icons.person_add_alt_1_outlined,
+                                title: 'Following',
+                                subtitle: '$followingCount people',
+                                onTap: () {
+                                  Navigator.of(context).push(
+                                    CupertinoPageRoute(
+                                      builder: (_) => FollowListScreen(
+                                        type: FollowListType.following,
+                                        userId: widget.userID,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                          const Divider(height: 1, color: AppColors.border),
+                          StreamBuilder<DocumentSnapshot>(
+                            stream: FirebaseFirestore.instance
+                                .collection('users')
+                                .doc(widget.userID)
+                                .snapshots(),
+                            builder: (context, userSnap) {
+                              final d = userSnap.data?.data()
+                                      as Map<String, dynamic>? ??
+                                  const <String, dynamic>{};
+                              final lastSeen = parseFirestoreTimestamp(
+                                  d['lastMessagesSeenAt']);
+
+                              return StreamBuilder<QuerySnapshot>(
+                                stream: FirebaseFirestore.instance
+                                    .collection('chats')
+                                    .where('participants',
+                                        arrayContains: widget.userID)
+                                    .snapshots(),
+                                builder: (context, participantsSnap) {
+                                  return StreamBuilder<QuerySnapshot>(
+                                    stream: FirebaseFirestore.instance
+                                        .collection('chats')
+                                        .where('users',
+                                            arrayContains: widget.userID)
+                                        .snapshots(),
+                                    builder: (context, usersSnap) {
+                                      final merged =
+                                          <String, Map<String, dynamic>>{};
+                                      if (participantsSnap.hasData) {
+                                        for (final doc
+                                            in participantsSnap.data!.docs) {
+                                          merged[doc.id] = (doc.data()
+                                                  as Map<String, dynamic>? ??
+                                              const <String, dynamic>{});
+                                        }
+                                      }
+                                      if (usersSnap.hasData) {
+                                        for (final doc
+                                            in usersSnap.data!.docs) {
+                                          merged[doc.id] = (doc.data()
+                                                  as Map<String, dynamic>? ??
+                                              const <String, dynamic>{});
+                                        }
+                                      }
+
+                                      int unread = 0;
+                                      final conversationCount = merged.length;
+                                      for (final m in merged.values) {
+                                        final updated = parseFirestoreTimestamp(
+                                            m['updatedAt']);
+                                        final author =
+                                            (m['lastMessageAuthorId'] ?? '')
+                                                .toString();
+                                        if (updated == null) continue;
+                                        if (author == widget.userID) continue;
+                                        if (lastSeen == null ||
+                                            updated.isAfter(lastSeen)) {
+                                          unread++;
+                                        }
+                                      }
+
+                                      return _accountRow(
+                                        icon: Icons.chat_bubble_outline_rounded,
+                                        title: 'Messages & missed calls',
+                                        subtitle: conversationCount > 0
+                                            ? '$conversationCount conversations'
+                                            : 'Open conversations',
+                                        badgeCount: unread,
+                                        onTap: () {
+                                          Navigator.of(context).push(
+                                            CupertinoPageRoute(
+                                              builder: (_) => MessagesScreen(
+                                                userId: widget.userID,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      );
+                                    },
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                          const Divider(height: 1, color: AppColors.border),
                           StreamBuilder<DocumentSnapshot>(
                             stream: FirebaseFirestore.instance
                                 .collection('users')

@@ -4,7 +4,6 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:video_player/video_player.dart';
 
 import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/theme/tokens.dart';
@@ -54,7 +53,9 @@ class HomeContentScreen extends StatefulWidget {
 class HomeContentScreenState extends State<HomeContentScreen>
     with AutomaticKeepAliveClientMixin {
   final ScrollController _scroll = ScrollController();
-  final Set<String> _markedUploadFailedIds = {};
+  int _postsReloadTick = 0;
+  int _displayPostsLimit = 30;
+  int _serverPostsLimit = 120;
 
   @override
   void initState() {
@@ -89,7 +90,25 @@ class HomeContentScreenState extends State<HomeContentScreen>
 
   Future<void> _onRefresh() async {
     await _scrollToTop(haptic: true);
+    if (mounted) {
+      setState(() {
+        _postsReloadTick++;
+        _displayPostsLimit = 30;
+        _serverPostsLimit = 120;
+      });
+    }
     await Future.delayed(const Duration(milliseconds: 600));
+  }
+
+  void _loadMorePosts() {
+    if (!mounted) return;
+    setState(() {
+      _displayPostsLimit += 30;
+      // Expand backend query only when local window is close to server cap.
+      if (_displayPostsLimit >= _serverPostsLimit - 10) {
+        _serverPostsLimit += 120;
+      }
+    });
   }
 
   Future<void> _startCall({
@@ -269,7 +288,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
               parent: AlwaysScrollableScrollPhysics(),
             ),
             slivers: [
-              const SliverToBoxAdapter(child: _HomeTopBar()),
+              SliverToBoxAdapter(child: _HomeTopBar(currentUid: currentUid)),
               SliverToBoxAdapter(
                 child: currentUid.isEmpty
                     ? _WelcomeCard(
@@ -304,18 +323,51 @@ class HomeContentScreenState extends State<HomeContentScreen>
               const SliverToBoxAdapter(child: _SectionTitle('Recent posts')),
               SliverToBoxAdapter(
                 child: StreamBuilder<QuerySnapshot>(
+                  key: ValueKey('home_posts_$_postsReloadTick'),
                   stream: FirebaseFirestore.instance
                       .collection('posts')
                       .orderBy('timestamp', descending: true)
+                      .limit(_serverPostsLimit)
                       .snapshots(),
                   builder: (context, snap) {
-                    if (snap.connectionState == ConnectionState.waiting) {
+                    if (snap.connectionState == ConnectionState.waiting &&
+                        !snap.hasData) {
                       return const Padding(
                         padding: EdgeInsets.symmetric(vertical: 24),
                         child: Center(child: CircularProgressIndicator()),
                       );
                     }
-                    if (!snap.hasData || snap.data!.docs.isEmpty) {
+                    if (snap.hasError) {
+                      return Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Could not load posts right now.',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleSmall
+                                  ?.copyWith(color: Colors.red.shade700),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '${snap.error}',
+                              style: const TextStyle(color: AppColors.muted),
+                            ),
+                            const SizedBox(height: 10),
+                            OutlinedButton(
+                              onPressed: () {
+                                setState(() => _postsReloadTick++);
+                              },
+                              child: const Text('Retry'),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                    final docs = snap.data?.docs ?? const [];
+                    if (docs.isEmpty) {
                       return const Padding(
                         padding: EdgeInsets.all(16),
                         child: Text(
@@ -325,7 +377,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
                       );
                     }
 
-                    final posts = snap.data!.docs;
+                    final posts = docs;
 
                     final hasUploadingOwn = posts.any((doc) {
                       final raw = doc.data() as Map<String, dynamic>? ?? {};
@@ -343,40 +395,6 @@ class HomeContentScreenState extends State<HomeContentScreen>
                       return DateTime.now().difference(startedAt) <=
                           const Duration(minutes: 4);
                     });
-
-                    final staleUploads = posts.where((doc) {
-                      final raw = doc.data() as Map<String, dynamic>? ?? {};
-                      final authorId = _extractUserId(raw);
-                      if (authorId != currentUid) return false;
-                      if ((raw['mediaUploadStatus'] ?? '') != 'uploading')
-                        return false;
-                      final started = raw['mediaUploadStartedAt'];
-                      final DateTime? startedAt = started is Timestamp
-                          ? started.toDate()
-                          : (raw['timestamp'] is Timestamp
-                              ? (raw['timestamp'] as Timestamp).toDate()
-                              : null);
-                      if (startedAt == null) return false;
-                      return DateTime.now().difference(startedAt) >
-                          const Duration(minutes: 4);
-                    }).toList();
-
-                    if (staleUploads.isNotEmpty) {
-                      Future.microtask(() {
-                        for (final doc in staleUploads) {
-                          if (_markedUploadFailedIds.contains(doc.id)) continue;
-                          _markedUploadFailedIds.add(doc.id);
-                          FirebaseFirestore.instance
-                              .collection('posts')
-                              .doc(doc.id)
-                              .update({
-                            'mediaUploadStatus': 'failed',
-                            'mediaUploadUpdatedAt':
-                                FieldValue.serverTimestamp(),
-                          });
-                        }
-                      });
-                    }
 
                     final visiblePosts = posts.where((doc) {
                       final raw = doc.data() as Map<String, dynamic>? ?? {};
@@ -396,6 +414,10 @@ class HomeContentScreenState extends State<HomeContentScreen>
                       return true;
                     }).toList();
 
+                    final shownPosts = visiblePosts
+                        .take(_displayPostsLimit)
+                        .toList(growable: false);
+
                     return Column(
                       children: [
                         if (hasUploadingOwn)
@@ -407,13 +429,13 @@ class HomeContentScreenState extends State<HomeContentScreen>
                           physics: const NeverScrollableScrollPhysics(),
                           shrinkWrap: true,
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-                          itemCount: visiblePosts.length,
+                          itemCount: shownPosts.length,
                           separatorBuilder: (_, __) =>
                               const SizedBox(height: 0),
                           itemBuilder: (_, i) {
-                            final raw = visiblePosts[i].data()
-                                    as Map<String, dynamic>? ??
-                                {};
+                            final raw =
+                                shownPosts[i].data() as Map<String, dynamic>? ??
+                                    {};
                             final authorName =
                                 (raw['userName'] ?? 'User') as String;
                             final authorId = _extractUserId(raw);
@@ -460,7 +482,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
                             final isOwnPost = (authorId == currentUid);
 
                             return _PostCell(
-                              postId: visiblePosts[i].id,
+                              postId: shownPosts[i].id,
                               postType: type,
                               authorName: authorName,
                               authorAvatarUrl: avatar,
@@ -510,6 +532,15 @@ class HomeContentScreenState extends State<HomeContentScreen>
                             );
                           },
                         ),
+                        if (shownPosts.length < visiblePosts.length ||
+                            posts.length >= _serverPostsLimit)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
+                            child: OutlinedButton(
+                              onPressed: _loadMorePosts,
+                              child: const Text('Load more'),
+                            ),
+                          ),
                       ],
                     );
                   },
@@ -525,7 +556,8 @@ class HomeContentScreenState extends State<HomeContentScreen>
 
 // ===== Top bar =====
 class _HomeTopBar extends StatelessWidget {
-  const _HomeTopBar({Key? key}) : super(key: key);
+  final String currentUid;
+  const _HomeTopBar({Key? key, required this.currentUid}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -537,23 +569,115 @@ class _HomeTopBar extends StatelessWidget {
         children: [
           Text('Home', style: titleStyle),
           const Spacer(),
-          Container(
-            decoration: BoxDecoration(
-              color: AppColors.chip,
-              borderRadius: BorderRadius.circular(AppRadius.md),
-            ),
-            child: IconButton(
-              icon: const Icon(
-                Icons.chat_bubble_outline_rounded,
-                color: AppColors.primary,
-              ),
-              tooltip: 'Messages',
-              onPressed: () {
-                Navigator.of(context).push(
-                  CupertinoPageRoute(builder: (_) => const MessagesScreen()),
-                );
-              },
-            ),
+          StreamBuilder<DocumentSnapshot>(
+            stream: currentUid.isEmpty
+                ? null
+                : FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(currentUid)
+                    .snapshots(),
+            builder: (context, userSnap) {
+              final data = userSnap.data?.data() as Map<String, dynamic>? ??
+                  const <String, dynamic>{};
+              final lastSeen =
+                  parseFirestoreTimestamp(data['lastMessagesSeenAt']);
+
+              return StreamBuilder<QuerySnapshot>(
+                stream: currentUid.isEmpty
+                    ? null
+                    : FirebaseFirestore.instance
+                        .collection('chats')
+                        .where('participants', arrayContains: currentUid)
+                        .snapshots(),
+                builder: (context, chatSnapParticipants) {
+                  return StreamBuilder<QuerySnapshot>(
+                    stream: currentUid.isEmpty
+                        ? null
+                        : FirebaseFirestore.instance
+                            .collection('chats')
+                            .where('users', arrayContains: currentUid)
+                            .snapshots(),
+                    builder: (context, chatSnapUsers) {
+                      final merged = <String, Map<String, dynamic>>{};
+                      if (chatSnapParticipants.hasData) {
+                        for (final doc in chatSnapParticipants.data!.docs) {
+                          merged[doc.id] =
+                              (doc.data() as Map<String, dynamic>? ??
+                                  const <String, dynamic>{});
+                        }
+                      }
+                      if (chatSnapUsers.hasData) {
+                        for (final doc in chatSnapUsers.data!.docs) {
+                          merged[doc.id] =
+                              (doc.data() as Map<String, dynamic>? ??
+                                  const <String, dynamic>{});
+                        }
+                      }
+
+                      int unread = 0;
+                      for (final m in merged.values) {
+                        final updated = parseFirestoreTimestamp(m['updatedAt']);
+                        final author =
+                            (m['lastMessageAuthorId'] ?? '').toString();
+                        if (updated == null) continue;
+                        if (author == currentUid) continue;
+                        if (lastSeen == null || updated.isAfter(lastSeen)) {
+                          unread++;
+                        }
+                      }
+
+                      return Stack(
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(
+                              color: AppColors.chip,
+                              borderRadius: BorderRadius.circular(AppRadius.md),
+                            ),
+                            child: IconButton(
+                              icon: const Icon(
+                                Icons.chat_bubble_outline_rounded,
+                                color: AppColors.primary,
+                              ),
+                              tooltip: 'Messages',
+                              onPressed: () {
+                                Navigator.of(context).push(
+                                  CupertinoPageRoute(
+                                    builder: (_) => MessagesScreen(
+                                      userId: currentUid,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                          if (unread > 0)
+                            Positioned(
+                              top: 6,
+                              right: 6,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppColors.primary,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  '$unread',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  );
+                },
+              );
+            },
           ),
         ],
       ),
@@ -570,15 +694,6 @@ class _WelcomeCard extends StatelessWidget {
     required this.name,
     required this.onFindHelper,
   });
-
-  Future<void> _markConnectionsSeen(String uid) async {
-    try {
-      await FirebaseFirestore.instance.collection('users').doc(uid).set(
-        {'lastConnectionsSeenAt': FieldValue.serverTimestamp()},
-        SetOptions(merge: true),
-      );
-    } catch (_) {}
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -634,60 +749,97 @@ class _WelcomeCard extends StatelessWidget {
                         .collection('connections')
                         .where('users', arrayContains: uid)
                         .snapshots(),
-                    builder: (context, connSnap) {
-                      int recentCount = 0;
-                      if (connSnap.hasData) {
-                        for (final doc in connSnap.data!.docs) {
-                          final data = doc.data() as Map<String, dynamic>;
-                          final connectedAt =
-                              parseFirestoreTimestamp(data['connectedAt']);
-                          if (connectedAt == null) continue;
-                          if (lastSeen == null ||
-                              connectedAt.isAfter(lastSeen)) {
-                            recentCount++;
-                          }
-                        }
-                      }
+                    builder: (context, usersSnap) {
+                      return StreamBuilder<QuerySnapshot>(
+                        stream: FirebaseFirestore.instance
+                            .collection('connections')
+                            .where('userId', isEqualTo: uid)
+                            .snapshots(),
+                        builder: (context, userIdSnap) {
+                          return StreamBuilder<QuerySnapshot>(
+                            stream: FirebaseFirestore.instance
+                                .collection('connections')
+                                .where('connectedUserId', isEqualTo: uid)
+                                .snapshots(),
+                            builder: (context, connectedUserIdSnap) {
+                              final merged = <String, Map<String, dynamic>>{};
+                              if (usersSnap.hasData) {
+                                for (final doc in usersSnap.data!.docs) {
+                                  merged[doc.id] =
+                                      (doc.data() as Map<String, dynamic>? ??
+                                          const <String, dynamic>{});
+                                }
+                              }
+                              if (userIdSnap.hasData) {
+                                for (final doc in userIdSnap.data!.docs) {
+                                  merged[doc.id] =
+                                      (doc.data() as Map<String, dynamic>? ??
+                                          const <String, dynamic>{});
+                                }
+                              }
+                              if (connectedUserIdSnap.hasData) {
+                                for (final doc
+                                    in connectedUserIdSnap.data!.docs) {
+                                  merged[doc.id] =
+                                      (doc.data() as Map<String, dynamic>? ??
+                                          const <String, dynamic>{});
+                                }
+                              }
 
-                      return Stack(
-                        children: [
-                          _TaupePill(
-                            icon: Icons.people_alt_outlined,
-                            label: 'My connections',
-                            onTap: () async {
-                              await _markConnectionsSeen(uid);
-                              // ignore: use_build_context_synchronously
-                              Navigator.of(context).push(
-                                CupertinoPageRoute(
-                                  builder: (_) => const ConnectionsScreen(),
-                                ),
+                              int recentCount = 0;
+                              for (final data in merged.values) {
+                                final connectedAt = parseFirestoreTimestamp(
+                                    data['connectedAt']);
+                                if (connectedAt == null) continue;
+                                if (lastSeen == null ||
+                                    connectedAt.isAfter(lastSeen)) {
+                                  recentCount++;
+                                }
+                              }
+
+                              return Stack(
+                                children: [
+                                  _TaupePill(
+                                    icon: Icons.people_alt_outlined,
+                                    label: 'My connections',
+                                    onTap: () {
+                                      Navigator.of(context).push(
+                                        CupertinoPageRoute(
+                                          builder: (_) =>
+                                              const ConnectionsScreen(),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  if (recentCount > 0)
+                                    Positioned(
+                                      right: 14,
+                                      top: 10,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.primary,
+                                          borderRadius:
+                                              BorderRadius.circular(12),
+                                        ),
+                                        child: Text(
+                                          '$recentCount',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               );
                             },
-                          ),
-                          if (recentCount > 0)
-                            Positioned(
-                              right: 14,
-                              top: 10,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: AppColors.primary,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  '$recentCount',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
+                          );
+                        },
                       );
                     },
                   );
@@ -1350,7 +1502,7 @@ class _MediaImage extends StatelessWidget {
   }
 }
 
-class _InlineVideoPlayer extends StatefulWidget {
+class _InlineVideoPlayer extends StatelessWidget {
   final String url;
   final String thumbUrl;
   final double aspect;
@@ -1364,88 +1516,28 @@ class _InlineVideoPlayer extends StatefulWidget {
   });
 
   @override
-  State<_InlineVideoPlayer> createState() => _InlineVideoPlayerState();
-}
-
-class _InlineVideoPlayerState extends State<_InlineVideoPlayer> {
-  late final VideoPlayerController _controller;
-  bool _ready = false;
-  bool _failed = false;
-  bool _muted = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.url));
-    _controller
-      ..setLooping(true)
-      ..setVolume(0.0);
-    _initVideo();
-  }
-
-  Future<void> _initVideo() async {
-    try {
-      await _controller.initialize();
-      if (!mounted) return;
-      setState(() {
-        _ready = true;
-        _failed = false;
-      });
-      _controller.play();
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _failed = true);
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final fallbackAspect = widget.aspect > 0 ? widget.aspect : (16 / 9);
-    final aspect = _ready && _controller.value.isInitialized
-        ? _controller.value.aspectRatio
-        : fallbackAspect;
+    final aspect = this.aspect > 0 ? this.aspect : (16 / 9);
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(14),
       child: AspectRatio(
-        aspectRatio: (aspect.isFinite && aspect > 0) ? aspect : fallbackAspect,
+        aspectRatio: (aspect.isFinite && aspect > 0) ? aspect : (16 / 9),
         child: InkWell(
-          onTap: widget.onTap,
+          onTap: onTap,
           child: Stack(
             fit: StackFit.expand,
             children: [
-              if (_ready)
-                FittedBox(
-                  fit: BoxFit.cover,
-                  child: SizedBox(
-                    width: _controller.value.size.width,
-                    height: _controller.value.size.height,
-                    child: VideoPlayer(_controller),
-                  ),
-                )
-              else if (_failed)
-                Container(
-                  color: AppColors.button,
-                  alignment: Alignment.center,
-                  child: const Icon(Icons.videocam_off_outlined,
-                      color: AppColors.muted, size: 30),
-                )
-              else if (widget.thumbUrl.isNotEmpty)
+              if (thumbUrl.isNotEmpty)
                 Image.network(
-                  widget.thumbUrl,
+                  thumbUrl,
                   fit: BoxFit.cover,
                   loadingBuilder: (c, w, p) =>
                       p == null ? w : Container(color: AppColors.button),
                   errorBuilder: (_, __, ___) => Container(
                     color: AppColors.button,
                     alignment: Alignment.center,
-                    child: const Icon(Icons.play_circle_outline,
+                    child: const Icon(Icons.videocam_outlined,
                         color: AppColors.muted, size: 30),
                   ),
                 )
@@ -1453,91 +1545,18 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> {
                 Container(
                   color: AppColors.button,
                   alignment: Alignment.center,
-                  child: const Icon(Icons.play_circle_outline,
+                  child: const Icon(Icons.videocam_outlined,
                       color: AppColors.muted, size: 30),
                 ),
-              Positioned(
-                right: 8,
-                bottom: 8,
-                child: Material(
-                  color: Colors.black.withOpacity(0.45),
-                  borderRadius: BorderRadius.circular(999),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(999),
-                    onTap: () {
-                      if (!_ready) return;
-                      setState(() => _muted = !_muted);
-                      _controller.setVolume(_muted ? 0.0 : 1.0);
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
-                      child: Icon(
-                        _muted ? Icons.volume_off : Icons.volume_up,
-                        color: Colors.white,
-                        size: 18,
-                      ),
-                    ),
-                  ),
+              const Center(
+                child: Icon(
+                  Icons.play_circle_fill_rounded,
+                  color: Colors.white,
+                  size: 52,
                 ),
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _MediaVideoThumb extends StatelessWidget {
-  final String thumbUrl;
-  final double aspect;
-  final VoidCallback? onPlay;
-
-  const _MediaVideoThumb({
-    required this.thumbUrl,
-    required this.aspect,
-    this.onPlay,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: AspectRatio(
-        aspectRatio: aspect,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (thumbUrl.isNotEmpty)
-              Image.network(
-                thumbUrl,
-                fit: BoxFit.cover,
-                loadingBuilder: (c, w, p) =>
-                    p == null ? w : Container(color: AppColors.button),
-                errorBuilder: (_, __, ___) =>
-                    Container(color: AppColors.button),
-              )
-            else
-              Container(color: AppColors.button),
-            Center(
-              child: InkWell(
-                onTap: onPlay,
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.45),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.play_arrow,
-                    color: Colors.white,
-                    size: 36,
-                  ),
-                ),
-              ),
-            ),
-          ],
         ),
       ),
     );

@@ -22,8 +22,6 @@
 	<string>$(FLUTTER_BUILD_NAME)</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
-
-	<!-- ✅ GOOGLE & APPLE SIGN-IN + STRIPE CALLBACKS -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -31,12 +29,10 @@
 			<string>Editor</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<!-- Google Sign-In scheme -->
 				<string>com.googleusercontent.apps.33757728932-4tif62vov47uhc7mgjg050vpv4hou40b</string>
 			</array>
 		</dict>
 		<dict>
-			<!-- Apple Sign-In scheme -->
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLSchemes</key>
@@ -45,7 +41,6 @@
 			</array>
 		</dict>
 		<dict>
-			<!-- ✅ Stripe PaymentSheet callback -->
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLSchemes</key>
@@ -54,23 +49,17 @@
 			</array>
 		</dict>
 	</array>
-
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
-
-	<!-- ✅ ALLOWED SCHEMES -->
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>google</string>
 		<string>com.googleusercontent.apps.33757728932-4tif62vov47uhc7mgjg050vpv4hou40b</string>
 		<string>com.yakup.helperly</string>
-		<string>connectapp</string> <!-- ✅ added -->
+		<string>connectapp</string>
 	</array>
-
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-
-	<!-- ✅ PERMISSIONS -->
 	<key>NSCameraUsageDescription</key>
 	<string>We use the camera for video calls and photo sharing.</string>
 	<key>NSMicrophoneUsageDescription</key>
@@ -79,24 +68,17 @@
 	<string>We save images and videos you capture in the app.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>We use your photo library to let you choose images to share.</string>
-
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
-
-	<!-- ✅ BACKGROUND MODES -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
 		<string>voip</string>
 	</array>
-
-	<!-- ✅ STORYBOARD SETTINGS -->
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
-
-	<!-- ✅ SUPPORTED ORIENTATIONS -->
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
@@ -110,12 +92,9 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-
-	<!-- ✅ ASSOCIATED DOMAINS -->
 	<key>com.apple.developer.associated-domains</key>
 	<array>
 		<string>webcredentials:connectapp-278b4.firebaseapp.com</string>
 	</array>
-
 </dict>
 </plist>
