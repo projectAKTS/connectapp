@@ -37,6 +37,13 @@ String _shortFromTs(dynamic ts) {
   return _timeAgoShort(dt);
 }
 
+int _asUnreadCount(dynamic raw) {
+  if (raw is int) return raw;
+  if (raw is num) return raw.toInt();
+  if (raw is String) return int.tryParse(raw.trim()) ?? 0;
+  return 0;
+}
+
 // ===== Main screen =====
 class HomeContentScreen extends StatefulWidget {
   final HomeTabController controller;
@@ -581,6 +588,8 @@ class _HomeTopBar extends StatelessWidget {
                   const <String, dynamic>{};
               final lastSeen =
                   parseFirestoreTimestamp(data['lastMessagesSeenAt']);
+              final userUnreadCounter =
+                  _asUnreadCount(data['unreadMessagesCount']);
 
               return StreamBuilder<QuerySnapshot>(
                 stream: currentUid.isEmpty
@@ -614,19 +623,32 @@ class _HomeTopBar extends StatelessWidget {
                         }
                       }
 
-                      int unread = 0;
-                      for (final m in merged.values) {
-                        final updated = parseFirestoreTimestamp(m['updatedAt']);
-                        final author =
-                            (m['lastMessageAuthorId'] ?? '').toString();
-                        if (updated == null) continue;
-                        if (author == currentUid) continue;
-                        if (lastSeen == null || updated.isAfter(lastSeen)) {
-                          unread++;
+                      var unread = userUnreadCounter;
+                      if (unread <= 0) {
+                        for (final m in merged.values) {
+                          final unreadBy = m['unreadBy'];
+                          if (unreadBy is Map) {
+                            final value = _asUnreadCount(unreadBy[currentUid]);
+                            if (value > 0) {
+                              unread += value;
+                              continue;
+                            }
+                          }
+                          final updated =
+                              parseFirestoreTimestamp(m['updatedAt']) ??
+                                  parseFirestoreTimestamp(m['lastMessageAt']);
+                          final author =
+                              (m['lastMessageAuthorId'] ?? '').toString();
+                          if (updated != null &&
+                              author != currentUid &&
+                              (lastSeen == null || updated.isAfter(lastSeen))) {
+                            unread += 1;
+                          }
                         }
                       }
 
                       return Stack(
+                        clipBehavior: Clip.none,
                         children: [
                           Container(
                             decoration: BoxDecoration(
@@ -652,8 +674,8 @@ class _HomeTopBar extends StatelessWidget {
                           ),
                           if (unread > 0)
                             Positioned(
-                              top: 6,
-                              right: 6,
+                              top: -2,
+                              right: -2,
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 6, vertical: 2),
@@ -662,7 +684,7 @@ class _HomeTopBar extends StatelessWidget {
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Text(
-                                  '$unread',
+                                  '+$unread',
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 11,
@@ -737,11 +759,13 @@ class _WelcomeCard extends StatelessWidget {
                     .doc(uid)
                     .snapshots(),
                 builder: (context, userSnap) {
-                  DateTime? lastSeen;
+                  int seenCount = 0;
                   if (userSnap.hasData) {
                     final d = userSnap.data!.data() as Map<String, dynamic>?;
-                    lastSeen =
-                        parseFirestoreTimestamp(d?['lastConnectionsSeenAt']);
+                    final raw = d?['connectionsCountSeen'];
+                    if (raw is num && raw >= 0) {
+                      seenCount = raw.toInt();
+                    }
                   }
 
                   return StreamBuilder<QuerySnapshot>(
@@ -786,16 +810,31 @@ class _WelcomeCard extends StatelessWidget {
                                 }
                               }
 
-                              int recentCount = 0;
-                              for (final data in merged.values) {
-                                final connectedAt = parseFirestoreTimestamp(
-                                    data['connectedAt']);
-                                if (connectedAt == null) continue;
-                                if (lastSeen == null ||
-                                    connectedAt.isAfter(lastSeen)) {
-                                  recentCount++;
+                              final peerIds = <String>{};
+                              for (final m in merged.values) {
+                                final users =
+                                    ((m['users'] as List?) ?? const [])
+                                        .map((e) => e.toString())
+                                        .where((e) => e.isNotEmpty)
+                                        .toList();
+                                if (users.isNotEmpty) {
+                                  for (final id in users) {
+                                    if (id != uid) peerIds.add(id);
+                                  }
+                                  continue;
+                                }
+                                final u1 = (m['userId'] ?? '').toString();
+                                final u2 =
+                                    (m['connectedUserId'] ?? '').toString();
+                                if (u1 == uid && u2.isNotEmpty) {
+                                  peerIds.add(u2);
+                                } else if (u2 == uid && u1.isNotEmpty) {
+                                  peerIds.add(u1);
                                 }
                               }
+
+                              final recentCount =
+                                  (peerIds.length - seenCount).clamp(0, 9999);
 
                               return Stack(
                                 children: [
@@ -826,7 +865,7 @@ class _WelcomeCard extends StatelessWidget {
                                               BorderRadius.circular(12),
                                         ),
                                         child: Text(
-                                          '$recentCount',
+                                          '+$recentCount',
                                           style: const TextStyle(
                                             color: Colors.white,
                                             fontSize: 12,
@@ -993,6 +1032,7 @@ class _PostCell extends StatefulWidget {
 class _PostCellState extends State<_PostCell> {
   static const _collapsedLines = 7;
   bool _expanded = false;
+  bool _helpfulBusy = false;
 
   Future<void> _confirmDelete() async {
     final ok = await showDialog<bool>(
@@ -1015,6 +1055,26 @@ class _PostCellState extends State<_PostCell> {
         .collection('posts')
         .doc(widget.postId)
         .delete();
+  }
+
+  Future<void> _toggleHelpful(bool isHelpful) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || uid.isEmpty || _helpfulBusy) return;
+    setState(() => _helpfulBusy = true);
+    try {
+      await FirebaseFirestore.instance
+          .collection('posts')
+          .doc(widget.postId)
+          .set({
+        'likes': FieldValue.increment(isHelpful ? -1 : 1),
+        'likedBy': isHelpful
+            ? FieldValue.arrayRemove([uid])
+            : FieldValue.arrayUnion([uid]),
+      }, SetOptions(merge: true));
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _helpfulBusy = false);
+    }
   }
 
   @override
@@ -1084,8 +1144,53 @@ class _PostCellState extends State<_PostCell> {
             ),
           if (media() != null) const SizedBox(height: 8),
           if (media() != null) media()!,
+          const SizedBox(height: 8),
+          StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+            stream: FirebaseFirestore.instance
+                .collection('posts')
+                .doc(widget.postId)
+                .snapshots(),
+            builder: (context, snap) {
+              final data = snap.data?.data() ?? const <String, dynamic>{};
+              final likes =
+                  (data['likes'] is num) ? (data['likes'] as num).toInt() : 0;
+              final likedBy = ((data['likedBy'] as List?) ?? const [])
+                  .map((e) => '$e')
+                  .toSet();
+              final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+              final isHelpful = uid.isNotEmpty && likedBy.contains(uid);
+              return Row(
+                children: [
+                  TextButton.icon(
+                    onPressed:
+                        _helpfulBusy ? null : () => _toggleHelpful(isHelpful),
+                    icon: Icon(
+                      isHelpful ? Icons.favorite : Icons.favorite_border,
+                      size: 18,
+                      color: isHelpful ? AppColors.primary : AppColors.muted,
+                    ),
+                    label: Text(
+                      'Helpful',
+                      style: TextStyle(
+                        color: isHelpful ? AppColors.primary : AppColors.muted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  if (likes > 0)
+                    Text(
+                      '$likes',
+                      style: const TextStyle(
+                        color: AppColors.muted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
           if (widget.showConnect) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 6),
             TextButton(
               onPressed: widget.onConnect,
               style: TextButton.styleFrom(

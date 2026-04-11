@@ -2,7 +2,7 @@ name: connect_app
 description: "A Flutter app with Firebase integration."
 publish_to: none
 
-version: 1.0.0+10
+version: 1.0.2+80
 
 environment:
   sdk: ">=3.6.0 <4.0.0"
@@ -14,7 +14,7 @@ dependencies:
   intl: ^0.20.2
   google_sign_in: ^6.1.5
   sign_in_with_apple: ^7.0.1
-  agora_rtc_engine: ^6.1.2
+  agora_rtc_engine: 6.5.2
   permission_handler: ^12.0.0+1
   provider: ^6.1.2
 
@@ -27,7 +27,7 @@ dependencies:
   firebase_storage: ^12.4.0
   firebase_messaging: ^15.2.3
   flutter_local_notifications: ^19.2.1
-  flutter_callkit_incoming: ^2.5.8
+  flutter_callkit_incoming: 3.0.0
   firebase_app_check: ^0.3.2+6
   cloud_functions: ^5.3.4
 
@@ -55,6 +55,9 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^5.0.0 # ✅ Downgraded to support Dart 3.6.0
   mockito: ^5.4.5       # ✅ Compatible with Dart 3.6.0
+
+dependency_overrides:
+  ffi: ^2.1.4
 
 flutter:
   uses-material-design: true

@@ -23,10 +23,44 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
 
     // 🕒 Mark as seen to clear the Home badge
     if (currentUid.isNotEmpty) {
-      FirebaseFirestore.instance.collection('users').doc(currentUid).update({
-        'lastConnectionsSeenAt': FieldValue.serverTimestamp()
-      }).catchError((_) {});
+      _markConnectionsSeen();
     }
+  }
+
+  Future<void> _markConnectionsSeen() async {
+    try {
+      final docs = await _fetchConnections();
+      final seenCount = _uniquePeerCount(docs);
+      await FirebaseFirestore.instance.collection('users').doc(currentUid).set({
+        'lastConnectionsSeenAt': FieldValue.serverTimestamp(),
+        'connectionsCountSeen': seenCount,
+      }, SetOptions(merge: true));
+    } catch (_) {}
+  }
+
+  int _uniquePeerCount(List<QueryDocumentSnapshot> docs) {
+    final peers = <String>{};
+    for (final doc in docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      if (data.containsKey('users')) {
+        final users = ((data['users'] as List?) ?? const [])
+            .map((e) => e.toString())
+            .where((e) => e.isNotEmpty)
+            .toList();
+        for (final id in users) {
+          if (id != currentUid) peers.add(id);
+        }
+        continue;
+      }
+      final u1 = (data['userId'] ?? '').toString();
+      final u2 = (data['connectedUserId'] ?? '').toString();
+      if (u1 == currentUid && u2.isNotEmpty) {
+        peers.add(u2);
+      } else if (u2 == currentUid && u1.isNotEmpty) {
+        peers.add(u1);
+      }
+    }
+    return peers.length;
   }
 
   Future<List<QueryDocumentSnapshot>> _fetchConnections() async {
@@ -171,7 +205,7 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
                       .doc(otherId)
                       .get(),
                   builder: (context, userSnap) {
-                    if (!userSnap.hasData) {
+                    if (userSnap.connectionState == ConnectionState.waiting) {
                       return const ListTile(
                         leading: CircleAvatar(
                           radius: 22,

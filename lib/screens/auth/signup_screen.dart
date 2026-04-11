@@ -40,12 +40,13 @@ class _SignupScreenState extends State<SignupScreen> {
 
   void _goHome() {
     if (!mounted) return;
-    Navigator.of(context).pushNamedAndRemoveUntil('/home', (r) => false);
+    Navigator.of(context).pushNamedAndRemoveUntil('/', (r) => false);
   }
 
   void _goOnboarding() {
     if (!mounted) return;
-    Navigator.of(context).pushNamedAndRemoveUntil('/onboarding', (r) => false);
+    // Route through AuthGate so notification/token/user bootstrap always runs.
+    Navigator.of(context).pushNamedAndRemoveUntil('/', (r) => false);
   }
 
   Future<void> _register() async {
@@ -203,7 +204,6 @@ class _SignupScreenState extends State<SignupScreen> {
                 style: t.textTheme.bodyMedium,
               ),
               const SizedBox(height: 16),
-
               Container(
                 padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
                 decoration: BoxDecoration(
@@ -252,7 +252,6 @@ class _SignupScreenState extends State<SignupScreen> {
                       ],
                     ),
                     const SizedBox(height: 12),
-
                     _LabeledField(
                       label: 'Email',
                       child: TextField(
@@ -270,7 +269,6 @@ class _SignupScreenState extends State<SignupScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-
                     _LabeledField(
                       label: 'Password',
                       child: TextField(
@@ -286,15 +284,17 @@ class _SignupScreenState extends State<SignupScreen> {
                           ),
                           suffixIcon: IconButton(
                             icon: Icon(
-                              _obscure1 ? Icons.visibility : Icons.visibility_off,
+                              _obscure1
+                                  ? Icons.visibility
+                                  : Icons.visibility_off,
                             ),
-                            onPressed: () => setState(() => _obscure1 = !_obscure1),
+                            onPressed: () =>
+                                setState(() => _obscure1 = !_obscure1),
                           ),
                         ),
                       ),
                     ),
                     const SizedBox(height: 12),
-
                     _LabeledField(
                       label: 'Confirm password',
                       child: TextField(
@@ -309,15 +309,17 @@ class _SignupScreenState extends State<SignupScreen> {
                           ),
                           suffixIcon: IconButton(
                             icon: Icon(
-                              _obscure2 ? Icons.visibility : Icons.visibility_off,
+                              _obscure2
+                                  ? Icons.visibility
+                                  : Icons.visibility_off,
                             ),
-                            onPressed: () => setState(() => _obscure2 = !_obscure2),
+                            onPressed: () =>
+                                setState(() => _obscure2 = !_obscure2),
                           ),
                         ),
                       ),
                     ),
                     const SizedBox(height: 16),
-
                     _isLoading
                         ? const Center(child: CircularProgressIndicator())
                         : SizedBox(
@@ -330,11 +332,9 @@ class _SignupScreenState extends State<SignupScreen> {
                   ],
                 ),
               ),
-
               const SizedBox(height: 18),
               const _OrDivider(),
               const SizedBox(height: 12),
-
               _SoftButton(
                 icon: Icons.g_mobiledata,
                 label: 'Sign up with Google',
@@ -348,13 +348,12 @@ class _SignupScreenState extends State<SignupScreen> {
                 onPressed: _isSocialLoading ? null : _signUpWithApple,
                 loading: _isSocialLoading,
               ),
-
               const SizedBox(height: 16),
               TextButton(
-                onPressed: () => Navigator.pushReplacementNamed(context, '/login'),
+                onPressed: () =>
+                    Navigator.pushReplacementNamed(context, '/login'),
                 child: const Text('Already have an account? Log in'),
               ),
-
               const SizedBox(height: 8),
               Text(
                 'By creating an account, you agree to our Terms & Privacy.',

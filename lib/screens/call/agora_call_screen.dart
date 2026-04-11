@@ -1,35 +1,66 @@
 // lib/call/agora_call_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:connect_app/theme/tokens.dart';
-import '/services/interaction_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:connect_app/services/callkit_id.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 
-const String appId = 'dac900a04a87460c87c3d18b63cac65d';
+class AgoraJoinAuth {
+  final String token;
+  final String appId;
+  final int uid;
+  final String tokenVersion;
+  const AgoraJoinAuth({
+    required this.token,
+    required this.appId,
+    required this.uid,
+    required this.tokenVersion,
+  });
+}
 
-/// ---- TOKEN FETCH ----
-Future<String> fetchAgoraToken({
+const String _agoraFallbackAppId = 'dac900a04a87460c87c3d18b63cac65d';
+
+/// ---- TOKEN + APPID FETCH ----
+Future<AgoraJoinAuth> fetchAgoraToken({
   required String channelName,
   required int uid,
+  bool allowUidZero = false,
 }) async {
   final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
       .httpsCallable('getAgoraRtcToken');
   final resp = await callable.call({
     'channelName': channelName,
     'uid': uid,
+    'allowUidZero': allowUidZero,
     'role': 'publisher',
     'expireSeconds': 3600,
   });
   final data = (resp.data as Map?) ?? const {};
   final token = (data['token'] as String?)?.trim();
+  final serverAppId = (data['appId'] as String?)?.trim();
+  final serverUidRaw = data['uid'];
+  final tokenVersion = (data['tokenVersion'] as String?)?.trim() ?? '';
+  final serverUid = serverUidRaw is num ? serverUidRaw.toInt() : uid;
   if (token == null || token.isEmpty) {
     throw Exception('Token service returned empty token');
   }
-  return token;
+  final detectedVersion = tokenVersion.isNotEmpty
+      ? tokenVersion
+      : (token.length >= 3 ? token.substring(0, 3) : token);
+  return AgoraJoinAuth(
+    token: token,
+    appId: (serverAppId == null || serverAppId.isEmpty)
+        ? _agoraFallbackAppId
+        : serverAppId,
+    uid: serverUid,
+    tokenVersion: detectedVersion,
+  );
 }
 
 class AgoraCallScreen extends StatefulWidget {
@@ -55,12 +86,66 @@ class AgoraCallScreen extends StatefulWidget {
 }
 
 class _AgoraCallScreenState extends State<AgoraCallScreen> {
-  late final RtcEngine _engine;
+  static const MethodChannel _pushTokenChannel =
+      MethodChannel('connectapp/pushTokens');
+  static Future<void> _lastEngineShutdown = Future<void>.value();
+  static const bool _diagEnabled =
+      bool.fromEnvironment('ENABLE_RUNTIME_DIAG', defaultValue: false);
+  static const Duration _joinWatchdogTimeout = Duration(seconds: 35);
+  static const Set<String> _persistedUserDiagStages = <String>{
+    'begin_start',
+    'begin_done',
+    'engine_wait_previous_shutdown',
+    'engine_precleanup_done',
+    'mic_permission_ok',
+    'camera_permission_ok',
+    'invite_marked_accepted',
+    'token_ok',
+    'engine_create_start',
+    'engine_create_done',
+    'engine_initialize_start',
+    'engine_initialize_slow',
+    'engine_initialized',
+    'audio_enabled',
+    'video_enabled',
+    'channel_profile_set',
+    'handler_registered',
+    'preview_started',
+    'callkit_connected_marked',
+    'callkit_connected_error',
+    'join_attempt',
+    'join_success',
+    'join_watchdog_timeout',
+    'remote_joined',
+    'remote_offline',
+    'conn_state_changed',
+    'conn_state_polled',
+    'network_type_changed',
+    'proxy_connected',
+    'token_requested',
+    'token_will_expire',
+    'user_mute_audio',
+    'remote_audio_state',
+    'audio_routing_changed',
+    'local_audio_state',
+    'local_video_state',
+    'leave_channel',
+    'agora_error',
+    'begin_error',
+    'invite_status_terminal',
+    'screen_auto_close',
+  };
+  RtcEngine? _engine;
+  RtcEngineEventHandler? _eventHandler;
   String? _token;
+  String? _agoraAppId;
+  int _rtcUid = 0;
+  String? _seenTerminalInviteStatus;
 
   bool _joined = false;
   int? _remoteUid;
   bool _ended = false;
+  bool _endingCall = false;
   bool _isLoading = true;
   String? _fatalError;
 
@@ -70,12 +155,129 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   bool _frontCamera = true;
 
   // Video layout state
-  bool _localIsBig = false; // tap to swap big/local
+  bool _localIsBig = true; // show self first while waiting
   Offset _pipPos = const Offset(12, 120); // PiP top-left corner
 
   Timer? _ringTimeout;
+  Timer? _joinWatchdog;
+  Timer? _autoCloseTimer;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _inviteSub;
   bool _remoteEverJoined = false;
   bool _missedLogged = false;
+  bool _callkitMarkedConnected = false;
+  bool _nativeAcceptedCallCleared = false;
+
+  int _deriveRtcUidFromFirebaseUid(String firebaseUid) {
+    if (firebaseUid.isEmpty) return 1;
+    var hash = 0x811c9dc5;
+    for (final codeUnit in firebaseUid.codeUnits) {
+      hash ^= codeUnit;
+      hash = (hash * 0x01000193) & 0xFFFFFFFF;
+    }
+    final positive = hash & 0x7FFFFFFF;
+    return (positive % 2147483646) + 1;
+  }
+
+  String get _callkitId {
+    return normalizeCallkitId(
+      rawId: widget.inviteId ?? '',
+      fallback: widget.channelName,
+    );
+  }
+
+  Future<void> _markCallkitConnected() async {
+    if (_callkitMarkedConnected) return;
+    final id = _callkitId;
+    if (id.isEmpty) return;
+    try {
+      await FlutterCallkitIncoming.setCallConnected(id);
+      _callkitMarkedConnected = true;
+    } catch (_) {}
+  }
+
+  Future<void> _markCallkitConnectedForAcceptedCall() async {
+    if (widget.isCaller) return;
+    try {
+      await _markCallkitConnected();
+      if (_callkitMarkedConnected) {
+        await _diagCall('callkit_connected_marked', meta: {
+          'source': 'accepted_call_start',
+        });
+      }
+    } catch (e) {
+      await _diagCall('callkit_connected_error', meta: {
+        'source': 'accepted_call_start',
+        'error': '$e',
+      });
+    }
+  }
+
+  Future<void> _diagCall(
+    String stage, {
+    Map<String, dynamic>? meta,
+  }) async {
+    final baseMeta = <String, dynamic>{
+      'inviteId': widget.inviteId ?? '',
+      'channel': widget.channelName,
+      'isCaller': widget.isCaller,
+      ...?meta,
+    };
+    final metaStr = baseMeta.toString();
+    final payload = <String, dynamic>{
+      'stage': stage,
+      'meta': metaStr.length > 500 ? metaStr.substring(0, 500) : metaStr,
+    };
+    debugPrint('[DIAG][call] $stage meta=${payload['meta']}');
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || uid.isEmpty) return;
+    try {
+      if (stage == 'begin_start') {
+        await FirebaseFirestore.instance.collection('users').doc(uid).set({
+          'diag.callTrail': FieldValue.delete(),
+          'diag.currentCallInviteId': widget.inviteId ?? '',
+          'diag.currentCallChannel': widget.channelName,
+          'diag.currentCallIsCaller': widget.isCaller,
+          'diag.currentCallStartedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+      final shouldPersistUserDiag = _persistedUserDiagStages.contains(stage) ||
+          (stage == 'conn_state_changed' &&
+              '${meta?['state'] ?? ''}'.contains('connectionStateFailed'));
+      if (shouldPersistUserDiag) {
+        final userUpdate = <String, dynamic>{
+          'diag.lastCallStage': stage,
+          'diag.lastCallAt': FieldValue.serverTimestamp(),
+          'diag.lastCallMeta': payload['meta'],
+          'diag.lastCallInviteId': widget.inviteId ?? '',
+          'diag.lastCallChannel': widget.channelName,
+          'diag.lastCallIsCaller': widget.isCaller,
+          'diag.callTrail.$stage.at': FieldValue.serverTimestamp(),
+          'diag.callTrail.$stage.meta': payload['meta'],
+          'diag.callTrail.$stage.inviteId': widget.inviteId ?? '',
+          'diag.callTrail.$stage.channel': widget.channelName,
+          'diag.callTrail.$stage.isCaller': widget.isCaller,
+        };
+        await FirebaseFirestore.instance.collection('users').doc(uid).set({
+          ...userUpdate,
+        }, SetOptions(merge: true));
+      }
+      if (!_diagEnabled) return;
+      final inviteId = (widget.inviteId ?? '').trim();
+      if (inviteId.isNotEmpty) {
+        final inviteUpdate = <String, dynamic>{
+          'debug.$uid.stage': stage,
+          'debug.$uid.at': FieldValue.serverTimestamp(),
+          'debug.$uid.meta': payload['meta'],
+        };
+        await FirebaseFirestore.instance
+            .collection('callInvites')
+            .doc(inviteId)
+            .set({
+          ...inviteUpdate,
+        }, SetOptions(merge: true));
+      }
+    } catch (_) {}
+  }
 
   @override
   void initState() {
@@ -83,58 +285,261 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     _begin();
   }
 
+  Future<void> _clearStoredAcceptedCallRecovery() async {
+    if (_nativeAcceptedCallCleared) return;
+    _nativeAcceptedCallCleared = true;
+    try {
+      await _pushTokenChannel.invokeMethod('clearStoredAcceptedCall');
+    } catch (_) {
+      _nativeAcceptedCallCleared = false;
+    }
+  }
+
   Future<void> _begin() async {
     try {
+      await _diagCall('begin_start', meta: {
+        'isCaller': widget.isCaller,
+        'isVideo': widget.isVideo,
+        'inviteId': widget.inviteId ?? '',
+      });
+      await _diagCall('engine_wait_previous_shutdown');
+      try {
+        await _lastEngineShutdown;
+      } catch (_) {}
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      await _clearStoredAcceptedCallRecovery();
       final channel = widget.channelName;
       if (channel.isEmpty) throw Exception('Channel name is empty');
       if (channel.length > 64) throw Exception('Channel name too long');
 
+      await _cleanupEngine();
+      await _diagCall('engine_precleanup_done');
+
       // Permissions (request sequentially to avoid iOS prompt issues)
       await _ensurePermission(Permission.microphone, 'Microphone');
+      await _diagCall('mic_permission_ok');
       if (widget.isVideo) {
         await _ensurePermission(Permission.camera, 'Camera');
+        await _diagCall('camera_permission_ok');
       }
+
+      final inviteId = (widget.inviteId ?? '').trim();
+      if (!widget.isCaller && inviteId.isNotEmpty) {
+        try {
+          await FirebaseFirestore.instance
+              .collection('callInvites')
+              .doc(inviteId)
+              .set({
+            'status': 'accepted',
+            'acceptedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+          await _diagCall('invite_marked_accepted');
+        } catch (e) {
+          await _diagCall('invite_mark_accepted_error', meta: {'error': '$e'});
+        }
+      }
+      await _markCallkitConnectedForAcceptedCall();
+
+      final currentUser = FirebaseAuth.instance.currentUser;
+      final requestedUid = _deriveRtcUidFromFirebaseUid(currentUser?.uid ?? '');
 
       // Token & engine
-      const int uid = 0; // let SDK assign, token also for 0
-      _token = await fetchAgoraToken(channelName: channel, uid: uid);
+      final auth = await fetchAgoraToken(
+        channelName: channel,
+        uid: requestedUid,
+      );
+      _token = auth.token;
+      _agoraAppId = _agoraFallbackAppId;
+      _rtcUid = auth.uid > 0 ? auth.uid : requestedUid;
+      await _diagCall('token_ok', meta: {
+        'rtcUidRequested': requestedUid,
+        'rtcUidServer': auth.uid,
+        'rtcUidFinal': _rtcUid,
+        'tokenVersion': auth.tokenVersion,
+        'appIdSuffix': _agoraAppId!.substring(_agoraAppId!.length - 6),
+        'appIdSource': 'local_fallback',
+        'serverAppIdLen': auth.appId.length,
+        'serverAppIdMatchesFallback':
+            auth.appId.toLowerCase() == _agoraFallbackAppId,
+        'serverAppIdSuffix': auth.appId.length >= 6
+            ? auth.appId.substring(auth.appId.length - 6)
+            : auth.appId,
+      });
 
-      _engine = createAgoraRtcEngine();
-      await _engine.initialize(const RtcEngineContext(appId: appId));
+      final engine = await _createAndInitializeEngine();
+      await _diagCall('engine_initialized');
 
-      await _engine.setChannelProfile(ChannelProfileType.channelProfileCommunication);
-      await _engine.setClientRole(role: ClientRoleType.clientRoleBroadcaster);
-      await _engine.enableAudio();
-      await _engine.setDefaultAudioRouteToSpeakerphone(true);
+      await engine.enableAudio();
+      await engine.setAudioProfile(
+        profile: AudioProfileType.audioProfileDefault,
+        scenario: AudioScenarioType.audioScenarioDefault,
+      );
+      await _diagCall('audio_enabled');
 
       if (widget.isVideo) {
-        await _engine.enableVideo();
-        await _engine.startPreview();
+        await engine.enableVideo();
+        await _diagCall('video_enabled');
       } else {
-        await _engine.disableVideo();
+        await engine.disableVideo();
       }
 
-      _engine.registerEventHandler(
-        RtcEngineEventHandler(
-          onError: (ErrorCodeType err, String msg) {
-            setState(() => _fatalError = 'Agora error: $err - $msg');
-          },
-          onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
-            setState(() => _joined = true);
-            // If callee never joins, mark as unavailable after 35s
-            _ringTimeout?.cancel();
-            _ringTimeout = Timer(const Duration(seconds: 35), () {
-              if (!mounted) return;
-              if (_remoteUid == null && !_ended) {
-                _recordMissedCall(reason: 'timeout');
-                setState(() => _fatalError = 'User unavailable');
-              }
+      await engine.setChannelProfile(
+        ChannelProfileType.channelProfileCommunication,
+      );
+      await engine.setClientRole(
+        role: ClientRoleType.clientRoleBroadcaster,
+      );
+      await engine.setDefaultAudioRouteToSpeakerphone(true);
+      await _diagCall('channel_profile_set', meta: {
+        'profile': 'communication',
+        'source': 'engine_and_join_options',
+      });
+
+      final handler = RtcEngineEventHandler(
+        onError: (ErrorCodeType err, String msg) {
+          _diagCall('agora_error', meta: {'code': '$err', 'msg': msg});
+          if (!_joined && mounted && !_ended) {
+            setState(() {
+              _fatalError = 'Call connection failed. Please try again.';
             });
-          },
-          onUserJoined: (RtcConnection connection, int uid, int elapsed) async {
+          }
+        },
+        onConnectionLost: (RtcConnection connection) {
+          _diagCall('conn_lost', meta: {
+            'channel': connection.channelId ?? '',
+            'localUid': connection.localUid ?? -1,
+          });
+        },
+        onConnectionStateChanged: (
+          RtcConnection connection,
+          ConnectionStateType state,
+          ConnectionChangedReasonType reason,
+        ) {
+          _diagCall('conn_state_changed', meta: {
+            'channel': connection.channelId ?? '',
+            'localUid': connection.localUid ?? -1,
+            'state': '$state',
+            'reason': '$reason',
+          });
+          if (!_joined &&
+              !_ended &&
+              mounted &&
+              state == ConnectionStateType.connectionStateFailed) {
+            setState(() {
+              _fatalError = 'Call network failed. Please try again.';
+            });
+          }
+        },
+        onNetworkTypeChanged: (RtcConnection connection, NetworkType type) {
+          _diagCall('network_type_changed', meta: {
+            'channel': connection.channelId ?? '',
+            'localUid': connection.localUid ?? -1,
+            'type': '$type',
+          });
+        },
+        onProxyConnected: (
+          String channel,
+          int uid,
+          ProxyType proxyType,
+          String localProxyIp,
+          int elapsed,
+        ) {
+          _diagCall('proxy_connected', meta: {
+            'channel': channel,
+            'uid': uid,
+            'proxyType': '$proxyType',
+            'localProxyIp': localProxyIp,
+            'elapsedMs': elapsed,
+          });
+        },
+        onRequestToken: (RtcConnection connection) {
+          _diagCall('token_requested', meta: {
+            'channel': connection.channelId ?? '',
+            'localUid': connection.localUid ?? -1,
+          });
+        },
+        onTokenPrivilegeWillExpire: (RtcConnection connection, String token) {
+          _diagCall('token_will_expire', meta: {
+            'channel': connection.channelId ?? '',
+            'localUid': connection.localUid ?? -1,
+            'tokenVersion': token.length >= 3 ? token.substring(0, 3) : token,
+          });
+        },
+        onUserMuteAudio: (RtcConnection connection, int remoteUid, bool muted) {
+          _diagCall('user_mute_audio', meta: {
+            'remoteUid': remoteUid,
+            'muted': muted,
+          });
+        },
+        onRemoteAudioStateChanged: (
+          RtcConnection connection,
+          int remoteUid,
+          RemoteAudioState state,
+          RemoteAudioStateReason reason,
+          int elapsed,
+        ) {
+          _diagCall('remote_audio_state', meta: {
+            'remoteUid': remoteUid,
+            'state': '$state',
+            'reason': '$reason',
+            'elapsedMs': elapsed,
+          });
+        },
+        onAudioRoutingChanged: (int routing) {
+          _diagCall('audio_routing_changed', meta: {
+            'routing': routing,
+          });
+        },
+        onLocalAudioStateChanged: (
+          RtcConnection connection,
+          LocalAudioStreamState state,
+          LocalAudioStreamReason reason,
+        ) {
+          _diagCall('local_audio_state', meta: {
+            'state': '$state',
+            'reason': '$reason',
+          });
+        },
+        onLocalVideoStateChanged: (
+          VideoSourceType source,
+          LocalVideoStreamState state,
+          LocalVideoStreamReason reason,
+        ) {
+          _diagCall('local_video_state', meta: {
+            'source': '$source',
+            'state': '$state',
+            'reason': '$reason',
+          });
+        },
+        onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
+          _joinWatchdog?.cancel();
+          _diagCall('join_success', meta: {
+            'localUid': connection.localUid ?? -1,
+            'elapsedMs': elapsed,
+          });
+          unawaited(_markCallkitConnected());
+          setState(() => _joined = true);
+          // If callee never joins, mark as unavailable after 35s
+          _ringTimeout?.cancel();
+          _ringTimeout = Timer(const Duration(seconds: 45), () {
+            if (!mounted) return;
+            if (_remoteUid == null && !_ended) {
+              _recordMissedCall(reason: 'timeout');
+              setState(() {
+                _ended = true;
+                _fatalError = 'User unavailable';
+              });
+            }
+          });
+        },
+        onUserJoined: (RtcConnection connection, int uid, int elapsed) async {
+          await _diagCall('remote_joined', meta: {'remoteUid': uid});
           _ringTimeout?.cancel();
           _remoteEverJoined = true;
-          setState(() => _remoteUid = uid);
+          setState(() {
+            _remoteUid = uid;
+            _localIsBig = false;
+          });
 
           if ((widget.inviteId ?? '').isNotEmpty) {
             try {
@@ -147,56 +552,190 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
               }, SetOptions(merge: true));
             } catch (_) {}
           }
-
-          // 👇 Add this
-          final me = FirebaseAuth.instance.currentUser?.uid;
-          if (me != null) {
-            // Extract the other user ID from channelName if you encoded it like `${me}_${otherId}`
-            final parts = widget.channelName.split('_');
-            final other = parts.firstWhere((p) => p != me, orElse: () => '');
-            if (other.isNotEmpty) {
-              await InteractionService.recordInteraction(other);
-            }
-          }
         },
-
-          onUserOffline: (RtcConnection connection, int uid, UserOfflineReasonType r) {
-            // Remote hung up/declined
-            if (!_remoteEverJoined) {
-              _recordMissedCall(reason: 'declined_or_unavailable');
-            }
-            setState(() {
-              _remoteUid = null;
-              _fatalError = 'User declined or unavailable';
-            });
-          },
-          onLeaveChannel: (RtcConnection connection, RtcStats stats) {
-            setState(() {
-              _remoteUid = null;
-              _ended = true;
-            });
-          },
-        ),
+        onUserOffline:
+            (RtcConnection connection, int uid, UserOfflineReasonType r) {
+          _diagCall('remote_offline', meta: {'remoteUid': uid, 'reason': '$r'});
+          // Remote hung up/declined
+          if (!_remoteEverJoined) {
+            _recordMissedCall(reason: 'declined_or_unavailable');
+          }
+          setState(() {
+            _remoteUid = null;
+            _fatalError = 'User declined or unavailable';
+          });
+        },
+        onLeaveChannel: (RtcConnection connection, RtcStats stats) {
+          _joinWatchdog?.cancel();
+          _diagCall('leave_channel');
+          setState(() {
+            _remoteUid = null;
+            _ended = true;
+          });
+        },
       );
+      _eventHandler = handler;
+      engine.registerEventHandler(handler);
+      await _diagCall('handler_registered');
 
-      await _engine.joinChannel(
-        token: _token!,
+      if (widget.isVideo) {
+        await engine.startPreview();
+        await _diagCall('preview_started');
+      }
+
+      await _diagCall('join_attempt', meta: {
+        'channel': channel,
+        'uid': _rtcUid,
+        'tokenMode': 'provided',
+      });
+      await engine.joinChannel(
+        token: _token ?? '',
         channelId: channel,
-        uid: uid,
-        options: ChannelMediaOptions(
+        uid: _rtcUid,
+        options: const ChannelMediaOptions(
           clientRoleType: ClientRoleType.clientRoleBroadcaster,
-          channelProfile: ChannelProfileType.channelProfileCommunication,
-          publishMicrophoneTrack: true,
-          publishCameraTrack: widget.isVideo,
-          autoSubscribeAudio: true,
-          autoSubscribeVideo: widget.isVideo,
         ),
       );
+      await _pollConnectionState('join_returned');
+      _scheduleConnectionStatePolls();
+      _startJoinWatchdog(channel);
+      _bindInviteStatus();
+      await _diagCall('begin_done');
     } catch (e) {
-      setState(() => _fatalError = e.toString());
+      _lastEngineShutdown = _cleanupEngine();
+      await _lastEngineShutdown;
+      await _diagCall('begin_error', meta: {'error': '$e'});
+      if (mounted) {
+        setState(() => _fatalError = e.toString());
+      }
+      _scheduleAutoClose('begin_error');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  Future<RtcEngine> _createAndInitializeEngine() async {
+    await _diagCall('engine_create_start');
+    final engine = createAgoraRtcEngine();
+    _engine = engine;
+    await _diagCall('engine_create_done');
+    await _diagCall('engine_initialize_start', meta: {
+      'appIdSuffix': _agoraAppId!.length >= 6
+          ? _agoraAppId!.substring(_agoraAppId!.length - 6)
+          : _agoraAppId!,
+    });
+
+    var initialized = false;
+    final slowLog = Timer(const Duration(seconds: 20), () {
+      if (!initialized) {
+        unawaited(_diagCall('engine_initialize_slow', meta: {
+          'elapsedSeconds': 20,
+          'note': 'still_waiting_for_native_initialize',
+        }));
+      }
+    });
+    try {
+      await engine.initialize(RtcEngineContext(appId: _agoraAppId!));
+      initialized = true;
+      return engine;
+    } catch (e) {
+      await _diagCall('engine_initialize_error', meta: {
+        'error': '$e',
+      });
+      rethrow;
+    } finally {
+      initialized = true;
+      slowLog.cancel();
+    }
+  }
+
+  Future<void> _pollConnectionState(String source) async {
+    final engine = _engine;
+    if (engine == null) return;
+    try {
+      final state = await engine.getConnectionState();
+      await _diagCall('conn_state_polled', meta: {
+        'source': source,
+        'state': '$state',
+      });
+    } catch (e) {
+      await _diagCall('conn_state_polled', meta: {
+        'source': source,
+        'error': '$e',
+      });
+    }
+  }
+
+  void _scheduleConnectionStatePolls() {
+    for (final seconds in const <int>[1, 5, 15]) {
+      unawaited(Future<void>.delayed(Duration(seconds: seconds), () async {
+        if (!mounted || _ended || _joined) return;
+        await _pollConnectionState('after_${seconds}s');
+      }));
+    }
+  }
+
+  void _startJoinWatchdog(String channel) {
+    _joinWatchdog?.cancel();
+    _joinWatchdog = Timer(_joinWatchdogTimeout, () async {
+      if (!mounted || _ended || _joined) return;
+      await _diagCall('join_watchdog_timeout', meta: {
+        'channel': channel,
+        'uid': _rtcUid,
+      });
+      final inviteId = (widget.inviteId ?? '').trim();
+      if (inviteId.isNotEmpty) {
+        try {
+          await FirebaseFirestore.instance
+              .collection('callInvites')
+              .doc(inviteId)
+              .set({
+            'status': 'ended',
+            'endedAt': FieldValue.serverTimestamp(),
+            'endedBy': FirebaseAuth.instance.currentUser?.uid ?? '',
+            'endReason': 'join_watchdog_timeout',
+          }, SetOptions(merge: true));
+        } catch (_) {}
+      }
+      if (mounted && !_ended) {
+        setState(() {
+          _ended = true;
+          _fatalError = 'Call connection timed out. Please try again.';
+        });
+      }
+      _scheduleAutoClose('join_watchdog_timeout');
+    });
+  }
+
+  void _bindInviteStatus() {
+    final id = (widget.inviteId ?? '').trim();
+    if (id.isEmpty) return;
+    _inviteSub?.cancel();
+    _inviteSub = FirebaseFirestore.instance
+        .collection('callInvites')
+        .doc(id)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted || !snap.exists) return;
+      final data = snap.data() ?? const <String, dynamic>{};
+      final status = (data['status'] ?? '').toString().toLowerCase();
+      if (status == 'declined' ||
+          status == 'ended' ||
+          status == 'cancelled' ||
+          status == 'missed') {
+        if (_seenTerminalInviteStatus == status) return;
+        _seenTerminalInviteStatus = status;
+        _diagCall('invite_status_terminal', meta: {'status': status});
+        _ringTimeout?.cancel();
+        if (!_ended) {
+          setState(() {
+            _ended = true;
+            _fatalError = 'Call ended';
+          });
+        }
+        _scheduleAutoClose('invite_status_terminal');
+      }
+    });
   }
 
   String _chatIdFor(String a, String b) {
@@ -224,6 +763,8 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         'lastMessageAt': now,
         'lastMessageAuthorId': me,
         'lastMessageType': 'missed_call',
+        'lastMessageText': callText,
+        'unreadBy.$me': 0,
         'createdAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
@@ -248,7 +789,6 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           'missedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
       }
-      await InteractionService.recordInteraction(other);
     } catch (_) {}
   }
 
@@ -261,39 +801,124 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     }
   }
 
+  Future<void> _cleanupEngine({bool release = true}) async {
+    _joinWatchdog?.cancel();
+    final engine = _engine;
+    if (engine == null) return;
+    final handler = _eventHandler;
+    _engine = null;
+    _eventHandler = null;
+    try {
+      if (handler != null) {
+        engine.unregisterEventHandler(handler);
+      }
+    } catch (_) {}
+    try {
+      await engine.leaveChannel().timeout(const Duration(seconds: 2));
+    } catch (_) {}
+    if (widget.isVideo) {
+      try {
+        await engine.stopPreview().timeout(const Duration(seconds: 1));
+      } catch (_) {}
+    }
+    if (release) {
+      try {
+        await engine.release(sync: true).timeout(const Duration(seconds: 2));
+      } catch (_) {}
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+  }
+
+  Future<void> _closeScreenAfterTerminalState(String reason) async {
+    if (_endingCall) return;
+    _endingCall = true;
+    _autoCloseTimer?.cancel();
+    await _diagCall('screen_auto_close', meta: {'reason': reason});
+    try {
+      await _cleanupEngine();
+      final callkitId = _callkitId;
+      if (callkitId.isNotEmpty) {
+        try {
+          await FlutterCallkitIncoming.endCall(callkitId);
+        } catch (_) {}
+      }
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+    } finally {
+      _endingCall = false;
+    }
+  }
+
+  void _scheduleAutoClose(
+    String reason, {
+    Duration delay = const Duration(seconds: 1),
+  }) {
+    _autoCloseTimer?.cancel();
+    _autoCloseTimer = Timer(delay, () {
+      unawaited(_closeScreenAfterTerminalState(reason));
+    });
+  }
+
   @override
   void dispose() {
     _ringTimeout?.cancel();
-    try {
-      _engine.leaveChannel();
-      _engine.release();
-    } catch (_) {}
+    _joinWatchdog?.cancel();
+    _autoCloseTimer?.cancel();
+    _inviteSub?.cancel();
+    _lastEngineShutdown = _cleanupEngine();
     super.dispose();
   }
 
   Future<void> _toggleMute() async {
     _muted = !_muted;
-    await _engine.muteLocalAudioStream(_muted);
+    await _engine?.muteLocalAudioStream(_muted);
     setState(() {});
   }
 
   Future<void> _toggleSpeaker() async {
     _speakerOn = !_speakerOn;
-    await _engine.setEnableSpeakerphone(_speakerOn);
+    await _engine?.setEnableSpeakerphone(_speakerOn);
     setState(() {});
   }
 
   Future<void> _switchCamera() async {
     _frontCamera = !_frontCamera;
-    await _engine.switchCamera();
+    await _engine?.switchCamera();
     setState(() {});
   }
 
-  void _endCall() {
+  Future<void> _endCall() async {
+    if (_endingCall) return;
+    _endingCall = true;
     try {
-      _engine.leaveChannel();
-    } catch (_) {}
-    Navigator.of(context).pop();
+      await _diagCall('end_call_pressed');
+      _joinWatchdog?.cancel();
+      final id = (widget.inviteId ?? '').trim();
+      final endedBy = FirebaseAuth.instance.currentUser?.uid ?? '';
+      await _cleanupEngine();
+      final callkitId = _callkitId;
+      if (callkitId.isNotEmpty) {
+        try {
+          await FlutterCallkitIncoming.endCall(callkitId);
+        } catch (_) {}
+      }
+      if (id.isNotEmpty) {
+        try {
+          await FirebaseFirestore.instance
+              .collection('callInvites')
+              .doc(id)
+              .set({
+            'status': 'ended',
+            'endedAt': FieldValue.serverTimestamp(),
+            'endedBy': endedBy,
+          }, SetOptions(merge: true));
+        } catch (_) {}
+      }
+      if (mounted) Navigator.of(context).pop();
+    } finally {
+      _endingCall = false;
+    }
   }
 
   // ---------- UI ----------
@@ -310,11 +935,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     }
 
     if (_fatalError != null) {
-      return _ErrorScreen(title: title, message: _fatalError!, onClose: _endCall);
+      return _ErrorScreen(
+          title: title, message: _fatalError!, onClose: () => _endCall());
     }
 
     if (_ended) {
-      return _EndedScreen(title: title, onClose: _endCall);
+      return _EndedScreen(title: title, onClose: () => _endCall());
     }
 
     if (widget.isVideo) return _videoLayout();
@@ -347,7 +973,8 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
             const SizedBox(height: 14),
             Text(
               widget.otherUserName,
-              style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+              style:
+                  textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 6),
@@ -366,7 +993,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     final remote = (_remoteUid != null)
         ? AgoraVideoView(
             controller: VideoViewController.remote(
-              rtcEngine: _engine,
+              rtcEngine: _engine!,
               canvas: VideoCanvas(uid: _remoteUid),
               connection: RtcConnection(channelId: widget.channelName),
             ),
@@ -390,7 +1017,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
     final local = AgoraVideoView(
       controller: VideoViewController(
-        rtcEngine: _engine,
+        rtcEngine: _engine!,
         canvas: const VideoCanvas(uid: 0),
       ),
     );
@@ -417,6 +1044,22 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
               Positioned.fill(
                 child: ClipRect(child: _localIsBig ? local : remote),
               ),
+              if (_localIsBig && _remoteUid == null)
+                const Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 110,
+                  child: Center(
+                    child: Text(
+                      'Waiting for the other user to join…',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
 
               Positioned(
                 left: 12,
@@ -598,7 +1241,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
   Widget _hangupButton() {
     return InkResponse(
-      onTap: _endCall,
+      onTap: () => _endCall(),
       child: Container(
         width: 76,
         height: 76,
@@ -673,7 +1316,8 @@ class _ErrorScreen extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, color: AppColors.danger, size: 64),
+              const Icon(Icons.error_outline,
+                  color: AppColors.danger, size: 64),
               const SizedBox(height: 12),
               const Text('Something went wrong.',
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
@@ -683,7 +1327,7 @@ class _ErrorScreen extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 14, color: AppColors.muted),
               ),
-            const SizedBox(height: 16),
+              const SizedBox(height: 16),
               if (isPermissionError) ...[
                 OutlinedButton(
                   onPressed: openAppSettings,

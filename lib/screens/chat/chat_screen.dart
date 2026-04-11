@@ -16,17 +16,19 @@ import 'package:chewie/chewie.dart';
 import 'package:video_player/video_player.dart';
 import '../../theme/tokens.dart';
 import '../profile/profile_screen.dart';
-import '/services/interaction_service.dart';
+import '/services/current_chat.dart';
 import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 
 class ChatScreen extends StatefulWidget {
   final String otherUserId;
+  final String? chatId;
   final String? otherUserName;
   final String? otherUserAvatar;
 
   const ChatScreen({
     Key? key,
     required this.otherUserId,
+    this.chatId,
     this.otherUserName,
     this.otherUserAvatar,
   }) : super(key: key);
@@ -46,16 +48,35 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _sending = false;
   XFile? _pendingAttachment;
   bool _pendingIsImage = true;
+  int _lastAutoReadMessageMs = 0;
 
   String? _titleName;
+
+  bool _looksLikeUid(String value) {
+    final v = value.trim();
+    if (v.length < 16) return false;
+    if (v.contains(' ')) return false;
+    return RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(v);
+  }
+
+  String _sanitizeName(String value) {
+    final v = value.trim();
+    if (v.isEmpty || _looksLikeUid(v)) return '';
+    return v;
+  }
 
   @override
   void initState() {
     super.initState();
     _me = FirebaseAuth.instance.currentUser!.uid;
     debugPrint('[Chat] init me=$_me other=${widget.otherUserId}');
-    final ids = [_me, widget.otherUserId]..sort();
-    _chatId = ids.join('_');
+    final normalizedChatId = (widget.chatId ?? '').trim();
+    if (normalizedChatId.isNotEmpty) {
+      _chatId = normalizedChatId;
+    } else {
+      final ids = [_me, widget.otherUserId]..sort();
+      _chatId = ids.join('_');
+    }
     debugPrint('[Chat] chatId=$_chatId');
     _ready = _ensureChatDoc().timeout(
       const Duration(seconds: 12),
@@ -66,6 +87,8 @@ class _ChatScreenState extends State<ChatScreen> {
     );
     _ready.then((_) {
       debugPrint('[Chat] ensureChatDoc OK chatId=$_chatId');
+      CurrentChat.otherUserId = widget.otherUserId;
+      _markChatRead();
     }).catchError((e, st) {
       debugPrint('[Chat] ensureChatDoc ERROR: $e');
       debugPrint('[Chat] ensureChatDoc STACK: $st');
@@ -80,19 +103,58 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     final ref = FirebaseFirestore.instance.collection('chats').doc(_chatId);
     final users = [_me, widget.otherUserId]..sort();
-    debugPrint('[Chat] ensureChatDoc set start users=$users');
+    debugPrint('[Chat] ensureChatDoc start users=$users');
+    final snap = await ref.get();
+    if (!snap.exists) {
+      await ref.set({
+        'users': users,
+        'participants': users,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        'unreadBy.$_me': 0,
+        'unreadBy.${widget.otherUserId}': 0,
+      }, SetOptions(merge: true));
+      debugPrint('[Chat] ensureChatDoc created chatId=$_chatId');
+      return;
+    }
+
+    // Keep participant metadata healthy without mutating unread for the other user.
     await ref.set({
       'users': users,
       'participants': users,
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
-    debugPrint('[Chat] ensureChatDoc set done chatId=$_chatId');
+    debugPrint('[Chat] ensureChatDoc refreshed chatId=$_chatId');
+  }
+
+  Future<void> _markChatRead() async {
+    try {
+      await FirebaseFirestore.instance.collection('chats').doc(_chatId).set({
+        'unreadBy.$_me': 0,
+      }, SetOptions(merge: true));
+      await FirebaseFirestore.instance.collection('users').doc(_me).set({
+        'lastMessagesSeenAt': FieldValue.serverTimestamp(),
+        'unreadMessagesCount': 0,
+      }, SetOptions(merge: true));
+    } catch (_) {}
+  }
+
+  void _autoMarkReadFromSnapshot(QuerySnapshot snap) {
+    try {
+      if (snap.docs.isEmpty) return;
+      final data = snap.docs.first.data() as Map<String, dynamic>? ?? {};
+      final authorId = (data['authorId'] ?? '').toString();
+      if (authorId.isEmpty || authorId == _me) return;
+      final ts = data['createdAt'];
+      final ms = ts is Timestamp ? ts.toDate().millisecondsSinceEpoch : 0;
+      if (ms <= 0 || ms <= _lastAutoReadMessageMs) return;
+      _lastAutoReadMessageMs = ms;
+      unawaited(_markChatRead());
+    } catch (_) {}
   }
 
   Future<void> _resolveTitleName() async {
-    final passed = widget.otherUserName?.trim();
-    if (passed != null && passed.isNotEmpty) {
+    final passed = _sanitizeName(widget.otherUserName ?? '');
+    if (passed.isNotEmpty) {
       _titleName = passed;
       setState(() {});
       return;
@@ -103,19 +165,30 @@ class _ChatScreenState extends State<ChatScreen> {
           .doc(widget.otherUserId)
           .get();
       final d = snap.data();
-      final name = (d?['displayName'] ??
-              d?['fullName'] ??
-              d?['name'] ??
-              d?['userName'] ??
-              '')
-          .toString()
-          .trim();
-      if (mounted) setState(() => _titleName = name.isEmpty ? null : name);
+      final candidates = <String>[
+        (d?['displayName'] ?? '').toString(),
+        (d?['fullName'] ?? '').toString(),
+        (d?['name'] ?? '').toString(),
+        (d?['userName'] ?? '').toString(),
+      ];
+      var resolved = '';
+      for (final candidate in candidates) {
+        final clean = _sanitizeName(candidate);
+        if (clean.isNotEmpty) {
+          resolved = clean;
+          break;
+        }
+      }
+      if (mounted)
+        setState(() => _titleName = resolved.isEmpty ? null : resolved);
     } catch (_) {}
   }
 
   @override
   void dispose() {
+    if (CurrentChat.otherUserId == widget.otherUserId) {
+      CurrentChat.otherUserId = null;
+    }
     _inputCtrl.dispose();
     super.dispose();
   }
@@ -175,27 +248,44 @@ class _ChatScreenState extends State<ChatScreen> {
     if (t.isEmpty) return;
     _inputCtrl.clear();
 
-    await _ready;
+    try {
+      await _ready;
+    } catch (_) {
+      await _ensureChatDoc();
+    }
+    await _ensureChatDoc();
     debugPrint('[Chat] sendText ready OK');
 
     final now = Timestamp.now();
     final chatRef = FirebaseFirestore.instance.collection('chats').doc(_chatId);
 
-    await chatRef.collection('messages').add({
-      'authorId': _me,
-      'createdAt': now,
-      'type': 'text',
-      'text': t,
-    });
+    try {
+      await chatRef.collection('messages').add({
+        'authorId': _me,
+        'createdAt': now,
+        'type': 'text',
+        'text': t,
+      });
 
-    await InteractionService.recordInteraction(widget.otherUserId);
-    await chatRef.set({
-      'updatedAt': now,
-      'lastMessageAt': now,
-      'lastMessageAuthorId': _me,
-      'lastMessageType': 'text',
-    }, SetOptions(merge: true));
-    debugPrint('[Chat] sendText done');
+      await chatRef.set({
+        'users': FieldValue.arrayUnion([_me, widget.otherUserId]),
+        'participants': FieldValue.arrayUnion([_me, widget.otherUserId]),
+        'updatedAt': now,
+        'lastMessageAt': now,
+        'lastMessageAuthorId': _me,
+        'lastMessageType': 'text',
+        'lastMessageText': t,
+        'unreadBy.$_me': 0,
+      }, SetOptions(merge: true));
+      debugPrint('[Chat] sendText done');
+    } catch (e) {
+      debugPrint('[Chat] sendText ERROR: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Message could not be sent: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _pickAttachment() async {
@@ -277,7 +367,12 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _uploadAndSend(XFile x, {required bool isImage}) async {
-    await _ready;
+    try {
+      await _ready;
+    } catch (_) {
+      await _ensureChatDoc();
+    }
+    await _ensureChatDoc();
     debugPrint('[Chat] upload ready OK isImage=$isImage');
     setState(() => _sending = true);
     try {
@@ -310,13 +405,16 @@ class _ChatScreenState extends State<ChatScreen> {
         'mime': mime,
       });
 
-      await InteractionService.recordInteraction(widget.otherUserId);
       final now = Timestamp.now();
       await chatRef.set({
+        'users': FieldValue.arrayUnion([_me, widget.otherUserId]),
+        'participants': FieldValue.arrayUnion([_me, widget.otherUserId]),
         'updatedAt': now,
         'lastMessageAt': now,
         'lastMessageAuthorId': _me,
         'lastMessageType': isImage ? 'image' : 'video',
+        'lastMessageText': isImage ? 'Photo' : 'Video',
+        'unreadBy.$_me': 0,
       }, SetOptions(merge: true));
       debugPrint(
           '[Chat] uploadAndSend done type=${isImage ? 'image' : 'video'}');
@@ -426,6 +524,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 final msgs = snap.hasData
                     ? _toMessages(snap.data!)
                     : const <types.Message>[];
+                if (snap.hasData) {
+                  _autoMarkReadFromSnapshot(snap.data!);
+                }
 
                 return Chat(
                   messages: msgs,

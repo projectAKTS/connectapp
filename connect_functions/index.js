@@ -5,8 +5,9 @@
 const { onRequest, onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const functionsV1 = require("firebase-functions/v1");
 const { defineSecret } = require("firebase-functions/params");
-const { RtcTokenBuilder, RtcRole } = require("agora-access-token");
+const { RtcTokenBuilder, RtcRole } = require("agora-token");
 const admin = require("firebase-admin");
 admin.initializeApp();
 
@@ -32,47 +33,248 @@ function getStripeMode() {
   return secret.startsWith("sk_live_") ? "live" : "test";
 }
 
+function fallbackNameFromEmail(email) {
+  const e = `${email || ""}`.trim();
+  if (!e.includes("@")) return "";
+  const raw = e.split("@")[0];
+  const cleaned = raw.replace(/[^A-Za-z0-9]+/g, " ").trim();
+  if (!cleaned) return "";
+  return cleaned
+    .split(" ")
+    .filter(Boolean)
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+    .join(" ")
+    .trim();
+}
+
+function inferOtherUidFromChatId(chatId, currentUid) {
+  const id = `${chatId || ""}`.trim();
+  const me = `${currentUid || ""}`.trim();
+  if (!id || !me) return "";
+
+  const prefix = `${me}_`;
+  if (id.startsWith(prefix) && id.length > prefix.length) {
+    return id.substring(prefix.length);
+  }
+  const suffix = `_${me}`;
+  if (id.endsWith(suffix) && id.length > suffix.length) {
+    return id.substring(0, id.length - suffix.length);
+  }
+
+  const parts = id.split("_").filter(Boolean);
+  if (parts.length === 2) {
+    return parts[0] === me ? parts[1] : parts[0];
+  }
+  return "";
+}
+
+function deriveRtcUidFromAuthUid(authUid) {
+  const source = `${authUid || ""}`;
+  if (!source) return 1;
+  // FNV-1a 32-bit hash for stable, deterministic non-zero Agora uid.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < source.length; i++) {
+    hash ^= source.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  const unsigned = hash >>> 0;
+  return (unsigned % 2147483646) + 1;
+}
+
 // --- Get User Tokens ---
-async function getUserTokens(uid) {
+function normalizeTokenList(arr, single) {
+  const list = Array.isArray(arr) ? arr : [];
+  const one = single ? [single] : [];
+  return Array.from(new Set([...list, ...one].filter(Boolean)));
+}
+
+function tokenSuffixes(tokens) {
+  return (Array.isArray(tokens) ? tokens : [])
+    .filter(Boolean)
+    .map((token) => `${token}`.slice(-12));
+}
+
+async function getUserPushTokenSets(uid) {
   const snap = await db.collection("users").doc(uid).get();
-  if (!snap.exists) return [];
+  if (!snap.exists) {
+    return {
+      fcmAll: [],
+      fcmForFallback: [],
+      apns: [],
+      voip: [],
+    };
+  }
   const data = snap.data() || {};
-  const arr = Array.isArray(data.fcmTokens) ? data.fcmTokens : [];
-  const single = data.fcmToken ? [data.fcmToken] : [];
-  return Array.from(new Set([...arr, ...single].filter(Boolean)));
+  // Prefer the latest scalar token fields over historical arrays. Reinstalls
+  // were growing these arrays and causing duplicate notifications.
+  const fcmAll = data.fcmToken
+    ? normalizeTokenList([], data.fcmToken)
+    : normalizeTokenList(data.fcmTokens, data.fcmToken);
+  const fcmIos = data.fcmTokenIos
+    ? normalizeTokenList([], data.fcmTokenIos)
+    : normalizeTokenList(data.fcmTokensIos, data.fcmTokenIos);
+  const fcmAndroid = data.fcmTokenAndroid
+    ? normalizeTokenList([], data.fcmTokenAndroid)
+    : normalizeTokenList(data.fcmTokensAndroid, data.fcmTokenAndroid);
+  const apns = data.apnsToken
+    ? normalizeTokenList([], data.apnsToken)
+    : normalizeTokenList(data.apnsTokens, data.apnsToken);
+  const voip = data.voipToken
+    ? normalizeTokenList([], data.voipToken)
+    : normalizeTokenList(data.voipTokens, data.voipToken);
+
+  // Prefer explicit Android tokens for FCM fallback.
+  // If only iOS tokens exist, skip FCM and rely on APNS direct paths.
+  let fcmForFallback = fcmAndroid;
+  if (!fcmForFallback.length) {
+    if (fcmIos.length) {
+      const iosSet = new Set(fcmIos);
+      fcmForFallback = fcmAll.filter((token) => !iosSet.has(token));
+    } else {
+      fcmForFallback = fcmAll;
+    }
+  }
+
+  return {
+    fcmAll,
+    fcmForFallback: Array.from(new Set(fcmForFallback)),
+    apns,
+    voip,
+  };
+}
+
+async function getUserTokens(uid) {
+  const tokenSets = await getUserPushTokenSets(uid);
+  return tokenSets.fcmAll;
 }
 
 async function getUserVoipTokens(uid) {
-  const snap = await db.collection("users").doc(uid).get();
-  if (!snap.exists) return [];
-  const data = snap.data() || {};
-  const arr = Array.isArray(data.voipTokens) ? data.voipTokens : [];
-  const single = data.voipToken ? [data.voipToken] : [];
-  return Array.from(new Set([...arr, ...single].filter(Boolean)));
+  const tokenSets = await getUserPushTokenSets(uid);
+  return tokenSets.voip;
+}
+
+async function getUserApnsTokens(uid) {
+  const tokenSets = await getUserPushTokenSets(uid);
+  return tokenSets.apns;
 }
 
 // --- Send Notification ---
 async function sendToTokens(tokens, payload) {
   const deduped = Array.from(new Set(tokens.filter(Boolean)));
   if (!deduped.length) return;
-  return fcm.sendEachForMulticast({ tokens: deduped, ...payload });
+  const result = await fcm.sendEachForMulticast({ tokens: deduped, ...payload });
+  const failed = [];
+  result.responses.forEach((r, i) => {
+    if (!r.success) {
+      failed.push({
+        token: deduped[i],
+        code: r.error?.code || "unknown",
+        message: r.error?.message || "",
+      });
+    }
+  });
+  if (failed.length) {
+    console.warn("FCM send failures:", failed);
+  }
+  return result;
 }
 
-let _apnProvider = null;
-function getApnProvider() {
-  if (_apnProvider) return _apnProvider;
+const _apnProviders = new Map();
+function looksLikeBase64KeyBody(s) {
+  return /^[A-Za-z0-9+/=\s]+$/.test(s) && s.replace(/\s+/g, "").length > 120;
+}
+
+function normalizeApnsKey(rawValue) {
+  const raw = (rawValue || "").replace(/\\n/g, "\n").trim();
+  if (!raw) return null;
+
+  // If a filesystem path was intentionally provided.
+  if ((raw.endsWith(".p8") || raw.startsWith("/")) && !raw.includes("BEGIN")) {
+    return raw;
+  }
+
+  // Full PEM key.
+  if (raw.includes("BEGIN PRIVATE KEY")) {
+    return Buffer.from(raw, "utf8");
+  }
+
+  // Base64-only key body from secret manager; wrap as PEM.
+  if (looksLikeBase64KeyBody(raw)) {
+    const compact = raw.replace(/\s+/g, "");
+    const lines = compact.match(/.{1,64}/g) || [compact];
+    const pem = [
+      "-----BEGIN PRIVATE KEY-----",
+      ...lines,
+      "-----END PRIVATE KEY-----",
+      "",
+    ].join("\n");
+    return Buffer.from(pem, "utf8");
+  }
+
+  // Best effort: use raw bytes.
+  return Buffer.from(raw, "utf8");
+}
+
+function getApnProvider({ production }) {
+  const cacheKey = production ? "production" : "development";
+  if (_apnProviders.has(cacheKey)) return _apnProviders.get(cacheKey);
   const apn = require("apn");
   const keyId = (APNS_KEY_ID.value() || "").trim();
   const teamId = (APNS_TEAM_ID.value() || "").trim();
-  const key = (APNS_VOIP_KEY_P8.value() || "").replace(/\\n/g, "\n").trim();
+  const key = normalizeApnsKey(APNS_VOIP_KEY_P8.value());
   if (!keyId || !teamId || !key) {
     throw new Error("APNS secrets missing");
   }
-  _apnProvider = new apn.Provider({
+  const provider = new apn.Provider({
     token: { key, keyId, teamId },
-    production: true,
+    production,
   });
-  return _apnProvider;
+  _apnProviders.set(cacheKey, provider);
+  return provider;
+}
+
+function apnsFailureReason(failure) {
+  return (
+    failure?.response?.reason ||
+    failure?.error?.reason ||
+    failure?.error?.message ||
+    "unknown"
+  );
+}
+
+function shouldRetryApnsInDevelopment(result) {
+  const failed = Array.isArray(result?.failed) ? result.failed : [];
+  const sent = Array.isArray(result?.sent) ? result.sent : [];
+  if (!failed.length || sent.length > 0) return false;
+  const retryReasons = new Set([
+    "BadDeviceToken",
+    "DeviceTokenNotForTopic",
+    "Unregistered",
+    "MissingTopic",
+    "TopicDisallowed",
+  ]);
+  return failed.some((f) => retryReasons.has(apnsFailureReason(f)));
+}
+
+function logApnsFailures(label, result, environment) {
+  const failed = Array.isArray(result?.failed) ? result.failed : [];
+  if (!failed.length) return;
+  const details = failed.map((f) => ({
+    device: f?.device,
+    reason: apnsFailureReason(f),
+    status: f?.status ?? null,
+  }));
+  console.warn(`${label} failed tokens (${environment}):`, details);
+}
+
+async function sendApnsWithFallback(notification, tokens) {
+  let environment = "production";
+  let result = await getApnProvider({ production: true }).send(notification, tokens);
+  if (shouldRetryApnsInDevelopment(result)) {
+    environment = "development";
+    result = await getApnProvider({ production: false }).send(notification, tokens);
+  }
+  return { result, environment };
 }
 
 async function sendVoipPushToTokens(tokens, data) {
@@ -85,7 +287,6 @@ async function sendVoipPushToTokens(tokens, data) {
   }
 
   const apn = require("apn");
-  const provider = getApnProvider();
   const notification = new apn.Notification();
   notification.topic = `${bundleId}.voip`;
   notification.pushType = "voip";
@@ -97,14 +298,53 @@ async function sendVoipPushToTokens(tokens, data) {
     ...data,
   };
 
-  const result = await provider.send(notification, deduped);
-  if (result.failed?.length) {
-    console.warn("APNS VoIP failed tokens:", result.failed.map((f) => f.device));
-  }
+  const { result, environment } = await sendApnsWithFallback(
+    notification,
+    deduped
+  );
+  logApnsFailures("APNS VoIP", result, environment);
   return {
     sent: result.sent?.length || 0,
     failed: result.failed?.length || 0,
     skipped: false,
+    environment,
+  };
+}
+
+async function sendApnsAlertToTokens(tokens, { title, body, data }) {
+  const deduped = Array.from(new Set(tokens.filter(Boolean)));
+  if (!deduped.length) return { sent: 0, failed: 0, skipped: true };
+
+  const bundleId = (APNS_BUNDLE_ID.value() || "").trim();
+  if (!bundleId) {
+    throw new Error("APNS_BUNDLE_ID missing");
+  }
+
+  const apn = require("apn");
+  const notification = new apn.Notification();
+  notification.topic = bundleId;
+  notification.pushType = "alert";
+  notification.priority = 10;
+  notification.expiry = Math.floor(Date.now() / 1000) + 60;
+  notification.alert = {
+    title: `${title || "Notification"}`,
+    body: `${body || ""}`,
+  };
+  notification.sound = "default";
+  notification.payload = {
+    ...(data || {}),
+  };
+
+  const { result, environment } = await sendApnsWithFallback(
+    notification,
+    deduped
+  );
+  logApnsFailures("APNS alert", result, environment);
+  return {
+    sent: result.sent?.length || 0,
+    failed: result.failed?.length || 0,
+    skipped: false,
+    environment,
   };
 }
 
@@ -534,7 +774,10 @@ exports.onCallInviteCreated = onDocumentCreated(
   async (event) => {
     const d = event.data?.data() || {};
     const { fromName, toUid, channel, isVideo } = d;
+    const inviteId = event.params.inviteId || "";
     if (!toUid || !channel) return;
+    let voipDelivered = false;
+    let apnsAlertDelivered = false;
     const payloadData = {
       channel: `${channel}`,
       isVideo: `${Boolean(isVideo)}`,
@@ -543,65 +786,347 @@ exports.onCallInviteCreated = onDocumentCreated(
       toUid: `${toUid}`,
       callId: event.params.inviteId || `${channel}`,
     };
+    const tokenSets = await getUserPushTokenSets(toUid);
 
     // Primary path for iOS incoming-call reliability
     try {
-      const voipTokens = await getUserVoipTokens(toUid);
+      const voipTokens = tokenSets.voip;
       if (voipTokens.length) {
         const voipRes = await sendVoipPushToTokens(voipTokens, payloadData);
-        console.log("APNS VoIP result:", voipRes);
+        voipDelivered = (voipRes.sent || 0) > 0;
+        console.log("APNS VoIP result:", {
+          inviteId,
+          toUid,
+          channel,
+          tokenSuffixes: tokenSuffixes(voipTokens),
+          ...voipRes,
+        });
+      } else {
+        console.log("APNS VoIP skipped: no tokens", { inviteId, toUid, channel });
       }
     } catch (e) {
       console.error("APNS VoIP send failed:", e);
     }
 
-    // Fallback path for regular notifications (Android/iOS)
-    const tokens = await getUserTokens(toUid);
+    // Only use regular APNs alert as a fallback when VoIP delivery is unavailable.
+    // Sending both on iOS creates duplicate incoming-call notifications.
+    try {
+      const apnsTokens = tokenSets.apns;
+      if (voipDelivered) {
+        console.log("APNS alert skipped: voip already delivered", {
+          inviteId,
+          toUid,
+          channel,
+          tokenSuffixes: tokenSuffixes(tokenSets.apns),
+        });
+      } else if (apnsTokens.length) {
+        const apnsRes = await sendApnsAlertToTokens(apnsTokens, {
+          title: isVideo ? "Incoming Video Call" : "Incoming Audio Call",
+          body: `From ${fromName || "Someone"}`,
+          data: {
+            type: "call_invite",
+            ...payloadData,
+          },
+        });
+        apnsAlertDelivered = (apnsRes.sent || 0) > 0;
+        console.log("APNS alert result:", {
+          inviteId,
+          toUid,
+          channel,
+          tokenSuffixes: tokenSuffixes(apnsTokens),
+          ...apnsRes,
+        });
+      } else {
+        console.log("APNS alert skipped: no tokens", { inviteId, toUid, channel });
+      }
+    } catch (e) {
+      console.error("APNS alert send failed:", e);
+    }
+
+    // Use FCM for Android by default, and as a full fallback when direct APNS fails.
+    const tokens = (voipDelivered || apnsAlertDelivered)
+      ? tokenSets.fcmForFallback
+      : tokenSets.fcmAll;
     if (tokens.length) {
       await sendToTokens(tokens, {
         notification: {
           title: isVideo ? "Incoming Video Call" : "Incoming Audio Call",
           body: `From ${fromName || "Someone"}`,
         },
+        android: {
+          priority: "high",
+          notification: {
+            channelId: "high_importance_channel",
+            sound: "default",
+          },
+        },
+        apns: {
+          headers: {
+            "apns-priority": "10",
+          },
+          payload: {
+            aps: {
+              sound: "default",
+              contentAvailable: true,
+            },
+          },
+        },
         data: {
           type: "call_invite",
           ...payloadData,
         },
       });
+    } else {
+      console.log("FCM skipped: no tokens", { inviteId, toUid, channel });
     }
   }
 );
 
 exports.onChatMessageCreated = onDocumentCreated(
-  { document: "chats/{chatId}/messages/{messageId}", region: "us-central1" },
+  {
+    document: "chats/{chatId}/messages/{messageId}",
+    region: "us-central1",
+    secrets: [APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_VOIP_KEY_P8],
+  },
   async (event) => {
     const m = event.data?.data() || {};
     const chatId = event.params.chatId;
     const authorId = m.authorId;
     if (!chatId || !authorId) return;
     const chat = (await db.doc(`chats/${chatId}`).get()).data() || {};
-    const users = chat.users || chat.participants || [];
+    let users = [];
+    if (Array.isArray(chat.users) && chat.users.length) users = chat.users;
+    else if (Array.isArray(chat.participants) && chat.participants.length) users = chat.participants;
+    else {
+      const inferredOther = inferOtherUidFromChatId(chatId, authorId);
+      if (inferredOther) {
+        users = [authorId, inferredOther];
+      } else if (chatId.includes("_")) {
+        const parts = chatId.split("_").filter(Boolean);
+        if (parts.length === 2) users = parts;
+      }
+    }
+    users = Array.from(new Set((users || []).map((u) => `${u}`))).filter(Boolean);
+    if (users.length < 2) {
+      console.warn("onChatMessageCreated skip: could not infer participants", {
+        chatId,
+        authorId,
+        usersCount: users.length,
+      });
+      return;
+    }
+
     const recipients = users.filter((u) => u !== authorId);
+    const parseMillis = (value) => {
+      if (!value) return 0;
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      if (typeof value === "string") {
+        const parsed = Date.parse(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+      }
+      if (value instanceof Date) return value.getTime();
+      if (typeof value.toMillis === "function") {
+        const ms = value.toMillis();
+        return Number.isFinite(ms) ? ms : 0;
+      }
+      return 0;
+    };
+    // Prefer server-side event commit time to avoid client clock skew.
+    const messageCreatedAtMs =
+      parseMillis(event.time) ||
+      parseMillis(event.data?.createTime) ||
+      parseMillis(m.createdAt) ||
+      Date.now();
     const sDoc = await db.collection("users").doc(authorId).get();
     const s = sDoc.data() || {};
-    const fromName = s.fullName || s.name || "Someone";
+    const fromName = s.displayName || s.fullName || s.name || "Someone";
     const body = m.text ? m.text.slice(0, 120) : "Sent you a message";
+    const lastMessageType = `${m.type || (m.text ? "text" : "attachment")}`;
+    let lastMessageText = "";
+    if (typeof m.text === "string" && m.text.trim()) {
+      lastMessageText = m.text.trim().slice(0, 120);
+    } else if (lastMessageType === "image") {
+      lastMessageText = "Photo";
+    } else if (lastMessageType === "video") {
+      lastMessageText = "Video";
+    } else if (lastMessageType === "file") {
+      lastMessageText = "File";
+    } else if (lastMessageType === "missed_call") {
+      lastMessageText = "Missed call";
+    } else {
+      lastMessageText = "Sent you a message";
+    }
+
+    // Keep sender unread at zero. Recipient unread is incremented per-message below.
+    const chatRef = db.collection("chats").doc(chatId);
+    await db.collection("chats").doc(chatId).set(
+      {
+        // Self-heal legacy chat docs and keep list metadata always fresh.
+        users,
+        participants: users,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastMessageAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastMessageAuthorId: `${authorId}`,
+        lastMessageType,
+        lastMessageText,
+        [`unreadBy.${authorId}`]: 0,
+      },
+      { merge: true }
+    );
+
+    // Keep a fast user-level unread counter for reliable badges in clients.
+    await Promise.all(
+      recipients.map(async (uid) => {
+        try {
+          const userRef = db.collection("users").doc(uid);
+          const userSnap = await userRef.get();
+          const userData = userSnap.data() || {};
+          const lastSeen = userData.lastMessagesSeenAt;
+          const lastSeenMs =
+            lastSeen && typeof lastSeen.toMillis === "function"
+              ? lastSeen.toMillis()
+              : 0;
+          // Skip stale increments if user has already opened messages
+          // after this message was created.
+          if (lastSeenMs > 0 && lastSeenMs - messageCreatedAtMs >= 1000) {
+            console.log("onChatMessageCreated skip unread increment (already seen)", {
+              chatId,
+              uid,
+              lastSeenMs,
+              messageCreatedAtMs,
+            });
+            return;
+          }
+          await Promise.all([
+            userRef.set(
+              {
+                unreadMessagesCount: admin.firestore.FieldValue.increment(1),
+                lastIncomingMessageAt: admin.firestore.FieldValue.serverTimestamp(),
+              },
+              { merge: true }
+            ),
+            chatRef.set(
+              {
+                [`unreadBy.${uid}`]: admin.firestore.FieldValue.increment(1),
+              },
+              { merge: true }
+            ),
+          ]);
+        } catch (e) {
+          console.warn("onChatMessageCreated unread counter update failed", {
+            chatId,
+            uid,
+            error: `${e}`,
+          });
+        }
+      })
+    );
 
     for (const uid of recipients) {
-      const tokens = await getUserTokens(uid);
-      if (!tokens.length) continue;
-      await sendToTokens(tokens, {
-        notification: { title: fromName, body },
-        data: {
-          type: "chat_message",
-          chatId,
-          authorId: `${authorId}`,
-          otherUserId: `${authorId}`,
-        },
-      });
+      const tokenSets = await getUserPushTokenSets(uid);
+      const tokens = tokenSets.fcmAll;
+      if (tokens.length) {
+        await sendToTokens(tokens, {
+          notification: { title: fromName, body },
+          android: {
+            priority: "high",
+            notification: {
+              channelId: "high_importance_channel",
+              sound: "default",
+            },
+          },
+          apns: {
+            headers: {
+              "apns-priority": "10",
+            },
+            payload: {
+              aps: {
+                sound: "default",
+                contentAvailable: true,
+              },
+            },
+          },
+          data: {
+            type: "chat_message",
+            chatId,
+            authorId: `${authorId}`,
+            otherUserId: `${authorId}`,
+          },
+        });
+        continue;
+      }
+
+      // Last-resort fallback if an iOS device somehow has APNS but no FCM token.
+      try {
+        const apnsTokens = tokenSets.apns;
+        if (apnsTokens.length) {
+          await sendApnsAlertToTokens(apnsTokens, {
+            title: fromName,
+            body,
+            data: {
+              type: "chat_message",
+              chatId,
+              authorId: `${authorId}`,
+              otherUserId: `${authorId}`,
+            },
+          });
+        }
+      } catch (e) {
+        console.error("APNS alert (chat) send failed:", e);
+      }
     }
   }
 );
+
+exports.onAuthUserCreated = functionsV1.auth.user().onCreate(async (user) => {
+  if (!user || !user.uid) return;
+
+  const uid = `${user.uid}`;
+  const email = `${user.email || ""}`.trim();
+  const displayNameRaw = `${user.displayName || ""}`.trim();
+  const resolvedName = displayNameRaw || fallbackNameFromEmail(email) || "User";
+
+  await db.collection("users").doc(uid).set(
+    {
+      fullName: resolvedName,
+      fullNameLower: resolvedName.toLowerCase(),
+      displayName: resolvedName,
+      displayName_lc: resolvedName.toLowerCase(),
+      email,
+      bio: "No bio available yet.",
+      followers: [],
+      following: [],
+      postsCount: 0,
+      profilePicture: "",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      xpPoints: 0,
+      badges: [],
+      postCount: 0,
+      commentCount: 0,
+      helpfulMarks: 0,
+      dailyLoginStreak: 0,
+      postingStreak: 0,
+      lastLoginDate: null,
+      lastPostDate: null,
+      referralCount: 0,
+      categoryPosts: {
+        Career: 0,
+        Travel: 0,
+        Finance: 0,
+        Technology: 0,
+        Health: 0,
+      },
+      activePerks: {
+        priorityPostBoost: null,
+        profileHighlight: null,
+        commentBoost: null,
+      },
+      premiumStatus: "none",
+      trialUsed: false,
+    },
+    { merge: true }
+  );
+});
 
 exports.healthCheck = onRequest(
   { region: "us-central1" },
@@ -628,6 +1153,12 @@ exports.getAgoraRtcToken = onCall(
     if (!appId || !appCertificate) {
       throw new HttpsError("failed-precondition", "Agora secrets are missing");
     }
+    if (!/^[0-9a-fA-F]{32}$/.test(appCertificate)) {
+      throw new HttpsError(
+        "failed-precondition",
+        "AGORA_APP_CERTIFICATE is invalid. Expected 32-char hex certificate."
+      );
+    }
 
     const channelName = (request.data?.channelName || "").toString().trim();
     if (!channelName || channelName.length > 64 || !/^[A-Za-z0-9_]+$/.test(channelName)) {
@@ -635,19 +1166,28 @@ exports.getAgoraRtcToken = onCall(
     }
 
     const rawUid = request.data?.uid;
-    const uid = Number.isInteger(rawUid) ? rawUid : Number.parseInt(`${rawUid ?? 0}`, 10);
-    if (!Number.isInteger(uid) || uid < 0) {
+    let uid = Number.isInteger(rawUid) ? rawUid : Number.parseInt(`${rawUid ?? 0}`, 10);
+    if (!Number.isInteger(uid) || uid < 0 || uid > 0xffffffff) {
       throw new HttpsError("invalid-argument", "Invalid uid");
     }
+    const requestedUid = uid;
+    const allowUidZeroRequested = request.data?.allowUidZero === true;
+    const allowUidZero = allowUidZeroRequested;
+    if (uid === 0 && !allowUidZero) {
+      uid = deriveRtcUidFromAuthUid(request.auth.uid);
+    }
 
-    const role = request.data?.role === "subscriber" ? RtcRole.SUBSCRIBER : RtcRole.PUBLISHER;
+    const roleInput = `${request.data?.role || ""}`.toLowerCase();
+    const role = roleInput === "subscriber"
+      ? (RtcRole.SUBSCRIBER ?? RtcRole.Subscriber ?? 2)
+      : (RtcRole.PUBLISHER ?? RtcRole.Publisher ?? 1);
     const expireSeconds = Math.min(
       Math.max(Number.parseInt(`${request.data?.expireSeconds ?? 3600}`, 10), 60),
       24 * 60 * 60
     );
 
     const now = Math.floor(Date.now() / 1000);
-    const privilegeExpireTs = now + expireSeconds;
+    const expireAt = now + expireSeconds;
 
     try {
       const token = RtcTokenBuilder.buildTokenWithUid(
@@ -656,9 +1196,31 @@ exports.getAgoraRtcToken = onCall(
         channelName,
         uid,
         role,
-        privilegeExpireTs
+        expireSeconds,
+        expireSeconds
       );
-      return { token, expireAt: privilegeExpireTs };
+      const tokenVersion = token.slice(0, 3);
+      console.log("getAgoraRtcToken ok", {
+        channelName,
+        requestedUid,
+        uid,
+        allowUidZeroRequested,
+        allowUidZero,
+        expireAt,
+        expireSeconds,
+        tokenVersion,
+        appIdSuffix: appId.slice(-6),
+      });
+      return {
+        token,
+        expireAt,
+        appId,
+        uid,
+        requestedUid,
+        allowUidZeroRequested,
+        allowUidZero,
+        tokenVersion,
+      };
     } catch (e) {
       console.error("getAgoraRtcToken failed:", e);
       throw new HttpsError("internal", "Failed to build Agora token");

@@ -60,20 +60,20 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyB2OAMOmE3sPh60XthLCh7kZW6phZ3l8AI',
-    appId: '1:33757728932:ios:d2344cfb0f8f08f19a1631',
+    appId: '1:33757728932:ios:1d2395488ecbdb029a1631',
     messagingSenderId: '33757728932',
     projectId: 'connectapp-278b4',
     storageBucket: 'connectapp-278b4.firebasestorage.app',
-    iosBundleId: 'com.example.connectApp',
+    iosBundleId: 'com.yakup.helperly',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
     apiKey: 'AIzaSyB2OAMOmE3sPh60XthLCh7kZW6phZ3l8AI',
-    appId: '1:33757728932:ios:d2344cfb0f8f08f19a1631',
+    appId: '1:33757728932:ios:1d2395488ecbdb029a1631',
     messagingSenderId: '33757728932',
     projectId: 'connectapp-278b4',
     storageBucket: 'connectapp-278b4.firebasestorage.app',
-    iosBundleId: 'com.example.connectApp',
+    iosBundleId: 'com.yakup.helperly',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
@@ -85,5 +85,4 @@ class DefaultFirebaseOptions {
     storageBucket: 'connectapp-278b4.firebasestorage.app',
     measurementId: 'G-0QVPFDWBFB',
   );
-
 }

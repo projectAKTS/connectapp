@@ -4,9 +4,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import 'package:connect_app/screens/call/agora_call_screen.dart';
-import 'package:connect_app/services/interaction_service.dart';
 
 class CallService {
+  static const bool _diagEnabled =
+      bool.fromEnvironment('ENABLE_RUNTIME_DIAG', defaultValue: false);
+  static bool _callRouteActive = false;
+
   static String generateChannelName(String uid1, String uid2) {
     String clean(String s) => s.replaceAll(RegExp(r'[^A-Za-z0-9_]'), '');
     final a = clean(uid1);
@@ -29,18 +32,26 @@ class CallService {
     required bool isVideo,
     bool navigateCaller = true,
   }) async {
+    if (_callRouteActive) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('A call is already in progress.')),
+      );
+      return;
+    }
     final me = FirebaseAuth.instance.currentUser;
     if (me == null) throw Exception('Not signed in');
 
     final meDoc =
         await FirebaseFirestore.instance.collection('users').doc(me.uid).get();
-    final fromName = (meDoc.data()?['fullName'] as String?) ??
+    final fromName = (meDoc.data()?['displayName'] as String?) ??
+        (meDoc.data()?['fullName'] as String?) ??
         (meDoc.data()?['name'] as String?) ??
         'Unknown';
 
     final channel = generateChannelName(me.uid, toUid);
 
-    final inviteRef = await FirebaseFirestore.instance.collection('callInvites').add({
+    final inviteRef =
+        await FirebaseFirestore.instance.collection('callInvites').add({
       'fromUid': me.uid,
       'fromName': fromName,
       'toUid': toUid,
@@ -50,27 +61,37 @@ class CallService {
       'status': 'ringing',
       'createdAt': FieldValue.serverTimestamp(),
     });
-
-    // Count call attempts as interaction so Home "My connections" updates.
-    try {
-      await InteractionService.recordInteraction(toUid);
-    } catch (_) {}
+    if (_diagEnabled) {
+      try {
+        await FirebaseFirestore.instance.collection('users').doc(me.uid).set({
+          'diag.lastCallStage': 'invite_created',
+          'diag.lastCallAt': FieldValue.serverTimestamp(),
+          'diag.lastCallMeta':
+              '{inviteId: ${inviteRef.id}, toUid: $toUid, isVideo: $isVideo}',
+        }, SetOptions(merge: true));
+      } catch (_) {}
+    }
 
     if (navigateCaller) {
       final nav = Navigator.of(context, rootNavigator: true);
-      // ignore: use_build_context_synchronously
-      nav.push(
-        MaterialPageRoute(
-          builder: (_) => AgoraCallScreen(
-            channelName: channel,
-            isVideo: isVideo,
-            otherUserName: toName,
-            otherUserId: toUid,
-            inviteId: inviteRef.id,
-            isCaller: true,
+      _callRouteActive = true;
+      try {
+        // ignore: use_build_context_synchronously
+        await nav.push(
+          MaterialPageRoute(
+            builder: (_) => AgoraCallScreen(
+              channelName: channel,
+              isVideo: isVideo,
+              otherUserName: toName,
+              otherUserId: toUid,
+              inviteId: inviteRef.id,
+              isCaller: true,
+            ),
           ),
-        ),
-      );
+        );
+      } finally {
+        _callRouteActive = false;
+      }
     }
   }
 }

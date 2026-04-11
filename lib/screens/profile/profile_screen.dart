@@ -65,6 +65,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return fallback;
   }
 
+  int _unreadValue(dynamic raw) {
+    if (raw is int) return raw;
+    if (raw is num) return raw.toInt();
+    if (raw is String) return int.tryParse(raw.trim()) ?? 0;
+    return 0;
+  }
+
   List<String> _stringList(dynamic v) =>
       (v is List) ? v.map((e) => e.toString()).toList() : const <String>[];
 
@@ -535,7 +542,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    '$badgeCount',
+                    '+$badgeCount',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 12,
@@ -845,7 +852,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           StreamBuilder<DocumentSnapshot>(
                             stream: FirebaseFirestore.instance
                                 .collection('users')
-                                .doc(widget.userID)
+                                .doc(FirebaseAuth.instance.currentUser?.uid ??
+                                    widget.userID)
                                 .snapshots(),
                             builder: (context, userSnap) {
                               final d = userSnap.data?.data()
@@ -853,19 +861,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   const <String, dynamic>{};
                               final lastSeen = parseFirestoreTimestamp(
                                   d['lastMessagesSeenAt']);
+                              final directUnread = _unreadValue(
+                                d['unreadMessagesCount'],
+                              );
+                              final myUid =
+                                  FirebaseAuth.instance.currentUser?.uid ??
+                                      widget.userID;
 
                               return StreamBuilder<QuerySnapshot>(
                                 stream: FirebaseFirestore.instance
                                     .collection('chats')
-                                    .where('participants',
-                                        arrayContains: widget.userID)
+                                    .where('participants', arrayContains: myUid)
                                     .snapshots(),
                                 builder: (context, participantsSnap) {
                                   return StreamBuilder<QuerySnapshot>(
                                     stream: FirebaseFirestore.instance
                                         .collection('chats')
-                                        .where('users',
-                                            arrayContains: widget.userID)
+                                        .where('users', arrayContains: myUid)
                                         .snapshots(),
                                     builder: (context, usersSnap) {
                                       final merged =
@@ -887,25 +899,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                         }
                                       }
 
-                                      int unread = 0;
+                                      var unread = directUnread;
                                       final conversationCount = merged.length;
-                                      for (final m in merged.values) {
-                                        final updated = parseFirestoreTimestamp(
-                                            m['updatedAt']);
-                                        final author =
-                                            (m['lastMessageAuthorId'] ?? '')
-                                                .toString();
-                                        if (updated == null) continue;
-                                        if (author == widget.userID) continue;
-                                        if (lastSeen == null ||
-                                            updated.isAfter(lastSeen)) {
-                                          unread++;
+                                      if (unread <= 0) {
+                                        for (final m in merged.values) {
+                                          final unreadBy = m['unreadBy'];
+                                          if (unreadBy is Map) {
+                                            final value =
+                                                _unreadValue(unreadBy[myUid]);
+                                            if (value > 0) {
+                                              unread += value;
+                                              continue;
+                                            }
+                                          }
+                                          final updated =
+                                              parseFirestoreTimestamp(
+                                                      m['updatedAt']) ??
+                                                  parseFirestoreTimestamp(
+                                                      m['lastMessageAt']);
+                                          final author =
+                                              (m['lastMessageAuthorId'] ?? '')
+                                                  .toString();
+                                          if (updated != null &&
+                                              author != myUid &&
+                                              (lastSeen == null ||
+                                                  updated.isAfter(lastSeen))) {
+                                            unread += 1;
+                                          }
                                         }
                                       }
 
                                       return _accountRow(
                                         icon: Icons.chat_bubble_outline_rounded,
-                                        title: 'Messages & missed calls',
+                                        title: 'Messages',
                                         subtitle: conversationCount > 0
                                             ? '$conversationCount conversations'
                                             : 'Open conversations',
@@ -914,7 +940,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                           Navigator.of(context).push(
                                             CupertinoPageRoute(
                                               builder: (_) => MessagesScreen(
-                                                userId: widget.userID,
+                                                userId: myUid,
                                               ),
                                             ),
                                           );

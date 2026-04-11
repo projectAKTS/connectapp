@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../services/firebase_auth_service.dart';
 import '../../theme/tokens.dart';
 
@@ -17,8 +18,23 @@ class _LoginScreenState extends State<LoginScreen> {
   final FirebaseAuthService _authService = FirebaseAuthService();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+  StreamSubscription<User?>? _authSub;
+  bool _navigatingAfterAuth = false;
 
   bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _authSub = FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (!mounted || user == null || _navigatingAfterAuth) return;
+      if (_isLoading) {
+        setState(() => _isLoading = false);
+      }
+      _navigatingAfterAuth = true;
+      _goHome();
+    });
+  }
 
   void _showSnack(String msg) {
     if (!mounted) return;
@@ -35,15 +51,20 @@ class _LoginScreenState extends State<LoginScreen> {
     if (_isLoading) return;
     setState(() => _isLoading = true);
     try {
-      final user = await _authService.signInWithEmail(
-        _emailController.text.trim(),
-        _passwordController.text.trim(),
-      );
+      final user = await _authService
+          .signInWithEmail(
+            _emailController.text.trim(),
+            _passwordController.text.trim(),
+          )
+          .timeout(
+            const Duration(seconds: 25),
+            onTimeout: () => throw TimeoutException('Login timed out'),
+          );
       if (user == null) {
         _showSnack('Login failed. Please try again.');
         return;
       }
-      _goHome();
+      // Auth listener handles navigation when sign-in is confirmed.
     } catch (e) {
       _showSnack('Error: $e');
     } finally {
@@ -56,14 +77,17 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
     try {
       // ✅ ALWAYS SHOW PICKER
-      final user = await _authService.signInWithGoogleAlwaysAsk();
+      final user = await _authService.signInWithGoogleAlwaysAsk().timeout(
+            const Duration(seconds: 35),
+            onTimeout: () => throw TimeoutException('Google sign-in timed out'),
+          );
       if (!mounted) return;
 
       if (user == null) {
         _showSnack('Google sign-in was cancelled.');
         return;
       }
-      _goHome();
+      // Auth listener handles navigation when sign-in is confirmed.
     } on TimeoutException {
       _showSnack('Google sign-in timed out. Please try again.');
     } catch (e) {
@@ -81,14 +105,17 @@ class _LoginScreenState extends State<LoginScreen> {
     }
     setState(() => _isLoading = true);
     try {
-      final user = await _authService.signInWithApple();
+      final user = await _authService.signInWithApple().timeout(
+            const Duration(seconds: 35),
+            onTimeout: () => throw TimeoutException('Apple sign-in timed out'),
+          );
       if (!mounted) return;
 
       if (user == null) {
         _showSnack('Apple sign-in was cancelled.');
         return;
       }
-      _goHome();
+      // Auth listener handles navigation when sign-in is confirmed.
     } on TimeoutException {
       _showSnack('Apple sign-in timed out. Please try again.');
     } catch (e) {
@@ -105,6 +132,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
+    _authSub?.cancel();
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();

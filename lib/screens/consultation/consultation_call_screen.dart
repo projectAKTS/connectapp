@@ -11,7 +11,14 @@ import '/services/interaction_service.dart';
 const String appId = 'dac900a04a87460c87c3d18b63cac65d';
 
 /// ---- FETCH TOKEN FROM REMOTE SERVER ----
-Future<String> fetchAgoraToken(String channelName, int uid) async {
+class ConsultationJoinAuth {
+  final String token;
+  final int uid;
+  const ConsultationJoinAuth({required this.token, required this.uid});
+}
+
+Future<ConsultationJoinAuth> fetchAgoraToken(
+    String channelName, int uid) async {
   final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
       .httpsCallable('getAgoraRtcToken');
   final response = await callable.call({
@@ -22,10 +29,12 @@ Future<String> fetchAgoraToken(String channelName, int uid) async {
   });
   final data = (response.data as Map?) ?? const {};
   final token = (data['token'] ?? '').toString().trim();
+  final serverUidRaw = data['uid'];
+  final serverUid = serverUidRaw is num ? serverUidRaw.toInt() : uid;
   if (token.isEmpty) {
     throw Exception('Token service returned empty token');
   }
-  return token;
+  return ConsultationJoinAuth(token: token, uid: serverUid);
 }
 
 class ConsultationCallScreen extends StatefulWidget {
@@ -47,6 +56,7 @@ class ConsultationCallScreen extends StatefulWidget {
 class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
   RtcEngine? _engine;
   String? _token;
+  int _rtcUid = 0;
 
   bool _joined = false;
   int? _remoteUid;
@@ -60,6 +70,17 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
 
   bool _interactionRecorded = false;
 
+  int _deriveRtcUidFromFirebaseUid(String firebaseUid) {
+    if (firebaseUid.isEmpty) return 1;
+    var hash = 0x811c9dc5;
+    for (final codeUnit in firebaseUid.codeUnits) {
+      hash ^= codeUnit;
+      hash = (hash * 0x01000193) & 0xFFFFFFFF;
+    }
+    final positive = hash & 0x7FFFFFFF;
+    return (positive % 2147483646) + 1;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -72,8 +93,12 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
       await _ensurePermission(Permission.microphone, 'Microphone');
       await _ensurePermission(Permission.camera, 'Camera');
 
-      // Fetch token
-      _token = await fetchAgoraToken(widget.roomId, 0);
+      // Fetch token with deterministic non-zero uid
+      final currentUser = FirebaseAuth.instance.currentUser;
+      final requestedUid = _deriveRtcUidFromFirebaseUid(currentUser?.uid ?? '');
+      final auth = await fetchAgoraToken(widget.roomId, requestedUid);
+      _token = auth.token;
+      _rtcUid = auth.uid > 0 ? auth.uid : requestedUid;
 
       // Create + init engine
       final engine = createAgoraRtcEngine();
@@ -81,7 +106,8 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
 
       await engine.initialize(const RtcEngineContext(appId: appId));
       await engine.enableVideo();
-      await engine.setChannelProfile(ChannelProfileType.channelProfileCommunication);
+      await engine
+          .setChannelProfile(ChannelProfileType.channelProfileCommunication);
 
       engine.registerEventHandler(
         RtcEngineEventHandler(
@@ -119,7 +145,7 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
       await engine.joinChannel(
         token: _token!,
         channelId: widget.roomId,
-        uid: 0,
+        uid: _rtcUid,
         options: const ChannelMediaOptions(
           clientRoleType: ClientRoleType.clientRoleBroadcaster,
         ),
@@ -290,7 +316,7 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
                   : AgoraVideoView(
                       controller: VideoViewController(
                         rtcEngine: _engine!,
-                        canvas: const VideoCanvas(uid: 0),
+                        canvas: VideoCanvas(uid: _rtcUid),
                       ),
                     ),
             ),

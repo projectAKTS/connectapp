@@ -20,35 +20,34 @@ class InteractionService {
         '[InteractionService] Trying to record connection between $me and $otherUserId');
 
     try {
-      await _db.runTransaction((txn) async {
-        final existing = await txn.get(ref);
-        if (existing.exists) {
-          print('[InteractionService] Updating existing connection: $docId');
-          txn.update(ref, {
-            'userId': me,
-            'connectedUserId': otherUserId,
-            'users': ids,
-            'connectedAt': FieldValue.serverTimestamp(),
-          });
-        } else {
-          print('[InteractionService] Creating new connection: $docId');
-          txn.set(ref, {
-            'userId': me,
-            'connectedUserId': otherUserId,
-            'users': ids,
-            'connectedAt': FieldValue.serverTimestamp(),
-          });
-        }
-      });
-    } catch (e) {
-      print('[InteractionService] TX ERROR: $e');
-      // Fallback write to avoid silently losing connection updates.
+      // Avoid transaction reads on non-existing docs, which can fail under
+      // strict rules and surface as permission-denied for first interaction.
       await ref.set({
-        'userId': me,
-        'connectedUserId': otherUserId,
+        'userId': ids[0],
+        'connectedUserId': ids[1],
         'users': ids,
+        'lastInteractionAt': FieldValue.serverTimestamp(),
         'connectedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
+
+      try {
+        await _db.collection('users').doc(me).set({
+          'diag.lastConnectionStage': 'record_ok',
+          'diag.lastConnectionAt': FieldValue.serverTimestamp(),
+          'diag.lastConnectionPeer': otherUserId,
+          'diag.lastConnectionError': FieldValue.delete(),
+        }, SetOptions(merge: true));
+      } catch (_) {}
+    } catch (e) {
+      print('[InteractionService] ERROR: $e');
+      try {
+        await _db.collection('users').doc(me).set({
+          'diag.lastConnectionStage': 'record_error',
+          'diag.lastConnectionAt': FieldValue.serverTimestamp(),
+          'diag.lastConnectionPeer': otherUserId,
+          'diag.lastConnectionError': '$e',
+        }, SetOptions(merge: true));
+      } catch (_) {}
     }
   }
 }

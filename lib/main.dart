@@ -36,7 +36,6 @@ import 'widgets/full_screen_back_gesture.dart';
 import 'services/firebase_options.dart';
 import 'services/notification_service.dart';
 import 'services/subscription_service.dart';
-import 'debug/firestore_probe.dart';
 import 'theme/theme.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -61,7 +60,13 @@ class _RouteLogger extends NavigatorObserver {
 }
 
 @pragma('vm:entry-point')
-Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {}
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (_) {}
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -105,25 +110,9 @@ Future<void> main() async {
     }
   }
 
-  Stripe.publishableKey =
-      'pk_live_51Kke4CFsXOZFrRZs9EBuzMeKRdmsrWdHEqx7oEBzbZm3kygcvNboaQkuTu2EXZQ87DDVmTvN4cu2QKkrw8hKxlMr00NHQfAdAp';
-  Stripe.merchantIdentifier = 'merchant.com.connectapp';
-  Stripe.urlScheme = 'connectapp';
-  await Stripe.instance.applySettings();
-
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-  await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
-    alert: true,
-    badge: true,
-    sound: true,
-  );
 
   notificationService = NotificationService(navigatorKey: navigatorKey);
-
-  final available = await SubscriptionService.init();
-  if (available) {
-    SubscriptionService.setupListener(_handlePurchaseUpdates);
-  }
 
   runApp(const MyApp());
 }
@@ -159,11 +148,72 @@ class MyApp extends StatefulWidget {
   State<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> {
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  bool _foregroundBootstrapDone = false;
+  bool _foregroundBootstrapRunning = false;
+  bool _dynamicLinksInitialized = false;
+
   @override
   void initState() {
     super.initState();
-    _initDynamicLinks();
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(_ensureForegroundBootstrap());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  Future<void> _ensureForegroundBootstrap() async {
+    if (_foregroundBootstrapDone || _foregroundBootstrapRunning) return;
+    if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      return;
+    }
+
+    _foregroundBootstrapRunning = true;
+    try {
+      Stripe.publishableKey =
+          'pk_live_51Kke4CFsXOZFrRZs9EBuzMeKRdmsrWdHEqx7oEBzbZm3kygcvNboaQkuTu2EXZQ87DDVmTvN4cu2QKkrw8hKxlMr00NHQfAdAp';
+      Stripe.merchantIdentifier = 'merchant.com.connectapp';
+      Stripe.urlScheme = 'connectapp';
+      await Stripe.instance.applySettings();
+
+      final available = await SubscriptionService.init();
+      if (available) {
+        SubscriptionService.setupListener(_handlePurchaseUpdates);
+      }
+
+      if (!_dynamicLinksInitialized) {
+        _dynamicLinksInitialized = true;
+        await _initDynamicLinks();
+      }
+
+      _foregroundBootstrapDone = true;
+    } catch (e, st) {
+      debugPrint('Foreground bootstrap failed: $e\n$st');
+    } finally {
+      _foregroundBootstrapRunning = false;
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    unawaited(_ensureForegroundBootstrap());
+  }
+
+  @override
+  void didUpdateWidget(covariant MyApp oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    unawaited(_ensureForegroundBootstrap());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    unawaited(_ensureForegroundBootstrap());
   }
 
   Future<void> _initDynamicLinks() async {
@@ -292,6 +342,7 @@ class _MyAppState extends State<MyApp> {
           return MaterialPageRoute(
             builder: (_) => FullScreenBackGesture(
               child: ChatScreen(
+                chatId: args['chatId'],
                 otherUserId: args['otherUserId'],
                 otherUserName: args['otherUserName'],
                 otherUserAvatar: args['otherUserAvatar'],
@@ -306,11 +357,8 @@ class _MyAppState extends State<MyApp> {
 
       onUnknownRoute: (settings) {
         return MaterialPageRoute(
-          builder: (_) => Scaffold(
-            body: Center(
-              child: Text('Route not found: ${settings.name}'),
-            ),
-          ),
+          settings: const RouteSettings(name: '/'),
+          builder: (_) => const AuthGate(),
         );
       },
     );
@@ -324,26 +372,106 @@ class AuthGate extends StatefulWidget {
 }
 
 class _AuthGateState extends State<AuthGate> {
-  bool _notifInitDone = false;
+  String? _notifBoundUid;
   late final StreamSubscription<User?> _sub;
+
+  Future<void> _ensureUserDoc(User user) async {
+    final ref = FirebaseFirestore.instance.collection('users').doc(user.uid);
+    try {
+      final snap = await ref.get();
+      final data = snap.data() ?? const <String, dynamic>{};
+      final authName = (user.displayName ?? '').trim();
+      final existingName =
+          (data['displayName'] ?? data['fullName'] ?? '').toString().trim();
+      final resolvedName = existingName.isNotEmpty
+          ? existingName
+          : (authName.isNotEmpty ? authName : 'User');
+
+      final patch = <String, dynamic>{
+        'displayName': resolvedName,
+        'displayName_lc': resolvedName.toLowerCase(),
+        'fullName': resolvedName,
+        'fullNameLower': resolvedName.toLowerCase(),
+      };
+
+      final email = (user.email ?? '').trim();
+      if (email.isNotEmpty && (data['email'] ?? '').toString().trim().isEmpty) {
+        patch['email'] = email;
+      }
+
+      if (!snap.exists) {
+        patch.addAll({
+          'bio': 'No bio available yet.',
+          'followers': [],
+          'following': [],
+          'postsCount': 0,
+          'profilePicture': '',
+          'createdAt': FieldValue.serverTimestamp(),
+          'xpPoints': 0,
+          'badges': [],
+          'postCount': 0,
+          'commentCount': 0,
+          'helpfulMarks': 0,
+          'dailyLoginStreak': 0,
+          'postingStreak': 0,
+          'lastLoginDate': null,
+          'lastPostDate': null,
+          'referralCount': 0,
+          'categoryPosts': {
+            'Career': 0,
+            'Travel': 0,
+            'Finance': 0,
+            'Technology': 0,
+            'Health': 0,
+          },
+          'activePerks': {
+            'priorityPostBoost': null,
+            'profileHighlight': null,
+            'commentBoost': null,
+          },
+          'premiumStatus': 'none',
+          'trialUsed': false,
+        });
+      }
+
+      await ref.set(patch, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('ensureUserDoc failed for ${user.uid}: $e');
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     _sub = FirebaseAuth.instance.authStateChanges().listen((user) {
-      if (user != null && !_notifInitDone) {
-        _notifInitDone = true;
+      if (user == null) {
+        _notifBoundUid = null;
         WidgetsBinding.instance.addPostFrameCallback((_) async {
+          try {
+            await notificationService.onSignedOut();
+          } catch (_) {}
+        });
+        return;
+      }
+
+      if (_notifBoundUid != user.uid) {
+        _notifBoundUid = user.uid;
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          if (WidgetsBinding.instance.lifecycleState ==
+              AppLifecycleState.resumed) {
+            await _ensureUserDoc(user);
+          }
           try {
             await notificationService.initialize();
           } catch (e, st) {
             debugPrint('Notification init failed: $e\n$st');
           }
-
-          try {
-            await FirestoreProbe.run();
-          } catch (e) {
-            debugPrint('FirestoreProbe.run() error: $e');
+        });
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          if (WidgetsBinding.instance.lifecycleState ==
+              AppLifecycleState.resumed) {
+            await _ensureUserDoc(user);
           }
         });
       }
@@ -378,6 +506,9 @@ class _AuthGateState extends State<AuthGate> {
               .doc(user.uid)
               .snapshots(),
           builder: (_, userSnap) {
+            if (userSnap.hasError) {
+              return const MainScaffold();
+            }
             if (userSnap.connectionState == ConnectionState.waiting) {
               return const Scaffold(
                 body: Center(child: CircularProgressIndicator()),

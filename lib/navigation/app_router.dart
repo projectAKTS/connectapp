@@ -40,6 +40,7 @@ class AppRouter {
     // Named routes with arguments
     if (name == '/chat') {
       final args = settings.arguments as Map<String, dynamic>?;
+      final chatId = args?['chatId'] as String?;
       final otherUserId = args?['otherUserId'] as String?;
       final otherUserName = args?['otherUserName'] as String?;
       final otherUserAvatar = args?['otherUserAvatar'] as String?;
@@ -58,6 +59,7 @@ class AppRouter {
         settings: settings,
         builder: (_) => FullScreenBackGesture(
           child: ChatScreen(
+            chatId: chatId,
             otherUserId: otherUserId,
             otherUserName: otherUserName,
             otherUserAvatar: otherUserAvatar,

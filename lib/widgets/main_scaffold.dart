@@ -49,17 +49,13 @@ class _MainScaffoldState extends State<MainScaffold> {
   late final Widget _homeRoot;
   late final Widget _searchRoot;
   late final Widget _createRoot;
-  late final Widget _profileRoot;
 
   @override
   void initState() {
     super.initState();
-    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
-
     _homeRoot = HomeContentScreen(controller: _homeController);
     _searchRoot = const SearchScreen();
     _createRoot = const CreatePostScreen();
-    _profileRoot = ProfileScreen(userID: uid);
   }
 
   NavigatorState? get _currentNav => _navKeys[_selectedIndex].currentState;
@@ -120,7 +116,10 @@ class _MainScaffoldState extends State<MainScaffold> {
             _buildTabNavigator(0, _homeRoot),
             _buildTabNavigator(1, _searchRoot),
             _buildTabNavigator(2, _createRoot),
-            _buildTabNavigator(3, _profileRoot),
+            _buildTabNavigator(
+              3,
+              ProfileScreen(userID: FirebaseAuth.instance.currentUser?.uid ?? ''),
+            ),
           ],
         ),
         bottomNavigationBar: BottomNavigationBar(
