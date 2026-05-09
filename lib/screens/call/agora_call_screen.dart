@@ -1,35 +1,62 @@
 // lib/call/agora_call_screen.dart
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
+import 'package:agora_rtc_engine/src/impl/agora_rtc_engine_impl.dart'
+    as agora_internal;
+import 'package:agora_rtc_engine/src/impl/platform/platform_bindings_provider.dart'
+    show createPlatformBindingsProvider;
 import 'package:connect_app/theme/tokens.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_auth/firebase_auth.dart' hide UserInfo;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connect_app/services/callkit_id.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:iris_method_channel/iris_method_channel.dart'
+    show IrisMethodChannel;
+import 'package:path_provider/path_provider.dart';
 
 class AgoraJoinAuth {
   final String token;
   final String appId;
   final int uid;
+  final String userAccount;
   final String tokenVersion;
+  final String identityMode;
   const AgoraJoinAuth({
     required this.token,
     required this.appId,
     required this.uid,
+    required this.userAccount,
     required this.tokenVersion,
+    required this.identityMode,
   });
 }
 
 const String _agoraFallbackAppId = 'dac900a04a87460c87c3d18b63cac65d';
+const String _agoraFlutterPluginVersion = '6.5.2';
+const int _agoraLogFileSizeInKB = 512;
+const VideoDimensions _videoCallDimensions =
+    VideoDimensions(width: 720, height: 960);
+const VideoFormat _videoCallCaptureFormat =
+    VideoFormat(width: 720, height: 960, fps: 24);
+const int _videoCallFrameRate = 24;
+const int _videoCallBitrate = standardBitrate;
+const int _videoCallMinBitrate = defaultMinBitrate;
+// iOS texture rendering fixed black screens earlier, but it also softens both
+// local preview and remote video on real devices. Prefer the native view path.
+const bool _preferFlutterTextureRendererOnIOS = false;
 
 /// ---- TOKEN + APPID FETCH ----
 Future<AgoraJoinAuth> fetchAgoraToken({
   required String channelName,
   required int uid,
+  required String userAccount,
+  String identityMode = 'uid',
   bool allowUidZero = false,
 }) async {
   final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
@@ -37,6 +64,8 @@ Future<AgoraJoinAuth> fetchAgoraToken({
   final resp = await callable.call({
     'channelName': channelName,
     'uid': uid,
+    'userAccount': userAccount,
+    'identityMode': identityMode,
     'allowUidZero': allowUidZero,
     'role': 'publisher',
     'expireSeconds': 3600,
@@ -45,7 +74,10 @@ Future<AgoraJoinAuth> fetchAgoraToken({
   final token = (data['token'] as String?)?.trim();
   final serverAppId = (data['appId'] as String?)?.trim();
   final serverUidRaw = data['uid'];
+  final serverUserAccount = (data['userAccount'] as String?)?.trim();
   final tokenVersion = (data['tokenVersion'] as String?)?.trim() ?? '';
+  final tokenIdentityMode =
+      (data['tokenIdentityMode'] as String?)?.trim() ?? identityMode;
   final serverUid = serverUidRaw is num ? serverUidRaw.toInt() : uid;
   if (token == null || token.isEmpty) {
     throw Exception('Token service returned empty token');
@@ -59,7 +91,11 @@ Future<AgoraJoinAuth> fetchAgoraToken({
         ? _agoraFallbackAppId
         : serverAppId,
     uid: serverUid,
+    userAccount: (serverUserAccount == null || serverUserAccount.isEmpty)
+        ? userAccount
+        : serverUserAccount,
     tokenVersion: detectedVersion,
+    identityMode: tokenIdentityMode,
   );
 }
 
@@ -91,6 +127,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   static Future<void> _lastEngineShutdown = Future<void>.value();
   static const bool _diagEnabled =
       bool.fromEnvironment('ENABLE_RUNTIME_DIAG', defaultValue: false);
+  static const Duration _engineInitializeTimeout = Duration(seconds: 30);
   static const Duration _joinWatchdogTimeout = Duration(seconds: 35);
   static const Set<String> _persistedUserDiagStages = <String>{
     'begin_start',
@@ -103,20 +140,40 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     'token_ok',
     'engine_create_start',
     'engine_create_done',
+    'engine_factory_selected',
     'engine_initialize_start',
+    'engine_initialize_context',
+    'engine_log_configured',
+    'engine_log_tail',
+    'engine_log_read_error',
     'engine_initialize_slow',
+    'engine_initialize_timeout',
+    'engine_initialize_error',
+    'engine_force_dispose_start',
+    'engine_force_dispose_done',
+    'engine_force_dispose_error',
+    'engine_initialize_retry',
     'engine_initialized',
     'audio_enabled',
     'video_enabled',
+    'video_profile_configured',
     'channel_profile_set',
     'handler_registered',
     'preview_started',
     'callkit_connected_marked',
     'callkit_connected_error',
     'join_attempt',
+    'join_returned',
     'join_success',
     'join_watchdog_timeout',
+    'first_local_video_frame',
+    'first_local_video_frame_published',
+    'first_remote_video_frame',
+    'first_remote_video_decoded',
+    'local_user_registered',
     'remote_joined',
+    'user_info_updated',
+    'user_account_updated',
     'remote_offline',
     'conn_state_changed',
     'conn_state_polled',
@@ -129,6 +186,14 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     'audio_routing_changed',
     'local_audio_state',
     'local_video_state',
+    'remote_video_state',
+    'user_mute_video',
+    'remote_video_stream_high_default_set',
+    'remote_video_stream_high_requested',
+    'video_quality_warning_local',
+    'video_quality_warning_remote',
+    'local_video_view_created',
+    'remote_video_view_created',
     'leave_channel',
     'agora_error',
     'begin_error',
@@ -139,6 +204,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   RtcEngineEventHandler? _eventHandler;
   String? _token;
   String? _agoraAppId;
+  String? _rtcUserAccount;
   int _rtcUid = 0;
   String? _seenTerminalInviteStatus;
 
@@ -153,6 +219,11 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   bool _muted = false;
   bool _speakerOn = true;
   bool _frontCamera = true;
+  bool _localVideoReady = false;
+  bool _remoteVideoReady = false;
+  bool _remoteVideoMuted = false;
+  bool _loggedLocalVideoQualityWarning = false;
+  bool _loggedRemoteVideoQualityWarning = false;
 
   // Video layout state
   bool _localIsBig = true; // show self first while waiting
@@ -166,6 +237,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   bool _missedLogged = false;
   bool _callkitMarkedConnected = false;
   bool _nativeAcceptedCallCleared = false;
+
+  bool get _useFlutterTextureRenderer =>
+      Platform.isIOS && _preferFlutterTextureRendererOnIOS;
+
+  String get _videoRendererLabel =>
+      _useFlutterTextureRenderer ? 'texture' : 'platform_view';
 
   int _deriveRtcUidFromFirebaseUid(String firebaseUid) {
     if (firebaseUid.isEmpty) return 1;
@@ -215,6 +292,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   Future<void> _diagCall(
     String stage, {
     Map<String, dynamic>? meta,
+    int metaLimit = 500,
   }) async {
     final baseMeta = <String, dynamic>{
       'inviteId': widget.inviteId ?? '',
@@ -225,7 +303,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     final metaStr = baseMeta.toString();
     final payload = <String, dynamic>{
       'stage': stage,
-      'meta': metaStr.length > 500 ? metaStr.substring(0, 500) : metaStr,
+      'meta': metaStr.length > metaLimit
+          ? metaStr.substring(0, metaLimit)
+          : metaStr,
     };
     debugPrint('[DIAG][call] $stage meta=${payload['meta']}');
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -342,22 +422,31 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
       final currentUser = FirebaseAuth.instance.currentUser;
       final requestedUid = _deriveRtcUidFromFirebaseUid(currentUser?.uid ?? '');
+      final requestedUserAccount = requestedUid.toString();
 
       // Token & engine
       final auth = await fetchAgoraToken(
         channelName: channel,
         uid: requestedUid,
+        userAccount: requestedUserAccount,
+        identityMode: 'uid',
       );
       _token = auth.token;
-      _agoraAppId = _agoraFallbackAppId;
+      _agoraAppId = auth.appId;
+      _rtcUserAccount = auth.userAccount;
       _rtcUid = auth.uid > 0 ? auth.uid : requestedUid;
       await _diagCall('token_ok', meta: {
         'rtcUidRequested': requestedUid,
         'rtcUidServer': auth.uid,
         'rtcUidFinal': _rtcUid,
+        'rtcUserAccountRequested': requestedUserAccount,
+        'rtcUserAccountServer': auth.userAccount,
+        'tokenIdentityMode': auth.identityMode,
         'tokenVersion': auth.tokenVersion,
         'appIdSuffix': _agoraAppId!.substring(_agoraAppId!.length - 6),
-        'appIdSource': 'local_fallback',
+        'appIdSource': auth.appId.toLowerCase() == _agoraFallbackAppId
+            ? 'server_matches_fallback'
+            : 'server',
         'serverAppIdLen': auth.appId.length,
         'serverAppIdMatchesFallback':
             auth.appId.toLowerCase() == _agoraFallbackAppId,
@@ -378,6 +467,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
       if (widget.isVideo) {
         await engine.enableVideo();
+        await engine.enableLocalVideo(true);
+        await engine.muteLocalVideoStream(false);
+        await _configureVideoPipeline(engine);
         await _diagCall('video_enabled');
       } else {
         await engine.disableVideo();
@@ -458,6 +550,31 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
             'localUid': connection.localUid ?? -1,
           });
         },
+        onLocalUserRegistered: (int uid, String userAccount) {
+          _diagCall('local_user_registered', meta: {
+            'uid': uid,
+            'userAccount': userAccount,
+          });
+        },
+        onUserInfoUpdated: (int uid, UserInfo info) {
+          _diagCall('user_info_updated', meta: {
+            'uid': uid,
+            'infoUid': info.uid,
+            'userAccount': info.userAccount,
+          });
+        },
+        onUserAccountUpdated: (
+          RtcConnection connection,
+          int remoteUid,
+          String remoteUserAccount,
+        ) {
+          _diagCall('user_account_updated', meta: {
+            'channel': connection.channelId ?? '',
+            'localUid': connection.localUid ?? -1,
+            'remoteUid': remoteUid,
+            'remoteUserAccount': remoteUserAccount,
+          });
+        },
         onTokenPrivilegeWillExpire: (RtcConnection connection, String token) {
           _diagCall('token_will_expire', meta: {
             'channel': connection.channelId ?? '',
@@ -505,10 +622,170 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           LocalVideoStreamState state,
           LocalVideoStreamReason reason,
         ) {
+          final ready =
+              state == LocalVideoStreamState.localVideoStreamStateCapturing ||
+                  state == LocalVideoStreamState.localVideoStreamStateEncoding;
+          if (mounted) {
+            setState(() {
+              _localVideoReady = ready;
+            });
+          }
           _diagCall('local_video_state', meta: {
             'source': '$source',
             'state': '$state',
             'reason': '$reason',
+          });
+        },
+        onLocalVideoStats: (RtcConnection connection, LocalVideoStats stats) {
+          final adapt = stats.qualityAdaptIndication;
+          final txPacketLossRate = stats.txPacketLossRate ?? 0;
+          final encodedWidth = stats.encodedFrameWidth ?? 0;
+          final encodedHeight = stats.encodedFrameHeight ?? 0;
+          final shouldWarn =
+              adapt == QualityAdaptIndication.adaptDownBandwidth ||
+                  txPacketLossRate >= 6 ||
+                  (encodedWidth > 0 &&
+                      encodedHeight > 0 &&
+                      (encodedWidth < 480 || encodedHeight < 480));
+          if (_loggedLocalVideoQualityWarning || !shouldWarn) return;
+          _loggedLocalVideoQualityWarning = true;
+          _diagCall('video_quality_warning_local', meta: {
+            'localUid': connection.localUid ?? -1,
+            'sentBitrateKbps': stats.sentBitrate ?? -1,
+            'sentFrameRate': stats.sentFrameRate ?? -1,
+            'targetBitrateKbps': stats.targetBitrate ?? -1,
+            'targetFrameRate': stats.targetFrameRate ?? -1,
+            'encodedWidth': encodedWidth,
+            'encodedHeight': encodedHeight,
+            'txPacketLossRate': txPacketLossRate,
+            'qualityAdapt': '$adapt',
+            'hwEncoderAccelerating': stats.hwEncoderAccelerating ?? -1,
+          });
+        },
+        onFirstLocalVideoFrame: (
+          VideoSourceType source,
+          int width,
+          int height,
+          int elapsed,
+        ) {
+          if (mounted) {
+            setState(() {
+              _localVideoReady = true;
+            });
+          }
+          _diagCall('first_local_video_frame', meta: {
+            'source': '$source',
+            'width': width,
+            'height': height,
+            'elapsedMs': elapsed,
+          });
+        },
+        onFirstLocalVideoFramePublished: (
+          RtcConnection connection,
+          int elapsed,
+        ) {
+          _diagCall('first_local_video_frame_published', meta: {
+            'localUid': connection.localUid ?? -1,
+            'elapsedMs': elapsed,
+          });
+        },
+        onRemoteVideoStateChanged: (
+          RtcConnection connection,
+          int remoteUid,
+          RemoteVideoState state,
+          RemoteVideoStateReason reason,
+          int elapsed,
+        ) {
+          final ready = state == RemoteVideoState.remoteVideoStateDecoding;
+          if (mounted && _remoteUid == remoteUid) {
+            setState(() {
+              _remoteVideoReady = ready;
+            });
+          }
+          _diagCall('remote_video_state', meta: {
+            'remoteUid': remoteUid,
+            'state': '$state',
+            'reason': '$reason',
+            'elapsedMs': elapsed,
+          });
+        },
+        onRemoteVideoStats: (RtcConnection connection, RemoteVideoStats stats) {
+          final packetLossRate = stats.packetLossRate ?? 0;
+          final frozenRate = stats.frozenRate ?? 0;
+          final width = stats.width ?? 0;
+          final height = stats.height ?? 0;
+          final shouldWarn = packetLossRate >= 6 ||
+              frozenRate >= 8 ||
+              (width > 0 && height > 0 && (width < 480 || height < 480));
+          if (_loggedRemoteVideoQualityWarning || !shouldWarn) return;
+          _loggedRemoteVideoQualityWarning = true;
+          _diagCall('video_quality_warning_remote', meta: {
+            'remoteUid': stats.uid ?? -1,
+            'receivedBitrateKbps': stats.receivedBitrate ?? -1,
+            'decoderOutputFrameRate': stats.decoderOutputFrameRate ?? -1,
+            'rendererOutputFrameRate': stats.rendererOutputFrameRate ?? -1,
+            'width': width,
+            'height': height,
+            'packetLossRate': packetLossRate,
+            'frozenRate': frozenRate,
+            'streamType': '${stats.rxStreamType}',
+            'e2eDelayMs': stats.e2eDelay ?? -1,
+          });
+        },
+        onFirstRemoteVideoFrame: (
+          RtcConnection connection,
+          int remoteUid,
+          int width,
+          int height,
+          int elapsed,
+        ) {
+          if (mounted && _remoteUid == remoteUid) {
+            setState(() {
+              _remoteVideoReady = true;
+              if (_localIsBig) _localIsBig = false;
+            });
+          }
+          _diagCall('first_remote_video_frame', meta: {
+            'remoteUid': remoteUid,
+            'width': width,
+            'height': height,
+            'elapsedMs': elapsed,
+          });
+        },
+        onFirstRemoteVideoDecoded: (
+          RtcConnection connection,
+          int remoteUid,
+          int width,
+          int height,
+          int elapsed,
+        ) {
+          if (mounted && _remoteUid == remoteUid) {
+            setState(() {
+              _remoteVideoReady = true;
+              if (_localIsBig) _localIsBig = false;
+            });
+          }
+          _diagCall('first_remote_video_decoded', meta: {
+            'remoteUid': remoteUid,
+            'width': width,
+            'height': height,
+            'elapsedMs': elapsed,
+          });
+        },
+        onUserMuteVideo: (
+          RtcConnection connection,
+          int remoteUid,
+          bool muted,
+        ) {
+          if (mounted && _remoteUid == remoteUid) {
+            setState(() {
+              _remoteVideoMuted = muted;
+              if (muted) _remoteVideoReady = false;
+            });
+          }
+          _diagCall('user_mute_video', meta: {
+            'remoteUid': remoteUid,
+            'muted': muted,
           });
         },
         onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
@@ -538,8 +815,25 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           _remoteEverJoined = true;
           setState(() {
             _remoteUid = uid;
-            _localIsBig = false;
+            _remoteVideoReady = false;
+            _remoteVideoMuted = false;
           });
+          if (widget.isVideo) {
+            try {
+              await engine.setRemoteVideoStreamType(
+                uid: uid,
+                streamType: VideoStreamType.videoStreamHigh,
+              );
+              await _diagCall('remote_video_stream_high_requested', meta: {
+                'remoteUid': uid,
+              });
+            } catch (e) {
+              await _diagCall('agora_error', meta: {
+                'code': 'remote_video_stream_high_request_failed',
+                'msg': '$e',
+              });
+            }
+          }
 
           if ((widget.inviteId ?? '').isNotEmpty) {
             try {
@@ -563,6 +857,8 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           setState(() {
             _remoteUid = null;
             _fatalError = 'User declined or unavailable';
+            _remoteVideoReady = false;
+            _remoteVideoMuted = false;
           });
         },
         onLeaveChannel: (RtcConnection connection, RtcStats stats) {
@@ -571,6 +867,8 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           setState(() {
             _remoteUid = null;
             _ended = true;
+            _remoteVideoReady = false;
+            _remoteVideoMuted = false;
           });
         },
       );
@@ -583,27 +881,50 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         await _diagCall('preview_started');
       }
 
+      final joinOptions = ChannelMediaOptions(
+        channelProfile: ChannelProfileType.channelProfileCommunication,
+        clientRoleType: ClientRoleType.clientRoleBroadcaster,
+        publishMicrophoneTrack: true,
+        publishCameraTrack: widget.isVideo,
+        autoSubscribeAudio: true,
+        autoSubscribeVideo: widget.isVideo,
+        enableAudioRecordingOrPlayout: true,
+      );
+
       await _diagCall('join_attempt', meta: {
         'channel': channel,
         'uid': _rtcUid,
+        'userAccount': _rtcUserAccount ?? '',
+        'joinMode': 'uid',
+        'tokenIdentityMode': auth.identityMode,
         'tokenMode': 'provided',
+        'publishMicrophoneTrack': true,
+        'publishCameraTrack': widget.isVideo,
+        'autoSubscribeAudio': true,
+        'autoSubscribeVideo': widget.isVideo,
       });
       await engine.joinChannel(
         token: _token ?? '',
         channelId: channel,
         uid: _rtcUid,
-        options: const ChannelMediaOptions(
-          clientRoleType: ClientRoleType.clientRoleBroadcaster,
-        ),
+        options: joinOptions,
       );
+      await _diagCall('join_returned', meta: {
+        'channel': channel,
+        'uid': _rtcUid,
+        'joinMode': 'uid',
+        'tokenIdentityMode': auth.identityMode,
+      });
       await _pollConnectionState('join_returned');
       _scheduleConnectionStatePolls();
       _startJoinWatchdog(channel);
       _bindInviteStatus();
       await _diagCall('begin_done');
     } catch (e) {
-      _lastEngineShutdown = _cleanupEngine();
-      await _lastEngineShutdown;
+      if (_engine != null) {
+        _lastEngineShutdown = _cleanupEngine();
+        await _lastEngineShutdown;
+      }
       await _diagCall('begin_error', meta: {'error': '$e'});
       if (mounted) {
         setState(() => _fatalError = e.toString());
@@ -615,11 +936,152 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   }
 
   Future<RtcEngine> _createAndInitializeEngine() async {
-    await _diagCall('engine_create_start');
-    final engine = createAgoraRtcEngine();
+    return _createAndInitializeEngineAttempt(attempt: 1);
+  }
+
+  String _sanitizeAgoraLogSegment(String raw) {
+    final cleaned = raw.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    return cleaned.isEmpty ? 'call' : cleaned;
+  }
+
+  Future<String?> _prepareAgoraLogPath({required int attempt}) async {
+    try {
+      final supportDir = await getApplicationSupportDirectory();
+      final agoraDir = Directory('${supportDir.path}/agora_logs');
+      await agoraDir.create(recursive: true);
+      final callId = _sanitizeAgoraLogSegment(
+        (widget.inviteId ?? '').trim().isNotEmpty
+            ? widget.inviteId!.trim()
+            : widget.channelName,
+      );
+      final file = File('${agoraDir.path}/${callId}_attempt_$attempt.log');
+      if (await file.exists()) {
+        await file.writeAsString('');
+      }
+      return file.path;
+    } catch (e) {
+      await _diagCall('engine_log_read_error', meta: {
+        'attempt': attempt,
+        'stage': 'prepare_path',
+        'error': '$e',
+      });
+      return null;
+    }
+  }
+
+  Future<void> _persistAgoraLogTail(
+    String? logPath, {
+    required int attempt,
+    required String reason,
+  }) async {
+    if (logPath == null || logPath.isEmpty) {
+      await _diagCall('engine_log_read_error', meta: {
+        'attempt': attempt,
+        'stage': 'missing_path',
+        'reason': reason,
+      });
+      return;
+    }
+    RandomAccessFile? raf;
+    try {
+      final file = File(logPath);
+      final exists = await file.exists();
+      if (!exists) {
+        await _diagCall('engine_log_tail', meta: {
+          'attempt': attempt,
+          'reason': reason,
+          'path': logPath,
+          'exists': false,
+        });
+        return;
+      }
+      raf = await file.open();
+      final length = await raf.length();
+      final start = length > 1400 ? length - 1400 : 0;
+      await raf.setPosition(start);
+      final bytes = await raf.read(length - start);
+      final tail =
+          utf8.decode(bytes, allowMalformed: true).replaceAll('\r', '');
+      await _diagCall(
+        'engine_log_tail',
+        meta: {
+          'attempt': attempt,
+          'reason': reason,
+          'path': logPath,
+          'exists': true,
+          'bytes': length,
+          'tail': tail.isEmpty ? '(empty)' : tail,
+        },
+        metaLimit: 1800,
+      );
+    } catch (e) {
+      await _diagCall(
+        'engine_log_read_error',
+        meta: {
+          'attempt': attempt,
+          'stage': 'read_tail',
+          'reason': reason,
+          'path': logPath,
+          'error': '$e',
+        },
+        metaLimit: 1200,
+      );
+    } finally {
+      try {
+        await raf?.close();
+      } catch (_) {}
+    }
+  }
+
+  RtcEngine _createFreshAgoraEngine() {
+    return agora_internal.RtcEngineImpl.createForTesting(
+      irisMethodChannel: IrisMethodChannel(createPlatformBindingsProvider()),
+    );
+  }
+
+  Future<void> _forceDisposeFailedInitialize(
+    RtcEngine engine, {
+    required String reason,
+    Object? error,
+  }) async {
+    await _diagCall('engine_force_dispose_start', meta: {
+      'reason': reason,
+      if (error != null) 'error': '$error',
+    });
+    try {
+      await agora_internal.RtcEngineExt(engine)
+          .irisMethodChannel
+          .dispose()
+          .timeout(const Duration(seconds: 3));
+      await _diagCall('engine_force_dispose_done', meta: {
+        'reason': reason,
+      });
+    } catch (disposeError) {
+      await _diagCall('engine_force_dispose_error', meta: {
+        'reason': reason,
+        'error': '$disposeError',
+      });
+    }
+  }
+
+  Future<RtcEngine> _createAndInitializeEngineAttempt({
+    required int attempt,
+  }) async {
+    final agoraLogPath = await _prepareAgoraLogPath(attempt: attempt);
+    await _diagCall('engine_create_start', meta: {
+      'attempt': attempt,
+    });
+    final engine = _createFreshAgoraEngine();
     _engine = engine;
-    await _diagCall('engine_create_done');
+    await _diagCall('engine_factory_selected', meta: {
+      'attempt': attempt,
+      'factory': 'create_for_testing_fresh_instance',
+    });
+    await _diagCall('engine_create_done', meta: {
+      'attempt': attempt,
+    });
     await _diagCall('engine_initialize_start', meta: {
+      'attempt': attempt,
       'appIdSuffix': _agoraAppId!.length >= 6
           ? _agoraAppId!.substring(_agoraAppId!.length - 6)
           : _agoraAppId!,
@@ -629,17 +1091,100 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     final slowLog = Timer(const Duration(seconds: 20), () {
       if (!initialized) {
         unawaited(_diagCall('engine_initialize_slow', meta: {
+          'attempt': attempt,
           'elapsedSeconds': 20,
           'note': 'still_waiting_for_native_initialize',
         }));
       }
     });
     try {
-      await engine.initialize(RtcEngineContext(appId: _agoraAppId!));
+      await _diagCall('engine_initialize_context', meta: {
+        'attempt': attempt,
+        'agoraFlutterPluginVersion': _agoraFlutterPluginVersion,
+        'channelProfile': 'communication',
+        'audioScenario': 'default',
+        'autoRegisterAgoraExtensions': false,
+        'logLevel': 'info',
+        'logPath': agoraLogPath ?? '',
+        'logFileSizeInKB': _agoraLogFileSizeInKB,
+      });
+      if (agoraLogPath != null) {
+        await _diagCall('engine_log_configured', meta: {
+          'attempt': attempt,
+          'path': agoraLogPath,
+          'fileSizeInKB': _agoraLogFileSizeInKB,
+        });
+      }
+      await engine
+          .initialize(RtcEngineContext(
+        appId: _agoraAppId!,
+        channelProfile: ChannelProfileType.channelProfileCommunication,
+        audioScenario: AudioScenarioType.audioScenarioDefault,
+        autoRegisterAgoraExtensions: false,
+        logConfig: LogConfig(
+          filePath: agoraLogPath,
+          fileSizeInKB: _agoraLogFileSizeInKB,
+          level: LogLevel.logLevelInfo,
+        ),
+      ))
+          .timeout(_engineInitializeTimeout, onTimeout: () async {
+        await _diagCall('engine_initialize_timeout', meta: {
+          'attempt': attempt,
+          'timeoutSeconds': _engineInitializeTimeout.inSeconds,
+          'note': 'native_initialize_future_did_not_complete',
+        });
+        throw TimeoutException(
+          'Agora engine did not start. Fully close and reopen the app, then try again.',
+          _engineInitializeTimeout,
+        );
+      });
       initialized = true;
       return engine;
-    } catch (e) {
+    } on TimeoutException catch (e) {
+      await _forceDisposeFailedInitialize(
+        engine,
+        reason: 'initialize_timeout',
+        error: e,
+      );
+      await _persistAgoraLogTail(
+        agoraLogPath,
+        attempt: attempt,
+        reason: 'initialize_timeout',
+      );
+      if (identical(_engine, engine)) {
+        _engine = null;
+      }
+      if (attempt < 2) {
+        await _diagCall('engine_initialize_retry', meta: {
+          'attempt': attempt + 1,
+          'reason': 'timeout_after_force_dispose',
+        });
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+        return _createAndInitializeEngineAttempt(attempt: attempt + 1);
+      }
       await _diagCall('engine_initialize_error', meta: {
+        'attempt': attempt,
+        'error': '$e',
+      });
+      rethrow;
+    } catch (e) {
+      if (!initialized) {
+        await _forceDisposeFailedInitialize(
+          engine,
+          reason: 'initialize_error',
+          error: e,
+        );
+        await _persistAgoraLogTail(
+          agoraLogPath,
+          attempt: attempt,
+          reason: 'initialize_error',
+        );
+        if (identical(_engine, engine)) {
+          _engine = null;
+        }
+      }
+      await _diagCall('engine_initialize_error', meta: {
+        'attempt': attempt,
         'error': '$e',
       });
       rethrow;
@@ -647,6 +1192,49 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       initialized = true;
       slowLog.cancel();
     }
+  }
+
+  Future<void> _configureVideoPipeline(RtcEngine engine) async {
+    await engine.setVideoEncoderConfiguration(
+      const VideoEncoderConfiguration(
+        codecType: VideoCodecType.videoCodecH264,
+        dimensions: _videoCallDimensions,
+        frameRate: _videoCallFrameRate,
+        bitrate: _videoCallBitrate,
+        minBitrate: _videoCallMinBitrate,
+        orientationMode: OrientationMode.orientationModeAdaptive,
+        degradationPreference: DegradationPreference.maintainBalanced,
+        mirrorMode: VideoMirrorModeType.videoMirrorModeAuto,
+      ),
+    );
+    await engine.setCameraCapturerConfiguration(
+      const CameraCapturerConfiguration(
+        cameraDirection: CameraDirection.cameraFront,
+        followEncodeDimensionRatio: true,
+        format: _videoCallCaptureFormat,
+      ),
+    );
+    await engine.setRemoteDefaultVideoStreamType(
+      VideoStreamType.videoStreamHigh,
+    );
+    await _diagCall('video_profile_configured', meta: {
+      'codec': 'h264',
+      'width': _videoCallDimensions.width ?? 0,
+      'height': _videoCallDimensions.height ?? 0,
+      'frameRate': _videoCallFrameRate,
+      'captureWidth': _videoCallCaptureFormat.width ?? 0,
+      'captureHeight': _videoCallCaptureFormat.height ?? 0,
+      'captureFps': _videoCallCaptureFormat.fps ?? 0,
+      'bitrateMode': 'standard_auto',
+      'minBitrateMode': 'sdk_default',
+      'orientationMode': 'adaptive',
+      'degradationPreference': 'balanced',
+      'cameraDirection': 'front',
+      'followEncodeDimensionRatio': true,
+    });
+    await _diagCall('remote_video_stream_high_default_set', meta: {
+      'streamType': 'high',
+    });
   }
 
   Future<void> _pollConnectionState(String source) async {
@@ -990,36 +1578,54 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   }
 
   Widget _videoLayout() {
+    final remotePlaceholder = _remoteUid == null
+        ? 'Waiting for the other user to join…'
+        : (_remoteVideoMuted
+            ? 'Remote camera is off'
+            : 'Waiting for remote video…');
     final remote = (_remoteUid != null)
         ? AgoraVideoView(
             controller: VideoViewController.remote(
               rtcEngine: _engine!,
-              canvas: VideoCanvas(uid: _remoteUid),
-              connection: RtcConnection(channelId: widget.channelName),
-            ),
-          )
-        : const Center(
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-              child: Text(
-                'Waiting for the other user to join…',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 18,
-                  height: 1.25,
-                ),
-                textAlign: TextAlign.center,
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
+              canvas: VideoCanvas(
+                uid: _remoteUid,
+                renderMode: RenderModeType.renderModeFit,
               ),
+              connection: RtcConnection(channelId: widget.channelName),
+              useFlutterTexture: _useFlutterTextureRenderer,
             ),
-          );
+            onAgoraVideoViewCreated: (viewId) {
+              unawaited(_diagCall('remote_video_view_created', meta: {
+                'remoteUid': _remoteUid ?? -1,
+                'viewId': viewId,
+                'useFlutterTexture': _useFlutterTextureRenderer,
+                'renderer': _videoRendererLabel,
+                'renderMode': 'fit',
+              }));
+            },
+          )
+        : const SizedBox.shrink();
 
     final local = AgoraVideoView(
       controller: VideoViewController(
         rtcEngine: _engine!,
-        canvas: const VideoCanvas(uid: 0),
+        canvas: const VideoCanvas(
+          uid: 0,
+          renderMode: RenderModeType.renderModeFit,
+        ),
+        useFlutterTexture: _useFlutterTextureRenderer,
       ),
+      onAgoraVideoViewCreated: (viewId) {
+        unawaited(_diagCall('local_video_view_created', meta: {
+          'viewId': viewId,
+          'useFlutterTexture': _useFlutterTextureRenderer,
+          'renderer': _videoRendererLabel,
+          'renderMode': 'fit',
+        }));
+        if (widget.isVideo) {
+          unawaited(_engine?.startPreview());
+        }
+      },
     );
 
     return Scaffold(
@@ -1042,7 +1648,14 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
             children: [
               // Big view
               Positioned.fill(
-                child: ClipRect(child: _localIsBig ? local : remote),
+                child: ClipRect(
+                  child: _buildVideoSurface(
+                    child: _localIsBig ? local : remote,
+                    ready: _localIsBig ? _localVideoReady : _remoteVideoReady,
+                    placeholder:
+                        _localIsBig ? 'Starting camera…' : remotePlaceholder,
+                  ),
+                ),
               ),
               if (_localIsBig && _remoteUid == null)
                 const Positioned(
@@ -1111,7 +1724,18 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
                       borderRadius: BorderRadius.circular(12),
                       child: Stack(
                         children: [
-                          Positioned.fill(child: _localIsBig ? remote : local),
+                          Positioned.fill(
+                            child: _buildVideoSurface(
+                              child: _localIsBig ? remote : local,
+                              ready: _localIsBig
+                                  ? _remoteVideoReady
+                                  : _localVideoReady,
+                              placeholder: _localIsBig
+                                  ? remotePlaceholder
+                                  : 'Starting camera…',
+                              compact: true,
+                            ),
+                          ),
                           Positioned(
                             left: 8,
                             top: 8,
@@ -1146,6 +1770,39 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         },
       ),
       bottomNavigationBar: _controlsBar(video: true),
+    );
+  }
+
+  Widget _buildVideoSurface({
+    required Widget child,
+    required bool ready,
+    required String placeholder,
+    bool compact = false,
+  }) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Container(color: Colors.black),
+        child,
+        if (!ready)
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(
+                placeholder,
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: compact ? 12 : 18,
+                  height: 1.25,
+                  fontWeight: compact ? FontWeight.w500 : FontWeight.w600,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: compact ? 3 : 4,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+      ],
     );
   }
 

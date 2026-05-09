@@ -78,8 +78,14 @@ class NotificationService with WidgetsBindingObserver {
   int _nextNotificationId() =>
       DateTime.now().millisecondsSinceEpoch & 0x7fffffff;
 
-  bool get _appIsActive =>
-      WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+  bool get _appIsActive {
+    final state = WidgetsBinding.instance.lifecycleState;
+    // iOS frequently enters `inactive` while still visibly foregrounded.
+    // Treat it as active so incoming calls use the in-app accept screen
+    // instead of falling back to a compact system banner.
+    return state == AppLifecycleState.resumed ||
+        state == AppLifecycleState.inactive;
+  }
 
   bool get _hasActiveIncomingUi =>
       _openingCallScreen ||
@@ -586,7 +592,7 @@ class NotificationService with WidgetsBindingObserver {
       final channel = _stringField(extra, body, 'channel');
       final fromName =
           _stringField(extra, body, 'fromName', fallback: 'Caller');
-      final isVideo = _boolField(extra, body, 'isVideo');
+      final isVideo = _videoField(extra, body);
       final id = _stringField(
         extra,
         body,
@@ -700,7 +706,7 @@ class NotificationService with WidgetsBindingObserver {
 
     final channel = (data['channel'] ?? '').toString();
     if (channel.isEmpty) return;
-    final isVideo = data['isVideo'] == true;
+    final isVideo = _videoField(data, const <String, dynamic>{});
     final fromName = (data['fromName'] ?? 'Caller').toString();
     final fromUid = (data['fromUid'] ?? '').toString();
     if (_hasActiveIncomingUi) {
@@ -1165,7 +1171,7 @@ class NotificationService with WidgetsBindingObserver {
         (data['type'] == 'call_invite') || (data['action'] == 'incoming_call');
     if (isCallInvite) {
       final channel = (data['channel'] ?? '') as String;
-      final isVideo = (data['isVideo'] ?? 'false').toString() == 'true';
+      final isVideo = _videoField(data, const <String, dynamic>{});
       final fromName = (data['fromName'] ?? 'Caller') as String;
       final fromUid = (data['fromUid'] ?? '').toString();
       final callId = (data['callId'] ?? channel).toString();
@@ -1387,10 +1393,9 @@ class NotificationService with WidgetsBindingObserver {
             nativeTokens['lastCallkitAcceptedFromName']);
         final fromUid = _normalizeTokenLikeValue(
             nativeTokens['lastCallkitAcceptedFromUid']);
-        final isVideo =
-            _normalizeTokenLikeValue(nativeTokens['lastCallkitAcceptedIsVideo'])
-                    .toLowerCase() ==
-                'true';
+        final isVideo = _truthyValue(
+          _normalizeTokenLikeValue(nativeTokens['lastCallkitAcceptedIsVideo']),
+        );
         await _clearStoredAcceptedCallRecovery();
         _pushCallScreen(
           channel: acceptedChannel,
@@ -1439,9 +1444,7 @@ class NotificationService with WidgetsBindingObserver {
             ),
           ),
         );
-        final rawType = body['type'] ?? extra['type'];
-        final isVideo = _boolField(extra, body, 'isVideo') ||
-            (rawType is num && rawType > 0);
+        final isVideo = _videoField(extra, body);
 
         _pushCallScreen(
           channel: channel,
@@ -1666,12 +1669,36 @@ class NotificationService with WidgetsBindingObserver {
   }
 
   bool _boolField(Map<String, dynamic> a, Map<String, dynamic> b, String key) {
-    final va = a[key];
-    if (va is bool) return va;
-    if (va is String) return va.toLowerCase() == 'true';
-    final vb = b[key];
-    if (vb is bool) return vb;
-    if (vb is String) return vb.toLowerCase() == 'true';
+    if (_truthyValue(a[key])) return true;
+    if (_truthyValue(b[key])) return true;
+    return false;
+  }
+
+  bool _videoField(Map<String, dynamic> a, Map<String, dynamic> b) {
+    return _videoLikeValue(a['isVideo']) ||
+        _videoLikeValue(b['isVideo']) ||
+        _videoLikeValue(a['type']) ||
+        _videoLikeValue(b['type']) ||
+        _videoLikeValue(a['callType']) ||
+        _videoLikeValue(b['callType']);
+  }
+
+  bool _truthyValue(dynamic raw) {
+    if (raw is bool) return raw;
+    if (raw is num) return raw != 0;
+    if (raw is String) {
+      final normalized = raw.trim().toLowerCase();
+      return normalized == 'true' || normalized == '1' || normalized == 'yes';
+    }
+    return false;
+  }
+
+  bool _videoLikeValue(dynamic raw) {
+    if (_truthyValue(raw)) return true;
+    if (raw is String) {
+      final normalized = raw.trim().toLowerCase();
+      return normalized == 'video';
+    }
     return false;
   }
 

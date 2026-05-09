@@ -1177,6 +1177,19 @@ exports.getAgoraRtcToken = onCall(
       uid = deriveRtcUidFromAuthUid(request.auth.uid);
     }
 
+    let userAccount = `${request.data?.userAccount ?? ""}`.trim();
+    if (userAccount && (userAccount.length > 255 || !/^[A-Za-z0-9 _!#$%&()+\-:;<=.>?@[\]^_{|}~,]+$/.test(userAccount))) {
+      throw new HttpsError("invalid-argument", "Invalid userAccount");
+    }
+    if (!userAccount) {
+      userAccount = `${uid}`;
+    }
+
+    const identityModeInput = `${request.data?.identityMode || ""}`
+      .toLowerCase()
+      .replace(/[^a-z]/g, "");
+    const tokenIdentityMode = identityModeInput === "useraccount" ? "userAccount" : "uid";
+
     const roleInput = `${request.data?.role || ""}`.toLowerCase();
     const role = roleInput === "subscriber"
       ? (RtcRole.SUBSCRIBER ?? RtcRole.Subscriber ?? 2)
@@ -1190,20 +1203,32 @@ exports.getAgoraRtcToken = onCall(
     const expireAt = now + expireSeconds;
 
     try {
-      const token = RtcTokenBuilder.buildTokenWithUid(
-        appId,
-        appCertificate,
-        channelName,
-        uid,
-        role,
-        expireSeconds,
-        expireSeconds
-      );
+      const token = tokenIdentityMode === "userAccount"
+        ? RtcTokenBuilder.buildTokenWithUserAccount(
+          appId,
+          appCertificate,
+          channelName,
+          userAccount,
+          role,
+          expireSeconds,
+          expireSeconds
+        )
+        : RtcTokenBuilder.buildTokenWithUid(
+          appId,
+          appCertificate,
+          channelName,
+          uid,
+          role,
+          expireSeconds,
+          expireSeconds
+        );
       const tokenVersion = token.slice(0, 3);
       console.log("getAgoraRtcToken ok", {
         channelName,
         requestedUid,
         uid,
+        userAccount,
+        tokenIdentityMode,
         allowUidZeroRequested,
         allowUidZero,
         expireAt,
@@ -1216,10 +1241,12 @@ exports.getAgoraRtcToken = onCall(
         expireAt,
         appId,
         uid,
+        userAccount,
         requestedUid,
         allowUidZeroRequested,
         allowUidZero,
         tokenVersion,
+        tokenIdentityMode,
       };
     } catch (e) {
       console.error("getAgoraRtcToken failed:", e);
