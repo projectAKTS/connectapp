@@ -123,11 +123,17 @@ class _PremiumScreenState extends State<PremiumScreen> {
             ),
             const SizedBox(height: 14),
             StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-              stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+              stream: FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(uid)
+                  .snapshots(),
               builder: (ctx, snap) {
                 final data = snap.data?.data() ?? const <String, dynamic>{};
-                final statusRaw = (data['premiumStatus'] ?? 'Free').toString().trim();
-                final status = (statusRaw.isEmpty || statusRaw == 'none') ? 'Free' : statusRaw;
+                final statusRaw =
+                    (data['premiumStatus'] ?? 'Free').toString().trim();
+                final status = (statusRaw.isEmpty || statusRaw == 'none')
+                    ? 'Free'
+                    : statusRaw;
                 final expiresAt = data['premiumExpiresAt'];
                 DateTime? expires;
                 if (expiresAt is Timestamp) expires = expiresAt.toDate();
@@ -144,19 +150,22 @@ class _PremiumScreenState extends State<PremiumScreen> {
                         decoration: BoxDecoration(
                           color: AppColors.primary.withOpacity(0.10),
                           borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: AppColors.primary.withOpacity(0.20)),
+                          border: Border.all(
+                              color: AppColors.primary.withOpacity(0.20)),
                         ),
-                        child: const Icon(Icons.workspace_premium_outlined, color: AppColors.primary),
+                        child: const Icon(Icons.workspace_premium_outlined,
+                            color: AppColors.primary),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                  Text('Current plan', style: muted),
+                            Text('Current plan', style: muted),
                             const SizedBox(height: 4),
                             Text(active ? 'Active' : 'Free',
-                                style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                                style: textTheme.titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w800)),
                             if (active && expires != null) ...[
                               const SizedBox(height: 4),
                               Text(
@@ -168,7 +177,8 @@ class _PremiumScreenState extends State<PremiumScreen> {
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
                           color: AppColors.button,
                           borderRadius: BorderRadius.circular(999),
@@ -187,9 +197,7 @@ class _PremiumScreenState extends State<PremiumScreen> {
                 );
               },
             ),
-
             const SizedBox(height: 14),
-
             _SoftCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -202,11 +210,9 @@ class _PremiumScreenState extends State<PremiumScreen> {
                 ],
               ),
             ),
-
             const SizedBox(height: 18),
             Text('Plans', style: headline),
             const SizedBox(height: 10),
-
             if (_showTestPlan || kDebugMode) ...[
               _SoftCard(
                 child: Row(
@@ -239,16 +245,16 @@ class _PremiumScreenState extends State<PremiumScreen> {
                         children: [
                           Text(
                             '\$0.00',
-                          style: textTheme.bodyLarge
-                              ?.copyWith(fontWeight: FontWeight.w800),
-                        ),
-                        const SizedBox(height: 6),
-                        _PrimaryButton(
-                          label: 'Activate',
-                          onTap: _activateTestPremium,
-                          compact: true,
-                          minWidth: 108,
-                        ),
+                            style: textTheme.bodyLarge
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                          const SizedBox(height: 6),
+                          _PrimaryButton(
+                            label: 'Activate',
+                            onTap: _activateTestPremium,
+                            compact: true,
+                            minWidth: 108,
+                          ),
                         ],
                       ),
                     ),
@@ -257,7 +263,6 @@ class _PremiumScreenState extends State<PremiumScreen> {
               ),
               const SizedBox(height: 10),
             ],
-
             FutureBuilder<List<ProductDetails>>(
               future: _subsFuture,
               builder: (ctx, snap) {
@@ -308,87 +313,91 @@ class _PremiumScreenState extends State<PremiumScreen> {
                   );
                 }
 
-                  return Column(
-                    children: plans.map((p) {
-                      final isYearly = p.id.contains('year');
-                      final title = isYearly ? 'Yearly' : 'Monthly';
-                      final subtitle = isYearly ? 'Best value' : 'Cancel anytime';
+                return Column(
+                  children: plans.map((p) {
+                    final isYearly = p.id.contains('year');
+                    final title = isYearly ? 'Yearly' : 'Monthly';
+                    final subtitle = isYearly ? 'Best value' : 'Cancel anytime';
 
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: _SoftCard(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _SoftCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  width: 46,
+                                  height: 46,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.button,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(color: AppColors.border),
+                                  ),
+                                  child: Icon(
+                                    isYearly
+                                        ? Icons.calendar_month_outlined
+                                        : Icons.date_range_outlined,
+                                    color: AppColors.text,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(title,
+                                          style: textTheme.bodyLarge?.copyWith(
+                                              fontWeight: FontWeight.w700)),
+                                      const SizedBox(height: 4),
+                                      Text(subtitle, style: muted),
+                                    ],
+                                  ),
+                                ),
+                                if (isYearly)
                                   Container(
-                                    width: 46,
-                                    height: 46,
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 6),
                                     decoration: BoxDecoration(
                                       color: AppColors.button,
-                                      borderRadius: BorderRadius.circular(14),
-                                      border: Border.all(color: AppColors.border),
+                                      borderRadius: BorderRadius.circular(999),
+                                      border:
+                                          Border.all(color: AppColors.border),
                                     ),
-                                    child: Icon(
-                                      isYearly
-                                          ? Icons.calendar_month_outlined
-                                          : Icons.date_range_outlined,
-                                      color: AppColors.text,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(title,
-                                            style:
-                                                textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700)),
-                                        const SizedBox(height: 4),
-                                        Text(subtitle, style: muted),
-                                      ],
-                                    ),
-                                  ),
-                                  if (isYearly)
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                      decoration: BoxDecoration(
-                                        color: AppColors.button,
-                                        borderRadius: BorderRadius.circular(999),
-                                        border: Border.all(color: AppColors.border),
-                                      ),
-                                      child: Text(
-                                        'Save 20%',
-                                        style: textTheme.bodyMedium?.copyWith(
-                                          color: AppColors.text,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                              const SizedBox(height: 14),
-                              Row(
-                                children: [
-                                  Expanded(
                                     child: Text(
-                                      p.price,
-                                      style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                                      'Save 20%',
+                                      style: textTheme.bodyMedium?.copyWith(
+                                        color: AppColors.text,
+                                        fontWeight: FontWeight.w700,
+                                      ),
                                     ),
                                   ),
-                                  _PrimaryButton(label: 'Select', onTap: () => _buy(p)),
-                                ],
-                              ),
-                            ],
-                          ),
+                              ],
+                            ),
+                            const SizedBox(height: 14),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    p.price,
+                                    style: textTheme.titleMedium
+                                        ?.copyWith(fontWeight: FontWeight.w800),
+                                  ),
+                                ),
+                                _PrimaryButton(
+                                    label: 'Select', onTap: () => _buy(p)),
+                              ],
+                            ),
+                          ],
                         ),
-                      );
-                    }).toList(),
-                  );
-                },
-              ),
-
+                      ),
+                    );
+                  }).toList(),
+                );
+              },
+            ),
             const SizedBox(height: 12),
             _SoftCard(
               child: Row(
@@ -440,69 +449,15 @@ class _BenefitRow extends StatelessWidget {
               borderRadius: BorderRadius.circular(999),
               border: Border.all(color: AppColors.primary.withOpacity(0.20)),
             ),
-            child:
-                const Icon(Icons.check_rounded, size: 14, color: AppColors.primary),
+            child: const Icon(Icons.check_rounded,
+                size: 14, color: AppColors.primary),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               text,
-              style: textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _HeroCard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        gradient: LinearGradient(
-          colors: [
-            AppColors.primary.withOpacity(0.10),
-            AppColors.button.withOpacity(0.6),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        border: Border.all(color: AppColors.border),
-        boxShadow: const [AppShadows.soft],
-      ),
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppColors.primary.withOpacity(0.25)),
-            ),
-            child: const Icon(Icons.workspace_premium_outlined, color: AppColors.primary),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Upgrade to Premium',
-                  style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Get priority visibility and premium features tailored to your profile.',
-                  style: textTheme.bodyMedium?.copyWith(color: AppColors.text),
-                ),
-              ],
+              style:
+                  textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
             ),
           ),
         ],
@@ -611,7 +566,8 @@ class _PrimaryButton extends StatelessWidget {
             fontWeight: FontWeight.w700,
             fontSize: compact ? 12 : 15,
           ),
-          visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
+          visualDensity:
+              compact ? VisualDensity.compact : VisualDensity.standard,
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),

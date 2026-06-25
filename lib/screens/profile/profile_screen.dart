@@ -15,6 +15,7 @@ import 'package:connect_app/theme/tokens.dart';
 import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 import 'package:connect_app/screens/profile/follow_list_screen.dart';
 import 'package:connect_app/screens/messages/messages_screen.dart';
+import 'package:connect_app/services/firestore_read_helper.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String userID;
@@ -100,10 +101,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _loadUserData() async {
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(widget.userID)
-          .get();
+      final snap = await FirestoreReadHelper.getDoc(
+        FirebaseFirestore.instance.collection('users').doc(widget.userID),
+      );
+      if (!mounted) return;
       if (!snap.exists) {
         setState(() {
           userData = null;
@@ -115,21 +116,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
       bool following = false;
       final cur = FirebaseAuth.instance.currentUser;
       if (!isCurrentUser && cur != null) {
-        final followDoc = await FirebaseFirestore.instance
-            .collection('followers')
-            .doc(widget.userID)
-            .collection('userFollowers')
-            .doc(cur.uid)
-            .get();
+        final followDoc = await FirestoreReadHelper.getDoc(
+          FirebaseFirestore.instance
+              .collection('followers')
+              .doc(widget.userID)
+              .collection('userFollowers')
+              .doc(cur.uid),
+        );
         following = followDoc.exists;
       }
 
+      if (!mounted) return;
       setState(() {
         userData = Map<String, dynamic>.from(snap.data() as Map);
         isFollowing = following;
         isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => isLoading = false);
       _snack('Failed to load profile.');
     }

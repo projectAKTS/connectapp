@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'package:connect_app/theme/tokens.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
+import 'package:connect_app/services/firestore_read_helper.dart';
 import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 
 /// FindHelperScreen — people-only search with helper-focused filters.
@@ -60,21 +61,23 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
 
       // Primary: helpers only (kept exactly as-is)
       try {
-        final snap = await FirebaseFirestore.instance
-            .collection('users')
-            .where('isHelper', isEqualTo: true)
-            .limit(400)
-            .get();
+        final snap = await FirestoreReadHelper.getQuery(
+          FirebaseFirestore.instance
+              .collection('users')
+              .where('isHelper', isEqualTo: true)
+              .limit(400),
+          timeout: const Duration(seconds: 5),
+        );
         docs = snap.docs;
       } catch (_) {}
 
       // Fallback: if none returned, pull a broader batch (NO extra filtering)
       if (docs.isEmpty) {
         try {
-          final broad = await FirebaseFirestore.instance
-              .collection('users')
-              .limit(400)
-              .get();
+          final broad = await FirestoreReadHelper.getQuery(
+            FirebaseFirestore.instance.collection('users').limit(400),
+            timeout: const Duration(seconds: 5),
+          );
           docs = broad.docs;
         } catch (_) {}
       }

@@ -15,6 +15,9 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:chewie/chewie.dart';
 import 'package:video_player/video_player.dart';
 import '../../theme/tokens.dart';
+import '../../services/diagnostic_service.dart';
+import '../../services/firestore_read_helper.dart';
+import '../../services/helperly_test_runtime.dart';
 import '../profile/profile_screen.dart';
 import '/services/current_chat.dart';
 import 'package:connect_app/widgets/full_screen_back_gesture.dart';
@@ -49,6 +52,9 @@ class _ChatScreenState extends State<ChatScreen> {
   XFile? _pendingAttachment;
   bool _pendingIsImage = true;
   int _lastAutoReadMessageMs = 0;
+  List<types.Message> _cachedMessages = const <types.Message>[];
+  bool _messageStreamErrorLogged = false;
+  bool _messageInitialLoadStarted = false;
 
   String? _titleName;
 
@@ -68,7 +74,12 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    _me = FirebaseAuth.instance.currentUser!.uid;
+    _me = HelperlyTestRuntime.currentUid ??
+        FirebaseAuth.instance.currentUser!.uid;
+    DiagnosticService.logChat('chat_open', uid: _me, meta: {
+      'chatId': widget.chatId ?? '',
+      'otherUserId': widget.otherUserId,
+    });
     debugPrint('[Chat] init me=$_me other=${widget.otherUserId}');
     final normalizedChatId = (widget.chatId ?? '').trim();
     if (normalizedChatId.isNotEmpty) {
@@ -78,17 +89,30 @@ class _ChatScreenState extends State<ChatScreen> {
       _chatId = ids.join('_');
     }
     debugPrint('[Chat] chatId=$_chatId');
+    DiagnosticService.logChat('chat_init_start', uid: _me, meta: {
+      'chatId': _chatId,
+      'otherUserId': widget.otherUserId,
+    });
     _ready = _ensureChatDoc().timeout(
       const Duration(seconds: 12),
       onTimeout: () {
+        DiagnosticService.logChat('chat_init_timeout', uid: _me, meta: {
+          'chatId': _chatId,
+          'otherUserId': widget.otherUserId,
+        });
         debugPrint('[Chat] ensureChatDoc TIMEOUT chatId=$_chatId');
         throw TimeoutException('Chat initialization timed out');
       },
     );
     _ready.then((_) {
+      DiagnosticService.logChat('chat_init_done', uid: _me, meta: {
+        'chatId': _chatId,
+        'otherUserId': widget.otherUserId,
+      });
       debugPrint('[Chat] ensureChatDoc OK chatId=$_chatId');
       CurrentChat.otherUserId = widget.otherUserId;
       _markChatRead();
+      unawaited(_loadInitialMessages());
     }).catchError((e, st) {
       debugPrint('[Chat] ensureChatDoc ERROR: $e');
       debugPrint('[Chat] ensureChatDoc STACK: $st');
@@ -101,10 +125,10 @@ class _ChatScreenState extends State<ChatScreen> {
       debugPrint('[Chat] ensureChatDoc missing otherUserId');
       throw Exception('Missing otherUserId for chat');
     }
-    final ref = FirebaseFirestore.instance.collection('chats').doc(_chatId);
+    final ref = HelperlyTestRuntime.firestore.collection('chats').doc(_chatId);
     final users = [_me, widget.otherUserId]..sort();
     debugPrint('[Chat] ensureChatDoc start users=$users');
-    final snap = await ref.get();
+    final snap = await FirestoreReadHelper.getDoc(ref);
     if (!snap.exists) {
       await ref.set({
         'users': users,
@@ -126,12 +150,40 @@ class _ChatScreenState extends State<ChatScreen> {
     debugPrint('[Chat] ensureChatDoc refreshed chatId=$_chatId');
   }
 
+  Future<void> _loadInitialMessages() async {
+    if (_messageInitialLoadStarted) return;
+    _messageInitialLoadStarted = true;
+    try {
+      final snap = await FirestoreReadHelper.getQuery(
+        HelperlyTestRuntime.firestore
+            .collection('chats')
+            .doc(_chatId)
+            .collection('messages')
+            .orderBy('createdAt', descending: true)
+            .limit(50),
+        timeout: const Duration(seconds: 5),
+      );
+      final messages = _toMessages(snap);
+      if (!mounted) return;
+      setState(() => _cachedMessages = messages);
+      DiagnosticService.logChat('chat_messages_initial_done', uid: _me, meta: {
+        'chatId': _chatId,
+        'count': messages.length,
+      });
+    } catch (error) {
+      DiagnosticService.logChat('chat_messages_initial_error', uid: _me, meta: {
+        'chatId': _chatId,
+        'error': '$error',
+      });
+    }
+  }
+
   Future<void> _markChatRead() async {
     try {
-      await FirebaseFirestore.instance.collection('chats').doc(_chatId).set({
+      await HelperlyTestRuntime.firestore.collection('chats').doc(_chatId).set({
         'unreadBy.$_me': 0,
       }, SetOptions(merge: true));
-      await FirebaseFirestore.instance.collection('users').doc(_me).set({
+      await HelperlyTestRuntime.firestore.collection('users').doc(_me).set({
         'lastMessagesSeenAt': FieldValue.serverTimestamp(),
         'unreadMessagesCount': 0,
       }, SetOptions(merge: true));
@@ -160,10 +212,11 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(widget.otherUserId)
-          .get();
+      final snap = await FirestoreReadHelper.getDoc(
+        HelperlyTestRuntime.firestore
+            .collection('users')
+            .doc(widget.otherUserId),
+      );
       final d = snap.data();
       final candidates = <String>[
         (d?['displayName'] ?? '').toString(),
@@ -247,17 +300,21 @@ class _ChatScreenState extends State<ChatScreen> {
     final t = text.trim();
     if (t.isEmpty) return;
     _inputCtrl.clear();
+    DiagnosticService.logChat('message_send_start', uid: _me, meta: {
+      'chatId': _chatId,
+      'type': 'text',
+    });
 
     try {
       await _ready;
     } catch (_) {
       await _ensureChatDoc();
     }
-    await _ensureChatDoc();
     debugPrint('[Chat] sendText ready OK');
 
     final now = Timestamp.now();
-    final chatRef = FirebaseFirestore.instance.collection('chats').doc(_chatId);
+    final chatRef =
+        HelperlyTestRuntime.firestore.collection('chats').doc(_chatId);
 
     try {
       await chatRef.collection('messages').add({
@@ -277,8 +334,17 @@ class _ChatScreenState extends State<ChatScreen> {
         'lastMessageText': t,
         'unreadBy.$_me': 0,
       }, SetOptions(merge: true));
+      DiagnosticService.logChat('message_send_done', uid: _me, meta: {
+        'chatId': _chatId,
+        'type': 'text',
+      });
       debugPrint('[Chat] sendText done');
     } catch (e) {
+      DiagnosticService.logChat('message_send_error', uid: _me, meta: {
+        'chatId': _chatId,
+        'type': 'text',
+        'error': '$e',
+      });
       debugPrint('[Chat] sendText ERROR: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -367,12 +433,15 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _uploadAndSend(XFile x, {required bool isImage}) async {
+    DiagnosticService.logChat('message_send_start', uid: _me, meta: {
+      'chatId': _chatId,
+      'type': isImage ? 'image' : 'video',
+    });
     try {
       await _ready;
     } catch (_) {
       await _ensureChatDoc();
     }
-    await _ensureChatDoc();
     debugPrint('[Chat] upload ready OK isImage=$isImage');
     setState(() => _sending = true);
     try {
@@ -394,7 +463,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final url = await task.ref.getDownloadURL();
 
       final chatRef =
-          FirebaseFirestore.instance.collection('chats').doc(_chatId);
+          HelperlyTestRuntime.firestore.collection('chats').doc(_chatId);
       await chatRef.collection('messages').add({
         'authorId': _me,
         'createdAt': Timestamp.now(),
@@ -416,8 +485,19 @@ class _ChatScreenState extends State<ChatScreen> {
         'lastMessageText': isImage ? 'Photo' : 'Video',
         'unreadBy.$_me': 0,
       }, SetOptions(merge: true));
+      DiagnosticService.logChat('message_send_done', uid: _me, meta: {
+        'chatId': _chatId,
+        'type': isImage ? 'image' : 'video',
+      });
       debugPrint(
           '[Chat] uploadAndSend done type=${isImage ? 'image' : 'video'}');
+    } catch (e) {
+      DiagnosticService.logChat('message_send_error', uid: _me, meta: {
+        'chatId': _chatId,
+        'type': isImage ? 'image' : 'video',
+        'error': '$e',
+      });
+      rethrow;
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -514,17 +594,29 @@ class _ChatScreenState extends State<ChatScreen> {
               );
             }
             return StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
+              stream: HelperlyTestRuntime.firestore
                   .collection('chats')
                   .doc(_chatId)
                   .collection('messages')
                   .orderBy('createdAt', descending: true)
                   .snapshots(),
               builder: (context, snap) {
-                final msgs = snap.hasData
-                    ? _toMessages(snap.data!)
-                    : const <types.Message>[];
+                if (snap.hasError && !_messageStreamErrorLogged) {
+                  _messageStreamErrorLogged = true;
+                  DiagnosticService.logChat(
+                    'chat_messages_stream_error',
+                    uid: _me,
+                    meta: {
+                      'chatId': _chatId,
+                      'error': '${snap.error}',
+                    },
+                  );
+                }
+                final msgs =
+                    snap.hasData ? _toMessages(snap.data!) : _cachedMessages;
                 if (snap.hasData) {
+                  _messageStreamErrorLogged = false;
+                  _cachedMessages = msgs;
                   _autoMarkReadFromSnapshot(snap.data!);
                 }
 
@@ -558,13 +650,11 @@ class _ChatScreenState extends State<ChatScreen> {
                     onSendPending: _sendPendingAttachment,
                   ),
                   customMessageBuilder: (message, {required int messageWidth}) {
-                    if (message is types.CustomMessage) {
-                      final meta = message.metadata ?? {};
-                      final uri = (meta['uri'] ?? '') as String;
-                      final mime = (meta['mime'] ?? 'video/mp4') as String;
-                      if (uri.isNotEmpty && mime.startsWith('video/')) {
-                        return _VideoBubble(uri: uri, maxWidth: messageWidth);
-                      }
+                    final meta = message.metadata ?? {};
+                    final uri = (meta['uri'] ?? '') as String;
+                    final mime = (meta['mime'] ?? 'video/mp4') as String;
+                    if (uri.isNotEmpty && mime.startsWith('video/')) {
+                      return _VideoBubble(uri: uri, maxWidth: messageWidth);
                     }
                     return const SizedBox.shrink();
                   },

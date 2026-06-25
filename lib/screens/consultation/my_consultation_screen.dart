@@ -45,11 +45,9 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
     super.initState();
     final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
     if (currentUid.isNotEmpty) {
-      FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUid)
-          .update({'lastConsultationsSeenAt': FieldValue.serverTimestamp()})
-          .catchError((_) {});
+      FirebaseFirestore.instance.collection('users').doc(currentUid).update({
+        'lastConsultationsSeenAt': FieldValue.serverTimestamp()
+      }).catchError((_) {});
     }
     _ticker = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) setState(() {});
@@ -76,8 +74,12 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
           'Canceling may trigger a refund based on the cancellation policy.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Cancel')),
         ],
       ),
     );
@@ -104,7 +106,7 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
     _userLoading.add(id);
     FirebaseFirestore.instance.collection('users').doc(id).get().then((snap) {
       if (!mounted) return;
-      final data = snap.data() as Map<String, dynamic>?;
+      final data = snap.data();
       if (data != null) _userCache[id] = data;
       _userLoading.remove(id);
       if (mounted) setState(() {});
@@ -205,351 +207,390 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
               .where('participants', arrayContains: myUid)
               .snapshots(),
           builder: (context, snap) {
-          if (snap.hasError) {
-            return const Center(child: Text('Error loading consultations.'));
-          }
-          if (!snap.hasData || snap.data!.docs.isEmpty) {
-            return const Center(
-              child: Text(
-                'No consultations found.',
-                style: TextStyle(color: AppColors.muted),
-              ),
-            );
-          }
-
-          final now = DateTime.now();
-          final docs = snap.data!.docs;
-
-          final upcoming = <QueryDocumentSnapshot>[];
-          final past = <QueryDocumentSnapshot>[];
-
-          for (final d in docs) {
-            final data = d.data() as Map<String, dynamic>;
-            final scheduledAt = parseFirestoreTimestamp(data['scheduledAt']);
-            final status = (data['status'] ?? 'scheduled').toString();
-            final isCancelled = status == 'cancelled';
-
-            final minsRaw = (data['minutesRequested'] ?? data['minutes'] ?? 0);
-            final mins = (minsRaw is num) ? minsRaw.toInt() : 0;
-
-            if (isCancelled) {
-              past.add(d);
-            } else if (scheduledAt == null) {
-              upcoming.add(d);
-            } else if (_isPast(now, scheduledAt, mins)) {
-              past.add(d);
-            } else {
-              upcoming.add(d);
+            if (snap.hasError) {
+              return const Center(child: Text('Error loading consultations.'));
             }
-          }
-
-          upcoming.sort((a, b) {
-            final aDt = parseFirestoreTimestamp((a.data() as Map)['scheduledAt']) ?? DateTime(9999);
-            final bDt = parseFirestoreTimestamp((b.data() as Map)['scheduledAt']) ?? DateTime(9999);
-            return aDt.compareTo(bDt);
-          });
-
-          past.sort((a, b) {
-            final aDt = parseFirestoreTimestamp((a.data() as Map)['scheduledAt']) ??
-                DateTime.fromMillisecondsSinceEpoch(0);
-            final bDt = parseFirestoreTimestamp((b.data() as Map)['scheduledAt']) ??
-                DateTime.fromMillisecondsSinceEpoch(0);
-            return bDt.compareTo(aDt);
-          });
-
-          return CustomScrollView(
-            slivers: [
-              const SliverToBoxAdapter(child: SizedBox(height: 12)),
-
-              // ===== UPCOMING HEADER =====
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Row(
-                    children: [
-                      Text(
-                        'Upcoming',
-                        style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-                      ),
-                      const SizedBox(width: 8),
-                      _CountPill(count: upcoming.length),
-                      const Spacer(),
-                      if (upcoming.isNotEmpty)
-                        Text(
-                          'Join opens ${_joinEarlyWindow.inMinutes} min early',
-                          style: textTheme.bodyMedium?.copyWith(
-                            color: AppColors.muted,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                    ],
-                  ),
+            if (!snap.hasData || snap.data!.docs.isEmpty) {
+              return const Center(
+                child: Text(
+                  'No consultations found.',
+                  style: TextStyle(color: AppColors.muted),
                 ),
-              ),
-              const SliverToBoxAdapter(child: SizedBox(height: 10)),
+              );
+            }
 
-              // ===== UPCOMING LIST =====
-              if (upcoming.isEmpty)
-                const SliverToBoxAdapter(
+            final now = DateTime.now();
+            final docs = snap.data!.docs;
+
+            final upcoming = <QueryDocumentSnapshot>[];
+            final past = <QueryDocumentSnapshot>[];
+
+            for (final d in docs) {
+              final data = d.data() as Map<String, dynamic>;
+              final scheduledAt = parseFirestoreTimestamp(data['scheduledAt']);
+              final status = (data['status'] ?? 'scheduled').toString();
+              final isCancelled = status == 'cancelled';
+
+              final minsRaw =
+                  (data['minutesRequested'] ?? data['minutes'] ?? 0);
+              final mins = (minsRaw is num) ? minsRaw.toInt() : 0;
+
+              if (isCancelled) {
+                past.add(d);
+              } else if (scheduledAt == null) {
+                upcoming.add(d);
+              } else if (_isPast(now, scheduledAt, mins)) {
+                past.add(d);
+              } else {
+                upcoming.add(d);
+              }
+            }
+
+            upcoming.sort((a, b) {
+              final aDt =
+                  parseFirestoreTimestamp((a.data() as Map)['scheduledAt']) ??
+                      DateTime(9999);
+              final bDt =
+                  parseFirestoreTimestamp((b.data() as Map)['scheduledAt']) ??
+                      DateTime(9999);
+              return aDt.compareTo(bDt);
+            });
+
+            past.sort((a, b) {
+              final aDt =
+                  parseFirestoreTimestamp((a.data() as Map)['scheduledAt']) ??
+                      DateTime.fromMillisecondsSinceEpoch(0);
+              final bDt =
+                  parseFirestoreTimestamp((b.data() as Map)['scheduledAt']) ??
+                      DateTime.fromMillisecondsSinceEpoch(0);
+              return bDt.compareTo(aDt);
+            });
+
+            return CustomScrollView(
+              slivers: [
+                const SliverToBoxAdapter(child: SizedBox(height: 12)),
+
+                // ===== UPCOMING HEADER =====
+                SliverToBoxAdapter(
                   child: Padding(
-                    padding: EdgeInsets.fromLTRB(16, 18, 16, 18),
-                    child: Center(
-                      child: Text(
-                        'No upcoming consultations.',
-                        style: TextStyle(color: AppColors.muted, fontSize: 15),
-                      ),
-                    ),
-                  ),
-                )
-              else
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-                  sliver: SliverList.separated(
-                    itemCount: upcoming.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 12),
-                    itemBuilder: (context, index) {
-                      final doc = upcoming[index];
-                      final data = doc.data() as Map<String, dynamic>;
-
-                      final consultationId =
-                          (data['consultationId'] ?? doc.id).toString();
-                      final scheduledAt = parseFirestoreTimestamp(data['scheduledAt']);
-                      final canCancel = (data['userId'] ?? '') == myUid;
-
-                      final minsRaw = (data['minutesRequested'] ?? data['minutes'] ?? 0);
-                      final minutes = (minsRaw is num) ? minsRaw.toInt() : 0;
-
-                      final costRaw = (data['cost'] ?? 0);
-                      final cost = (costRaw is num) ? costRaw : 0;
-
-                      final roomId = (data['roomId'] ?? consultationId).toString();
-
-                      final participants = (data['participants'] ?? const []) as List;
-                      final otherUserId = participants.firstWhere(
-                        (id) => id != myUid,
-                        orElse: () => '',
-                      ).toString();
-
-                      final fallbackName = (data['otherUserName'] ??
-                              data['partnerName'] ??
-                              'Helper')
-                          .toString();
-
-                      _ensureUserLoaded(otherUserId);
-                      final userData = _userCache[otherUserId];
-                      final resolvedName = _resolveName(userData, fallbackName);
-                      final avatarUrl = _resolveAvatar(userData);
-
-                      return _ConsultationCard(
-                        isPast: false,
-                        consultationId: consultationId,
-                        scheduledAt: scheduledAt,
-                        minutes: minutes,
-                        cost: cost,
-                        roomId: roomId,
-                        otherUserId: otherUserId,
-                        displayName: resolvedName,
-                        avatarUrl: avatarUrl,
-                        joinEnabled: _isJoinEnabled(now, scheduledAt),
-                        joinHint: _joinHint(now, scheduledAt),
-                        fmtWhen: _fmtWhen,
-                        fmtMoney: _fmtMoney,
-                        canCancel: canCancel,
-                        onOpenProfile: (uid) {
-                          if (uid.trim().isEmpty) return;
-                          Navigator.of(context).push(
-                            CupertinoPageRoute(builder: (_) => ProfileScreen(userID: uid)),
-                          );
-                        },
-                        onMessage: (uid, name, avatar) {
-                          if (uid.trim().isEmpty) return;
-                          Navigator.of(context).push(
-                            CupertinoPageRoute(
-                              builder: (_) => ChatScreen(
-                                otherUserId: uid,
-                                otherUserName: name,
-                                otherUserAvatar: avatar,
-                              ),
-                            ),
-                          );
-                        },
-                        onJoin: (uid, name) {
-                          if (uid.trim().isEmpty) {
-                            _snack('No partner found for this consultation.');
-                            return;
-                          }
-                          Navigator.of(context, rootNavigator: true).push(
-                            MaterialPageRoute(
-                              builder: (_) => ConsultationCallScreen(
-                                roomId: roomId,
-                                otherUserId: uid,
-                                otherUserName: name,
-                              ),
-                            ),
-                          );
-                        },
-                        onCancel: () => _cancelConsultation(consultationId),
-                      );
-                    },
-                  ),
-                ),
-
-              // ===== PAST SECTION (COLLAPSIBLE) =====
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                sliver: SliverToBoxAdapter(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.card,
-                      borderRadius: BorderRadius.circular(16),
-                      border: const Border.fromBorderSide(
-                        BorderSide(color: AppColors.border),
-                      ),
-                      boxShadow: const [AppShadows.soft],
-                    ),
-                    child: Column(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
                       children: [
-                        InkWell(
-                          borderRadius: BorderRadius.circular(16),
-                          onTap: () => setState(() => _pastExpanded = !_pastExpanded),
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                            child: Row(
-                              children: [
-                                const Text(
-                                  'Past consultations',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w800,
-                                    color: AppColors.text,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                _CountPill(count: past.length),
-                                const Spacer(),
-                                Icon(
-                                  _pastExpanded
-                                      ? Icons.keyboard_arrow_up
-                                      : Icons.keyboard_arrow_down,
-                                  color: AppColors.muted,
-                                ),
-                              ],
+                        Text(
+                          'Upcoming',
+                          style: textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(width: 8),
+                        _CountPill(count: upcoming.length),
+                        const Spacer(),
+                        if (upcoming.isNotEmpty)
+                          Text(
+                            'Join opens ${_joinEarlyWindow.inMinutes} min early',
+                            style: textTheme.bodyMedium?.copyWith(
+                              color: AppColors.muted,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                        ),
-                        AnimatedCrossFade(
-                          duration: const Duration(milliseconds: 180),
-                          crossFadeState: _pastExpanded
-                              ? CrossFadeState.showFirst
-                              : CrossFadeState.showSecond,
-                          firstChild: Column(
-                            children: [
-                              const Divider(height: 1, color: AppColors.border),
-                              if (past.isEmpty)
-                                const Padding(
-                                  padding: EdgeInsets.all(16),
-                                  child: Text(
-                                    'No past consultations yet.',
-                                    style: TextStyle(color: AppColors.muted),
-                                  ),
-                                )
-                              else
-                                ListView.separated(
-                                  shrinkWrap: true,
-                                  physics: const NeverScrollableScrollPhysics(),
-                                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-                                  itemCount: past.length,
-                                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                                  itemBuilder: (context, index) {
-                                    final doc = past[index];
-                                    final data = doc.data() as Map<String, dynamic>;
-
-                                    final consultationId =
-                                        (data['consultationId'] ?? doc.id).toString();
-                                    final scheduledAt =
-                                        parseFirestoreTimestamp(data['scheduledAt']);
-
-                                    final minsRaw =
-                                        (data['minutesRequested'] ?? data['minutes'] ?? 0);
-                                    final minutes = (minsRaw is num) ? minsRaw.toInt() : 0;
-
-                                    final costRaw = (data['cost'] ?? 0);
-                                    final cost = (costRaw is num) ? costRaw : 0;
-
-                                    final roomId =
-                                        (data['roomId'] ?? consultationId).toString();
-
-                                    final participants =
-                                        (data['participants'] ?? const []) as List;
-                                    final otherUserId = participants.firstWhere(
-                                      (id) => id != myUid,
-                                      orElse: () => '',
-                                    ).toString();
-
-                                    final fallbackName = (data['otherUserName'] ??
-                                            data['partnerName'] ??
-                                            'Helper')
-                                        .toString();
-
-                                    _ensureUserLoaded(otherUserId);
-                                    final userData = _userCache[otherUserId];
-                                    final resolvedName =
-                                        _resolveName(userData, fallbackName);
-                                    final avatarUrl = _resolveAvatar(userData);
-
-                                    return _ConsultationCard(
-                                      isPast: true,
-                                      consultationId: consultationId,
-                                      scheduledAt: scheduledAt,
-                                      minutes: minutes,
-                                      cost: cost,
-                                      roomId: roomId,
-                                      otherUserId: otherUserId,
-                                      displayName: resolvedName,
-                                      avatarUrl: avatarUrl,
-                                      joinEnabled: false,
-                                      joinHint: (data['status'] ?? '') == 'cancelled'
-                                          ? 'Canceled'
-                                          : 'Completed',
-                                      fmtWhen: _fmtWhen,
-                                      fmtMoney: _fmtMoney,
-                                      canCancel: false,
-                                      onOpenProfile: (uid) {
-                                        if (uid.trim().isEmpty) return;
-                                        Navigator.of(context).push(
-                                          CupertinoPageRoute(
-                                            builder: (_) => ProfileScreen(userID: uid),
-                                          ),
-                                        );
-                                      },
-                                      onMessage: (uid, name, avatar) {
-                                        if (uid.trim().isEmpty) return;
-                                        Navigator.of(context).push(
-                                          CupertinoPageRoute(
-                                            builder: (_) => ChatScreen(
-                                              otherUserId: uid,
-                                              otherUserName: name,
-                                              otherUserAvatar: avatar,
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                      onJoin: (_, __) {},
-                                      onCancel: () {},
-                                    );
-                                  },
-                                ),
-                            ],
-                          ),
-                          secondChild: const SizedBox(height: 0),
-                        ),
                       ],
                     ),
                   ),
                 ),
-              ),
-            ],
-          );
+                const SliverToBoxAdapter(child: SizedBox(height: 10)),
+
+                // ===== UPCOMING LIST =====
+                if (upcoming.isEmpty)
+                  const SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(16, 18, 16, 18),
+                      child: Center(
+                        child: Text(
+                          'No upcoming consultations.',
+                          style:
+                              TextStyle(color: AppColors.muted, fontSize: 15),
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                    sliver: SliverList.separated(
+                      itemCount: upcoming.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                        final doc = upcoming[index];
+                        final data = doc.data() as Map<String, dynamic>;
+
+                        final consultationId =
+                            (data['consultationId'] ?? doc.id).toString();
+                        final scheduledAt =
+                            parseFirestoreTimestamp(data['scheduledAt']);
+                        final canCancel = (data['userId'] ?? '') == myUid;
+
+                        final minsRaw =
+                            (data['minutesRequested'] ?? data['minutes'] ?? 0);
+                        final minutes = (minsRaw is num) ? minsRaw.toInt() : 0;
+
+                        final costRaw = (data['cost'] ?? 0);
+                        final cost = (costRaw is num) ? costRaw : 0;
+
+                        final roomId =
+                            (data['roomId'] ?? consultationId).toString();
+
+                        final participants =
+                            (data['participants'] ?? const []) as List;
+                        final otherUserId = participants
+                            .firstWhere(
+                              (id) => id != myUid,
+                              orElse: () => '',
+                            )
+                            .toString();
+
+                        final fallbackName = (data['otherUserName'] ??
+                                data['partnerName'] ??
+                                'Helper')
+                            .toString();
+
+                        _ensureUserLoaded(otherUserId);
+                        final userData = _userCache[otherUserId];
+                        final resolvedName =
+                            _resolveName(userData, fallbackName);
+                        final avatarUrl = _resolveAvatar(userData);
+
+                        return _ConsultationCard(
+                          isPast: false,
+                          consultationId: consultationId,
+                          scheduledAt: scheduledAt,
+                          minutes: minutes,
+                          cost: cost,
+                          roomId: roomId,
+                          otherUserId: otherUserId,
+                          displayName: resolvedName,
+                          avatarUrl: avatarUrl,
+                          joinEnabled: _isJoinEnabled(now, scheduledAt),
+                          joinHint: _joinHint(now, scheduledAt),
+                          fmtWhen: _fmtWhen,
+                          fmtMoney: _fmtMoney,
+                          canCancel: canCancel,
+                          onOpenProfile: (uid) {
+                            if (uid.trim().isEmpty) return;
+                            Navigator.of(context).push(
+                              CupertinoPageRoute(
+                                  builder: (_) => ProfileScreen(userID: uid)),
+                            );
+                          },
+                          onMessage: (uid, name, avatar) {
+                            if (uid.trim().isEmpty) return;
+                            Navigator.of(context).push(
+                              CupertinoPageRoute(
+                                builder: (_) => ChatScreen(
+                                  otherUserId: uid,
+                                  otherUserName: name,
+                                  otherUserAvatar: avatar,
+                                ),
+                              ),
+                            );
+                          },
+                          onJoin: (uid, name) {
+                            if (uid.trim().isEmpty) {
+                              _snack('No partner found for this consultation.');
+                              return;
+                            }
+                            Navigator.of(context, rootNavigator: true).push(
+                              MaterialPageRoute(
+                                builder: (_) => ConsultationCallScreen(
+                                  roomId: roomId,
+                                  otherUserId: uid,
+                                  otherUserName: name,
+                                ),
+                              ),
+                            );
+                          },
+                          onCancel: () => _cancelConsultation(consultationId),
+                        );
+                      },
+                    ),
+                  ),
+
+                // ===== PAST SECTION (COLLAPSIBLE) =====
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                  sliver: SliverToBoxAdapter(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: AppColors.card,
+                        borderRadius: BorderRadius.circular(16),
+                        border: const Border.fromBorderSide(
+                          BorderSide(color: AppColors.border),
+                        ),
+                        boxShadow: const [AppShadows.soft],
+                      ),
+                      child: Column(
+                        children: [
+                          InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: () =>
+                                setState(() => _pastExpanded = !_pastExpanded),
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                              child: Row(
+                                children: [
+                                  const Text(
+                                    'Past consultations',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppColors.text,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _CountPill(count: past.length),
+                                  const Spacer(),
+                                  Icon(
+                                    _pastExpanded
+                                        ? Icons.keyboard_arrow_up
+                                        : Icons.keyboard_arrow_down,
+                                    color: AppColors.muted,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          AnimatedCrossFade(
+                            duration: const Duration(milliseconds: 180),
+                            crossFadeState: _pastExpanded
+                                ? CrossFadeState.showFirst
+                                : CrossFadeState.showSecond,
+                            firstChild: Column(
+                              children: [
+                                const Divider(
+                                    height: 1, color: AppColors.border),
+                                if (past.isEmpty)
+                                  const Padding(
+                                    padding: EdgeInsets.all(16),
+                                    child: Text(
+                                      'No past consultations yet.',
+                                      style: TextStyle(color: AppColors.muted),
+                                    ),
+                                  )
+                                else
+                                  ListView.separated(
+                                    shrinkWrap: true,
+                                    physics:
+                                        const NeverScrollableScrollPhysics(),
+                                    padding: const EdgeInsets.fromLTRB(
+                                        14, 12, 14, 14),
+                                    itemCount: past.length,
+                                    separatorBuilder: (_, __) =>
+                                        const SizedBox(height: 10),
+                                    itemBuilder: (context, index) {
+                                      final doc = past[index];
+                                      final data =
+                                          doc.data() as Map<String, dynamic>;
+
+                                      final consultationId =
+                                          (data['consultationId'] ?? doc.id)
+                                              .toString();
+                                      final scheduledAt =
+                                          parseFirestoreTimestamp(
+                                              data['scheduledAt']);
+
+                                      final minsRaw =
+                                          (data['minutesRequested'] ??
+                                              data['minutes'] ??
+                                              0);
+                                      final minutes = (minsRaw is num)
+                                          ? minsRaw.toInt()
+                                          : 0;
+
+                                      final costRaw = (data['cost'] ?? 0);
+                                      final cost =
+                                          (costRaw is num) ? costRaw : 0;
+
+                                      final roomId =
+                                          (data['roomId'] ?? consultationId)
+                                              .toString();
+
+                                      final participants =
+                                          (data['participants'] ?? const [])
+                                              as List;
+                                      final otherUserId = participants
+                                          .firstWhere(
+                                            (id) => id != myUid,
+                                            orElse: () => '',
+                                          )
+                                          .toString();
+
+                                      final fallbackName =
+                                          (data['otherUserName'] ??
+                                                  data['partnerName'] ??
+                                                  'Helper')
+                                              .toString();
+
+                                      _ensureUserLoaded(otherUserId);
+                                      final userData = _userCache[otherUserId];
+                                      final resolvedName =
+                                          _resolveName(userData, fallbackName);
+                                      final avatarUrl =
+                                          _resolveAvatar(userData);
+
+                                      return _ConsultationCard(
+                                        isPast: true,
+                                        consultationId: consultationId,
+                                        scheduledAt: scheduledAt,
+                                        minutes: minutes,
+                                        cost: cost,
+                                        roomId: roomId,
+                                        otherUserId: otherUserId,
+                                        displayName: resolvedName,
+                                        avatarUrl: avatarUrl,
+                                        joinEnabled: false,
+                                        joinHint: (data['status'] ?? '') ==
+                                                'cancelled'
+                                            ? 'Canceled'
+                                            : 'Completed',
+                                        fmtWhen: _fmtWhen,
+                                        fmtMoney: _fmtMoney,
+                                        canCancel: false,
+                                        onOpenProfile: (uid) {
+                                          if (uid.trim().isEmpty) return;
+                                          Navigator.of(context).push(
+                                            CupertinoPageRoute(
+                                              builder: (_) =>
+                                                  ProfileScreen(userID: uid),
+                                            ),
+                                          );
+                                        },
+                                        onMessage: (uid, name, avatar) {
+                                          if (uid.trim().isEmpty) return;
+                                          Navigator.of(context).push(
+                                            CupertinoPageRoute(
+                                              builder: (_) => ChatScreen(
+                                                otherUserId: uid,
+                                                otherUserName: name,
+                                                otherUserAvatar: avatar,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                        onJoin: (_, __) {},
+                                        onCancel: () {},
+                                      );
+                                    },
+                                  ),
+                              ],
+                            ),
+                            secondChild: const SizedBox(height: 0),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
           },
         ),
       ),
@@ -568,7 +609,8 @@ class _CountPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.button,
         borderRadius: BorderRadius.circular(999),
-        border: const Border.fromBorderSide(BorderSide(color: AppColors.border)),
+        border:
+            const Border.fromBorderSide(BorderSide(color: AppColors.border)),
       ),
       child: Text(
         '$count',
@@ -603,7 +645,8 @@ class _ConsultationCard extends StatelessWidget {
   final String Function(num) fmtMoney;
 
   final void Function(String uid) onOpenProfile;
-  final void Function(String uid, String resolvedName, String avatarUrl) onMessage;
+  final void Function(String uid, String resolvedName, String avatarUrl)
+      onMessage;
   final void Function(String uid, String resolvedName) onJoin;
   final VoidCallback onCancel;
 
@@ -636,7 +679,8 @@ class _ConsultationCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.card,
         borderRadius: BorderRadius.circular(16),
-        border: const Border.fromBorderSide(BorderSide(color: AppColors.border)),
+        border:
+            const Border.fromBorderSide(BorderSide(color: AppColors.border)),
         boxShadow: const [AppShadows.soft],
       ),
       child: Padding(
@@ -813,7 +857,8 @@ class _ActionsColumn extends StatelessWidget {
   final String avatarUrl;
   final bool canCancel;
 
-  final void Function(String uid, String resolvedName, String avatarUrl) onMessage;
+  final void Function(String uid, String resolvedName, String avatarUrl)
+      onMessage;
   final void Function(String uid, String resolvedName) onJoin;
   final VoidCallback onCancel;
 
@@ -849,7 +894,8 @@ class _ActionsColumn extends StatelessWidget {
               backgroundColor: AppColors.button,
               foregroundColor: AppColors.text,
               side: const BorderSide(color: AppColors.border),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
               padding: const EdgeInsets.symmetric(horizontal: 12),
               textStyle: const TextStyle(fontWeight: FontWeight.w800),
             ),
@@ -875,7 +921,8 @@ class _ActionsColumn extends StatelessWidget {
                 disabledBackgroundColor: AppColors.border.withOpacity(0.6),
                 disabledForegroundColor: AppColors.muted,
                 elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 textStyle: const TextStyle(fontWeight: FontWeight.w800),
               ),
@@ -910,7 +957,8 @@ class _TinyPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.button,
         borderRadius: BorderRadius.circular(999),
-        border: const Border.fromBorderSide(BorderSide(color: AppColors.border)),
+        border:
+            const Border.fromBorderSide(BorderSide(color: AppColors.border)),
       ),
       child: Text(
         text,

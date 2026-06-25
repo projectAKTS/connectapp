@@ -2,7 +2,7 @@ name: connect_app
 description: "A Flutter app with Firebase integration."
 publish_to: none
 
-version: 1.0.2+98
+version: 1.0.2+135
 
 environment:
   sdk: ">=3.6.0 <4.0.0"
@@ -53,8 +53,11 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  integration_test:
+    sdk: flutter
   flutter_lints: ^5.0.0 # ✅ Downgraded to support Dart 3.6.0
   mockito: ^5.4.5       # ✅ Compatible with Dart 3.6.0
+  fake_cloud_firestore: ^3.1.0
 
 dependency_overrides:
   ffi: ^2.1.4

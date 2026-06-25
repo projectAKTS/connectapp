@@ -1,7 +1,6 @@
 // lib/screens/posts/edit_post_screen.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:connect_app/utils/time_utils.dart';
 
 class EditPostScreen extends StatefulWidget {
   const EditPostScreen({super.key});
@@ -17,7 +16,8 @@ class _EditPostScreenState extends State<EditPostScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    final args =
+        ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
 
     if (args != null) {
       _contentController.text = args['content'] ?? '';
@@ -45,7 +45,8 @@ class _EditPostScreenState extends State<EditPostScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    final args =
+        ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
     final String postId = args?['postId'] ?? '';
 
     return Scaffold(

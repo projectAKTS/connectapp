@@ -4,7 +4,10 @@
 
 const { onRequest, onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
-const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const {
+  onDocumentCreated,
+  onDocumentUpdated,
+} = require("firebase-functions/v2/firestore");
 const functionsV1 = require("firebase-functions/v1");
 const { defineSecret } = require("firebase-functions/params");
 const { RtcTokenBuilder, RtcRole } = require("agora-token");
@@ -92,6 +95,81 @@ function tokenSuffixes(tokens) {
   return (Array.isArray(tokens) ? tokens : [])
     .filter(Boolean)
     .map((token) => `${token}`.slice(-12));
+}
+
+function callInviteRef(inviteId) {
+  const id = `${inviteId || ""}`.trim();
+  return id ? db.collection("callInvites").doc(id) : null;
+}
+
+async function writeCallInviteServerDiag(inviteId, fields) {
+  const ref = callInviteRef(inviteId);
+  if (!ref) return;
+  try {
+    await ref.set(
+      {
+        ...fields,
+        serverNotifyAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+  } catch (e) {
+    console.warn("call invite server diag write failed:", {
+      inviteId,
+      error: `${e}`,
+    });
+  }
+}
+
+const TERMINAL_CALL_INVITE_STATUSES = new Set([
+  "ended",
+  "declined",
+  "cancelled",
+  "missed",
+]);
+
+function normalizeStatus(value) {
+  return `${value || ""}`.trim().toLowerCase();
+}
+
+function uniqueNonEmpty(values) {
+  return Array.from(
+    new Set((Array.isArray(values) ? values : []).map((v) => `${v || ""}`.trim()).filter(Boolean))
+  );
+}
+
+function terminalCallInviteRecipients(before, after, status) {
+  const fromUid = `${after.fromUid || before.fromUid || ""}`.trim();
+  const toUid = `${after.toUid || before.toUid || ""}`.trim();
+  const actorUid = `${after.endedBy || after.cancelledBy || after.declinedBy || after.missedBy || ""}`.trim();
+
+  if (status === "declined" || status === "missed") {
+    return uniqueNonEmpty([fromUid]);
+  }
+  if (status === "cancelled") {
+    return uniqueNonEmpty([toUid]);
+  }
+  if (status === "ended") {
+    const otherParty = uniqueNonEmpty([fromUid, toUid].filter((uid) => uid !== actorUid));
+    return otherParty.length ? otherParty : uniqueNonEmpty([fromUid, toUid]);
+  }
+  return uniqueNonEmpty([fromUid, toUid]);
+}
+
+const CALL_ALERT_FALLBACK_DELAY_MS = 4000;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isInviteStillUnhandled(data) {
+  const status = normalizeStatus(data?.status || "ringing");
+  const calleeStage = `${data?.calleeStage || ""}`.trim().toLowerCase();
+  return (
+    status === "ringing" &&
+    !data?.acceptedAt &&
+    (!calleeStage || calleeStage === "idle")
+  );
 }
 
 async function getUserPushTokenSets(uid) {
@@ -778,6 +856,22 @@ exports.onCallInviteCreated = onDocumentCreated(
     if (!toUid || !channel) return;
     let voipDelivered = false;
     let apnsAlertDelivered = false;
+    let fcmDelivered = false;
+    const serverDiag = {
+      serverNotifyStage: "started",
+      serverNotifyPolicy: "voip_then_delayed_alert_fallback",
+      serverVoipSent: 0,
+      serverVoipFailed: 0,
+      serverVoipEnvironment: "",
+      serverApnsAlertSent: 0,
+      serverApnsAlertFailed: 0,
+      serverApnsAlertEnvironment: "",
+      serverApnsAlertPolicy: "",
+      serverApnsAlertSkippedReason: "",
+      serverFcmSent: 0,
+      serverFcmFailed: 0,
+      serverNotifyLastError: "",
+    };
     const payloadData = {
       channel: `${channel}`,
       isVideo: `${Boolean(isVideo)}`,
@@ -787,6 +881,14 @@ exports.onCallInviteCreated = onDocumentCreated(
       callId: event.params.inviteId || `${channel}`,
     };
     const tokenSets = await getUserPushTokenSets(toUid);
+    await writeCallInviteServerDiag(inviteId, {
+      ...serverDiag,
+      serverVoipTokenCount: tokenSets.voip.length,
+      serverApnsAlertTokenCount: tokenSets.apns.length,
+      serverFcmTokenCount: tokenSets.fcmAll.length,
+      serverFcmFallbackTokenCount: tokenSets.fcmForFallback.length,
+      serverNotifyStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
 
     // Primary path for iOS incoming-call reliability
     try {
@@ -794,6 +896,9 @@ exports.onCallInviteCreated = onDocumentCreated(
       if (voipTokens.length) {
         const voipRes = await sendVoipPushToTokens(voipTokens, payloadData);
         voipDelivered = (voipRes.sent || 0) > 0;
+        serverDiag.serverVoipSent = voipRes.sent || 0;
+        serverDiag.serverVoipFailed = voipRes.failed || 0;
+        serverDiag.serverVoipEnvironment = voipRes.environment || "";
         console.log("APNS VoIP result:", {
           inviteId,
           toUid,
@@ -805,41 +910,72 @@ exports.onCallInviteCreated = onDocumentCreated(
         console.log("APNS VoIP skipped: no tokens", { inviteId, toUid, channel });
       }
     } catch (e) {
+      serverDiag.serverNotifyLastError = `voip:${e}`;
       console.error("APNS VoIP send failed:", e);
     }
 
-    // Only use regular APNs alert as a fallback when VoIP delivery is unavailable.
-    // Sending both on iOS creates duplicate incoming-call notifications.
+    // APNS accepts VoIP packets before the device/app actually handles them.
+    // Use a delayed alert fallback only if the invite is still unhandled after
+    // VoIP had time to surface CallKit. This avoids duplicate iOS call
+    // notifications on the healthy path while preserving recovery.
     try {
       const apnsTokens = tokenSets.apns;
-      if (voipDelivered) {
-        console.log("APNS alert skipped: voip already delivered", {
-          inviteId,
-          toUid,
-          channel,
-          tokenSuffixes: tokenSuffixes(tokenSets.apns),
-        });
-      } else if (apnsTokens.length) {
-        const apnsRes = await sendApnsAlertToTokens(apnsTokens, {
-          title: isVideo ? "Incoming Video Call" : "Incoming Audio Call",
-          body: `From ${fromName || "Someone"}`,
-          data: {
-            type: "call_invite",
-            ...payloadData,
-          },
-        });
-        apnsAlertDelivered = (apnsRes.sent || 0) > 0;
-        console.log("APNS alert result:", {
-          inviteId,
-          toUid,
-          channel,
-          tokenSuffixes: tokenSuffixes(apnsTokens),
-          ...apnsRes,
-        });
+      if (apnsTokens.length) {
+        const shouldSendImmediateAlert = !voipDelivered;
+        let shouldSendAlert = shouldSendImmediateAlert;
+        serverDiag.serverApnsAlertPolicy = shouldSendImmediateAlert
+          ? "immediate_no_voip_delivery"
+          : "delayed_if_unhandled";
+
+        if (!shouldSendImmediateAlert) {
+          await sleep(CALL_ALERT_FALLBACK_DELAY_MS);
+          const latestInvite = await db.collection("callInvites").doc(inviteId).get();
+          const latestData = latestInvite.exists ? latestInvite.data() || {} : {};
+          shouldSendAlert = isInviteStillUnhandled(latestData);
+          await writeCallInviteServerDiag(inviteId, {
+            serverFallbackCheckedAt: admin.firestore.FieldValue.serverTimestamp(),
+            serverFallbackCheckStatus: normalizeStatus(latestData.status || "ringing"),
+            serverFallbackCheckCalleeStage: `${latestData.calleeStage || ""}`,
+          });
+          if (!shouldSendAlert) {
+            serverDiag.serverApnsAlertSkippedReason = "invite_already_handled";
+            console.log("APNS alert skipped: invite already handled", {
+              inviteId,
+              toUid,
+              channel,
+              status: normalizeStatus(latestData.status || "ringing"),
+              calleeStage: `${latestData.calleeStage || ""}`,
+            });
+          }
+        }
+
+        if (shouldSendAlert) {
+          const apnsRes = await sendApnsAlertToTokens(apnsTokens, {
+            title: isVideo ? "Incoming Video Call" : "Incoming Audio Call",
+            body: `From ${fromName || "Someone"}`,
+            data: {
+              type: "call_invite",
+              ...payloadData,
+            },
+          });
+          apnsAlertDelivered = (apnsRes.sent || 0) > 0;
+          serverDiag.serverApnsAlertSent = apnsRes.sent || 0;
+          serverDiag.serverApnsAlertFailed = apnsRes.failed || 0;
+          serverDiag.serverApnsAlertEnvironment = apnsRes.environment || "";
+          console.log("APNS alert result:", {
+            inviteId,
+            toUid,
+            channel,
+            tokenSuffixes: tokenSuffixes(apnsTokens),
+            ...apnsRes,
+          });
+        }
       } else {
+        serverDiag.serverApnsAlertSkippedReason = "no_apns_tokens";
         console.log("APNS alert skipped: no tokens", { inviteId, toUid, channel });
       }
     } catch (e) {
+      serverDiag.serverNotifyLastError = `${serverDiag.serverNotifyLastError || ""} apns_alert:${e}`.trim();
       console.error("APNS alert send failed:", e);
     }
 
@@ -848,36 +984,165 @@ exports.onCallInviteCreated = onDocumentCreated(
       ? tokenSets.fcmForFallback
       : tokenSets.fcmAll;
     if (tokens.length) {
-      await sendToTokens(tokens, {
-        notification: {
-          title: isVideo ? "Incoming Video Call" : "Incoming Audio Call",
-          body: `From ${fromName || "Someone"}`,
-        },
-        android: {
-          priority: "high",
+      try {
+        const fcmRes = await sendToTokens(tokens, {
           notification: {
-            channelId: "high_importance_channel",
-            sound: "default",
+            title: isVideo ? "Incoming Video Call" : "Incoming Audio Call",
+            body: `From ${fromName || "Someone"}`,
           },
-        },
-        apns: {
-          headers: {
-            "apns-priority": "10",
-          },
-          payload: {
-            aps: {
+          android: {
+            priority: "high",
+            notification: {
+              channelId: "high_importance_channel",
               sound: "default",
-              contentAvailable: true,
             },
           },
-        },
-        data: {
-          type: "call_invite",
-          ...payloadData,
-        },
-      });
+          apns: {
+            headers: {
+              "apns-priority": "10",
+            },
+            payload: {
+              aps: {
+                sound: "default",
+                contentAvailable: true,
+              },
+            },
+          },
+          data: {
+            type: "call_invite",
+            ...payloadData,
+          },
+        });
+        serverDiag.serverFcmSent = fcmRes?.successCount || 0;
+        serverDiag.serverFcmFailed = fcmRes?.failureCount || 0;
+        fcmDelivered = serverDiag.serverFcmSent > 0;
+      } catch (e) {
+        serverDiag.serverNotifyLastError = `${serverDiag.serverNotifyLastError || ""} fcm:${e}`.trim();
+        console.error("FCM call invite send failed:", {
+          inviteId,
+          toUid,
+          channel,
+          error: `${e}`,
+        });
+      }
     } else {
       console.log("FCM skipped: no tokens", { inviteId, toUid, channel });
+    }
+    serverDiag.serverNotifyStage =
+      voipDelivered || apnsAlertDelivered || fcmDelivered
+        ? "sent"
+        : "no_delivery_path";
+    await writeCallInviteServerDiag(inviteId, {
+      ...serverDiag,
+      serverNotifyCompletedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+);
+
+exports.onCallInviteUpdated = onDocumentUpdated(
+  {
+    document: "callInvites/{inviteId}",
+    region: "us-central1",
+    secrets: [APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_VOIP_KEY_P8],
+  },
+  async (event) => {
+    const before = event.data?.before?.data() || {};
+    const after = event.data?.after?.data() || {};
+    const beforeStatus = normalizeStatus(before.status);
+    const afterStatus = normalizeStatus(after.status);
+    const inviteId = event.params.inviteId || "";
+    if (!inviteId || !afterStatus || afterStatus === beforeStatus) return;
+    if (!TERMINAL_CALL_INVITE_STATUSES.has(afterStatus)) return;
+
+    const channel = `${after.channel || before.channel || ""}`.trim();
+    if (!channel) return;
+
+    const payloadData = {
+      type: "call_end",
+      action: "call_end",
+      status: afterStatus,
+      channel: `${channel}`,
+      isVideo: `${Boolean(after.isVideo ?? before.isVideo)}`,
+      fromName: `${after.fromName || before.fromName || "Caller"}`,
+      fromUid: `${after.fromUid || before.fromUid || ""}`,
+      toUid: `${after.toUid || before.toUid || ""}`,
+      callId: `${inviteId}`,
+      inviteId: `${inviteId}`,
+      endedBy: `${after.endedBy || ""}`,
+      endReason: `${after.endReason || ""}`,
+    };
+
+    const recipients = terminalCallInviteRecipients(before, after, afterStatus);
+    if (!recipients.length) {
+      console.log("call invite terminal push skipped: no recipients", {
+        inviteId,
+        status: afterStatus,
+        channel,
+      });
+      return;
+    }
+
+    for (const uid of recipients) {
+      const tokenSets = await getUserPushTokenSets(uid);
+      try {
+        const voipTokens = tokenSets.voip;
+        if (voipTokens.length) {
+          const voipRes = await sendVoipPushToTokens(voipTokens, payloadData);
+          console.log("APNS VoIP terminal result:", {
+            inviteId,
+            toUid: uid,
+            channel,
+            status: afterStatus,
+            tokenSuffixes: tokenSuffixes(voipTokens),
+            ...voipRes,
+          });
+        } else {
+          console.log("APNS VoIP terminal skipped: no tokens", {
+            inviteId,
+            toUid: uid,
+            channel,
+            status: afterStatus,
+          });
+        }
+      } catch (e) {
+        console.error("APNS VoIP terminal send failed:", {
+          inviteId,
+          toUid: uid,
+          channel,
+          status: afterStatus,
+          error: `${e}`,
+        });
+      }
+
+      const fcmTokens = tokenSets.fcmAll;
+      if (fcmTokens.length) {
+        try {
+          await sendToTokens(fcmTokens, {
+            android: {
+              priority: "high",
+            },
+            apns: {
+              headers: {
+                "apns-priority": "5",
+              },
+              payload: {
+                aps: {
+                  contentAvailable: true,
+                },
+              },
+            },
+            data: payloadData,
+          });
+        } catch (e) {
+          console.error("FCM terminal send failed:", {
+            inviteId,
+            toUid: uid,
+            channel,
+            status: afterStatus,
+            error: `${e}`,
+          });
+        }
+      }
     }
   }
 );
@@ -1025,42 +1290,60 @@ exports.onChatMessageCreated = onDocumentCreated(
     for (const uid of recipients) {
       const tokenSets = await getUserPushTokenSets(uid);
       const tokens = tokenSets.fcmAll;
+      let fcmDelivered = false;
+
       if (tokens.length) {
-        await sendToTokens(tokens, {
-          notification: { title: fromName, body },
-          android: {
-            priority: "high",
-            notification: {
-              channelId: "high_importance_channel",
-              sound: "default",
-            },
-          },
-          apns: {
-            headers: {
-              "apns-priority": "10",
-            },
-            payload: {
-              aps: {
+        try {
+          const fcmRes = await sendToTokens(tokens, {
+            notification: { title: fromName, body },
+            android: {
+              priority: "high",
+              notification: {
+                channelId: "high_importance_channel",
                 sound: "default",
-                contentAvailable: true,
               },
             },
-          },
-          data: {
-            type: "chat_message",
+            apns: {
+              headers: {
+                "apns-priority": "10",
+              },
+              payload: {
+                aps: {
+                  sound: "default",
+                  contentAvailable: true,
+                },
+              },
+            },
+            data: {
+              type: "chat_message",
+              chatId,
+              authorId: `${authorId}`,
+              otherUserId: `${authorId}`,
+            },
+          });
+          fcmDelivered = (fcmRes?.successCount || 0) > 0;
+          if (!fcmDelivered) {
+            console.warn("FCM chat send returned zero successes", {
+              chatId,
+              toUid: uid,
+              tokenSuffixes: tokenSuffixes(tokens),
+            });
+          }
+        } catch (e) {
+          console.error("FCM chat send failed:", {
             chatId,
-            authorId: `${authorId}`,
-            otherUserId: `${authorId}`,
-          },
-        });
-        continue;
+            toUid: uid,
+            error: `${e}`,
+          });
+        }
       }
 
-      // Last-resort fallback if an iOS device somehow has APNS but no FCM token.
+      if (fcmDelivered) continue;
+
       try {
         const apnsTokens = tokenSets.apns;
         if (apnsTokens.length) {
-          await sendApnsAlertToTokens(apnsTokens, {
+          const apnsRes = await sendApnsAlertToTokens(apnsTokens, {
             title: fromName,
             body,
             data: {
@@ -1069,6 +1352,12 @@ exports.onChatMessageCreated = onDocumentCreated(
               authorId: `${authorId}`,
               otherUserId: `${authorId}`,
             },
+          });
+          console.log("APNS alert (chat) result:", {
+            chatId,
+            toUid: uid,
+            tokenSuffixes: tokenSuffixes(apnsTokens),
+            ...apnsRes,
           });
         }
       } catch (e) {

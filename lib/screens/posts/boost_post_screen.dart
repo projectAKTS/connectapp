@@ -73,17 +73,15 @@ class _BoostPostScreenState extends State<BoostPostScreen> {
         case PaymentResult.unauthenticated:
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-                content:
-                    Text('Authentication expired. Please log in again.')),
+                content: Text('Authentication expired. Please log in again.')),
           );
           break;
 
         case PaymentResult.failed:
-        default:
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-                content:
-                    Text('Payment failed. Please check your card or try again.')),
+                content: Text(
+                    'Payment failed. Please check your card or try again.')),
           );
           break;
       }

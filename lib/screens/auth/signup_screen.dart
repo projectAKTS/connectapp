@@ -7,7 +7,7 @@ import '../../services/firebase_auth_service.dart';
 import '../../theme/tokens.dart';
 
 class SignupScreen extends StatefulWidget {
-  const SignupScreen({Key? key}) : super(key: key);
+  const SignupScreen({super.key});
 
   @override
   State<SignupScreen> createState() => _SignupScreenState();
@@ -36,11 +36,6 @@ class _SignupScreenState extends State<SignupScreen> {
     _passwordCtrl.dispose();
     _confirmCtrl.dispose();
     super.dispose();
-  }
-
-  void _goHome() {
-    if (!mounted) return;
-    Navigator.of(context).pushNamedAndRemoveUntil('/', (r) => false);
   }
 
   void _goOnboarding() {

@@ -8,6 +8,7 @@ import 'package:connect_app/theme/tokens.dart';
 import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
 import 'package:connect_app/screens/posts/post_detail_screen.dart';
+import 'package:connect_app/services/firestore_read_helper.dart';
 import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 
 class SearchScreen extends StatefulWidget {
@@ -79,13 +80,13 @@ class _SearchScreenState extends State<SearchScreen> {
       bool anyIndexedHit = false;
       // userName_lc prefix
       try {
-        final qs = await FirebaseFirestore.instance
-            .collection('users')
-            .orderBy('userName_lc')
-            .startAt([query])
-            .endAt(['$query\uf8ff'])
-            .limit(40)
-            .get();
+        final qs = await FirestoreReadHelper.getQuery(
+          FirebaseFirestore.instance
+              .collection('users')
+              .orderBy('userName_lc')
+              .startAt([query]).endAt(['$query\uf8ff']).limit(40),
+          timeout: const Duration(seconds: 5),
+        );
         for (final d in qs.docs) {
           people.add(_userFromDoc(d.id, d.data()));
         }
@@ -94,13 +95,13 @@ class _SearchScreenState extends State<SearchScreen> {
 
       // displayName_lc prefix
       try {
-        final qs = await FirebaseFirestore.instance
-            .collection('users')
-            .orderBy('displayName_lc')
-            .startAt([query])
-            .endAt(['$query\uf8ff'])
-            .limit(40)
-            .get();
+        final qs = await FirestoreReadHelper.getQuery(
+          FirebaseFirestore.instance
+              .collection('users')
+              .orderBy('displayName_lc')
+              .startAt([query]).endAt(['$query\uf8ff']).limit(40),
+          timeout: const Duration(seconds: 5),
+        );
         for (final d in qs.docs) {
           final hit = _userFromDoc(d.id, d.data());
           if (!people.any((p) => p.userId == hit.userId)) people.add(hit);
@@ -110,10 +111,10 @@ class _SearchScreenState extends State<SearchScreen> {
 
       // Fallback scan (still fast enough for small datasets)
       if (!anyIndexedHit) {
-        final usersSnap = await FirebaseFirestore.instance
-            .collection('users')
-            .limit(300)
-            .get();
+        final usersSnap = await FirestoreReadHelper.getQuery(
+          FirebaseFirestore.instance.collection('users').limit(300),
+          timeout: const Duration(seconds: 5),
+        );
         for (final d in usersSnap.docs) {
           final m = d.data();
           final name = (m['displayName'] ?? m['userName'] ?? '').toString();
@@ -128,11 +129,13 @@ class _SearchScreenState extends State<SearchScreen> {
 
       // POSTS
       final posts = <_PostHit>[];
-      final postsSnap = await FirebaseFirestore.instance
-          .collection('posts')
-          .orderBy('timestamp', descending: true)
-          .limit(120)
-          .get();
+      final postsSnap = await FirestoreReadHelper.getQuery(
+        FirebaseFirestore.instance
+            .collection('posts')
+            .orderBy('timestamp', descending: true)
+            .limit(120),
+        timeout: const Duration(seconds: 5),
+      );
 
       for (final d in postsSnap.docs) {
         final m = d.data();
@@ -312,7 +315,10 @@ class _SuggestedCategoriesState extends State<SuggestedCategories> {
 
     if (uid != null) {
       try {
-        final u = await fs.collection('users').doc(uid).get();
+        final u = await FirestoreReadHelper.getDoc(
+          fs.collection('users').doc(uid),
+          timeout: const Duration(seconds: 5),
+        );
         final data = u.data() ?? {};
         recentSearches = ((data['searchHistory'] ?? []) as List)
             .map((e) => e.toString())
@@ -327,12 +333,14 @@ class _SuggestedCategoriesState extends State<SuggestedCategories> {
 
     try {
       final cutoff = DateTime.now().subtract(const Duration(days: 30));
-      final snap = await fs
-          .collection('posts')
-          .where('timestamp', isGreaterThan: Timestamp.fromDate(cutoff))
-          .orderBy('timestamp', descending: true)
-          .limit(150)
-          .get();
+      final snap = await FirestoreReadHelper.getQuery(
+        fs
+            .collection('posts')
+            .where('timestamp', isGreaterThan: Timestamp.fromDate(cutoff))
+            .orderBy('timestamp', descending: true)
+            .limit(150),
+        timeout: const Duration(seconds: 5),
+      );
 
       for (final d in snap.docs) {
         final m = d.data();
@@ -353,12 +361,14 @@ class _SuggestedCategoriesState extends State<SuggestedCategories> {
 
     if (uid != null) {
       try {
-        final liked = await fs
-            .collection('posts')
-            .where('likedBy', arrayContains: uid)
-            .orderBy('timestamp', descending: true)
-            .limit(60)
-            .get();
+        final liked = await FirestoreReadHelper.getQuery(
+          fs
+              .collection('posts')
+              .where('likedBy', arrayContains: uid)
+              .orderBy('timestamp', descending: true)
+              .limit(60),
+          timeout: const Duration(seconds: 5),
+        );
         for (final d in liked.docs) {
           final tags = ((d.data()['tags'] ?? []) as List)
               .map((e) => e.toString())
@@ -994,7 +1004,10 @@ Future<void> _recordSearchTerm(String term) async {
     if (uid == null) return;
 
     final doc = FirebaseFirestore.instance.collection('users').doc(uid);
-    final snap = await doc.get();
+    final snap = await FirestoreReadHelper.getDoc(
+      doc,
+      timeout: const Duration(seconds: 5),
+    );
     final data = (snap.data() ?? {});
     final List<dynamic> current =
         (data['searchHistory'] ?? []) as List<dynamic>;

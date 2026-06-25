@@ -46,7 +46,6 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
 
   bool _premiumActive = false;
   String _userRole = 'seeker';
-  DateTime? _premiumExpiresAt;
   DateTime? _freeAudioUsedAt;
 
   static const int _premiumDiscountPercent = 10;
@@ -92,8 +91,8 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
 
   bool _isPremiumActive(Map<String, dynamic> data) {
     final status = (data['premiumStatus'] ?? '').toString().toLowerCase();
-    if (status.isEmpty || status == 'none') return false;
     final exp = _tsToDate(data['premiumExpiresAt']);
+    if (status.isEmpty || status == 'none') return false;
     if (exp != null && exp.isBefore(DateTime.now())) return false;
     return true;
   }
@@ -101,13 +100,11 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
   void _applyUserBenefits(Map<String, dynamic> data) {
     final role = (data['role'] ?? 'seeker').toString();
     final active = _isPremiumActive(data);
-    final exp = _tsToDate(data['premiumExpiresAt']);
     final freeUsedAt = _tsToDate(data['premiumFreeAudioUsedAt']);
     if (!mounted) return;
     setState(() {
       _userRole = role;
       _premiumActive = active;
-      _premiumExpiresAt = exp;
       _freeAudioUsedAt = freeUsedAt;
     });
   }
@@ -200,9 +197,9 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
       try {
         debugPrint('🟡 [Booking] Waiting for user auth state...');
         user = await FirebaseAuth.instance.authStateChanges().firstWhere(
-          (u) => u != null,
-          orElse: () => null,
-        );
+              (u) => u != null,
+              orElse: () => null,
+            );
       } catch (e) {
         debugPrint('❌ [Booking] Auth state error: $e');
       }
@@ -228,19 +225,22 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
       await user.getIdToken(true);
       debugPrint('🔒 [Booking] Refreshing Firebase App Check token...');
       final appCheckToken = await FirebaseAppCheck.instance.getToken(true);
-      debugPrint('🧾 [Booking] App Check token: ${appCheckToken?.substring(0, 12)}...');
+      debugPrint(
+          '🧾 [Booking] App Check token: ${appCheckToken?.substring(0, 12)}...');
 
       debugPrint('💳 [Booking] Ensuring Stripe customer exists...');
       await _paymentService.ensureStripeCustomer();
 
       var charge = const PaymentChargeResult(result: PaymentResult.failed);
       if (_finalPrice > 0) {
-        debugPrint('🧾 [Booking] Starting payment flow. Amount: $_finalPrice CAD');
+        debugPrint(
+            '🧾 [Booking] Starting payment flow. Amount: $_finalPrice CAD');
         var charge = await _paymentService.processPayment(amount: _finalPrice);
         debugPrint('📤 [Booking] processPayment() returned: ${charge.result}');
 
         if (charge.result == PaymentResult.unauthenticated) {
-          debugPrint('🔁 [Booking] Retrying payment after refreshing tokens...');
+          debugPrint(
+              '🔁 [Booking] Retrying payment after refreshing tokens...');
           await user.getIdToken(true);
           await FirebaseAppCheck.instance.getToken(true);
           charge = await _paymentService.processPayment(amount: _finalPrice);
@@ -316,10 +316,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
       );
 
       if (_freeAudioEligible) {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .set(
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
           {'premiumFreeAudioUsedAt': FieldValue.serverTimestamp()},
           SetOptions(merge: true),
         );
@@ -354,249 +351,250 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
 
     return FullScreenBackGesture(
       child: Scaffold(
-      backgroundColor: AppColors.canvas,
-      appBar: AppBar(
-        title: const Text('Book a Consultation'),
         backgroundColor: AppColors.canvas,
-      ),
-      body: SafeArea(
-        child: Stack(
-          children: [
-            SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _card(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        CircleAvatar(
-                          radius: 22,
-                          backgroundColor: AppColors.avatarBg,
-                          child: const Icon(
-                            Icons.person_outline,
-                            color: AppColors.avatarFg,
+        appBar: AppBar(
+          title: const Text('Book a Consultation'),
+          backgroundColor: AppColors.canvas,
+        ),
+        body: SafeArea(
+          child: Stack(
+            children: [
+              SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _card(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          CircleAvatar(
+                            radius: 22,
+                            backgroundColor: AppColors.avatarBg,
+                            child: const Icon(
+                              Icons.person_outline,
+                              color: AppColors.avatarFg,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                widget.targetUserName,
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.text,
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  widget.targetUserName,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.text,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 2),
-                              Row(
-                                children: [
-                                  const Icon(
-                                    Icons.schedule,
-                                    size: 13,
-                                    color: AppColors.muted,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    _availabilityLabel,
-                                    style: const TextStyle(
+                                const SizedBox(height: 2),
+                                Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.schedule,
+                                      size: 13,
                                       color: AppColors.muted,
-                                      fontSize: 12,
                                     ),
-                                  ),
-                                ],
-                              ),
-                            ],
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      _availabilityLabel,
+                                      style: const TextStyle(
+                                        color: AppColors.muted,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                        _pill(child: Text('$_selectedDuration min')),
-                      ],
+                          _pill(child: Text('$_selectedDuration min')),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  Text('Select duration',
-                      style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: _durationOptions.map((m) {
-                      final sel = m == _selectedDuration;
-                      return ChoiceChip(
-                        label: Text(
-                          '$m min',
-                          style: TextStyle(
+                    const SizedBox(height: 20),
+                    Text('Select duration',
+                        style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _durationOptions.map((m) {
+                        final sel = m == _selectedDuration;
+                        return ChoiceChip(
+                          label: Text(
+                            '$m min',
+                            style: TextStyle(
+                              color: sel
+                                  ? Colors.black
+                                  : AppColors.text.withOpacity(0.8),
+                            ),
+                          ),
+                          selected: sel,
+                          onSelected: (_) =>
+                              setState(() => _selectedDuration = m),
+                          selectedColor: Colors.white,
+                          backgroundColor: Colors.white,
+                          side: BorderSide(
                             color: sel
                                 ? Colors.black
-                                : AppColors.text.withOpacity(0.8),
+                                : AppColors.border.withOpacity(0.4),
                           ),
-                        ),
-                        selected: sel,
-                        onSelected: (_) => setState(() => _selectedDuration = m),
-                        selectedColor: Colors.white,
-                        backgroundColor: Colors.white,
-                        side: BorderSide(
-                          color: sel
-                              ? Colors.black
-                              : AppColors.border.withOpacity(0.4),
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 20),
-                  Text('Call type',
-                      style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _choicePill(
-                          label: 'Audio',
-                          icon: Icons.call_outlined,
-                          selected: _callType == 'audio',
-                          onTap: () => setState(() => _callType = 'audio'),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _choicePill(
-                          label: 'Video',
-                          icon: Icons.videocam_outlined,
-                          selected: _callType == 'video',
-                          onTap: () => setState(() => _callType = 'video'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  Text('Pick a time',
-                      style: Theme.of(context).textTheme.titleMedium),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _pill(
-                          onTap: _pickDate,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(_selectedDate == null
-                                  ? 'Pick date'
-                                  : DateFormat('MMM d, yyyy')
-                                      .format(_selectedDate!)),
-                              const Icon(Icons.calendar_today_outlined,
-                                  color: AppColors.muted, size: 18),
-                            ],
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _pill(
-                          onTap: _pickTime,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(_selectedTime == null
-                                  ? 'Pick time'
-                                  : _selectedTime!.format(context)),
-                              const Icon(Icons.schedule,
-                                  color: AppColors.muted, size: 18),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Text('Scheduled: $scheduledText',
-                      style: const TextStyle(color: AppColors.muted)),
-                  const SizedBox(height: 20),
-                  _card(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 20),
+                    Text('Call type',
+                        style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    Row(
                       children: [
-                        const Text('Summary',
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.text)),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Type: ${_callType.toUpperCase()} • Duration: $_selectedDuration min',
-                          style: const TextStyle(color: AppColors.muted),
+                        Expanded(
+                          child: _choicePill(
+                            label: 'Audio',
+                            icon: Icons.call_outlined,
+                            selected: _callType == 'audio',
+                            onTap: () => setState(() => _callType = 'audio'),
+                          ),
                         ),
-                        const SizedBox(height: 6),
-                        if (_isSeekerPremium && !_freeAudioEligible)
-                          Row(
-                            children: [
-                              Text(
-                                _basePriceLabel,
-                                style: const TextStyle(
-                                  color: AppColors.muted,
-                                  decoration: TextDecoration.lineThrough,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                '-$_premiumDiscountPercent%',
-                                style: const TextStyle(
-                                  color: AppColors.primary,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _choicePill(
+                            label: 'Video',
+                            icon: Icons.videocam_outlined,
+                            selected: _callType == 'video',
+                            onTap: () => setState(() => _callType = 'video'),
                           ),
-                        if (_freeAudioEligible)
-                          const Text(
-                            'Premium: 5 min free audio applied',
-                            style: TextStyle(color: AppColors.primary),
-                          ),
-                        Text('Total: $_priceLabel',
-                            style: const TextStyle(color: AppColors.text)),
-                        Text(_payoutLabel,
-                            style: const TextStyle(color: AppColors.muted)),
+                        ),
                       ],
                     ),
-                  ),
-                ],
-              ),
-            ),
-            Positioned(
-              left: 16,
-              right: 16,
-              bottom: 16,
-              child: SafeArea(
-                top: false,
-                child: ElevatedButton(
-                  onPressed: _isProcessing ? null : _bookConsultation,
-                  style: ElevatedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                    backgroundColor: _evergreen,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+                    const SizedBox(height: 20),
+                    Text('Pick a time',
+                        style: Theme.of(context).textTheme.titleMedium),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _pill(
+                            onTap: _pickDate,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(_selectedDate == null
+                                    ? 'Pick date'
+                                    : DateFormat('MMM d, yyyy')
+                                        .format(_selectedDate!)),
+                                const Icon(Icons.calendar_today_outlined,
+                                    color: AppColors.muted, size: 18),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _pill(
+                            onTap: _pickTime,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(_selectedTime == null
+                                    ? 'Pick time'
+                                    : _selectedTime!.format(context)),
+                                const Icon(Icons.schedule,
+                                    color: AppColors.muted, size: 18),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                  child: _isProcessing
-                      ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Text('Book consultation ($_priceLabel)'),
+                    const SizedBox(height: 10),
+                    Text('Scheduled: $scheduledText',
+                        style: const TextStyle(color: AppColors.muted)),
+                    const SizedBox(height: 20),
+                    _card(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Summary',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.text)),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Type: ${_callType.toUpperCase()} • Duration: $_selectedDuration min',
+                            style: const TextStyle(color: AppColors.muted),
+                          ),
+                          const SizedBox(height: 6),
+                          if (_isSeekerPremium && !_freeAudioEligible)
+                            Row(
+                              children: [
+                                Text(
+                                  _basePriceLabel,
+                                  style: const TextStyle(
+                                    color: AppColors.muted,
+                                    decoration: TextDecoration.lineThrough,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  '-$_premiumDiscountPercent%',
+                                  style: const TextStyle(
+                                    color: AppColors.primary,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          if (_freeAudioEligible)
+                            const Text(
+                              'Premium: 5 min free audio applied',
+                              style: TextStyle(color: AppColors.primary),
+                            ),
+                          Text('Total: $_priceLabel',
+                              style: const TextStyle(color: AppColors.text)),
+                          Text(_payoutLabel,
+                              style: const TextStyle(color: AppColors.muted)),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-          ],
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 16,
+                child: SafeArea(
+                  top: false,
+                  child: ElevatedButton(
+                    onPressed: _isProcessing ? null : _bookConsultation,
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                      backgroundColor: _evergreen,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: _isProcessing
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Text('Book consultation ($_priceLabel)'),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-    ),
     );
   }
 

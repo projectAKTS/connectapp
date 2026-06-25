@@ -1,6 +1,9 @@
 import Flutter
 import UIKit
 import PushKit
+import FirebaseCore
+import FirebaseAuth
+import FirebaseFirestore
 import FirebaseMessaging
 import UserNotifications
 import flutter_callkit_incoming
@@ -17,6 +20,9 @@ import CallKit
   private let lastPushkitIncomingCallIdStoreKey = "connectapp.lastPushkitIncomingCallId"
   private let lastPushkitIncomingChannelStoreKey = "connectapp.lastPushkitIncomingChannel"
   private let lastPushkitIncomingCallkitIdStoreKey = "connectapp.lastPushkitIncomingCallkitId"
+  private let lastPushkitStageStoreKey = "connectapp.lastPushkitStage"
+  private let lastPushkitDetailStoreKey = "connectapp.lastPushkitDetail"
+  private let lastPushkitPayloadTypeStoreKey = "connectapp.lastPushkitPayloadType"
   private let lastCallkitAcceptedAtStoreKey = "connectapp.lastCallkitAcceptedAt"
   private let lastCallkitAcceptedInviteIdStoreKey = "connectapp.lastCallkitAcceptedInviteId"
   private let lastCallkitAcceptedChannelStoreKey = "connectapp.lastCallkitAcceptedChannel"
@@ -30,6 +36,7 @@ import CallKit
   private let lastCallkitEventInviteIdStoreKey = "connectapp.lastCallkitEventInviteId"
   private let lastCallkitEventChannelStoreKey = "connectapp.lastCallkitEventChannel"
   private var voipRegistry: PKPushRegistry?
+  private var pushTokenChannel: FlutterMethodChannel?
 
   override func application(
     _ application: UIApplication,
@@ -42,6 +49,7 @@ import CallKit
         name: pushTokenChannelName,
         binaryMessenger: controller.binaryMessenger
       )
+      pushTokenChannel = channel
       channel.setMethodCallHandler { [weak self] call, result in
         guard let self else {
           result(FlutterError(code: "UNAVAILABLE", message: "AppDelegate unavailable", details: nil))
@@ -60,6 +68,12 @@ import CallKit
             defaults.string(forKey: self.lastPushkitIncomingChannelStoreKey) ?? ""
           let lastPushkitIncomingCallkitId =
             defaults.string(forKey: self.lastPushkitIncomingCallkitIdStoreKey) ?? ""
+          let lastPushkitStage =
+            defaults.string(forKey: self.lastPushkitStageStoreKey) ?? ""
+          let lastPushkitDetail =
+            defaults.string(forKey: self.lastPushkitDetailStoreKey) ?? ""
+          let lastPushkitPayloadType =
+            defaults.string(forKey: self.lastPushkitPayloadTypeStoreKey) ?? ""
           let lastCallkitAcceptedAt =
             defaults.string(forKey: self.lastCallkitAcceptedAtStoreKey) ?? ""
           let lastCallkitAcceptedInviteId =
@@ -94,6 +108,9 @@ import CallKit
             "lastPushkitIncomingCallId": lastPushkitIncomingCallId,
             "lastPushkitIncomingChannel": lastPushkitIncomingChannel,
             "lastPushkitIncomingCallkitId": lastPushkitIncomingCallkitId,
+            "lastPushkitStage": lastPushkitStage,
+            "lastPushkitDetail": lastPushkitDetail,
+            "lastPushkitPayloadType": lastPushkitPayloadType,
             "lastCallkitAcceptedAt": lastCallkitAcceptedAt,
             "lastCallkitAcceptedInviteId": lastCallkitAcceptedInviteId,
             "lastCallkitAcceptedChannel": lastCallkitAcceptedChannel,
@@ -122,6 +139,21 @@ import CallKit
             self.voipRegistry?.desiredPushTypes = [.voIP]
           }
           result(true)
+          return
+        }
+
+        if call.method == "getApplicationState" {
+          let state = UIApplication.shared.applicationState
+          switch state {
+          case .active:
+            result("active")
+          case .inactive:
+            result("inactive")
+          case .background:
+            result("background")
+          @unknown default:
+            result("unknown")
+          }
           return
         }
 
@@ -160,6 +192,96 @@ import CallKit
     } else {
       completionHandler([.alert, .sound, .badge])
     }
+  }
+
+  override func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    didReceive response: UNNotificationResponse,
+    withCompletionHandler completionHandler: @escaping () -> Void
+  ) {
+    let userInfo = response.notification.request.content.userInfo
+    let type = (userInfo["type"] as? String) ?? ""
+    if type == "call_invite" {
+      let inviteId = ((userInfo["inviteId"] as? String) ?? (userInfo["callId"] as? String) ?? "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      let channel = ((userInfo["channel"] as? String) ?? "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      let fromName = ((userInfo["fromName"] as? String) ?? "Caller")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      let fromUid = ((userInfo["fromUid"] as? String) ?? "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      let isVideoRaw = "\((userInfo["isVideo"] as? String) ?? (userInfo["isVideo"] as? Bool == true ? "true" : "false"))"
+      let isVideo = isVideoRaw.lowercased() == "true"
+      let callkitId = normalizedCallkitId(
+        raw: userInfo["callkitId"] as? String,
+        fallback: inviteId.isEmpty ? channel : inviteId
+      )
+      let actionId = response.actionIdentifier
+
+      if actionId == "DECLINE_CALL" {
+        storeCallkitEvent(
+          "decline",
+          inviteId: inviteId,
+          callkitId: callkitId,
+          channel: channel
+        )
+        if !inviteId.isEmpty {
+          syncInviteStatus(inviteId: inviteId, status: "declined", additional: [
+            "declinedBy": Auth.auth().currentUser?.uid ?? "",
+          ])
+        }
+        storePushkitState(
+          "incoming_fallback_decline_received",
+          payloadType: "call_invite",
+          detail: "inviteId=\(inviteId) callkitId=\(callkitId)"
+        )
+        completionHandler()
+        return
+      }
+
+      if actionId == UNNotificationDismissActionIdentifier {
+        storePushkitState(
+          "incoming_fallback_dismissed",
+          payloadType: "call_invite",
+          detail: "inviteId=\(inviteId) callkitId=\(callkitId)"
+        )
+        completionHandler()
+        return
+      }
+
+      storeAcceptedCallData(
+        inviteId: inviteId,
+        channel: channel,
+        callkitId: callkitId,
+        fromName: fromName.isEmpty ? "Caller" : fromName,
+        fromUid: fromUid,
+        isVideo: isVideo
+      )
+      storeCallkitEvent(
+        "accept",
+        inviteId: inviteId,
+        callkitId: callkitId,
+        channel: channel
+      )
+      if !inviteId.isEmpty {
+        syncInviteStatus(inviteId: inviteId, status: "accepted", additional: [
+          "acceptedBy": Auth.auth().currentUser?.uid ?? "",
+        ])
+      }
+      storePushkitState(
+        "incoming_fallback_accept_received",
+        payloadType: "call_invite",
+        detail: "inviteId=\(inviteId) callkitId=\(callkitId) actionId=\(actionId)"
+      )
+      completionHandler()
+      return
+    }
+
+    super.userNotificationCenter(
+      center,
+      didReceive: response,
+      withCompletionHandler: completionHandler
+    )
   }
 
   override func application(
@@ -242,6 +364,188 @@ import CallKit
     defaults.set(callkitId, forKey: lastPushkitIncomingCallkitIdStoreKey)
   }
 
+  private func storePushkitState(
+    _ stage: String,
+    payloadType: String = "",
+    detail: String = ""
+  ) {
+    let defaults = UserDefaults.standard
+    defaults.set(stage, forKey: lastPushkitStageStoreKey)
+    defaults.set(payloadType, forKey: lastPushkitPayloadTypeStoreKey)
+    defaults.set(detail, forKey: lastPushkitDetailStoreKey)
+  }
+
+  private func ensureFirebaseConfigured() {
+    if FirebaseApp.app() == nil {
+      FirebaseApp.configure()
+    }
+  }
+
+  private func inviteIdFromCall(_ call: Call?) -> String {
+    let extra = call?.data.extra as? [String: Any]
+    let inviteId = (extra?["inviteId"] as? String) ?? ""
+    if !inviteId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      return inviteId
+    }
+    let callId = (extra?["callId"] as? String) ?? ""
+    if !callId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      return callId
+    }
+    return call?.data.uuid ?? ""
+  }
+
+  private func syncInviteStatus(
+    inviteId: String,
+    status: String,
+    additional: [String: Any] = [:]
+  ) {
+    let trimmedInviteId = inviteId.trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmedStatus = status.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedInviteId.isEmpty, !trimmedStatus.isEmpty else { return }
+
+    ensureFirebaseConfigured()
+    var payload: [String: Any] = [
+      "status": trimmedStatus,
+      "\(trimmedStatus)At": FieldValue.serverTimestamp(),
+      "nativeStatusSource": "ios_callkit",
+    ]
+    for (key, value) in additional {
+      payload[key] = value
+    }
+
+    Firestore.firestore().collection("callInvites").document(trimmedInviteId)
+      .setData(payload, merge: true) { error in
+        if let error {
+          self.storePushkitState(
+            "invite_status_sync_error",
+            payloadType: trimmedStatus,
+            detail: "inviteId=\(trimmedInviteId) error=\(error.localizedDescription)"
+          )
+          NSLog(
+            "Helperly CallKit invite status sync failed inviteId=%@ status=%@ error=%@",
+            trimmedInviteId,
+            trimmedStatus,
+            error.localizedDescription
+          )
+          return
+        }
+        self.storePushkitState(
+          "invite_status_synced",
+          payloadType: trimmedStatus,
+          detail: "inviteId=\(trimmedInviteId)"
+        )
+        NSLog(
+          "Helperly CallKit invite status synced inviteId=%@ status=%@",
+          trimmedInviteId,
+          trimmedStatus
+        )
+      }
+  }
+
+  private func shouldSyncInviteStatusFromNative() -> Bool {
+    return UIApplication.shared.applicationState == .background
+  }
+
+  private func shouldPresentIncomingCallkitFromNative() -> Bool {
+    // Every VoIP push representing a real call must be reported to CallKit
+    // promptly. Skipping CallKit while the app is active/inactive can make iOS
+    // throttle later PushKit deliveries, which appears as progressively slower
+    // incoming call prompts after repeated calls.
+    return true
+  }
+
+  private func appStateLabel(_ state: UIApplication.State) -> String {
+    switch state {
+    case .active:
+      return "active"
+    case .inactive:
+      return "inactive"
+    case .background:
+      return "background"
+    @unknown default:
+      return "unknown"
+    }
+  }
+
+  private func notifyFlutterOfForegroundVoip(
+    method: String,
+    payload: [String: Any]
+  ) {
+    DispatchQueue.main.async {
+      self.pushTokenChannel?.invokeMethod(method, arguments: payload)
+    }
+  }
+
+  private func showIncomingFallbackNotification(
+    callkitId: String,
+    channel: String,
+    fromName: String,
+    fromUid: String,
+    isVideo: Bool,
+    inviteId: String
+  ) {
+    let content = UNMutableNotificationContent()
+    content.title = isVideo ? "Incoming Video Call" : "Incoming Audio Call"
+    content.body = "From \(fromName)"
+    content.sound = .default
+    content.categoryIdentifier = "INCOMING_CALL"
+    content.userInfo = [
+      "type": "call_invite",
+      "channel": channel,
+      "isVideo": isVideo ? "true" : "false",
+      "fromName": fromName,
+      "fromUid": fromUid,
+      "callId": inviteId,
+      "inviteId": inviteId,
+      "callkitId": callkitId,
+    ]
+
+    let request = UNNotificationRequest(
+      identifier: "callkit_fallback_\(callkitId)",
+      content: content,
+      trigger: nil
+    )
+    UNUserNotificationCenter.current().add(request)
+    storePushkitState(
+      "incoming_fallback_notification_scheduled",
+      payloadType: "call_invite",
+      detail: "callkitId=\(callkitId)"
+    )
+  }
+
+  private func endDisplayedCall(
+    callkitId: String,
+    rawCallId: String,
+    channel: String,
+    payloadType: String,
+    detail: String = ""
+  ) {
+    let trimmedCallkitId = callkitId.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmedCallkitId.isEmpty { return }
+
+    SwiftFlutterCallkitIncomingPlugin.sharedInstance?.saveEndCall(trimmedCallkitId, 2)
+    let data = flutter_callkit_incoming.Data(
+      id: trimmedCallkitId,
+      nameCaller: "Helperly",
+      handle: channel.isEmpty ? "Call ended" : channel,
+      type: 0
+    )
+    data.extra = [
+      "id": trimmedCallkitId,
+      "callkitId": trimmedCallkitId,
+      "callId": rawCallId,
+      "inviteId": rawCallId,
+      "channel": channel,
+    ]
+    SwiftFlutterCallkitIncomingPlugin.sharedInstance?.endCall(data)
+    clearStoredAcceptedCall()
+    storePushkitState(
+      "terminal_push_end_requested",
+      payloadType: payloadType,
+      detail: detail.isEmpty ? "callkitId=\(trimmedCallkitId)" : detail
+    )
+  }
+
   private func clearStoredAcceptedCall() {
     let defaults = UserDefaults.standard
     defaults.removeObject(forKey: lastCallkitAcceptedAtStoreKey)
@@ -254,20 +558,40 @@ import CallKit
   }
 
   private func storeAcceptedCall(_ call: Call) {
+    let extra = call.data.extra as? [String: Any]
+    let isVideo: Bool
+    if let rawIsVideo = extra?["isVideo"] {
+      isVideo = "\(rawIsVideo)".lowercased() == "true"
+    } else {
+      isVideo = call.data.type > 0
+    }
+    storeAcceptedCallData(
+      inviteId: (extra?["inviteId"] as? String) ?? "",
+      channel: (extra?["channel"] as? String) ?? "",
+      callkitId: call.data.uuid,
+      fromName: (extra?["fromName"] as? String) ?? call.data.nameCaller,
+      fromUid: (extra?["fromUid"] as? String) ?? "",
+      isVideo: isVideo
+    )
+  }
+
+  private func storeAcceptedCallData(
+    inviteId: String,
+    channel: String,
+    callkitId: String,
+    fromName: String,
+    fromUid: String,
+    isVideo: Bool
+  ) {
     let formatter = ISO8601DateFormatter()
     let defaults = UserDefaults.standard
-    let extra = call.data.extra as? [String: Any]
     defaults.set(formatter.string(from: Date()), forKey: lastCallkitAcceptedAtStoreKey)
-    defaults.set((extra?["inviteId"] as? String) ?? "", forKey: lastCallkitAcceptedInviteIdStoreKey)
-    defaults.set((extra?["channel"] as? String) ?? "", forKey: lastCallkitAcceptedChannelStoreKey)
-    defaults.set(call.data.uuid, forKey: lastCallkitAcceptedCallkitIdStoreKey)
-    defaults.set((extra?["fromName"] as? String) ?? call.data.nameCaller, forKey: lastCallkitAcceptedFromNameStoreKey)
-    defaults.set((extra?["fromUid"] as? String) ?? "", forKey: lastCallkitAcceptedFromUidStoreKey)
-    if let isVideo = extra?["isVideo"] {
-      defaults.set("\(isVideo)", forKey: lastCallkitAcceptedIsVideoStoreKey)
-    } else {
-      defaults.set(call.data.type > 0 ? "true" : "false", forKey: lastCallkitAcceptedIsVideoStoreKey)
-    }
+    defaults.set(inviteId, forKey: lastCallkitAcceptedInviteIdStoreKey)
+    defaults.set(channel, forKey: lastCallkitAcceptedChannelStoreKey)
+    defaults.set(callkitId, forKey: lastCallkitAcceptedCallkitIdStoreKey)
+    defaults.set(fromName, forKey: lastCallkitAcceptedFromNameStoreKey)
+    defaults.set(fromUid, forKey: lastCallkitAcceptedFromUidStoreKey)
+    defaults.set(isVideo ? "true" : "false", forKey: lastCallkitAcceptedIsVideoStoreKey)
   }
 
   private func storeCallkitEvent(_ event: String, call: Call?) {
@@ -279,6 +603,21 @@ import CallKit
     defaults.set(call?.data.uuid ?? "", forKey: lastCallkitEventCallkitIdStoreKey)
     defaults.set((extra?["inviteId"] as? String) ?? "", forKey: lastCallkitEventInviteIdStoreKey)
     defaults.set((extra?["channel"] as? String) ?? "", forKey: lastCallkitEventChannelStoreKey)
+  }
+
+  private func storeCallkitEvent(
+    _ event: String,
+    inviteId: String,
+    callkitId: String,
+    channel: String
+  ) {
+    let formatter = ISO8601DateFormatter()
+    let defaults = UserDefaults.standard
+    defaults.set(event, forKey: lastCallkitEventStoreKey)
+    defaults.set(formatter.string(from: Date()), forKey: lastCallkitEventAtStoreKey)
+    defaults.set(callkitId, forKey: lastCallkitEventCallkitIdStoreKey)
+    defaults.set(inviteId, forKey: lastCallkitEventInviteIdStoreKey)
+    defaults.set(channel, forKey: lastCallkitEventChannelStoreKey)
   }
 
   func pushRegistry(
@@ -321,6 +660,10 @@ import CallKit
     }
 
     let data = payload.dictionaryPayload
+    let payloadType = ((data["type"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    let payloadStatus = ((data["status"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
     let rawCallId = (data["callId"] as? String) ?? ""
     let fromName = (data["fromName"] as? String) ?? "Caller"
     let fromUid = (data["fromUid"] as? String) ?? ""
@@ -329,18 +672,29 @@ import CallKit
     let isVideo = isVideoRaw.lowercased() == "true"
     let callkitId = normalizedCallkitId(raw: rawCallId, fallback: channel)
     storeLastPushkitIncoming(rawCallId: rawCallId, channel: channel, callkitId: callkitId)
+    storePushkitState(
+      "incoming_received",
+      payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
+      detail: "callId=\(rawCallId) channel=\(channel)"
+    )
     NSLog(
-      "Helperly PushKit incoming push callId=%@ channel=%@ callkitId=%@",
+      "Helperly PushKit incoming push type=%@ status=%@ callId=%@ channel=%@ callkitId=%@",
+      payloadType,
+      payloadStatus,
       rawCallId,
       channel,
       callkitId
     )
 
-    if UIApplication.shared.applicationState == .active {
-      NSLog(
-        "Helperly PushKit foreground skip CallKit callId=%@ channel=%@",
-        rawCallId,
-        channel
+    if payloadType == "call_end" || payloadType == "call_cancel" ||
+        payloadStatus == "ended" || payloadStatus == "declined" ||
+        payloadStatus == "missed" || payloadStatus == "cancelled" {
+      endDisplayedCall(
+        callkitId: callkitId,
+        rawCallId: rawCallId,
+        channel: channel,
+        payloadType: payloadType.isEmpty ? payloadStatus : payloadType,
+        detail: "status=\(payloadStatus) callId=\(rawCallId)"
       )
       finish()
       return
@@ -375,11 +729,76 @@ import CallKit
       "isVideo": isVideo ? "true" : "false",
     ]
 
+    let appState = UIApplication.shared.applicationState
+    if !shouldPresentIncomingCallkitFromNative() {
+      let stateLabel = appStateLabel(appState)
+      storePushkitState(
+        "incoming_foreground_handoff",
+        payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
+        detail: "state=\(stateLabel) callId=\(rawCallId) channel=\(channel)"
+      )
+      notifyFlutterOfForegroundVoip(
+        method: "incomingVoipForeground",
+        payload: [
+          "type": payloadType.isEmpty ? "call_invite" : payloadType,
+          "callId": rawCallId,
+          "inviteId": rawCallId,
+          "channel": channel,
+          "fromName": fromName,
+          "fromUid": fromUid,
+          "isVideo": isVideo ? "true" : "false",
+          "appState": stateLabel,
+        ]
+      )
+      NSLog(
+        "Helperly PushKit skipping native CallKit in foreground state=%@ callId=%@ channel=%@",
+        stateLabel,
+        rawCallId,
+        channel
+      )
+      finish()
+      return
+    }
+
     SwiftFlutterCallkitIncomingPlugin.sharedInstance?.showCallkitIncoming(
       callData,
       fromPushKit: true
-    ) {
-      finish()
+    )
+    storePushkitState(
+      "incoming_report_requested",
+      payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
+      detail: "callkitId=\(callkitId)"
+    )
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+      let activeCalls =
+        SwiftFlutterCallkitIncomingPlugin.sharedInstance?.activeCalls() ?? []
+      let hasCall = activeCalls.contains { raw in
+        let id = ((raw["id"] as? String) ?? (raw["uuid"] as? String) ?? "")
+          .lowercased()
+        return id == callkitId.lowercased()
+      }
+      if hasCall {
+        self.storePushkitState(
+          "incoming_reported",
+          payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
+          detail: "callkitId=\(callkitId)"
+        )
+      } else {
+        self.storePushkitState(
+          "incoming_report_missing",
+          payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
+          detail: "callkitId=\(callkitId)"
+        )
+        self.showIncomingFallbackNotification(
+          callkitId: callkitId,
+          channel: channel,
+          fromName: fromName,
+          fromUid: fromUid,
+          isVideo: isVideo,
+          inviteId: rawCallId.isEmpty ? channel : rawCallId
+        )
+      }
     }
 
     // iOS can terminate the app if PushKit handling takes too long.
@@ -391,24 +810,49 @@ import CallKit
   func onAccept(_ call: Call, _ action: CXAnswerCallAction) {
     storeAcceptedCall(call)
     storeCallkitEvent("accept", call: call)
+    let inviteId = inviteIdFromCall(call)
+    if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
+      syncInviteStatus(inviteId: inviteId, status: "accepted", additional: [
+        "acceptedBy": Auth.auth().currentUser?.uid ?? "",
+      ])
+    }
     NSLog("Helperly CallKit onAccept callkitId=%@", call.data.uuid)
     action.fulfill()
   }
 
   func onDecline(_ call: Call, _ action: CXEndCallAction) {
     storeCallkitEvent("decline", call: call)
+    clearStoredAcceptedCall()
+    let inviteId = inviteIdFromCall(call)
+    if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
+      syncInviteStatus(inviteId: inviteId, status: "declined", additional: [
+        "declinedBy": Auth.auth().currentUser?.uid ?? "",
+      ])
+    }
     NSLog("Helperly CallKit onDecline callkitId=%@", call.data.uuid)
     action.fulfill()
   }
 
   func onEnd(_ call: Call, _ action: CXEndCallAction) {
     storeCallkitEvent("end", call: call)
+    clearStoredAcceptedCall()
+    let inviteId = inviteIdFromCall(call)
+    if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
+      syncInviteStatus(inviteId: inviteId, status: "ended", additional: [
+        "endedBy": Auth.auth().currentUser?.uid ?? "",
+      ])
+    }
     NSLog("Helperly CallKit onEnd callkitId=%@", call.data.uuid)
     action.fulfill()
   }
 
   func onTimeOut(_ call: Call) {
     storeCallkitEvent("timeout", call: call)
+    clearStoredAcceptedCall()
+    let inviteId = inviteIdFromCall(call)
+    if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
+      syncInviteStatus(inviteId: inviteId, status: "missed")
+    }
     NSLog("Helperly CallKit onTimeOut callkitId=%@", call.data.uuid)
   }
 

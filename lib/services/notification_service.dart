@@ -11,13 +11,22 @@ import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import '../screens/call/agora_call_screen.dart';
-import '../screens/call/incoming_call_screen.dart';
+import 'call_session_manager.dart';
 import 'callkit_id.dart';
 import 'current_chat.dart';
+import 'diagnostic_service.dart';
+import 'firestore_read_helper.dart';
 
 class NotificationService with WidgetsBindingObserver {
-  NotificationService({this.navigatorKey});
+  NotificationService({this.navigatorKey}) {
+    CallSessionManager.instance.configure(
+      navigatorKey: navigatorKey,
+      listNativeCalls: _listActiveCallkitCalls,
+      endNativeCall: _endActiveCallkitCall,
+      clearStoredAcceptedCallRecovery: _clearStoredAcceptedCallRecovery,
+      appForegroundProvider: _isAppActuallyForeground,
+    );
+  }
 
   final GlobalKey<NavigatorState>? navigatorKey;
 
@@ -39,29 +48,33 @@ class NotificationService with WidgetsBindingObserver {
   bool _observerBound = false;
   bool _notificationsAllowed = false;
   bool _localInitialized = false;
+  bool _nativePushHandlerBound = false;
   String? _boundUid;
   StreamSubscription<String>? _tokenSub;
   StreamSubscription<CallEvent?>? _callkitSub;
-  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _inviteSub;
+  StreamSubscription<RemoteMessage>? _messageSub;
+  StreamSubscription<RemoteMessage>? _messageOpenedSub;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _chatSubParticipants;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _chatSubUsers;
-  Timer? _invitePollTimer;
-  bool _openingCallScreen = false;
-  bool _showingIncomingCallDialog = false;
-  bool _incomingCallRouteActive = false;
-  String? _activeIncomingInviteId;
-  final Set<String> _handledCallInviteIds = <String>{};
+  final Map<String, DateTime> _recentCallkitTerminalEvents =
+      <String, DateTime>{};
+  final Map<String, DateTime> _recentAcceptedCallkitCalls =
+      <String, DateTime>{};
   final Map<String, DateTime> _chatLastNotifiedAt = <String, DateTime>{};
   bool _appleTokensRegisteredForSession = false;
   bool _apnsRetryScheduled = false;
   Timer? _appleTokenRetryTimer;
   int _appleTokenRetryAttempts = 0;
   bool _messageHandlersBound = false;
+  bool _chatListenerBindingInFlight = false;
   bool _resumeSyncInFlight = false;
   DateTime? _lastResumeSyncAt;
   bool _callPermissionsPrimed = false;
   bool _recoveringAcceptedCall = false;
   String? _lastRecoveredAcceptedAt;
+  String? _pendingChatOpenOtherUserId;
+  String? _pendingChatOpenChatId;
+  bool _chatNavigationInFlight = false;
   static const bool _enableIosCallKit =
       bool.fromEnvironment('ENABLE_IOS_CALLKIT', defaultValue: true);
   static const bool _diagEnabled =
@@ -87,10 +100,24 @@ class NotificationService with WidgetsBindingObserver {
         state == AppLifecycleState.inactive;
   }
 
+  Future<bool> _isAppActuallyForeground() async {
+    if (!Platform.isIOS) return _appIsActive;
+    try {
+      final rawState =
+          await _pushTokenChannel.invokeMethod<String>('getApplicationState');
+      switch ((rawState ?? '').trim().toLowerCase()) {
+        case 'active':
+        case 'inactive':
+          return true;
+        case 'background':
+          return false;
+      }
+    } catch (_) {}
+    return _appIsActive;
+  }
+
   bool get _hasActiveIncomingUi =>
-      _openingCallScreen ||
-      _showingIncomingCallDialog ||
-      _incomingCallRouteActive;
+      CallSessionManager.instance.hasActiveUiOrSession;
 
   Future<void> _clearStoredAcceptedCallRecovery() async {
     if (!Platform.isIOS) return;
@@ -99,16 +126,266 @@ class NotificationService with WidgetsBindingObserver {
     } catch (_) {}
   }
 
-  bool _isRecentAcceptedCallTimestamp(String value) {
+  Future<List<NativeCallSnapshot>> _listActiveCallkitCalls() async {
+    if (!Platform.isIOS || !_enableIosCallKit) {
+      return const <NativeCallSnapshot>[];
+    }
+    try {
+      final activeCalls = await FlutterCallkitIncoming.activeCalls();
+      if (activeCalls is! List) return const <NativeCallSnapshot>[];
+      final snapshots = <NativeCallSnapshot>[];
+      for (final raw in activeCalls) {
+        if (raw is! Map) continue;
+        final body = Map<String, dynamic>.from(raw);
+        final extra = _eventExtra(body);
+        final channel = _stringField(extra, body, 'channel');
+        final inviteId = _stringField(
+          extra,
+          body,
+          'inviteId',
+          fallback: _stringField(
+            extra,
+            body,
+            'callId',
+            fallback: _stringField(
+              extra,
+              body,
+              'id',
+              fallback: _stringField(extra, body, 'uuid'),
+            ),
+          ),
+        );
+        final rawCallkitId = _stringField(
+          extra,
+          body,
+          'id',
+          fallback: _stringField(
+            extra,
+            body,
+            'callkitId',
+            fallback: _stringField(extra, body, 'uuid', fallback: channel),
+          ),
+        );
+        snapshots.add(NativeCallSnapshot(
+          callkitId: normalizeCallkitId(
+            rawId: rawCallkitId,
+            fallback: channel,
+          ),
+          inviteId: inviteId.trim(),
+          channel: channel.trim(),
+          accepted: _boolField(extra, body, 'accepted') ||
+              _boolField(extra, body, 'isAccepted'),
+        ));
+      }
+      return snapshots;
+    } catch (e) {
+      await _diagPush('callkit_active_calls_list_error', meta: {'error': '$e'});
+      return const <NativeCallSnapshot>[];
+    }
+  }
+
+  Future<void> _endActiveCallkitCall(
+    String callkitId, {
+    bool aggressive = true,
+    String source = 'notification_service',
+  }) async {
+    if (!Platform.isIOS || !_enableIosCallKit) return;
+    final normalized = callkitId.trim();
+    final before = await _listActiveCallkitCalls();
+    await _diagPush('callkit_cleanup_start', meta: {
+      'callkitId': normalized,
+      'source': source,
+      'aggressive': aggressive,
+    });
+    await _diagPush('callkit_active_before', meta: {
+      'callkitId': normalized,
+      'count': before.length,
+      'ids': before.map((call) => call.callkitId).join(','),
+      'source': source,
+      'aggressive': aggressive,
+    });
+    try {
+      if (normalized.isNotEmpty) {
+        await FlutterCallkitIncoming.endCall(normalized);
+      }
+      if (aggressive) {
+        await FlutterCallkitIncoming.endAllCalls();
+        await _diagPush('callkit_end_all_done', meta: {
+          'callkitId': normalized,
+          'source': source,
+        });
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      final remaining = await _listActiveCallkitCalls();
+      for (final call in remaining) {
+        if (call.callkitId.isEmpty) continue;
+        if (!aggressive && call.callkitId != normalized) continue;
+        try {
+          await FlutterCallkitIncoming.endCall(call.callkitId);
+        } catch (_) {}
+      }
+      if (remaining.any((call) => aggressive || call.callkitId == normalized)) {
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+      }
+      final after = await _listActiveCallkitCalls();
+      await _diagPush('callkit_active_after', meta: {
+        'callkitId': normalized,
+        'count': after.length,
+        'ids': after.map((call) => call.callkitId).join(','),
+        'source': source,
+        'aggressive': aggressive,
+      });
+    } catch (e) {
+      await _diagPush('callkit_end_call_error', meta: {
+        'callkitId': normalized,
+        'error': '$e',
+        'source': source,
+        'aggressive': aggressive,
+      });
+      rethrow;
+    }
+  }
+
+  Future<bool> _resetStaleIncomingUiIfNeeded() async {
+    if (!Platform.isIOS || !_enableIosCallKit || !_hasActiveIncomingUi) {
+      return false;
+    }
+    try {
+      final activeCalls = await FlutterCallkitIncoming.activeCalls();
+      final hasActiveCalls = activeCalls is List && activeCalls.isNotEmpty;
+      if (hasActiveCalls) return false;
+      final staleInviteId = CallSessionManager.instance.activeInviteId ?? '';
+      CallSessionManager.instance.clearStaleUiFlags();
+      _lastRecoveredAcceptedAt = null;
+      await _clearStoredAcceptedCallRecovery();
+      await _diagPush('stale_incoming_ui_reset', meta: {
+        'inviteId': staleInviteId,
+        'hadManagerUiOrSession': true,
+      });
+      return true;
+    } catch (e) {
+      await _diagPush('stale_incoming_ui_reset_error', meta: {'error': '$e'});
+      return false;
+    }
+  }
+
+  bool _isRecentIsoTimestamp(String value, Duration maxAge) {
     final parsed = DateTime.tryParse(value.trim());
     if (parsed == null) return false;
-    return DateTime.now().difference(parsed) <= const Duration(minutes: 2);
+    return DateTime.now().difference(parsed) <= maxAge;
+  }
+
+  bool _isRecentAcceptedCallTimestamp(String value) {
+    return _isRecentIsoTimestamp(value, const Duration(minutes: 2));
+  }
+
+  Future<void> _diagResourceCounts(String stage) async {
+    final activeCallSubscriptions = [
+      _callkitSub,
+    ].where((sub) => sub != null).length;
+    final activeChatSubscriptions = [
+      _chatSubParticipants,
+      _chatSubUsers,
+    ].where((sub) => sub != null).length;
+    final activeListeners = [
+      _tokenSub,
+      _callkitSub,
+      _messageSub,
+      _messageOpenedSub,
+      _chatSubParticipants,
+      _chatSubUsers,
+    ].where((sub) => sub != null).length;
+    final activeTimers = [
+      _appleTokenRetryTimer,
+    ].where((timer) => timer != null && timer.isActive).length;
+    final counters = <String, int>{
+      'activeListeners': activeListeners,
+      'activeTimers': activeTimers,
+      'activeCallSubscriptions': activeCallSubscriptions,
+      'activeChatSubscriptions': activeChatSubscriptions,
+    };
+    DiagnosticService.updateCounters(
+      counters,
+      uid: FirebaseAuth.instance.currentUser?.uid,
+    );
+    await _diagPush(stage, meta: {
+      ...counters,
+      'boundUid': _boundUid ?? '',
+      'initialized': _initialized,
+    });
   }
 
   String _tokenSuffix(String token) {
     final value = token.trim();
     if (value.isEmpty) return '';
     return value.length <= 12 ? value : value.substring(value.length - 12);
+  }
+
+  bool _shouldProcessCallkitTerminalEvent(
+    Object event,
+    String inviteId,
+    String callkitId,
+  ) {
+    final now = DateTime.now();
+    _recentCallkitTerminalEvents.removeWhere(
+      (_, seenAt) => now.difference(seenAt) > const Duration(seconds: 10),
+    );
+    final key = '${event.toString()}|${inviteId.trim()}|${callkitId.trim()}';
+    final seenAt = _recentCallkitTerminalEvents[key];
+    if (seenAt != null &&
+        now.difference(seenAt) < const Duration(seconds: 10)) {
+      return false;
+    }
+    _recentCallkitTerminalEvents[key] = now;
+    return true;
+  }
+
+  void _rememberAcceptedCallkitCall(String inviteId, String callkitId) {
+    final now = DateTime.now();
+    _recentAcceptedCallkitCalls.removeWhere(
+      (_, seenAt) => now.difference(seenAt) > const Duration(seconds: 20),
+    );
+    final trimmedInviteId = inviteId.trim();
+    final trimmedCallkitId = callkitId.trim();
+    if (trimmedInviteId.isNotEmpty) {
+      _recentAcceptedCallkitCalls['invite:$trimmedInviteId'] = now;
+    }
+    if (trimmedCallkitId.isNotEmpty) {
+      _recentAcceptedCallkitCalls['callkit:$trimmedCallkitId'] = now;
+    }
+  }
+
+  bool _wasRecentlyAcceptedCallkitCall(String inviteId, String callkitId) {
+    final now = DateTime.now();
+    _recentAcceptedCallkitCalls.removeWhere(
+      (_, seenAt) => now.difference(seenAt) > const Duration(seconds: 20),
+    );
+    final trimmedInviteId = inviteId.trim();
+    final trimmedCallkitId = callkitId.trim();
+    final inviteSeenAt = trimmedInviteId.isEmpty
+        ? null
+        : _recentAcceptedCallkitCalls['invite:$trimmedInviteId'];
+    if (inviteSeenAt != null &&
+        now.difference(inviteSeenAt) < const Duration(seconds: 20)) {
+      return true;
+    }
+    final callkitSeenAt = trimmedCallkitId.isEmpty
+        ? null
+        : _recentAcceptedCallkitCalls['callkit:$trimmedCallkitId'];
+    if (callkitSeenAt != null &&
+        now.difference(callkitSeenAt) < const Duration(seconds: 20)) {
+      return true;
+    }
+    return false;
+  }
+
+  bool _shouldIgnoreSyntheticAcceptedCallkitEnd(
+      String inviteId, String callkitId) {
+    if (!_wasRecentlyAcceptedCallkitCall(inviteId, callkitId)) {
+      return false;
+    }
+    return CallSessionManager.instance.hasActiveUiOrSession ||
+        _recoveringAcceptedCall;
   }
 
   String _otherUserIdFromChatId(String chatId, String currentUid) {
@@ -136,19 +413,12 @@ class NotificationService with WidgetsBindingObserver {
     String stage, {
     Map<String, dynamic>? meta,
   }) async {
-    if (!_diagEnabled) return;
     debugPrint('[DIAG][push] $stage meta=${meta ?? const {}}');
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null || uid.isEmpty) return;
-    try {
-      final safeMeta = (meta ?? const <String, dynamic>{}).toString();
-      await FirebaseFirestore.instance.collection('users').doc(uid).set({
-        'diag.lastPushStage': stage,
-        'diag.lastPushAt': FieldValue.serverTimestamp(),
-        'diag.lastPushMeta':
-            safeMeta.length > 500 ? safeMeta.substring(0, 500) : safeMeta,
-      }, SetOptions(merge: true));
-    } catch (_) {}
+    DiagnosticService.logPush(
+      stage,
+      uid: FirebaseAuth.instance.currentUser?.uid,
+      meta: meta,
+    );
   }
 
   Future<void> _pruneLegacyDiagTrailIfNeeded() async {
@@ -170,18 +440,69 @@ class NotificationService with WidgetsBindingObserver {
       _observerBound = true;
     }
 
+    final appActuallyForeground = await _isAppActuallyForeground();
     if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
-      debugPrint('ℹ️ Notification init deferred until app is resumed.');
-      return;
+      debugPrint(
+        'ℹ️ Notification init continuing while lifecycle='
+        '${WidgetsBinding.instance.lifecycleState}; foreground=$appActuallyForeground',
+      );
     }
 
     if (_initialized) {
+      DiagnosticService.logLifecycle(
+        WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed,
+        uid: FirebaseAuth.instance.currentUser?.uid,
+        counters: <String, int>{
+          'activeListeners': [
+            _tokenSub,
+            _callkitSub,
+            _messageSub,
+            _messageOpenedSub,
+            _chatSubParticipants,
+            _chatSubUsers,
+          ].where((sub) => sub != null).length,
+          'activeTimers': [
+            _appleTokenRetryTimer,
+          ].where((timer) => timer != null && timer.isActive).length,
+          'activeCallSubscriptions': [
+            _callkitSub,
+          ].where((sub) => sub != null).length,
+          'activeChatSubscriptions': [
+            _chatSubParticipants,
+            _chatSubUsers,
+          ].where((sub) => sub != null).length,
+        },
+      );
       await _rebindForCurrentUser();
       await _recoverAcceptedCallkitCall();
       return;
     }
     _initialized = true;
     await _pruneLegacyDiagTrailIfNeeded();
+    DiagnosticService.logLifecycle(
+      WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed,
+      uid: FirebaseAuth.instance.currentUser?.uid,
+      counters: <String, int>{
+        'activeListeners': [
+          _tokenSub,
+          _callkitSub,
+          _messageSub,
+          _messageOpenedSub,
+          _chatSubParticipants,
+          _chatSubUsers,
+        ].where((sub) => sub != null).length,
+        'activeTimers': [
+          _appleTokenRetryTimer,
+        ].where((timer) => timer != null && timer.isActive).length,
+        'activeCallSubscriptions': [
+          _callkitSub,
+        ].where((sub) => sub != null).length,
+        'activeChatSubscriptions': [
+          _chatSubParticipants,
+          _chatSubUsers,
+        ].where((sub) => sub != null).length,
+      },
+    );
     await _diagPush('initialize_start');
 
     try {
@@ -191,8 +512,7 @@ class NotificationService with WidgetsBindingObserver {
         _notificationsAllowed =
             existingStatus == AuthorizationStatus.authorized ||
                 existingStatus == AuthorizationStatus.provisional;
-      } else if (WidgetsBinding.instance.lifecycleState ==
-          AppLifecycleState.resumed) {
+      } else if (appActuallyForeground) {
         final requested = await _fcm.requestPermission(
           alert: true,
           badge: true,
@@ -267,13 +587,23 @@ class NotificationService with WidgetsBindingObserver {
                 final fromUid = parts[4];
                 final inviteId = parts[5];
 
-                if (actionId == 'DECLINE_CALL') return;
-                _pushCallScreen(
+                if (actionId == 'DECLINE_CALL') {
+                  await CallSessionManager.instance.declineInvite(
+                    inviteId: inviteId,
+                    source: 'local_notification_decline',
+                  );
+                  return;
+                }
+                await CallSessionManager.instance.handleNotificationInviteTap(
+                  inviteId: inviteId,
                   channel: channel,
                   isVideo: isVideo,
                   fromName: fromName,
                   fromUid: fromUid.isEmpty ? null : fromUid,
-                  inviteId: inviteId.isEmpty ? null : inviteId,
+                  autoAccept: actionId == 'ACCEPT_CALL',
+                  source: actionId == 'ACCEPT_CALL'
+                      ? 'local_notification_accept'
+                      : 'local_notification_tap',
                 );
                 return;
               }
@@ -287,9 +617,16 @@ class NotificationService with WidgetsBindingObserver {
                 final isVideo = parts[2] == 'true';
                 final fromName = parts[3];
 
-                if (actionId == 'DECLINE_CALL') return;
-                _pushCallScreen(
-                    channel: channel, isVideo: isVideo, fromName: fromName);
+                await CallSessionManager.instance.handleNotificationInviteTap(
+                  inviteId: '',
+                  channel: channel,
+                  isVideo: isVideo,
+                  fromName: fromName,
+                  autoAccept: actionId == 'ACCEPT_CALL',
+                  source: actionId == 'ACCEPT_CALL'
+                      ? 'legacy_local_notification_accept'
+                      : 'legacy_local_notification_tap',
+                );
                 return;
               }
             }
@@ -319,20 +656,30 @@ class NotificationService with WidgetsBindingObserver {
       }
     }
 
-    if (Platform.isIOS) _bindCallkitEvents();
-    _bindInviteListener();
-    _bindChatListener();
+    if (!_nativePushHandlerBound) {
+      _pushTokenChannel.setMethodCallHandler(_handleNativePushMethodCall);
+      _nativePushHandlerBound = true;
+    }
+
+    if (Platform.isIOS) {
+      await _bindCallkitEvents();
+    }
+    await CallSessionManager.instance.bindIncomingInviteListener();
+    await _bindChatListener();
 
     // Foreground + tap handlers
     if (!_messageHandlersBound) {
-      FirebaseMessaging.onMessage.listen(
+      await _messageSub?.cancel();
+      await _messageOpenedSub?.cancel();
+      _messageSub = FirebaseMessaging.onMessage.listen(
         (RemoteMessage message) => _handleMessage(message, showLocal: true),
       );
-      FirebaseMessaging.onMessageOpenedApp.listen(
+      _messageOpenedSub = FirebaseMessaging.onMessageOpenedApp.listen(
         (RemoteMessage message) => _handleMessage(message, showLocal: false),
       );
       _messageHandlersBound = true;
     }
+    await _diagResourceCounts('initialize_handlers_bound');
 
     // App opened from terminated via push
     final initial = await _fcm.getInitialMessage();
@@ -357,19 +704,20 @@ class NotificationService with WidgetsBindingObserver {
     });
     await _primeCallPermissionsIfNeeded();
     await _recoverAcceptedCallkitCall();
+    await _flushPendingChatOpen();
     await _diagPush('initialize_done');
   }
 
   Future<void> _clearUserBindings() async {
-    await _inviteSub?.cancel();
-    _inviteSub = null;
+    await _diagResourceCounts('clear_user_bindings_start');
+    await CallSessionManager.instance.clearForSignedOut();
     await _chatSubParticipants?.cancel();
     _chatSubParticipants = null;
     await _chatSubUsers?.cancel();
     _chatSubUsers = null;
-    _invitePollTimer?.cancel();
-    _invitePollTimer = null;
-    _handledCallInviteIds.clear();
+    _chatListenerBindingInFlight = false;
+    _recentCallkitTerminalEvents.clear();
+    _recentAcceptedCallkitCalls.clear();
     _chatLastNotifiedAt.clear();
     _appleTokensRegisteredForSession = false;
     _apnsRetryScheduled = false;
@@ -377,6 +725,7 @@ class NotificationService with WidgetsBindingObserver {
     _appleTokenRetryTimer = null;
     _appleTokenRetryAttempts = 0;
     _boundUid = null;
+    await _diagResourceCounts('clear_user_bindings_done');
   }
 
   Future<void> onSignedOut() async {
@@ -391,9 +740,11 @@ class NotificationService with WidgetsBindingObserver {
     }
 
     if (_boundUid == uid &&
-        _inviteSub != null &&
         (_chatSubParticipants != null || _chatSubUsers != null)) {
+      await CallSessionManager.instance.bindIncomingInviteListener();
+      await _bindChatListener();
       await _pruneLegacyDiagTrailIfNeeded();
+      await _diagResourceCounts('rebind_same_user');
       if (Platform.isIOS) {
         await _registerApplePushTokens(force: true);
       }
@@ -404,8 +755,8 @@ class NotificationService with WidgetsBindingObserver {
     await _clearUserBindings();
     _boundUid = uid;
     await _refreshNativePushRegistrations();
-    _bindInviteListener();
-    _bindChatListener();
+    await CallSessionManager.instance.bindIncomingInviteListener();
+    await _bindChatListener();
     if (Platform.isIOS) {
       await _registerApplePushTokens(force: true);
     }
@@ -415,6 +766,7 @@ class NotificationService with WidgetsBindingObserver {
   }
 
   Future<void> dispose() async {
+    await _diagResourceCounts('notification_dispose_start');
     if (_observerBound) {
       WidgetsBinding.instance.removeObserver(this);
       _observerBound = false;
@@ -423,28 +775,111 @@ class NotificationService with WidgetsBindingObserver {
     _tokenSub = null;
     await _callkitSub?.cancel();
     _callkitSub = null;
-    await _inviteSub?.cancel();
-    _inviteSub = null;
+    await _messageSub?.cancel();
+    _messageSub = null;
+    await _messageOpenedSub?.cancel();
+    _messageOpenedSub = null;
+    _messageHandlersBound = false;
     await _chatSubParticipants?.cancel();
     _chatSubParticipants = null;
     await _chatSubUsers?.cancel();
     _chatSubUsers = null;
-    _invitePollTimer?.cancel();
-    _invitePollTimer = null;
-    _handledCallInviteIds.clear();
+    _recentCallkitTerminalEvents.clear();
+    _recentAcceptedCallkitCalls.clear();
     _chatLastNotifiedAt.clear();
     _appleTokensRegisteredForSession = false;
     _apnsRetryScheduled = false;
     _appleTokenRetryTimer?.cancel();
     _appleTokenRetryTimer = null;
     _appleTokenRetryAttempts = 0;
+    if (_nativePushHandlerBound) {
+      _pushTokenChannel.setMethodCallHandler(null);
+      _nativePushHandlerBound = false;
+    }
     _boundUid = null;
     _initialized = false;
   }
 
+  Future<dynamic> _handleNativePushMethodCall(MethodCall call) async {
+    if (call.method == 'incomingVoipForeground') {
+      final rawArgs = call.arguments;
+      if (rawArgs is! Map) return null;
+      final data = Map<String, dynamic>.from(rawArgs.cast<dynamic, dynamic>());
+      final channel = (data['channel'] ?? '').toString().trim();
+      final inviteId =
+          ((data['inviteId'] ?? data['callId'] ?? channel)).toString().trim();
+      final fromName = (data['fromName'] ?? 'Caller').toString();
+      final fromUid = (data['fromUid'] ?? '').toString().trim();
+      final isVideo = _videoField(data, const <String, dynamic>{});
+      await _diagPush('pushkit_foreground_handoff_received', meta: {
+        'inviteId': inviteId,
+        'channel': channel,
+        'fromUid': fromUid,
+        'isVideo': isVideo,
+        'appState': (data['appState'] ?? '').toString(),
+      });
+      if (channel.isEmpty || inviteId.isEmpty) return null;
+
+      // Return to native before invoking any plugin or method channel. Calling
+      // back into iOS while handling an iOS -> Flutter method call can deadlock
+      // the channel and prevent the invite from ever reaching the manager.
+      unawaited(
+        Future<void>.delayed(Duration.zero, () async {
+          try {
+            await _diagPush('pushkit_foreground_handoff_dispatched', meta: {
+              'inviteId': inviteId,
+              'channel': channel,
+            });
+            await CallSessionManager.instance.handleNotificationInviteTap(
+              inviteId: inviteId,
+              channel: channel,
+              isVideo: isVideo,
+              fromName: fromName,
+              fromUid: fromUid.isEmpty ? null : fromUid,
+              source: 'pushkit_foreground_handoff',
+            );
+          } catch (error) {
+            await _diagPush('pushkit_foreground_handoff_error', meta: {
+              'inviteId': inviteId,
+              'channel': channel,
+              'error': '$error',
+            });
+          }
+        }),
+      );
+      return true;
+    }
+    return null;
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    DiagnosticService.logLifecycle(
+      state,
+      uid: FirebaseAuth.instance.currentUser?.uid,
+      counters: <String, int>{
+        'activeListeners': [
+          _tokenSub,
+          _callkitSub,
+          _messageSub,
+          _messageOpenedSub,
+          _chatSubParticipants,
+          _chatSubUsers,
+        ].where((sub) => sub != null).length,
+        'activeTimers': [
+          _appleTokenRetryTimer,
+        ].where((timer) => timer != null && timer.isActive).length,
+        'activeCallSubscriptions': [
+          _callkitSub,
+        ].where((sub) => sub != null).length,
+        'activeChatSubscriptions': [
+          _chatSubParticipants,
+          _chatSubUsers,
+        ].where((sub) => sub != null).length,
+      },
+    );
     if (state != AppLifecycleState.resumed) return;
+    unawaited(FirestoreReadHelper.recoverNetwork(reason: 'app_resumed'));
     if (!_initialized) {
       unawaited(initialize());
       return;
@@ -462,9 +897,14 @@ class NotificationService with WidgetsBindingObserver {
     }
     _resumeSyncInFlight = true;
     try {
+      await FirestoreReadHelper.recoverNetwork(reason: 'resume_sync');
       await _rebindForCurrentUser();
+      await CallSessionManager.instance
+          .recoverForegroundIncomingInvites(source: 'resume_sync');
       await _primeCallPermissionsIfNeeded();
+      await _resetStaleIncomingUiIfNeeded();
       await _recoverAcceptedCallkitCall();
+      await _flushPendingChatOpen();
     } finally {
       _lastResumeSyncAt = DateTime.now();
       _resumeSyncInFlight = false;
@@ -501,90 +941,98 @@ class NotificationService with WidgetsBindingObserver {
     }
   }
 
-  void _bindChatListener() {
-    _chatSubParticipants?.cancel();
-    _chatSubUsers?.cancel();
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null || uid.isEmpty) return;
-
-    Future<void> process(QuerySnapshot<Map<String, dynamic>> snap) async {
-      final lifecycle = WidgetsBinding.instance.lifecycleState;
-      final appResumed = lifecycle == AppLifecycleState.resumed;
-      for (final change in snap.docChanges) {
-        if (change.type != DocumentChangeType.added &&
-            change.type != DocumentChangeType.modified) {
-          continue;
-        }
-        final data = change.doc.data() ?? const <String, dynamic>{};
-        final updated = _timestampToDate(data['updatedAt']) ??
-            _timestampToDate(data['lastMessageAt']);
-        if (updated == null) continue;
-        final last = _chatLastNotifiedAt[change.doc.id];
-        if (last != null && !updated.isAfter(last)) continue;
-        _chatLastNotifiedAt[change.doc.id] = updated;
-
-        final author = (data['lastMessageAuthorId'] ?? '').toString();
-        if (author.isEmpty || author == uid) continue;
-
-        final users = <String>{
-          ...((data['users'] as List?) ?? const []).map((e) => '$e'),
-          ...((data['participants'] as List?) ?? const []).map((e) => '$e'),
-        }.toList();
-        String otherUid = users.firstWhere((e) => e != uid, orElse: () => '');
-        if (otherUid.isEmpty) {
-          otherUid = _otherUserIdFromChatId(change.doc.id, uid);
-        }
-        if (otherUid.isEmpty) continue;
-        if (CurrentChat.otherUserId == otherUid) continue;
-        if (!_localInitialized) continue;
-        if (!appResumed) {
-          // Background/locked iOS delivery should come from APNS/FCM, not a
-          // second local notification generated from Firestore snapshots.
-          continue;
-        }
-
-        await _diagPush('chat_firestore_local_notification', meta: {
-          'chatId': change.doc.id,
-          'otherUserId': otherUid,
-        });
-        try {
-          final notifId = _notificationIdFrom(
-            'chat_firestore_${change.doc.id}_${updated.millisecondsSinceEpoch}',
-          );
-          await _local.show(
-            notifId,
-            'New Message',
-            'You received a new message',
-            NotificationDetails(
-              android: AndroidNotificationDetails(
-                _androidChannel.id,
-                _androidChannel.name,
-                channelDescription: _androidChannel.description,
-                importance: Importance.max,
-                priority: Priority.high,
-              ),
-              iOS: const DarwinNotificationDetails(),
-            ),
-            payload: 'open_chat|$otherUid|${change.doc.id}',
-          );
-        } catch (_) {}
+  Future<void> _bindChatListener() async {
+    if (_chatListenerBindingInFlight) return;
+    _chatListenerBindingInFlight = true;
+    try {
+      await _chatSubParticipants?.cancel();
+      _chatSubParticipants = null;
+      await _chatSubUsers?.cancel();
+      _chatSubUsers = null;
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null || uid.isEmpty) {
+        return;
       }
-    }
 
-    _chatSubParticipants = FirebaseFirestore.instance
-        .collection('chats')
-        .where('participants', arrayContains: uid)
-        .snapshots()
-        .listen((snap) => process(snap), onError: (_) {});
-    _chatSubUsers = FirebaseFirestore.instance
-        .collection('chats')
-        .where('users', arrayContains: uid)
-        .snapshots()
-        .listen((snap) => process(snap), onError: (_) {});
+      Future<void> process(QuerySnapshot<Map<String, dynamic>> snap) async {
+        final appActive = await _isAppActuallyForeground();
+        for (final change in snap.docChanges) {
+          if (change.type != DocumentChangeType.added &&
+              change.type != DocumentChangeType.modified) {
+            continue;
+          }
+          final data = change.doc.data() ?? const <String, dynamic>{};
+          final updated = _timestampToDate(data['updatedAt']) ??
+              _timestampToDate(data['lastMessageAt']);
+          if (updated == null) continue;
+          final last = _chatLastNotifiedAt[change.doc.id];
+          if (last != null && !updated.isAfter(last)) continue;
+          _chatLastNotifiedAt[change.doc.id] = updated;
+
+          final author = (data['lastMessageAuthorId'] ?? '').toString();
+          if (author.isEmpty || author == uid) continue;
+
+          final users = <String>{
+            ...((data['users'] as List?) ?? const []).map((e) => '$e'),
+            ...((data['participants'] as List?) ?? const []).map((e) => '$e'),
+          }.toList();
+          String otherUid = users.firstWhere((e) => e != uid, orElse: () => '');
+          if (otherUid.isEmpty) {
+            otherUid = _otherUserIdFromChatId(change.doc.id, uid);
+          }
+          if (otherUid.isEmpty) continue;
+          if (CurrentChat.otherUserId == otherUid) continue;
+          if (!_localInitialized) continue;
+          if (!appActive) {
+            continue;
+          }
+
+          await _diagPush('chat_firestore_local_notification', meta: {
+            'chatId': change.doc.id,
+            'otherUserId': otherUid,
+          });
+          try {
+            final notifId = _notificationIdFrom(
+              'chat_firestore_${change.doc.id}_${updated.millisecondsSinceEpoch}',
+            );
+            await _local.show(
+              notifId,
+              'New Message',
+              'You received a new message',
+              NotificationDetails(
+                android: AndroidNotificationDetails(
+                  _androidChannel.id,
+                  _androidChannel.name,
+                  channelDescription: _androidChannel.description,
+                  importance: Importance.max,
+                  priority: Priority.high,
+                ),
+                iOS: const DarwinNotificationDetails(),
+              ),
+              payload: 'open_chat|$otherUid|${change.doc.id}',
+            );
+          } catch (_) {}
+        }
+      }
+
+      _chatSubParticipants = FirebaseFirestore.instance
+          .collection('chats')
+          .where('participants', arrayContains: uid)
+          .snapshots()
+          .listen((snap) => process(snap), onError: (_) {});
+      _chatSubUsers = FirebaseFirestore.instance
+          .collection('chats')
+          .where('users', arrayContains: uid)
+          .snapshots()
+          .listen((snap) => process(snap), onError: (_) {});
+      await _diagResourceCounts('chat_listener_bound');
+    } finally {
+      _chatListenerBindingInFlight = false;
+    }
   }
 
-  void _bindCallkitEvents() {
-    _callkitSub?.cancel();
+  Future<void> _bindCallkitEvents() async {
+    await _callkitSub?.cancel();
     _callkitSub = FlutterCallkitIncoming.onEvent.listen((event) async {
       if (event == null) return;
       final body = _eventBody(event.body);
@@ -606,6 +1054,12 @@ class NotificationService with WidgetsBindingObserver {
         'inviteId',
         fallback: _stringField(extra, body, 'callId', fallback: id),
       );
+      await _diagPush('callkit_event_received', meta: {
+        'event': event.event.toString(),
+        'inviteId': inviteId,
+        'callkitId': id,
+        'channel': channel,
+      });
 
       if (event.event == Event.actionDidUpdateDevicePushTokenVoip) {
         final token = _stringField(extra, body, 'deviceToken');
@@ -617,172 +1071,82 @@ class NotificationService with WidgetsBindingObserver {
       if (!_enableIosCallKit) return;
 
       if (event.event == Event.actionCallAccept && channel.isNotEmpty) {
-        _pushCallScreen(
+        _rememberAcceptedCallkitCall(inviteId, id);
+        await _diagPush('callkit_accept', meta: {
+          'inviteId': inviteId,
+          'callkitId': id,
+          'channel': channel,
+        });
+        await CallSessionManager.instance.handleNotificationInviteTap(
+          inviteId: inviteId,
           channel: channel,
           isVideo: isVideo,
           fromName: fromName,
           fromUid: fromUid,
-          inviteId: inviteId,
+          autoAccept: true,
+          source: 'callkit_accept',
         );
         return;
       }
       if (event.event == Event.actionCallDecline) {
+        await _diagPush('callkit_decline', meta: {
+          'inviteId': inviteId,
+          'callkitId': id,
+          'channel': channel,
+        });
+        if (!_shouldProcessCallkitTerminalEvent(event.event, inviteId, id)) {
+          return;
+        }
         if (inviteId.isNotEmpty) {
-          await _setInviteStatus(inviteId, 'declined');
+          await CallSessionManager.instance.declineInvite(
+            inviteId: inviteId,
+            source: 'callkit_decline',
+          );
+        }
+      }
+      if (event.event == Event.actionCallEnded) {
+        await _diagPush('callkit_end', meta: {
+          'inviteId': inviteId,
+          'callkitId': id,
+          'channel': channel,
+        });
+        if (_shouldIgnoreSyntheticAcceptedCallkitEnd(inviteId, id)) {
+          await _diagPush('callkit_end_ignored_recent_accept', meta: {
+            'inviteId': inviteId,
+            'callkitId': id,
+            'channel': channel,
+            'hasActiveManagedCall':
+                CallSessionManager.instance.hasActiveUiOrSession,
+            'recoveringAcceptedCall': _recoveringAcceptedCall,
+          });
+          return;
+        }
+        if (!_shouldProcessCallkitTerminalEvent(event.event, inviteId, id)) {
+          return;
+        }
+        if (inviteId.isNotEmpty) {
+          await CallSessionManager.instance.handleSystemEndedInvite(
+            inviteId: inviteId,
+            source: 'callkit_end',
+          );
         }
       }
       if (event.event == Event.actionCallTimeout && inviteId.isNotEmpty) {
-        await _setInviteStatus(inviteId, 'missed');
-      }
-      if (event.event == Event.actionCallDecline ||
-          event.event == Event.actionCallEnded ||
-          event.event == Event.actionCallTimeout) {
-        if (id.isNotEmpty) {
-          try {
-            await FlutterCallkitIncoming.endCall(id);
-          } catch (_) {}
-        }
-      }
-    });
-  }
-
-  void _bindInviteListener() {
-    _inviteSub?.cancel();
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null || uid.isEmpty) return;
-    _diagPush('invite_listener_bound', meta: {'uid': uid});
-
-    _inviteSub = FirebaseFirestore.instance
-        .collection('callInvites')
-        .where('toUid', isEqualTo: uid)
-        .snapshots()
-        .listen((snapshot) async {
-      for (final doc in snapshot.docs) {
-        await _processIncomingInviteDoc(doc);
-      }
-    }, onError: (e) {
-      debugPrint('⚠️ callInvites listener failed: $e');
-      _diagPush('invite_listener_error', meta: {'error': '$e'});
-    });
-
-    // Fallback polling catches edge-cases where realtime snapshots are missed.
-    _invitePollTimer?.cancel();
-    _invitePollTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
-      final state = WidgetsBinding.instance.lifecycleState;
-      if (state != AppLifecycleState.resumed) return;
-      try {
-        final snap = await FirebaseFirestore.instance
-            .collection('callInvites')
-            .where('toUid', isEqualTo: uid)
-            .get();
-        for (final doc in snap.docs) {
-          await _processIncomingInviteDoc(doc);
-        }
-      } catch (e) {
-        await _diagPush('invite_poll_error', meta: {'error': '$e'});
-      }
-    });
-  }
-
-  Future<void> _processIncomingInviteDoc(
-      QueryDocumentSnapshot<Map<String, dynamic>> doc) async {
-    final id = doc.id;
-    if (_handledCallInviteIds.contains(id)) return;
-
-    final data = doc.data();
-    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    final toUid = (data['toUid'] ?? '').toString();
-    if (currentUid.isEmpty || (toUid.isNotEmpty && toUid != currentUid)) {
-      return;
-    }
-    final status = (data['status'] ?? '').toString();
-    if (status.isNotEmpty && status != 'ringing') return;
-    final createdAt = data['createdAt'];
-    final created = createdAt is Timestamp ? createdAt.toDate() : null;
-    if (created != null &&
-        DateTime.now().difference(created) > const Duration(minutes: 2)) {
-      return;
-    }
-
-    final channel = (data['channel'] ?? '').toString();
-    if (channel.isEmpty) return;
-    final isVideo = _videoField(data, const <String, dynamic>{});
-    final fromName = (data['fromName'] ?? 'Caller').toString();
-    final fromUid = (data['fromUid'] ?? '').toString();
-    if (_hasActiveIncomingUi) {
-      await _diagPush('invite_listener_skipped_active_call', meta: {
-        'inviteId': id,
-        'fromUid': fromUid,
-      });
-      await _setInviteStatus(id, 'declined');
-      _handledCallInviteIds.add(id);
-      return;
-    }
-    await _diagPush('invite_listener_added', meta: {
-      'inviteId': id,
-      'fromUid': fromUid,
-      'status': status,
-    });
-    final appActive = _appIsActive;
-    if (Platform.isIOS && !appActive) {
-      // On iOS background/lock-screen delivery should come from PushKit/APNS.
-      // Showing it again from Firestore causes duplicate call notifications.
-      await _diagPush('invite_listener_skipped_background_ios', meta: {
-        'inviteId': id,
-        'fromUid': fromUid,
-      });
-      return;
-    }
-    _handledCallInviteIds.add(id);
-    if (appActive) {
-      await _clearStoredAcceptedCallRecovery();
-      final shown = await _showInAppIncomingCallPrompt(
-        channel: channel,
-        isVideo: isVideo,
-        fromName: fromName,
-        fromUid: fromUid,
-        inviteId: id,
-      );
-      if (!shown) {
-        _handledCallInviteIds.remove(id);
-        await _diagPush('invite_listener_foreground_prompt_deferred', meta: {
-          'inviteId': id,
-          'fromUid': fromUid,
+        await _diagPush('callkit_end', meta: {
+          'inviteId': inviteId,
+          'callkitId': id,
+          'channel': channel,
+          'timeout': true,
         });
-      }
-      return;
-    }
-
-    if (Platform.isIOS && _enableIosCallKit) {
-      await _showIncomingCallKit(
-        channel: channel,
-        isVideo: isVideo,
-        fromName: fromName,
-        fromUid: fromUid,
-        inviteId: id,
-      );
-    } else if (_localInitialized) {
-      final notifId = _notificationIdFrom('invite_local_$id');
-      try {
-        await _local.show(
-          notifId,
-          isVideo ? 'Incoming Video Call' : 'Incoming Audio Call',
-          'From $fromName',
-          NotificationDetails(
-            android: AndroidNotificationDetails(
-              _androidChannel.id,
-              _androidChannel.name,
-              channelDescription: _androidChannel.description,
-              importance: Importance.max,
-              priority: Priority.high,
-            ),
-            iOS: const DarwinNotificationDetails(
-                categoryIdentifier: 'INCOMING_CALL'),
-          ),
-          payload: 'incoming_call2|$channel|$isVideo|$fromName|$fromUid|$id',
+        if (!_shouldProcessCallkitTerminalEvent(event.event, inviteId, id)) {
+          return;
+        }
+        await CallSessionManager.instance.handleSystemTimeoutInvite(
+          inviteId: inviteId,
+          source: 'callkit_timeout',
         );
-      } catch (_) {}
-    }
+      }
+    });
   }
 
   Future<void> _registerFcmToken({String? forceToken}) async {
@@ -876,6 +1240,12 @@ class NotificationService with WidgetsBindingObserver {
           (raw['lastPushkitIncomingChannel'] ?? '').toString().trim();
       final lastPushkitIncomingCallkitId =
           (raw['lastPushkitIncomingCallkitId'] ?? '').toString().trim();
+      final lastPushkitStage =
+          (raw['lastPushkitStage'] ?? '').toString().trim();
+      final lastPushkitDetail =
+          (raw['lastPushkitDetail'] ?? '').toString().trim();
+      final lastPushkitPayloadType =
+          (raw['lastPushkitPayloadType'] ?? '').toString().trim();
       final lastCallkitAcceptedAt =
           (raw['lastCallkitAcceptedAt'] ?? '').toString().trim();
       final lastCallkitAcceptedInviteId =
@@ -910,6 +1280,9 @@ class NotificationService with WidgetsBindingObserver {
         'lastPushkitIncomingCallId': lastPushkitIncomingCallId,
         'lastPushkitIncomingChannel': lastPushkitIncomingChannel,
         'lastPushkitIncomingCallkitId': lastPushkitIncomingCallkitId,
+        'lastPushkitStage': lastPushkitStage,
+        'lastPushkitDetail': lastPushkitDetail,
+        'lastPushkitPayloadType': lastPushkitPayloadType,
         'lastCallkitAcceptedAt': lastCallkitAcceptedAt,
         'lastCallkitAcceptedInviteId': lastCallkitAcceptedInviteId,
         'lastCallkitAcceptedChannel': lastCallkitAcceptedChannel,
@@ -949,6 +1322,12 @@ class NotificationService with WidgetsBindingObserver {
               nativeTokens['lastPushkitIncomingChannel']),
           'diag.push.lastPushkitIncomingCallkitId': _normalizeTokenLikeValue(
               nativeTokens['lastPushkitIncomingCallkitId']),
+          'diag.push.lastPushkitStage':
+              _normalizeTokenLikeValue(nativeTokens['lastPushkitStage']),
+          'diag.push.lastPushkitDetail':
+              _normalizeTokenLikeValue(nativeTokens['lastPushkitDetail']),
+          'diag.push.lastPushkitPayloadType':
+              _normalizeTokenLikeValue(nativeTokens['lastPushkitPayloadType']),
           'diag.push.lastCallkitAcceptedAt':
               _normalizeTokenLikeValue(nativeTokens['lastCallkitAcceptedAt']),
           'diag.push.lastCallkitAcceptedInviteId': _normalizeTokenLikeValue(
@@ -1175,31 +1554,27 @@ class NotificationService with WidgetsBindingObserver {
       final fromName = (data['fromName'] ?? 'Caller') as String;
       final fromUid = (data['fromUid'] ?? '').toString();
       final callId = (data['callId'] ?? channel).toString();
-      if (callId.isNotEmpty && _handledCallInviteIds.contains(callId)) {
-        await _diagPush('call_invite_skipped_duplicate',
-            meta: {'callId': callId});
-        return;
-      }
-      if (callId.isNotEmpty) _handledCallInviteIds.add(callId);
       final payload =
           'incoming_call2|$channel|$isVideo|$fromName|$fromUid|$callId';
+      await _diagPush('push_call_invite_received', meta: {
+        'callId': callId,
+        'channel': channel,
+        'isVideo': isVideo,
+        'showLocal': showLocal,
+      });
 
       if (showLocal) {
-        final appActive = _appIsActive;
+        final appActive = await _isAppActuallyForeground();
         if (appActive) {
           await _clearStoredAcceptedCallRecovery();
-          final shown = await _showInAppIncomingCallPrompt(
+          await CallSessionManager.instance.handleNotificationInviteTap(
+            inviteId: callId,
             channel: channel,
             isVideo: isVideo,
             fromName: fromName,
             fromUid: fromUid,
-            inviteId: callId,
+            source: 'fcm_foreground_invite',
           );
-          if (!shown) {
-            if (callId.isNotEmpty) _handledCallInviteIds.remove(callId);
-            await _diagPush('call_invite_foreground_prompt_deferred',
-                meta: {'callId': callId});
-          }
           return;
         }
 
@@ -1242,14 +1617,55 @@ class NotificationService with WidgetsBindingObserver {
           );
         }
       } else {
-        await _diagPush('call_invite_open_from_tap', meta: {'callId': callId});
-        _pushCallScreen(
+        await _diagPush('push_call_invite_received', meta: {
+          'callId': callId,
+          'channel': channel,
+          'isVideo': isVideo,
+          'showLocal': showLocal,
+          'openedFromTap': true,
+        });
+        await CallSessionManager.instance.handleNotificationInviteTap(
+          inviteId: callId,
           channel: channel,
           isVideo: isVideo,
           fromName: fromName,
           fromUid: fromUid,
-          inviteId: callId,
+          source: 'fcm_notification_tap',
         );
+      }
+      return;
+    }
+
+    // ===== CALL END / CANCEL ===============================================
+    final isCallEnd =
+        (data['type'] == 'call_end') || (data['action'] == 'call_end');
+    if (isCallEnd) {
+      final channel = (data['channel'] ?? '').toString();
+      final callId = (data['callId'] ?? data['inviteId'] ?? channel).toString();
+      final status = (data['status'] ?? '').toString();
+      await _diagPush('push_call_end_received', meta: {
+        'callId': callId,
+        'channel': channel,
+        'status': status,
+      });
+      if (Platform.isIOS && _enableIosCallKit) {
+        final callkitId = normalizeCallkitId(
+          rawId: callId,
+          fallback: channel,
+        );
+        try {
+          await _endActiveCallkitCall(
+            callkitId,
+            aggressive: false,
+            source: 'call_end_message',
+          );
+        } catch (e) {
+          await _diagPush('call_end_message_endcall_error', meta: {
+            'callId': callId,
+            'channel': channel,
+            'error': '$e',
+          });
+        }
       }
       return;
     }
@@ -1295,8 +1711,6 @@ class NotificationService with WidgetsBindingObserver {
           payload: 'open_chat|$otherUserId|$chatId',
         );
       } else if (!showLocal) {
-        await _diagPush('chat_open_from_tap',
-            meta: {'otherUserId': otherUserId});
         _openChat(otherUserId, chatId: chatId);
       }
       return;
@@ -1331,18 +1745,12 @@ class NotificationService with WidgetsBindingObserver {
     return navigatorKey?.currentState;
   }
 
-  Future<void> _waitForAppResumed() async {
-    for (var i = 0; i < 80; i++) {
-      if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
-        return;
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    }
-  }
-
   Future<void> _recoverAcceptedCallkitCall() async {
     if (!Platform.isIOS || !_enableIosCallKit) return;
-    if (_recoveringAcceptedCall || _hasActiveIncomingUi) return;
+    if (_recoveringAcceptedCall) return;
+    if (_hasActiveIncomingUi && !(await _resetStaleIncomingUiIfNeeded())) {
+      return;
+    }
 
     _recoveringAcceptedCall = true;
     try {
@@ -1397,12 +1805,12 @@ class NotificationService with WidgetsBindingObserver {
           _normalizeTokenLikeValue(nativeTokens['lastCallkitAcceptedIsVideo']),
         );
         await _clearStoredAcceptedCallRecovery();
-        _pushCallScreen(
+        await CallSessionManager.instance.handleRecoveredAcceptedInvite(
+          inviteId: acceptedInviteId,
           channel: acceptedChannel,
           isVideo: isVideo,
           fromName: fromName.isEmpty ? 'Caller' : fromName,
           fromUid: fromUid,
-          inviteId: acceptedInviteId,
         );
         return;
       }
@@ -1446,12 +1854,12 @@ class NotificationService with WidgetsBindingObserver {
         );
         final isVideo = _videoField(extra, body);
 
-        _pushCallScreen(
+        await CallSessionManager.instance.handleRecoveredAcceptedInvite(
+          inviteId: inviteId,
           channel: channel,
           isVideo: isVideo,
           fromName: fromName,
           fromUid: fromUid,
-          inviteId: inviteId,
         );
         return;
       }
@@ -1462,120 +1870,87 @@ class NotificationService with WidgetsBindingObserver {
     }
   }
 
-  void _pushCallScreen({
-    required String channel,
-    required bool isVideo,
-    required String fromName,
-    String? fromUid,
-    String? inviteId,
-  }) {
-    final normalizedInviteId = (inviteId ?? '').trim();
-    final routeInviteId =
-        normalizedInviteId.isEmpty ? channel : normalizedInviteId;
-    if (_openingCallScreen) return;
-    if (_incomingCallRouteActive && _activeIncomingInviteId == routeInviteId) {
-      return;
-    }
-    if (_incomingCallRouteActive) return;
-    final normalizedFromUid = (fromUid ?? '').trim();
-    _openingCallScreen = true;
-    unawaited(() async {
-      await _waitForAppResumed();
-      final nav = await _waitForNavigator();
-      if (nav == null) {
-        _openingCallScreen = false;
-        return;
-      }
-      _incomingCallRouteActive = true;
-      _activeIncomingInviteId = routeInviteId;
-      await nav.push(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => AgoraCallScreen(
-            channelName: channel,
-            isVideo: isVideo,
-            otherUserName: fromName,
-            otherUserId: normalizedFromUid.isEmpty ? null : normalizedFromUid,
-            inviteId: normalizedInviteId.isEmpty ? null : normalizedInviteId,
-            isCaller: false,
-          ),
-        ),
-      );
-    }()
-        .whenComplete(() {
-      _incomingCallRouteActive = false;
-      _activeIncomingInviteId = null;
-      _openingCallScreen = false;
-    }));
-  }
-
   void _openChat(String otherUserId, {String? chatId}) {
     if (otherUserId.isEmpty) return;
+    _pendingChatOpenOtherUserId = otherUserId;
+    _pendingChatOpenChatId = (chatId ?? '').trim();
     unawaited(() async {
-      final nav = await _waitForNavigator();
-      if (nav == null) return;
-      nav.pushNamed(
-        '/chat',
-        arguments: <String, dynamic>{
-          'otherUserId': otherUserId,
-          if ((chatId ?? '').trim().isNotEmpty) 'chatId': chatId!.trim(),
-        },
-      );
+      await _flushPendingChatOpen();
     }());
   }
 
-  Future<bool> _showInAppIncomingCallPrompt({
+  Future<void> debugSimulateForegroundVoipForTest({
+    required String inviteId,
     required String channel,
-    required bool isVideo,
     required String fromName,
-    String? fromUid,
-    String? inviteId,
+    required String fromUid,
+    required bool isVideo,
+    String appState = 'active',
   }) async {
-    if (_hasActiveIncomingUi) return false;
-    final nav = await _waitForNavigator();
-    if (nav == null) return false;
-    _showingIncomingCallDialog = true;
-    try {
-      final accepted = await nav.push<bool>(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => IncomingCallScreen(
-            channel: channel,
-            isVideo: isVideo,
-            fromName: fromName,
-          ),
-        ),
-      );
-
-      if (accepted == true) {
-        _pushCallScreen(
-          channel: channel,
-          isVideo: isVideo,
-          fromName: fromName,
-          fromUid: fromUid,
-          inviteId: inviteId,
-        );
-      } else {
-        await _setInviteStatus(inviteId, 'declined');
-      }
-      return true;
-    } catch (e) {
-      debugPrint('⚠️ in-app call prompt failed: $e');
-      return false;
-    } finally {
-      _showingIncomingCallDialog = false;
-    }
+    await _handleNativePushMethodCall(
+      MethodCall('incomingVoipForeground', <String, dynamic>{
+        'inviteId': inviteId,
+        'callId': inviteId,
+        'channel': channel,
+        'fromName': fromName,
+        'fromUid': fromUid,
+        'isVideo': isVideo,
+        'appState': appState,
+      }),
+    );
   }
 
-  Future<void> _setInviteStatus(String? inviteId, String status) async {
-    final id = (inviteId ?? '').trim();
-    if (id.isEmpty) return;
+  Future<void> debugOpenChatFromTapForTest({
+    required String otherUserId,
+    String? chatId,
+  }) async {
+    _openChat(otherUserId, chatId: chatId);
+    await Future<void>.delayed(Duration.zero);
+  }
+
+  Future<void> _flushPendingChatOpen() async {
+    if (_chatNavigationInFlight) return;
+    final pendingOtherUserId = (_pendingChatOpenOtherUserId ?? '').trim();
+    if (pendingOtherUserId.isEmpty) return;
+
+    _chatNavigationInFlight = true;
     try {
-      await FirebaseFirestore.instance.collection('callInvites').doc(id).set({
-        'status': status,
-        '${status}At': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    } catch (_) {}
+      for (var i = 0; i < 80; i++) {
+        final otherUserId = (_pendingChatOpenOtherUserId ?? '').trim();
+        if (otherUserId.isEmpty) return;
+        if (!await _isAppActuallyForeground()) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          continue;
+        }
+        final nav = await _waitForNavigator();
+        if (nav == null || !nav.mounted) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          continue;
+        }
+        final chatId = (_pendingChatOpenChatId ?? '').trim();
+        _pendingChatOpenOtherUserId = null;
+        _pendingChatOpenChatId = null;
+        await _diagPush('chat_open_from_tap', meta: {
+          'otherUserId': otherUserId,
+          if (chatId.isNotEmpty) 'chatId': chatId,
+          'queued': true,
+        });
+        nav.pushNamedAndRemoveUntil(
+          '/chat',
+          (route) => route.isFirst,
+          arguments: <String, dynamic>{
+            'otherUserId': otherUserId,
+            if (chatId.isNotEmpty) 'chatId': chatId,
+          },
+        );
+        return;
+      }
+    } finally {
+      _chatNavigationInFlight = false;
+      if ((_pendingChatOpenOtherUserId ?? '').trim().isNotEmpty) {
+        unawaited(_flushPendingChatOpen());
+      }
+    }
   }
 
   Future<void> _showIncomingCallKit({
@@ -1639,7 +2014,8 @@ class NotificationService with WidgetsBindingObserver {
         const NotificationDetails(
           iOS: DarwinNotificationDetails(categoryIdentifier: 'INCOMING_CALL'),
         ),
-        payload: 'incoming_call|$channel|$isVideo|$fromName',
+        payload:
+            'incoming_call2|$channel|$isVideo|$fromName|${fromUid ?? ''}|$rawInviteId',
       );
     }
   }

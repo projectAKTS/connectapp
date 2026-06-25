@@ -34,6 +34,7 @@ import 'screens/premium/premium_screen.dart';
 import 'widgets/main_scaffold.dart';
 import 'widgets/full_screen_back_gesture.dart';
 import 'services/firebase_options.dart';
+import 'services/firestore_read_helper.dart';
 import 'services/notification_service.dart';
 import 'services/subscription_service.dart';
 import 'theme/theme.dart';
@@ -73,6 +74,9 @@ Future<void> main() async {
 
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
+  );
+  unawaited(
+    FirestoreReadHelper.ensureNetworkEnabled(reason: 'app_start'),
   );
 
   const useDebugAppCheck =
@@ -213,6 +217,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
+    unawaited(
+      FirestoreReadHelper.ensureNetworkEnabled(reason: 'app_resumed'),
+    );
     unawaited(_ensureForegroundBootstrap());
   }
 
@@ -378,7 +385,10 @@ class _AuthGateState extends State<AuthGate> {
   Future<void> _ensureUserDoc(User user) async {
     final ref = FirebaseFirestore.instance.collection('users').doc(user.uid);
     try {
-      final snap = await ref.get();
+      final snap = await FirestoreReadHelper.getDoc(
+        ref,
+        timeout: const Duration(seconds: 5),
+      );
       final data = snap.data() ?? const <String, dynamic>{};
       final authName = (user.displayName ?? '').trim();
       final existingName =
@@ -434,7 +444,9 @@ class _AuthGateState extends State<AuthGate> {
         });
       }
 
-      await ref.set(patch, SetOptions(merge: true));
+      await ref
+          .set(patch, SetOptions(merge: true))
+          .timeout(const Duration(seconds: 5));
     } catch (e) {
       debugPrint('ensureUserDoc failed for ${user.uid}: $e');
     }
@@ -459,7 +471,7 @@ class _AuthGateState extends State<AuthGate> {
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           if (WidgetsBinding.instance.lifecycleState ==
               AppLifecycleState.resumed) {
-            await _ensureUserDoc(user);
+            unawaited(_ensureUserDoc(user));
           }
           try {
             await notificationService.initialize();
@@ -471,7 +483,7 @@ class _AuthGateState extends State<AuthGate> {
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           if (WidgetsBinding.instance.lifecycleState ==
               AppLifecycleState.resumed) {
-            await _ensureUserDoc(user);
+            unawaited(_ensureUserDoc(user));
           }
         });
       }

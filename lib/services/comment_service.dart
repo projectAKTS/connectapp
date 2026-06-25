@@ -1,6 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/comment_model.dart';
-import 'package:connect_app/utils/time_utils.dart';
 
 class CommentService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -23,14 +22,18 @@ class CommentService {
         .collection('comments')
         .orderBy('timestamp', descending: true)
         .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) => Comment.fromJson(doc.data()))
-            .toList());
+        .map((snapshot) =>
+            snapshot.docs.map((doc) => Comment.fromJson(doc.data())).toList());
   }
 
   // Like a comment
-  Future<void> likeComment(String postId, String commentId, String userId) async {
-    final commentRef = _firestore.collection('posts').doc(postId).collection('comments').doc(commentId);
+  Future<void> likeComment(
+      String postId, String commentId, String userId) async {
+    final commentRef = _firestore
+        .collection('posts')
+        .doc(postId)
+        .collection('comments')
+        .doc(commentId);
 
     final commentSnap = await commentRef.get();
     if (!commentSnap.exists) return;
@@ -51,6 +54,11 @@ class CommentService {
 
   // Delete a comment
   Future<void> deleteComment(String postId, String commentId) async {
-    await _firestore.collection('posts').doc(postId).collection('comments').doc(commentId).delete();
+    await _firestore
+        .collection('posts')
+        .doc(postId)
+        .collection('comments')
+        .doc(commentId)
+        .delete();
   }
 }

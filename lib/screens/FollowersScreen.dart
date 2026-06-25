@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'profile/profile_screen.dart';
 
 class FollowersScreen extends StatelessWidget {
   final List<dynamic> followers;
 
-  const FollowersScreen({Key? key, required this.followers}) : super(key: key);
+  const FollowersScreen({super.key, required this.followers});
 
   @override
   Widget build(BuildContext context) {
@@ -27,7 +26,10 @@ class FollowersScreen extends StatelessWidget {
           final userId = followers[index];
 
           return FutureBuilder<DocumentSnapshot>(
-            future: FirebaseFirestore.instance.collection('users').doc(userId).get(),
+            future: FirebaseFirestore.instance
+                .collection('users')
+                .doc(userId)
+                .get(),
             builder: (context, snapshot) {
               if (!snapshot.hasData) {
                 return const ListTile(
@@ -41,7 +43,8 @@ class FollowersScreen extends StatelessWidget {
                 leading: CircleAvatar(
                   backgroundImage: userData['profilePicture'] != null
                       ? NetworkImage(userData['profilePicture'])
-                      : const AssetImage('assets/default_profile.png') as ImageProvider,
+                      : const AssetImage('assets/default_profile.png')
+                          as ImageProvider,
                 ),
                 title: Text(userData['name'] ?? 'No name'),
                 subtitle: Text(userData['bio'] ?? 'No bio'),

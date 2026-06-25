@@ -35,19 +35,10 @@
             </intent-filter>
         </activity>
 
-        <!-- Firebase Messaging Service (Handles Push Notifications) -->
-        <service
-            android:name=".services.MyFirebaseMessagingService"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.google.firebase.MESSAGING_EVENT"/>
-            </intent-filter>
-        </service>
-
         <!-- Firebase Required Metadata -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="default_channel" />
+            android:value="high_importance_channel" />
 
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_icon"

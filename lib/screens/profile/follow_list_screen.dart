@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:connect_app/theme/tokens.dart';
 import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
+import 'package:connect_app/services/firestore_read_helper.dart';
 
 enum FollowListType { followers, following }
 
@@ -20,11 +21,49 @@ class FollowListScreen extends StatefulWidget {
 
 class _FollowListScreenState extends State<FollowListScreen> {
   late final String _uid;
+  late Future<List<String>> _idsFuture;
 
   @override
   void initState() {
     super.initState();
     _uid = widget.userId ?? FirebaseAuth.instance.currentUser?.uid ?? '';
+    _idsFuture = _loadIds();
+  }
+
+  Future<List<String>> _loadIds() async {
+    if (_uid.isEmpty) return const <String>[];
+    if (widget.type == FollowListType.followers) {
+      final snap = await FirestoreReadHelper.getQuery(
+        FirebaseFirestore.instance
+            .collection('followers')
+            .doc(_uid)
+            .collection('userFollowers'),
+      );
+      return snap.docs
+          .map((d) => d.id)
+          .where((e) => e.isNotEmpty)
+          .toSet()
+          .toList();
+    }
+
+    final snap = await FirestoreReadHelper.getDoc(
+      FirebaseFirestore.instance.collection('users').doc(_uid),
+    );
+    final data = snap.data() ?? const <String, dynamic>{};
+    return (data['following'] is List)
+        ? (data['following'] as List)
+            .map((e) => e.toString())
+            .where((e) => e.isNotEmpty && e != _uid)
+            .toSet()
+            .toList()
+        : <String>[];
+  }
+
+  Future<void> _refresh() async {
+    setState(() {
+      _idsFuture = _loadIds();
+    });
+    await _idsFuture;
   }
 
   @override
@@ -51,61 +90,46 @@ class _FollowListScreenState extends State<FollowListScreen> {
       child: Scaffold(
         backgroundColor: AppColors.canvas,
         appBar: AppBar(title: Text(title)),
-        body: widget.type == FollowListType.followers
-            ? StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('followers')
-                    .doc(_uid)
-                    .collection('userFollowers')
-                    .snapshots(),
-                builder: (context, snap) {
-                  if (snap.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  final ids = (snap.data?.docs ?? const [])
-                      .map((d) => d.id)
-                      .where((e) => e.isNotEmpty)
-                      .toSet()
-                      .toList();
-                  return _buildList(ids, emptyText: 'No followers yet.');
-                },
-              )
-            : StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                stream: FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(_uid)
-                    .snapshots(),
-                builder: (context, snap) {
-                  if (snap.connectionState == ConnectionState.waiting &&
-                      !snap.hasData) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  final data = snap.data?.data() ?? const <String, dynamic>{};
-                  final ids = (data['following'] is List)
-                      ? (data['following'] as List)
-                          .map((e) => e.toString())
-                          .where((e) => e.isNotEmpty && e != _uid)
-                          .toSet()
-                          .toList()
-                      : <String>[];
-                  return _buildList(ids,
-                      emptyText: 'Not following anyone yet.');
-                },
-              ),
+        body: RefreshIndicator(
+          onRefresh: _refresh,
+          child: FutureBuilder<List<String>>(
+            future: _idsFuture,
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting &&
+                  !snap.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final ids = snap.data ?? const <String>[];
+              return _buildList(
+                ids,
+                emptyText: widget.type == FollowListType.followers
+                    ? 'No followers yet.'
+                    : 'Not following anyone yet.',
+              );
+            },
+          ),
+        ),
       ),
     );
   }
 
   Widget _buildList(List<String> ids, {required String emptyText}) {
     if (ids.isEmpty) {
-      return Center(
-        child: Text(
-          emptyText,
-          style: const TextStyle(color: AppColors.muted),
-        ),
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          const SizedBox(height: 120),
+          Center(
+            child: Text(
+              emptyText,
+              style: const TextStyle(color: AppColors.muted),
+            ),
+          ),
+        ],
       );
     }
     return ListView.separated(
+      physics: const AlwaysScrollableScrollPhysics(),
       itemCount: ids.length,
       separatorBuilder: (_, __) =>
           const Divider(height: 1, color: AppColors.border),
@@ -121,7 +145,9 @@ class _FollowUserRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      future: FirebaseFirestore.instance.collection('users').doc(userId).get(),
+      future: FirestoreReadHelper.getDoc(
+        FirebaseFirestore.instance.collection('users').doc(userId),
+      ),
       builder: (context, snap) {
         final data = snap.data?.data() ?? const <String, dynamic>{};
         final name =
