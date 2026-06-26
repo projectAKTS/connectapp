@@ -22,16 +22,20 @@ const {
   CallV2Error,
   TaskPublisherError,
   acceptCallV2,
+  acknowledgeTimeoutTaskExecutionV2,
   cancelCallV2,
   claimTaskOutboxDispatchV2,
+  createTimeoutTaskHttpHandlerV2,
   declineCallV2,
   deterministicExternalTaskId,
   dispatchTaskOutboxV2,
   endCallV2,
+  executeTimeoutTaskEnvelopeV2,
   finalizeTaskOutboxDispatchFailureV2,
   finalizeTaskOutboxDispatchSuccessV2,
   processActiveLeaseTimeoutV2,
   processCallTimeoutV2,
+  recordTimeoutTaskExecutionFailureV2,
   reportParticipantMediaV2,
   renewActiveCallLeaseV2,
   startCallV2,
@@ -4992,6 +4996,497 @@ test("dispatcher accepts every task kind and payload remains processor-compatibl
 
 });
 
+test("executor rejects non-dispatched tasks and malformed execution schema", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  let task = await singleTaskForKind("ringing_timeout");
+
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    executeEnvelope({ request: executionEnvelope(task) }),
+  );
+
+  await claimTask({ task, generateClaimToken: () => "execute_dispatching_claim" });
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    executeEnvelope({ request: executionEnvelope(task) }),
+  );
+
+  await setTaskFields(task, {
+    status: "dead_letter",
+    claimToken: null,
+    claimExpiresAt: null,
+    lastDispatchErrorCode: "publisher_permanent",
+  });
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    executeEnvelope({ request: executionEnvelope(task) }),
+  );
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  task = await singleTaskForKind("ringing_timeout");
+  await setTaskFields(task, { executionAttempts: "bad" });
+  await assertCallError(ERROR_CODES.transactionFailed, claimTask({ task }));
+});
+
+test("executor validates dispatched task identity, task kind, and payload", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const task = await singleTaskForKind("ringing_timeout");
+  await dispatchTask({
+    task,
+    generateClaimToken: () => "identity_dispatch_claim",
+  });
+  const dispatchedTask = await requiredData(
+    `callOps/${task.callId}/taskOutbox/${task.taskId}`,
+  );
+
+  const result = await executeEnvelope({
+    request: executionEnvelope(dispatchedTask),
+    internalServices: {
+      async processCallTimeout({ request }) {
+        assert.deepEqual(
+          normalizeFirestoreData(request),
+          normalizeFirestoreData(dispatchedTask.payload),
+        );
+        return { status: "stale" };
+      },
+      async processActiveLeaseTimeout() {
+        throw new Error("active lease processor must not run");
+      },
+    },
+  });
+  assert.equal(result.status, "acknowledged");
+  assert.equal(result.executionOutcome, "stale");
+
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    executeEnvelope({
+      request: executionEnvelope(dispatchedTask, {
+        externalTaskId: "helperly-call-v2-wrong",
+      }),
+    }),
+  );
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    executeEnvelope({
+      request: executionEnvelope(dispatchedTask, {
+        callId: "missing_call",
+        payload: {
+          callId: "missing_call",
+          timeoutKind: "ringing",
+          expectedCallVersion: 1,
+          expectedDeadlineAt: dispatchedTask.dueAt,
+        },
+      }),
+    }),
+  );
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    executeEnvelope({
+      request: executionEnvelope(dispatchedTask, {
+        outboxTaskId: "missing_task",
+      }),
+    }),
+  );
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    executeEnvelope({
+      request: executionEnvelope(dispatchedTask, {
+        taskKind: "accepted_join_timeout",
+        payload: {
+          callId: "call_1",
+          timeoutKind: "accepted_join",
+          expectedCallVersion: 1,
+          expectedDeadlineAt: dispatchedTask.dueAt,
+        },
+      }),
+    }),
+  );
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    executeEnvelope({
+      request: executionEnvelope(dispatchedTask, {
+        payload: {
+          ...dispatchedTask.payload,
+          expectedCallVersion: 999,
+        },
+      }),
+    }),
+  );
+});
+
+test("executor routes every timeout kind to the correct processor", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+  await reportMedia({
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "execute_route_caller_joined"),
+  });
+  await reportMedia({
+    authUid: "callee",
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "execute_route_callee_joined"),
+  });
+  await reportMedia({
+    mediaState: "reconnecting",
+    request: mediaRequest("call_1", "reconnecting", "execute_route_reconnect"),
+  });
+
+  const tasks = [
+    await singleTaskForKind("ringing_timeout"),
+    await singleTaskForKind("accepted_join_timeout"),
+    await singleTaskForKind("reconnect_timeout"),
+    (await tasksForKind("active_lease_timeout"))[0],
+  ];
+  const routed = [];
+  for (const [index, task] of tasks.entries()) {
+    await dispatchTask({
+      task,
+      now: new Date(fixedMs() + index),
+      generateClaimToken: () => `route_dispatch_claim_${index}`,
+    });
+    const dispatchedTask = await requiredData(
+      `callOps/${task.callId}/taskOutbox/${task.taskId}`,
+    );
+    const result = await executeEnvelope({
+      request: executionEnvelope(dispatchedTask),
+      now: new Date(fixedMs() + index + 100),
+      internalServices: {
+        async processCallTimeout({ request }) {
+          routed.push(["call", dispatchedTask.taskKind, request]);
+          return { status: "missing" };
+        },
+        async processActiveLeaseTimeout({ request }) {
+          routed.push(["active", dispatchedTask.taskKind, request]);
+          return { status: "missing" };
+        },
+      },
+    });
+    assert.equal(result.status, "acknowledged");
+    assert.equal(result.executionOutcome, "missing");
+  }
+
+  assert.deepEqual(
+    routed.map(([processor, taskKind]) => `${processor}:${taskKind}`),
+    [
+      "call:ringing_timeout",
+      "call:accepted_join_timeout",
+      "call:reconnect_timeout",
+      "active:active_lease_timeout",
+    ],
+  );
+  for (const [, , payload] of routed) {
+    const matchingTask = tasks.find((task) =>
+      normalizeFirestoreData(task.payload).callId ===
+        normalizeFirestoreData(payload).callId &&
+      JSON.stringify(normalizeFirestoreData(task.payload)) ===
+        JSON.stringify(normalizeFirestoreData(payload)),
+    );
+    assert.ok(matchingTask);
+  }
+});
+
+test("execution acknowledgement is idempotent and does not alter public state", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const task = await singleTaskForKind("ringing_timeout");
+  await dispatchTask({
+    task,
+    generateClaimToken: () => "ack_dispatch_claim",
+  });
+  const dispatchedTask = await requiredData(
+    `callOps/${task.callId}/taskOutbox/${task.taskId}`,
+  );
+  const publicBefore = {
+    call: await docState("calls/call_1"),
+    caller: await docState("calls/call_1/participants/caller"),
+    callee: await docState("calls/call_1/participants/callee"),
+    callerLock: await docState("activeCallLocks/caller"),
+    calleeLock: await docState("activeCallLocks/callee"),
+  };
+
+  const ack = await acknowledgeExecution({
+    request: {
+      callId: task.callId,
+      outboxTaskId: task.taskId,
+      externalTaskId: deterministicExternalTaskId(dispatchedTask),
+      executionOutcome: "terminalized",
+    },
+  });
+  assert.equal(ack.status, "acknowledged");
+  assert.equal(ack.idempotentReplay, false);
+  assert.equal(millis(ack.completedAt), fixedMs());
+  let stored = await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`);
+  assert.equal(millis(stored.completedAt), fixedMs());
+  assert.equal(millis(stored.lastExecutionAt), fixedMs());
+  assert.equal(stored.executionAttempts, 1);
+  assert.equal(stored.executionOutcome, "terminalized");
+  assert.equal(stored.executionErrorCode, null);
+  assert.deepEqual(publicBefore.call, await docState("calls/call_1"));
+  assert.deepEqual(publicBefore.caller, await docState("calls/call_1/participants/caller"));
+  assert.deepEqual(publicBefore.callee, await docState("calls/call_1/participants/callee"));
+  assert.deepEqual(publicBefore.callerLock, await docState("activeCallLocks/caller"));
+  assert.deepEqual(publicBefore.calleeLock, await docState("activeCallLocks/callee"));
+
+  const replay = await acknowledgeExecution({
+    now: new Date(fixedMs() + 1000),
+    request: {
+      callId: task.callId,
+      outboxTaskId: task.taskId,
+      externalTaskId: deterministicExternalTaskId(dispatchedTask),
+      executionOutcome: "terminalized",
+    },
+  });
+  assert.equal(replay.idempotentReplay, true);
+  assert.equal(millis(replay.completedAt), fixedMs());
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    acknowledgeExecution({
+      request: {
+        callId: task.callId,
+        outboxTaskId: task.taskId,
+        externalTaskId: deterministicExternalTaskId(dispatchedTask),
+        executionOutcome: "stale",
+      },
+    }),
+  );
+  stored = await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`);
+  assert.equal(stored.executionOutcome, "terminalized");
+});
+
+test("execution failure recording preserves dispatch state and allows redelivery", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const task = await singleTaskForKind("ringing_timeout");
+  await dispatchTask({
+    task,
+    generateClaimToken: () => "failure_execution_dispatch_claim",
+  });
+  let dispatchedTask = await requiredData(
+    `callOps/${task.callId}/taskOutbox/${task.taskId}`,
+  );
+
+  let result = await executeEnvelope({
+    request: executionEnvelope(dispatchedTask),
+    internalServices: {
+      async processCallTimeout() {
+        return { status: "not_due" };
+      },
+    },
+  });
+  assert.deepEqual(result, {
+    callId: task.callId,
+    outboxTaskId: task.taskId,
+    status: "retry_later",
+    retryable: true,
+    errorCode: "timeout_not_due",
+  });
+  let stored = await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`);
+  assert.equal(stored.status, "dispatched");
+  assert.equal(stored.completedAt, null);
+  assert.equal(stored.executionOutcome, null);
+  assert.equal(stored.executionErrorCode, "timeout_not_due");
+  assert.equal(stored.executionAttempts, 1);
+
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    executeEnvelope({
+      request: executionEnvelope(dispatchedTask),
+      internalServices: {
+        async processCallTimeout() {
+          throw new Error("raw processor stack");
+        },
+      },
+    }),
+  );
+  stored = await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`);
+  assert.equal(stored.executionErrorCode, "timeout_processor_unexpected_error");
+  assert.equal(stored.executionAttempts, 2);
+  assert.equal(stored.completedAt, null);
+
+  await assertCallError(
+    ERROR_CODES.lockRecoveryRequired,
+    executeEnvelope({
+      request: executionEnvelope(dispatchedTask),
+      internalServices: {
+        async processCallTimeout() {
+          throw new CallV2Error(
+            ERROR_CODES.lockRecoveryRequired,
+            "controlled failure",
+          );
+        },
+      },
+    }),
+  );
+  stored = await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`);
+  assert.equal(stored.executionErrorCode, ERROR_CODES.lockRecoveryRequired);
+  assert.equal(stored.executionAttempts, 3);
+
+  result = await executeEnvelope({
+    request: executionEnvelope(dispatchedTask),
+    internalServices: {
+      async processCallTimeout() {
+        return { status: "terminalized" };
+      },
+    },
+  });
+  assert.equal(result.status, "acknowledged");
+  assert.equal(result.executionOutcome, "terminalized");
+  stored = await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`);
+  assert.equal(stored.executionAttempts, 4);
+  assert.equal(stored.executionErrorCode, null);
+  assert.equal(stored.executionOutcome, "terminalized");
+
+  await assertCallError(
+    ERROR_CODES.invalidArgument,
+    () => recordExecutionFailure({
+      request: {
+        callId: task.callId,
+        outboxTaskId: task.taskId,
+        externalTaskId: deterministicExternalTaskId(dispatchedTask),
+        errorCode: "timeout_not_due",
+        message: "raw failure text",
+      },
+    }),
+  );
+});
+
+test("acknowledgement failure after processor success is not recorded as processor failure", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const task = await singleTaskForKind("ringing_timeout");
+  await dispatchTask({
+    task,
+    generateClaimToken: () => "ack_failure_dispatch_claim",
+  });
+  const dispatchedTask = await requiredData(
+    `callOps/${task.callId}/taskOutbox/${task.taskId}`,
+  );
+
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    executeEnvelope({
+      request: executionEnvelope(dispatchedTask),
+      internalServices: {
+        async processCallTimeout() {
+          return { status: "already_terminal" };
+        },
+        async acknowledgeExecution() {
+          throw new CallV2Error(
+            ERROR_CODES.transactionFailed,
+            "Injected acknowledgement failure.",
+          );
+        },
+      },
+    }),
+  );
+  let stored = await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`);
+  assert.equal(stored.completedAt, null);
+  assert.equal(stored.executionOutcome, null);
+  assert.equal(stored.executionErrorCode, null);
+  assert.equal(stored.executionAttempts, 0);
+
+  const result = await executeEnvelope({
+    request: executionEnvelope(dispatchedTask),
+    internalServices: {
+      async processCallTimeout() {
+        return { status: "already_terminal" };
+      },
+    },
+  });
+  assert.equal(result.status, "acknowledged");
+  assert.equal(result.executionOutcome, "already_terminal");
+  stored = await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`);
+  assert.equal(stored.executionAttempts, 1);
+});
+
+test("timeout task HTTP handler enforces auth, method, body, and response mapping", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  let task = await singleTaskForKind("ringing_timeout");
+  await dispatchTask({
+    task,
+    generateClaimToken: () => "http_dispatch_claim",
+  });
+  let dispatchedTask = await requiredData(
+    `callOps/${task.callId}/taskOutbox/${task.taskId}`,
+  );
+  await acknowledgeExecution({
+    request: {
+      callId: task.callId,
+      outboxTaskId: task.taskId,
+      externalTaskId: deterministicExternalTaskId(dispatchedTask),
+      executionOutcome: "missing",
+    },
+  });
+
+  let verifyCalls = 0;
+  const handler = createTimeoutTaskHttpHandlerV2({
+    db,
+    verifyRequest: async () => {
+      verifyCalls += 1;
+      return true;
+    },
+    now: FIXED_NOW,
+  });
+  let response = await handler({
+    method: "POST",
+    body: executionEnvelope(dispatchedTask),
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.idempotentReplay, true);
+  assert.equal(verifyCalls, 1);
+
+  response = await handler({ method: "GET", body: executionEnvelope(dispatchedTask) });
+  assert.equal(response.statusCode, 405);
+
+  response = await handler({ method: "POST" });
+  assert.equal(response.statusCode, 400);
+
+  const unauthorized = createTimeoutTaskHttpHandlerV2({
+    db,
+    verifyRequest: async () => false,
+    now: FIXED_NOW,
+  });
+  response = await unauthorized({
+    method: "POST",
+    body: executionEnvelope(dispatchedTask, {
+      externalTaskId: "helperly-call-v2-would-be-invalid",
+    }),
+  });
+  assert.equal(response.statusCode, 401);
+
+  response = await handler({
+    method: "POST",
+    body: { ...executionEnvelope(dispatchedTask), unknown: true },
+  });
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.stack, undefined);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  task = await singleTaskForKind("ringing_timeout");
+  await dispatchTask({
+    task,
+    generateClaimToken: () => "http_not_due_dispatch_claim",
+  });
+  dispatchedTask = await requiredData(
+    `callOps/${task.callId}/taskOutbox/${task.taskId}`,
+  );
+  response = await handler({
+    method: "POST",
+    body: executionEnvelope(dispatchedTask),
+  });
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.body.errorCode, "timeout_not_due");
+  assert.equal(response.body.stack, undefined);
+});
+
 test("same-state joined report still evaluates active promotion", async () => {
   await seedUsers("caller", "callee");
   await startCall();
@@ -5439,6 +5934,31 @@ function finalizeFailure(overrides = {}) {
   });
 }
 
+function acknowledgeExecution(overrides = {}) {
+  return acknowledgeTimeoutTaskExecutionV2({
+    db,
+    request: overrides.request,
+    now: overrides.now || FIXED_NOW,
+  });
+}
+
+function recordExecutionFailure(overrides = {}) {
+  return recordTimeoutTaskExecutionFailureV2({
+    db,
+    request: overrides.request,
+    now: overrides.now || FIXED_NOW,
+  });
+}
+
+function executeEnvelope(overrides = {}) {
+  return executeTimeoutTaskEnvelopeV2({
+    db,
+    request: overrides.request,
+    now: overrides.now || FIXED_NOW,
+    internalServices: overrides.internalServices,
+  });
+}
+
 function dispatchTask(overrides = {}) {
   return dispatchTaskOutboxV2({
     db,
@@ -5515,6 +6035,17 @@ function taskRequest(task) {
   return {
     callId: task.callId,
     taskId: task.taskId,
+  };
+}
+
+function executionEnvelope(task, overrides = {}) {
+  return {
+    schemaVersion: 1,
+    externalTaskId: overrides.externalTaskId || deterministicExternalTaskId(task),
+    callId: overrides.callId || task.callId,
+    outboxTaskId: overrides.outboxTaskId || task.taskId,
+    taskKind: overrides.taskKind || task.taskKind,
+    payload: overrides.payload || task.payload,
   };
 }
 
@@ -5757,9 +6288,13 @@ function assertTaskSchema(task) {
     "dispatchAttempts",
     "dispatchedAt",
     "dueAt",
+    "executionAttempts",
+    "executionErrorCode",
+    "executionOutcome",
     "externalTaskName",
     "lastDispatchError",
     "lastDispatchErrorCode",
+    "lastExecutionAt",
     "payload",
     "schemaVersion",
     "status",
@@ -5778,6 +6313,10 @@ function assertTaskSchema(task) {
   assert.equal(task.claimExpiresAt, null);
   assert.equal(task.externalTaskName, null);
   assert.equal(task.lastDispatchErrorCode, null);
+  assert.equal(task.executionAttempts, 0);
+  assert.equal(task.lastExecutionAt, null);
+  assert.equal(task.executionOutcome, null);
+  assert.equal(task.executionErrorCode, null);
   assert.equal(millis(task.ttlAt), millis(task.dueAt) + TASK_OUTBOX_RETENTION_MS);
   assert.equal(task.taskId.startsWith(`${task.taskKind}_`), true);
 }
@@ -5916,6 +6455,7 @@ function assertNoPrivatePublicFields(value) {
     assert.equal(normalizedKey.includes("notification"), false, key);
     assert.equal(normalizedKey.includes("task"), false, key);
     assert.equal(normalizedKey.includes("dispatch"), false, key);
+    assert.equal(normalizedKey.includes("execution"), false, key);
     assert.equal(normalizedKey.includes("payload"), false, key);
   }
 }

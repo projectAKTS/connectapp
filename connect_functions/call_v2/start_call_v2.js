@@ -87,6 +87,12 @@ const TASK_PUBLISHER_OUTCOMES = Object.freeze([
   "created",
   "already_exists",
 ]);
+const TASK_EXECUTION_ACK_OUTCOMES = Object.freeze([
+  "terminalized",
+  "stale",
+  "already_terminal",
+  "missing",
+]);
 const TIMEOUT_CONFIG = Object.freeze({
   ringing: Object.freeze({
     lifecycleState: "ringing",
@@ -2380,6 +2386,8 @@ async function dispatchTaskOutboxV2({
     publishResult = normalizePublishResult(
       await publisher.publishTimeoutTask({
         externalTaskId: claim.deterministicExternalTaskId,
+        callId: claim.callId,
+        outboxTaskId: claim.taskId,
         taskKind: claim.taskKind,
         scheduleTime: claim.dueAt,
         payload: claim.payload,
@@ -2426,6 +2434,301 @@ async function dispatchTaskOutboxV2({
     ...success,
     publishOutcome: publishResult.outcome,
   });
+}
+
+function acknowledgeTimeoutTaskExecutionV2({ db, request, now }) {
+  assertDbDependency(db);
+  const validatedRequest = validateExecutionAcknowledgementRequest(request);
+  const nowDate = resolveNow(now);
+  const ref = db
+    .collection("callOps")
+    .doc(validatedRequest.callId)
+    .collection("taskOutbox")
+    .doc(validatedRequest.outboxTaskId);
+
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    const task = requireValidTaskOutboxDocument(snapshot, {
+      callId: validatedRequest.callId,
+      taskId: validatedRequest.outboxTaskId,
+    });
+    requireExecutableDispatchedTaskIdentity(task, validatedRequest);
+
+    if (task.completedAt !== null) {
+      if (task.executionOutcome !== validatedRequest.executionOutcome) {
+        throw new CallV2Error(
+          ERROR_CODES.transactionFailed,
+          "The task execution acknowledgement is conflicting.",
+        );
+      }
+      return Object.freeze({
+        callId: task.callId,
+        outboxTaskId: task.taskId,
+        status: "acknowledged",
+        executionOutcome: task.executionOutcome,
+        completedAt: toDate(task.completedAt),
+        idempotentReplay: true,
+      });
+    }
+
+    const executionAttempts = task.executionAttempts + 1;
+    transaction.update(ref, {
+      completedAt: nowDate,
+      lastExecutionAt: nowDate,
+      executionAttempts,
+      executionOutcome: validatedRequest.executionOutcome,
+      executionErrorCode: null,
+      updatedAt: nowDate,
+    });
+    return Object.freeze({
+      callId: task.callId,
+      outboxTaskId: task.taskId,
+      status: "acknowledged",
+      executionOutcome: validatedRequest.executionOutcome,
+      completedAt: nowDate,
+      idempotentReplay: false,
+    });
+  }).catch(wrapTransactionError);
+}
+
+function recordTimeoutTaskExecutionFailureV2({ db, request, now }) {
+  assertDbDependency(db);
+  const validatedRequest = validateExecutionFailureRequest(request);
+  const nowDate = resolveNow(now);
+  const ref = db
+    .collection("callOps")
+    .doc(validatedRequest.callId)
+    .collection("taskOutbox")
+    .doc(validatedRequest.outboxTaskId);
+
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    const task = requireValidTaskOutboxDocument(snapshot, {
+      callId: validatedRequest.callId,
+      taskId: validatedRequest.outboxTaskId,
+    });
+    requireExecutableDispatchedTaskIdentity(task, validatedRequest);
+    if (task.completedAt !== null) {
+      throw new CallV2Error(
+        ERROR_CODES.transactionFailed,
+        "The task execution has already been acknowledged.",
+      );
+    }
+
+    const executionAttempts = task.executionAttempts + 1;
+    transaction.update(ref, {
+      lastExecutionAt: nowDate,
+      executionAttempts,
+      executionErrorCode: validatedRequest.errorCode,
+      updatedAt: nowDate,
+    });
+    return Object.freeze({
+      callId: task.callId,
+      outboxTaskId: task.taskId,
+      status: "recorded",
+      errorCode: validatedRequest.errorCode,
+      executionAttempts,
+    });
+  }).catch(wrapTransactionError);
+}
+
+async function executeTimeoutTaskEnvelopeV2({
+  db,
+  request,
+  now,
+  internalServices = {},
+}) {
+  assertDbDependency(db);
+  const envelope = validateTimeoutTaskEnvelope(request);
+  const nowDate = resolveNow(now);
+  const task = await loadExecutableOutboxTask(db, envelope);
+  if (task.completedAt !== null) {
+    return acknowledgeTimeoutTaskExecutionV2({
+      db,
+      request: {
+        callId: task.callId,
+        outboxTaskId: task.taskId,
+        externalTaskId: envelope.externalTaskId,
+        executionOutcome: task.executionOutcome,
+      },
+      now: nowDate,
+    });
+  }
+
+  const processCallTimeout =
+    internalServices.processCallTimeout || processCallTimeoutV2;
+  const processActiveLeaseTimeout =
+    internalServices.processActiveLeaseTimeout || processActiveLeaseTimeoutV2;
+  const acknowledgeExecution =
+    internalServices.acknowledgeExecution ||
+    acknowledgeTimeoutTaskExecutionV2;
+  const recordExecutionFailure =
+    internalServices.recordExecutionFailure ||
+    recordTimeoutTaskExecutionFailureV2;
+
+  let processorResult;
+  try {
+    if (task.taskKind === TASK_KINDS.activeLeaseTimeout) {
+      processorResult = await processActiveLeaseTimeout({
+        db,
+        request: task.payload,
+        now: nowDate,
+      });
+    } else {
+      processorResult = await processCallTimeout({
+        db,
+        request: task.payload,
+        now: nowDate,
+      });
+    }
+  } catch (error) {
+    const errorCode =
+      error instanceof CallV2Error
+        ? error.code
+        : "timeout_processor_unexpected_error";
+    await recordExecutionFailureIfPossible({
+      recordExecutionFailure,
+      db,
+      task,
+      externalTaskId: envelope.externalTaskId,
+      errorCode,
+      now: nowDate,
+    });
+    if (error instanceof CallV2Error) {
+      throw error;
+    }
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The timeout processor failed.",
+    );
+  }
+
+  if (!processorResult || typeof processorResult.status !== "string") {
+    await recordExecutionFailureIfPossible({
+      recordExecutionFailure,
+      db,
+      task,
+      externalTaskId: envelope.externalTaskId,
+      errorCode: "timeout_processor_invalid_result",
+      now: nowDate,
+    });
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The timeout processor returned an invalid result.",
+    );
+  }
+
+  if (processorResult.status === "not_due") {
+    await recordExecutionFailureIfPossible({
+      recordExecutionFailure,
+      db,
+      task,
+      externalTaskId: envelope.externalTaskId,
+      errorCode: "timeout_not_due",
+      now: nowDate,
+    });
+    return Object.freeze({
+      callId: task.callId,
+      outboxTaskId: task.taskId,
+      status: "retry_later",
+      retryable: true,
+      errorCode: "timeout_not_due",
+    });
+  }
+
+  if (!TASK_EXECUTION_ACK_OUTCOMES.includes(processorResult.status)) {
+    await recordExecutionFailureIfPossible({
+      recordExecutionFailure,
+      db,
+      task,
+      externalTaskId: envelope.externalTaskId,
+      errorCode: "timeout_processor_invalid_result",
+      now: nowDate,
+    });
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The timeout processor outcome is unsupported.",
+    );
+  }
+
+  return acknowledgeExecution({
+    db,
+    request: {
+      callId: task.callId,
+      outboxTaskId: task.taskId,
+      externalTaskId: envelope.externalTaskId,
+      executionOutcome: processorResult.status,
+    },
+    now: nowDate,
+  });
+}
+
+function createTimeoutTaskHttpHandlerV2({ db, verifyRequest, now }) {
+  assertDbDependency(db);
+  if (typeof verifyRequest !== "function") {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A request verification dependency is required.",
+    );
+  }
+  return async function timeoutTaskHttpHandler(request) {
+    try {
+      if (!request || request.method !== "POST") {
+        return httpResult(405, {
+          errorCode: "method_not_allowed",
+          retryable: false,
+        });
+      }
+      let verified = false;
+      try {
+        verified = await verifyRequest(request);
+      } catch {
+        return httpResult(401, {
+          errorCode: "unauthorized",
+          retryable: false,
+        });
+      }
+      if (verified !== true) {
+        return httpResult(401, {
+          errorCode: "unauthorized",
+          retryable: false,
+        });
+      }
+      if (!request.body || typeof request.body !== "object") {
+        return httpResult(400, {
+          errorCode: ERROR_CODES.invalidArgument,
+          retryable: false,
+        });
+      }
+
+      const result = await executeTimeoutTaskEnvelopeV2({
+        db,
+        request: request.body,
+        now,
+      });
+      if (result.status === "retry_later") {
+        return httpResult(503, result);
+      }
+      return httpResult(200, result);
+    } catch (error) {
+      if (error instanceof CallV2Error) {
+        if (error.code === ERROR_CODES.invalidArgument) {
+          return httpResult(400, {
+            errorCode: error.code,
+            retryable: false,
+          });
+        }
+        return httpResult(503, {
+          errorCode: error.code,
+          retryable: true,
+        });
+      }
+      return httpResult(503, {
+        errorCode: ERROR_CODES.transactionFailed,
+        retryable: true,
+      });
+    }
+  };
 }
 
 function requireMutableV2Call(snapshot, callId) {
@@ -3422,6 +3725,10 @@ function createTaskOutboxDocument(transaction, callOpsRef, intent) {
     claimExpiresAt: null,
     externalTaskName: null,
     lastDispatchErrorCode: null,
+    executionAttempts: 0,
+    lastExecutionAt: null,
+    executionOutcome: null,
+    executionErrorCode: null,
     ttlAt: intent.ttlAt,
   });
 }
@@ -3443,9 +3750,13 @@ function requireValidTaskOutboxDocument(snapshot, expected) {
     "dispatchAttempts",
     "dispatchedAt",
     "dueAt",
+    "executionAttempts",
+    "executionErrorCode",
+    "executionOutcome",
     "externalTaskName",
     "lastDispatchError",
     "lastDispatchErrorCode",
+    "lastExecutionAt",
     "payload",
     "schemaVersion",
     "status",
@@ -3465,9 +3776,10 @@ function requireValidTaskOutboxDocument(snapshot, expected) {
     Object.keys(task).length !== exactKeys.length ||
     !Object.values(TASK_KINDS).includes(task.taskKind) ||
     task.lastDispatchError !== null ||
-    task.completedAt !== null ||
     !Number.isSafeInteger(task.dispatchAttempts) ||
-    task.dispatchAttempts < 0
+    task.dispatchAttempts < 0 ||
+    !Number.isSafeInteger(task.executionAttempts) ||
+    task.executionAttempts < 0
   ) {
     throw new CallV2Error(
       ERROR_CODES.transactionFailed,
@@ -3526,12 +3838,13 @@ function taskStatusFieldsAreConsistent(task, claimExpiresMs) {
       task.claimExpiresAt === null &&
       task.externalTaskName === null &&
       task.dispatchedAt === null &&
-      task.lastDispatchErrorCode === null ||
-      task.claimToken === null &&
-      task.claimExpiresAt === null &&
-      task.externalTaskName === null &&
-      task.dispatchedAt === null &&
-      isControlledDispatchErrorCode(task.lastDispatchErrorCode)
+      task.completedAt === null &&
+      task.executionAttempts === 0 &&
+      task.lastExecutionAt === null &&
+      task.executionOutcome === null &&
+      task.executionErrorCode === null &&
+      (task.lastDispatchErrorCode === null ||
+        isControlledDispatchErrorCode(task.lastDispatchErrorCode))
     );
   }
   if (task.status === "dispatching") {
@@ -3540,17 +3853,46 @@ function taskStatusFieldsAreConsistent(task, claimExpiresMs) {
       claimExpiresMs !== null &&
       task.externalTaskName === null &&
       task.dispatchedAt === null &&
+      task.completedAt === null &&
+      task.executionAttempts === 0 &&
+      task.lastExecutionAt === null &&
+      task.executionOutcome === null &&
+      task.executionErrorCode === null &&
       (task.lastDispatchErrorCode === null ||
         isControlledDispatchErrorCode(task.lastDispatchErrorCode))
     );
   }
   if (task.status === "dispatched") {
+    const completedMs =
+      task.completedAt === null ? null : strictTimestampMillis(task.completedAt);
+    const lastExecutionMs =
+      task.lastExecutionAt === null
+        ? null
+        : strictTimestampMillis(task.lastExecutionAt);
+    if (
+      task.claimToken !== null ||
+      task.claimExpiresAt !== null ||
+      !isValidExternalTaskName(task.externalTaskName) ||
+      strictTimestampMillis(task.dispatchedAt) === null ||
+      task.lastDispatchErrorCode !== null
+    ) {
+      return false;
+    }
+    if (task.completedAt === null) {
+      return (
+        task.executionOutcome === null &&
+        (task.executionAttempts === 0
+          ? task.lastExecutionAt === null
+          : lastExecutionMs !== null) &&
+        (task.executionErrorCode === null ||
+          isControlledDispatchErrorCode(task.executionErrorCode))
+      );
+    }
     return (
-      task.claimToken === null &&
-      task.claimExpiresAt === null &&
-      isValidExternalTaskName(task.externalTaskName) &&
-      strictTimestampMillis(task.dispatchedAt) !== null &&
-      task.lastDispatchErrorCode === null
+      completedMs !== null &&
+      lastExecutionMs !== null &&
+      TASK_EXECUTION_ACK_OUTCOMES.includes(task.executionOutcome) &&
+      task.executionErrorCode === null
     );
   }
   if (task.status === "dead_letter") {
@@ -3559,13 +3901,27 @@ function taskStatusFieldsAreConsistent(task, claimExpiresMs) {
       task.claimExpiresAt === null &&
       task.externalTaskName === null &&
       task.dispatchedAt === null &&
+      task.completedAt === null &&
+      task.executionAttempts === 0 &&
+      task.lastExecutionAt === null &&
+      task.executionOutcome === null &&
+      task.executionErrorCode === null &&
       isControlledDispatchErrorCode(task.lastDispatchErrorCode)
     );
   }
   return false;
 }
 
-function isValidTaskPayload(taskKind, callId, payload) {
+function isValidTaskPayload(
+  taskKind,
+  callId,
+  payload,
+  options = {},
+) {
+  const timestampMillis = (value) =>
+    options.allowJsonTimestamps
+      ? taskPayloadTimestampMillis(value)
+      : strictTimestampMillis(value);
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return false;
   }
@@ -3585,7 +3941,7 @@ function isValidTaskPayload(taskKind, callId, payload) {
       payload.expectedCallVersion > 0 &&
       isValidHeartbeatVersion(payload.expectedHeartbeatVersion) &&
       isValidFencingToken(payload.expectedFencingToken) &&
-      strictTimestampMillis(payload.expectedLeaseExpiresAt) !== null
+      timestampMillis(payload.expectedLeaseExpiresAt) !== null
     );
   }
 
@@ -3602,8 +3958,15 @@ function isValidTaskPayload(taskKind, callId, payload) {
     payload.timeoutKind === timeoutKind &&
     Number.isSafeInteger(payload.expectedCallVersion) &&
     payload.expectedCallVersion > 0 &&
-    strictTimestampMillis(payload.expectedDeadlineAt) !== null
+    timestampMillis(payload.expectedDeadlineAt) !== null
   );
+}
+
+function taskPayloadTimestampMillis(value) {
+  if (isPlainTimestampObject(value)) {
+    return plainTimestampMillis(value);
+  }
+  return strictTimestampMillis(value);
 }
 
 function deterministicExternalTaskId(task) {
@@ -3630,6 +3993,8 @@ function normalizeTaskPayloadIdentity(payload) {
       normalized[key] = value.getTime();
     } else if (value && typeof value.toMillis === "function") {
       normalized[key] = value.toMillis();
+    } else if (isPlainTimestampObject(value)) {
+      normalized[key] = plainTimestampMillis(value);
     } else {
       normalized[key] = value;
     }
@@ -3727,6 +4092,227 @@ function validateDispatchFailureRequest(request) {
     errorCode: request.errorCode,
     retryable: request.retryable,
   };
+}
+
+function validateTimeoutTaskEnvelope(request) {
+  requireExactRequestKeys(
+    request,
+    [
+      "callId",
+      "externalTaskId",
+      "outboxTaskId",
+      "payload",
+      "schemaVersion",
+      "taskKind",
+    ],
+    "timeout task envelope",
+  );
+  if (request.schemaVersion !== 1) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A supported timeout task envelope schemaVersion is required.",
+    );
+  }
+  if (!isValidIdentifier(request.callId, 160)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid callId is required.",
+    );
+  }
+  if (!isValidIdentifier(request.outboxTaskId, 220)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid outboxTaskId is required.",
+    );
+  }
+  if (!isValidIdentifier(request.externalTaskId, 220)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid externalTaskId is required.",
+    );
+  }
+  if (!Object.values(TASK_KINDS).includes(request.taskKind)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A supported taskKind is required.",
+    );
+  }
+  if (
+    !isValidTaskPayload(
+      request.taskKind,
+      request.callId,
+      request.payload,
+      { allowJsonTimestamps: true },
+    )
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid timeout payload is required.",
+    );
+  }
+  return {
+    schemaVersion: request.schemaVersion,
+    externalTaskId: request.externalTaskId,
+    callId: request.callId,
+    outboxTaskId: request.outboxTaskId,
+    taskKind: request.taskKind,
+    payload: request.payload,
+  };
+}
+
+function validateExecutionAcknowledgementRequest(request) {
+  requireExactRequestKeys(
+    request,
+    ["callId", "executionOutcome", "externalTaskId", "outboxTaskId"],
+    "task execution acknowledgement",
+  );
+  const base = validateExecutionTaskIdentityRequest(request);
+  if (!TASK_EXECUTION_ACK_OUTCOMES.includes(request.executionOutcome)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A supported executionOutcome is required.",
+    );
+  }
+  return {
+    ...base,
+    executionOutcome: request.executionOutcome,
+  };
+}
+
+function validateExecutionFailureRequest(request) {
+  requireExactRequestKeys(
+    request,
+    ["callId", "errorCode", "externalTaskId", "outboxTaskId"],
+    "task execution failure",
+  );
+  const base = validateExecutionTaskIdentityRequest(request);
+  if (!isControlledDispatchErrorCode(request.errorCode)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A controlled execution errorCode is required.",
+    );
+  }
+  return {
+    ...base,
+    errorCode: request.errorCode,
+  };
+}
+
+function validateExecutionTaskIdentityRequest(request) {
+  if (!isValidIdentifier(request.callId, 160)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid callId is required.",
+    );
+  }
+  if (!isValidIdentifier(request.outboxTaskId, 220)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid outboxTaskId is required.",
+    );
+  }
+  if (!isValidIdentifier(request.externalTaskId, 220)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid externalTaskId is required.",
+    );
+  }
+  return {
+    callId: request.callId,
+    outboxTaskId: request.outboxTaskId,
+    externalTaskId: request.externalTaskId,
+  };
+}
+
+async function loadExecutableOutboxTask(db, envelope) {
+  const snapshot = await db
+    .collection("callOps")
+    .doc(envelope.callId)
+    .collection("taskOutbox")
+    .doc(envelope.outboxTaskId)
+    .get();
+  const task = requireValidTaskOutboxDocument(snapshot, {
+    callId: envelope.callId,
+    taskId: envelope.outboxTaskId,
+  });
+  if (task.status !== "dispatched") {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "Only dispatched timeout tasks can execute.",
+    );
+  }
+  requireExecutableDispatchedTaskIdentity(task, envelope);
+  if (task.taskKind !== envelope.taskKind) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The timeout task kind does not match the outbox task.",
+    );
+  }
+  if (!taskPayloadsCanonicallyEqual(task.payload, envelope.payload)) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The timeout task payload does not match the outbox task.",
+    );
+  }
+  return task;
+}
+
+function requireExecutableDispatchedTaskIdentity(task, request) {
+  if (task.status !== "dispatched") {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The timeout task is not dispatched.",
+    );
+  }
+  const expectedExternalTaskId = deterministicExternalTaskId(task);
+  if (
+    request.externalTaskId !== expectedExternalTaskId ||
+    !externalTaskNameMatchesId(task.externalTaskName, expectedExternalTaskId)
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The timeout task external identity is invalid.",
+    );
+  }
+}
+
+function taskPayloadsCanonicallyEqual(left, right) {
+  return (
+    canonicalJson(normalizeTaskPayloadIdentity(left)) ===
+    canonicalJson(normalizeTaskPayloadIdentity(right))
+  );
+}
+
+async function recordExecutionFailureIfPossible({
+  recordExecutionFailure,
+  db,
+  task,
+  externalTaskId,
+  errorCode,
+  now,
+}) {
+  try {
+    await recordExecutionFailure({
+      db,
+      request: {
+        callId: task.callId,
+        outboxTaskId: task.taskId,
+        externalTaskId,
+        errorCode,
+      },
+      now,
+    });
+  } catch {
+    // Execution failure recording is best-effort; the processor failure remains
+    // the authoritative error for the delivery attempt.
+  }
+}
+
+function httpResult(statusCode, body) {
+  return Object.freeze({
+    statusCode,
+    body: Object.freeze(body),
+  });
 }
 
 function requireExactRequestKeys(request, allowedKeys, label) {
@@ -4398,6 +4984,36 @@ function strictTimestampMillis(value) {
   }
 }
 
+function isPlainTimestampObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const keys = Object.keys(value).sort();
+  const hasPublicKeys = keys[0] === "nanoseconds" && keys[1] === "seconds";
+  const hasPrivateKeys = keys[0] === "_nanoseconds" && keys[1] === "_seconds";
+  return (
+    (hasPublicKeys || hasPrivateKeys) &&
+    Number.isSafeInteger(value.seconds ?? value._seconds) &&
+    Number.isSafeInteger(value.nanoseconds ?? value._nanoseconds)
+  );
+}
+
+function plainTimestampMillis(value) {
+  const seconds = value.seconds ?? value._seconds;
+  const nanoseconds = value.nanoseconds ?? value._nanoseconds;
+  if (
+    !Number.isSafeInteger(seconds) ||
+    !Number.isSafeInteger(nanoseconds) ||
+    nanoseconds < 0 ||
+    nanoseconds > 999999999 ||
+    nanoseconds % 1000000 !== 0
+  ) {
+    return null;
+  }
+  const millis = seconds * 1000 + nanoseconds / 1000000;
+  return Number.isSafeInteger(millis) ? millis : null;
+}
+
 function isSupportedMediaState(value) {
   return SUPPORTED_MEDIA_STATES.includes(value);
 }
@@ -4577,22 +5193,27 @@ module.exports = {
   TASK_DISPATCH_CLAIM_DURATION_MS,
   TASK_DISPATCH_ERROR_CODE_MAX_LENGTH,
   TASK_DISPATCH_MAX_ATTEMPTS,
+  TASK_EXECUTION_ACK_OUTCOMES,
   TASK_OUTBOX_RETENTION_MS,
   TASK_OUTBOX_SCHEMA_VERSION,
   CallV2Error,
   TaskPublisherError,
   acceptCallV2,
+  acknowledgeTimeoutTaskExecutionV2,
   cancelCallV2,
   claimTaskOutboxDispatchV2,
+  createTimeoutTaskHttpHandlerV2,
   declineCallV2,
   deterministicExternalTaskId,
   dispatchTaskOutboxV2,
   deriveRtcUid,
   endCallV2,
+  executeTimeoutTaskEnvelopeV2,
   finalizeTaskOutboxDispatchFailureV2,
   finalizeTaskOutboxDispatchSuccessV2,
   processActiveLeaseTimeoutV2,
   processCallTimeoutV2,
+  recordTimeoutTaskExecutionFailureV2,
   reportParticipantMediaV2,
   renewActiveCallLeaseV2,
   startCallV2,
