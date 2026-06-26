@@ -11,14 +11,23 @@ const ERROR_CODES = Object.freeze({
   callIdConflict: "call_id_conflict",
   lockRecoveryRequired: "lock_recovery_required",
   transactionFailed: "transaction_failed",
+  callNotFound: "call_not_found",
+  forbidden: "forbidden",
+  invalidState: "invalid_state",
 });
 
 const ACTION_START_CALL = "startCall";
+const ACTION_ACCEPT_CALL = "acceptCall";
+const ACTION_DECLINE_CALL = "declineCall";
+const ACTION_CANCEL_CALL = "cancelCall";
+const ACTION_END_CALL = "endCall";
 const CALL_SCHEMA_VERSION = 2;
 const RINGING_DURATION_MS = 45 * 1000;
+const ACCEPTED_JOIN_DURATION_MS = 30 * 1000;
 const LOCK_EXPIRY_SAFETY_BUFFER_MS = 5 * 1000;
 const COMMAND_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const OPS_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const PUBLIC_HISTORY_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 160;
 const MAX_UID_LENGTH = 160;
 
@@ -117,7 +126,10 @@ function startCallV2({
       if (idempotencySnapshot.exists) {
         return handleExistingIdempotencyRecord(
           idempotencySnapshot.data(),
-          validatedRequest,
+          {
+            actorUid: validatedRequest.callerUid,
+            action: ACTION_START_CALL,
+          },
           requestHash,
         );
       }
@@ -160,6 +172,15 @@ function startCallV2({
         );
       }
 
+      const callerFencingToken = nextFencingToken(
+        lockSnapshots,
+        validatedRequest.callerUid,
+      );
+      const calleeFencingToken = nextFencingToken(
+        lockSnapshots,
+        validatedRequest.calleeUid,
+      );
+
       const callerLock = buildLockDocument({
         uid: validatedRequest.callerUid,
         peerUid: validatedRequest.calleeUid,
@@ -167,10 +188,7 @@ function startCallV2({
         nowDate,
         lockExpiresAt,
         commandId,
-        fencingToken: nextFencingToken(
-          lockSnapshots,
-          validatedRequest.callerUid,
-        ),
+        fencingToken: callerFencingToken,
       });
       const calleeLock = buildLockDocument({
         uid: validatedRequest.calleeUid,
@@ -179,10 +197,7 @@ function startCallV2({
         nowDate,
         lockExpiresAt,
         commandId,
-        fencingToken: nextFencingToken(
-          lockSnapshots,
-          validatedRequest.calleeUid,
-        ),
+        fencingToken: calleeFencingToken,
       });
 
       transaction.create(refs.callRef, {
@@ -244,6 +259,16 @@ function startCallV2({
         terminalAt: null,
         latestOpsVersion: 1,
         opsRetentionExpiresAt,
+        lockClaims: {
+          caller: {
+            uid: validatedRequest.callerUid,
+            fencingToken: callerFencingToken,
+          },
+          callee: {
+            uid: validatedRequest.calleeUid,
+            fencingToken: calleeFencingToken,
+          },
+        },
       });
 
       transaction.create(refs.commandRef, {
@@ -273,33 +298,755 @@ function startCallV2({
       return response;
     })
     .catch((error) => {
-      if (error instanceof CallV2Error) {
-        throw error;
-      }
-      throw new CallV2Error(
-        ERROR_CODES.transactionFailed,
-        "The start-call transaction failed.",
-        {
-          causeMessage: error && error.message ? error.message : String(error),
+      return recoverIdempotencyCreateConflictOrThrow({
+        error,
+        idempotencyRef: refs.idempotencyRef,
+        expected: {
+          actorUid: validatedRequest.callerUid,
+          action: ACTION_START_CALL,
         },
-      );
+        requestHash,
+        fallbackMessage: "The start-call transaction failed.",
+      });
     });
+}
+
+function acceptCallV2({ db, authUid, request, now }) {
+  assertDbDependency(db);
+  const validatedRequest = validateLifecycleCommandInput(authUid, request);
+  const nowDate = resolveNow(now);
+  const acceptedAt = nowDate;
+  const acceptedJoinDeadlineAt = addMilliseconds(
+    acceptedAt,
+    ACCEPTED_JOIN_DURATION_MS,
+  );
+  const command = buildLifecycleCommandContext({
+    actorUid: authUid,
+    action: ACTION_ACCEPT_CALL,
+    callId: validatedRequest.callId,
+    idempotencyKey: validatedRequest.idempotencyKey,
+    controlledPayload: {},
+  });
+  const refs = buildLifecycleRefs(db, {
+    callId: validatedRequest.callId,
+    actorUid: authUid,
+    idempotencyLookupId: command.idempotencyLookupId,
+    commandId: command.commandId,
+  });
+
+  return db
+    .runTransaction(async (transaction) => {
+      const idempotencySnapshot = await transaction.get(refs.idempotencyRef);
+      if (idempotencySnapshot.exists) {
+        return handleExistingIdempotencyRecord(
+          idempotencySnapshot.data(),
+          { actorUid: authUid, action: ACTION_ACCEPT_CALL },
+          command.requestHash,
+        );
+      }
+
+      const callSnapshot = await transaction.get(refs.callRef);
+      const call = requireMutableV2Call(callSnapshot, validatedRequest.callId);
+      const callOpsSnapshot = await transaction.get(refs.callOpsRef);
+      const callOps = requireCallOps(callOpsSnapshot, validatedRequest.callId);
+      const actorParticipantSnapshot = await transaction.get(
+        refs.actorParticipantRef,
+      );
+      const lockSnapshots = await readParticipantLockSnapshots(
+        transaction,
+        db,
+        call,
+      );
+
+      requireParticipantAuthorization(actorParticipantSnapshot, call, authUid);
+      if (authUid !== call.calleeUid) {
+        throw new CallV2Error(
+          ERROR_CODES.forbidden,
+          "Only the callee may accept this call.",
+        );
+      }
+      if (call.terminal || call.lifecycleState !== "ringing") {
+        throw new CallV2Error(
+          ERROR_CODES.invalidState,
+          "Only a ringing call can be accepted.",
+        );
+      }
+
+      const claims = requireLockClaims(callOps, call);
+      requireMatchingLocksForAccept(lockSnapshots.byRole, claims, call.id);
+
+      const nextCallVersion = nextMonotonicVersion(call.version);
+      const nextOpsVersion = nextMonotonicVersion(callOps.latestOpsVersion);
+      const lockExpiresAt = addMilliseconds(
+        acceptedJoinDeadlineAt,
+        LOCK_EXPIRY_SAFETY_BUFFER_MS,
+      );
+      const result = Object.freeze({
+        callId: call.id,
+        lifecycleState: "accepted",
+        version: nextCallVersion,
+        acceptedAt,
+        acceptedJoinDeadlineAt,
+        idempotentReplay: false,
+      });
+
+      transaction.update(refs.callRef, {
+        lifecycleState: "accepted",
+        version: nextCallVersion,
+        acceptedAt,
+        acceptedByUid: authUid,
+        acceptedJoinDeadlineAt,
+        updatedAt: nowDate,
+        lastPublicEventAt: nowDate,
+      });
+      transaction.update(refs.actorParticipantRef, {
+        acceptedAt,
+      });
+      updateAcceptedLock(transaction, lockSnapshots.byRole.caller.ref, {
+        nowDate,
+        lockExpiresAt,
+      });
+      updateAcceptedLock(transaction, lockSnapshots.byRole.callee.ref, {
+        nowDate,
+        lockExpiresAt,
+      });
+      transaction.update(refs.callOpsRef, {
+        latestOpsVersion: nextOpsVersion,
+        opsRetentionExpiresAt: addMilliseconds(nowDate, OPS_RETENTION_MS),
+      });
+      createCommandRecords(transaction, refs, {
+        command,
+        actorUid: authUid,
+        action: ACTION_ACCEPT_CALL,
+        callId: call.id,
+        nowDate,
+        result,
+      });
+
+      return result;
+    })
+    .catch((error) =>
+      recoverIdempotencyCreateConflictOrThrow({
+        error,
+        idempotencyRef: refs.idempotencyRef,
+        expected: { actorUid: authUid, action: ACTION_ACCEPT_CALL },
+        requestHash: command.requestHash,
+        fallbackMessage: "The call command transaction failed.",
+      }),
+    );
+}
+
+function declineCallV2({ db, authUid, request, now }) {
+  return runTerminalLifecycleCommand({
+    db,
+    authUid,
+    request,
+    now,
+    action: ACTION_DECLINE_CALL,
+    targetLifecycleState: "declined",
+    endReason: "declined",
+    allowedRoles: ["callee"],
+    allowedLifecycleStates: ["ringing"],
+  });
+}
+
+function cancelCallV2({ db, authUid, request, now }) {
+  return runTerminalLifecycleCommand({
+    db,
+    authUid,
+    request,
+    now,
+    action: ACTION_CANCEL_CALL,
+    targetLifecycleState: "cancelled",
+    endReason: "cancelled",
+    allowedRoles: ["caller"],
+    allowedLifecycleStates: ["ringing"],
+  });
+}
+
+function endCallV2({ db, authUid, request, now }) {
+  return runTerminalLifecycleCommand({
+    db,
+    authUid,
+    request,
+    now,
+    action: ACTION_END_CALL,
+    targetLifecycleState: "completed",
+    endReason: "ended_by_participant",
+    allowedRoles: ["caller", "callee"],
+    allowedLifecycleStates: ["accepted", "active"],
+  });
+}
+
+function runTerminalLifecycleCommand({
+  db,
+  authUid,
+  request,
+  now,
+  action,
+  targetLifecycleState,
+  endReason,
+  allowedRoles,
+  allowedLifecycleStates,
+}) {
+  assertDbDependency(db);
+  const validatedRequest = validateLifecycleCommandInput(authUid, request);
+  const nowDate = resolveNow(now);
+  const command = buildLifecycleCommandContext({
+    actorUid: authUid,
+    action,
+    callId: validatedRequest.callId,
+    idempotencyKey: validatedRequest.idempotencyKey,
+    controlledPayload: {
+      lifecycleState: targetLifecycleState,
+      endReason,
+    },
+  });
+  const refs = buildLifecycleRefs(db, {
+    callId: validatedRequest.callId,
+    actorUid: authUid,
+    idempotencyLookupId: command.idempotencyLookupId,
+    commandId: command.commandId,
+  });
+
+  return db
+    .runTransaction(async (transaction) => {
+      const idempotencySnapshot = await transaction.get(refs.idempotencyRef);
+      if (idempotencySnapshot.exists) {
+        return handleExistingIdempotencyRecord(
+          idempotencySnapshot.data(),
+          { actorUid: authUid, action },
+          command.requestHash,
+        );
+      }
+
+      const callSnapshot = await transaction.get(refs.callRef);
+      const call = requireMutableV2Call(callSnapshot, validatedRequest.callId);
+      const callOpsSnapshot = await transaction.get(refs.callOpsRef);
+      const callOps = requireCallOps(callOpsSnapshot, validatedRequest.callId);
+      const actorParticipantSnapshot = await transaction.get(
+        refs.actorParticipantRef,
+      );
+      const lockSnapshots = await readParticipantLockSnapshots(
+        transaction,
+        db,
+        call,
+      );
+
+      const actorRole = requireParticipantAuthorization(
+        actorParticipantSnapshot,
+        call,
+        authUid,
+      );
+      if (!allowedRoles.includes(actorRole)) {
+        throw new CallV2Error(
+          ERROR_CODES.forbidden,
+          "The actor is not allowed to perform this call command.",
+        );
+      }
+      if (
+        call.terminal ||
+        !allowedLifecycleStates.includes(call.lifecycleState)
+      ) {
+        throw new CallV2Error(
+          ERROR_CODES.invalidState,
+          "The call is not in a valid state for this command.",
+        );
+      }
+
+      const nextCallVersion = nextMonotonicVersion(call.version);
+      const nextOpsVersion = nextMonotonicVersion(callOps.latestOpsVersion);
+      const lockReleaseResults = releaseScopedLocks(
+        transaction,
+        lockSnapshots.byRole,
+        callOps,
+        call,
+      );
+      const historyExpiresAt = addMilliseconds(
+        nowDate,
+        PUBLIC_HISTORY_RETENTION_MS,
+      );
+      const result = Object.freeze({
+        callId: call.id,
+        lifecycleState: targetLifecycleState,
+        terminal: true,
+        version: nextCallVersion,
+        endedAt: nowDate,
+        endReason,
+        lockReleaseResults,
+        idempotentReplay: false,
+      });
+
+      transaction.update(refs.callRef, {
+        lifecycleState: targetLifecycleState,
+        terminal: true,
+        version: nextCallVersion,
+        updatedAt: nowDate,
+        lastPublicEventAt: nowDate,
+        endedAt: nowDate,
+        endedByUid: authUid,
+        endReason,
+        historyExpiresAt,
+      });
+      transaction.update(refs.callOpsRef, {
+        latestOpsVersion: nextOpsVersion,
+        terminalAt: nowDate,
+        terminalState: targetLifecycleState,
+        terminalReason: endReason,
+        opsRetentionExpiresAt: addMilliseconds(nowDate, OPS_RETENTION_MS),
+        lockReleaseResults,
+      });
+      createCommandRecords(transaction, refs, {
+        command,
+        actorUid: authUid,
+        action,
+        callId: call.id,
+        nowDate,
+        result,
+      });
+
+      return result;
+    })
+    .catch((error) =>
+      recoverIdempotencyCreateConflictOrThrow({
+        error,
+        idempotencyRef: refs.idempotencyRef,
+        expected: { actorUid: authUid, action },
+        requestHash: command.requestHash,
+        fallbackMessage: "The call command transaction failed.",
+      }),
+    );
+}
+
+function assertDbDependency(db) {
+  if (!db || typeof db.runTransaction !== "function") {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A Firestore database dependency is required.",
+    );
+  }
+}
+
+function validateLifecycleCommandInput(authUid, request) {
+  if (!isValidIdentifier(authUid, MAX_UID_LENGTH)) {
+    throw new CallV2Error(
+      ERROR_CODES.unauthenticated,
+      "An authenticated actor is required.",
+    );
+  }
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A lifecycle command request object is required.",
+    );
+  }
+
+  const allowedKeys = new Set(["callId", "idempotencyKey"]);
+  for (const key of Object.keys(request)) {
+    if (!allowedKeys.has(key)) {
+      throw new CallV2Error(
+        ERROR_CODES.invalidArgument,
+        `Unsupported lifecycle command field: ${key}.`,
+      );
+    }
+  }
+  if (!isValidIdentifier(request.callId, 160)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid callId is required.",
+    );
+  }
+  if (!isValidIdentifier(request.idempotencyKey, MAX_IDEMPOTENCY_KEY_LENGTH)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid idempotencyKey is required.",
+    );
+  }
+
+  return {
+    callId: request.callId,
+    idempotencyKey: request.idempotencyKey,
+  };
+}
+
+function buildLifecycleCommandContext({
+  actorUid,
+  action,
+  callId,
+  idempotencyKey,
+  controlledPayload,
+}) {
+  const requestHash = sha256Hex(
+    canonicalJson({
+      action,
+      callId,
+      ...controlledPayload,
+    }),
+  );
+  const idempotencyLookupId = sha256Hex(
+    [actorUid, action, idempotencyKey].join("\u0000"),
+  );
+  const commandId = `${commandIdPrefix(action)}_${sha256Hex(
+    [actorUid, action, idempotencyKey, requestHash, callId].join("\u0000"),
+  ).slice(0, 48)}`;
+
+  return {
+    commandId,
+    idempotencyLookupId,
+    requestHash,
+  };
+}
+
+function commandIdPrefix(action) {
+  return action.replace(/[^A-Za-z0-9]/g, "_").toLowerCase();
+}
+
+function buildLifecycleRefs(
+  db,
+  { callId, actorUid, idempotencyLookupId, commandId },
+) {
+  const callRef = db.collection("calls").doc(callId);
+  return {
+    callRef,
+    actorParticipantRef: callRef.collection("participants").doc(actorUid),
+    callOpsRef: db.collection("callOps").doc(callId),
+    commandRef: db
+      .collection("callOps")
+      .doc(callId)
+      .collection("commands")
+      .doc(commandId),
+    idempotencyRef: db.collection("callCommandKeys").doc(idempotencyLookupId),
+  };
+}
+
+function requireMutableV2Call(snapshot, callId) {
+  if (!snapshot.exists) {
+    throw new CallV2Error(
+      ERROR_CODES.callNotFound,
+      "The requested call does not exist.",
+    );
+  }
+  const call = {
+    ...snapshot.data(),
+    id: callId,
+  };
+  if (call.callSystem !== "v2") {
+    throw new CallV2Error(
+      ERROR_CODES.callNotFound,
+      "The requested call is not a V2 call.",
+    );
+  }
+  validateAuthoritativeCallData(call);
+  return call;
+}
+
+function validateAuthoritativeCallData(call) {
+  if (
+    !isValidIdentifier(call.callerUid, MAX_UID_LENGTH) ||
+    !isValidIdentifier(call.calleeUid, MAX_UID_LENGTH) ||
+    call.callerUid === call.calleeUid ||
+    !Array.isArray(call.participantUids) ||
+    !call.participantUids.includes(call.callerUid) ||
+    !call.participantUids.includes(call.calleeUid) ||
+    !isIncrementablePositiveInteger(call.version) ||
+    typeof call.terminal !== "boolean"
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The call document is malformed.",
+    );
+  }
+
+  const nonTerminalStates = new Set(["ringing", "accepted", "active"]);
+  const terminalStates = new Set([
+    "completed",
+    "declined",
+    "cancelled",
+    "missed",
+    "failed",
+  ]);
+  if (
+    (call.terminal && !terminalStates.has(call.lifecycleState)) ||
+    (!call.terminal && !nonTerminalStates.has(call.lifecycleState))
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The call lifecycle and terminal flag are inconsistent.",
+    );
+  }
+}
+
+function requireCallOps(snapshot, callId) {
+  if (!snapshot.exists) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The call operations document is missing.",
+    );
+  }
+  const callOps = snapshot.data();
+  if (
+    !callOps ||
+    callOps.callId !== callId ||
+    !isIncrementablePositiveInteger(callOps.latestOpsVersion)
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The call operations document is malformed.",
+    );
+  }
+  return callOps;
+}
+
+async function readParticipantLockSnapshots(transaction, db, call) {
+  const entries = sortByDocumentId([
+    {
+      role: "caller",
+      uid: call.callerUid,
+      ref: db.collection("activeCallLocks").doc(call.callerUid),
+    },
+    {
+      role: "callee",
+      uid: call.calleeUid,
+      ref: db.collection("activeCallLocks").doc(call.calleeUid),
+    },
+  ]);
+  const byRole = {};
+  for (const entry of entries) {
+    byRole[entry.role] = {
+      ...entry,
+      snapshot: await transaction.get(entry.ref),
+    };
+  }
+  return {
+    entries,
+    byRole,
+  };
+}
+
+function requireParticipantAuthorization(participantSnapshot, call, authUid) {
+  if (!call.participantUids.includes(authUid) || !participantSnapshot.exists) {
+    throw new CallV2Error(
+      ERROR_CODES.forbidden,
+      "The actor is not a participant in this call.",
+    );
+  }
+  if (authUid === call.callerUid) {
+    return "caller";
+  }
+  if (authUid === call.calleeUid) {
+    return "callee";
+  }
+  throw new CallV2Error(
+    ERROR_CODES.forbidden,
+    "The actor is not a participant in this call.",
+  );
+}
+
+function requireLockClaims(callOps, call) {
+  const callerClaim = lockClaimForRole(callOps, "caller", call.callerUid);
+  const calleeClaim = lockClaimForRole(callOps, "callee", call.calleeUid);
+  if (!callerClaim || !calleeClaim) {
+    throw new CallV2Error(
+      ERROR_CODES.lockRecoveryRequired,
+      "The call lock claims are missing or malformed.",
+    );
+  }
+  return {
+    caller: callerClaim,
+    callee: calleeClaim,
+  };
+}
+
+function lockClaimForRole(callOps, role, expectedUid) {
+  const claim = callOps && callOps.lockClaims && callOps.lockClaims[role];
+  if (
+    !claim ||
+    claim.uid !== expectedUid ||
+    !isIncrementableFencingToken(claim.fencingToken)
+  ) {
+    return null;
+  }
+  return claim;
+}
+
+function requireMatchingLocksForAccept(lockSnapshotsByRole, claims, callId) {
+  for (const role of ["caller", "callee"]) {
+    const lockEntry = lockSnapshotsByRole[role];
+    const claim = claims[role];
+    if (!lockEntry || !lockEntry.snapshot.exists) {
+      throw new CallV2Error(
+        ERROR_CODES.lockRecoveryRequired,
+        "A required active call lock is missing.",
+      );
+    }
+    const lock = lockEntry.snapshot.data();
+    if (
+      !lock ||
+      lock.uid !== claim.uid ||
+      lock.callId !== callId ||
+      lock.fencingToken !== claim.fencingToken
+    ) {
+      throw new CallV2Error(
+        ERROR_CODES.lockRecoveryRequired,
+        "A required active call lock does not match its private claim.",
+      );
+    }
+  }
+}
+
+function updateAcceptedLock(transaction, lockRef, { nowDate, lockExpiresAt }) {
+  transaction.update(lockRef, {
+    state: "accepted",
+    updatedAt: nowDate,
+    expiresAt: lockExpiresAt,
+  });
+}
+
+function releaseScopedLocks(transaction, lockSnapshotsByRole, callOps, call) {
+  const results = {};
+  for (const role of ["caller", "callee"]) {
+    const expectedUid = role === "caller" ? call.callerUid : call.calleeUid;
+    const claim = lockClaimForRole(callOps, role, expectedUid);
+    const lockEntry = lockSnapshotsByRole[role];
+    if (!claim) {
+      results[role] = "claim_missing";
+      continue;
+    }
+    if (!lockEntry || !lockEntry.snapshot.exists) {
+      results[role] = "missing";
+      continue;
+    }
+
+    const lock = lockEntry.snapshot.data();
+    if (!lock || lock.uid !== expectedUid || lock.callId !== call.id) {
+      results[role] = "call_mismatch";
+      continue;
+    }
+    if (lock.fencingToken !== claim.fencingToken) {
+      results[role] = "fencing_mismatch";
+      continue;
+    }
+
+    transaction.delete(lockEntry.ref);
+    results[role] = "released";
+  }
+  return results;
+}
+
+function createCommandRecords(
+  transaction,
+  refs,
+  { command, actorUid, action, callId, nowDate, result },
+) {
+  const ttlAt = addMilliseconds(nowDate, COMMAND_TTL_MS);
+  transaction.create(refs.commandRef, {
+    commandId: command.commandId,
+    actorUid,
+    action,
+    requestHash: command.requestHash,
+    idempotencyLookupId: command.idempotencyLookupId,
+    callId,
+    status: "completed",
+    result,
+    createdAt: nowDate,
+    completedAt: nowDate,
+    ttlAt,
+  });
+  transaction.create(refs.idempotencyRef, {
+    actorUid,
+    action,
+    requestHash: command.requestHash,
+    callId,
+    result,
+    createdAt: nowDate,
+    completedAt: nowDate,
+    ttlAt,
+  });
+}
+
+function nextMonotonicVersion(value) {
+  if (!isIncrementablePositiveInteger(value)) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The version cannot be safely incremented.",
+    );
+  }
+  return value + 1;
+}
+
+function isIncrementablePositiveInteger(value) {
+  return (
+    Number.isSafeInteger(value) &&
+    value > 0 &&
+    value < Number.MAX_SAFE_INTEGER
+  );
+}
+
+function wrapTransactionError(error) {
+  if (error instanceof CallV2Error) {
+    throw error;
+  }
+  throw new CallV2Error(
+    ERROR_CODES.transactionFailed,
+    "The call command transaction failed.",
+    {
+      causeMessage: error && error.message ? error.message : String(error),
+    },
+  );
+}
+
+async function recoverIdempotencyCreateConflictOrThrow({
+  error,
+  idempotencyRef,
+  expected,
+  requestHash,
+  fallbackMessage,
+}) {
+  if (error instanceof CallV2Error) {
+    throw error;
+  }
+  if (isAlreadyExistsError(error)) {
+    const idempotencySnapshot = await idempotencyRef.get();
+    if (idempotencySnapshot.exists) {
+      return handleExistingIdempotencyRecord(
+        idempotencySnapshot.data(),
+        expected,
+        requestHash,
+      );
+    }
+  }
+  throw new CallV2Error(
+    ERROR_CODES.transactionFailed,
+    fallbackMessage,
+    {
+      causeMessage: error && error.message ? error.message : String(error),
+    },
+  );
+}
+
+function isAlreadyExistsError(error) {
+  return (
+    error &&
+    (error.code === 6 ||
+      error.code === "already-exists" ||
+      /already exists|ALREADY_EXISTS/i.test(error.message || ""))
+  );
 }
 
 function handleExistingIdempotencyRecord(
   record,
-  validatedRequest,
+  expected,
   requestHash,
 ) {
   if (
     !record ||
-    record.actorUid !== validatedRequest.callerUid ||
-    record.action !== ACTION_START_CALL ||
+    record.actorUid !== expected.actorUid ||
+    record.action !== expected.action ||
     record.requestHash !== requestHash
   ) {
     throw new CallV2Error(
       ERROR_CODES.idempotencyConflict,
-      "The idempotency key was already used for a different start-call request.",
+      "The idempotency key was already used for a different request.",
     );
   }
 
@@ -558,15 +1305,21 @@ function isIncrementableFencingToken(value) {
 }
 
 function normalizeReplayResult(result) {
-  return {
-    callId: result.callId,
-    lifecycleState: result.lifecycleState,
-    version: result.version,
-    ringingDeadlineAt: toDate(result.ringingDeadlineAt),
-    callerRtcUid: result.callerRtcUid,
-    calleeRtcUid: result.calleeRtcUid,
+  const normalized = {
+    ...result,
     idempotentReplay: true,
   };
+  for (const field of [
+    "ringingDeadlineAt",
+    "acceptedAt",
+    "acceptedJoinDeadlineAt",
+    "endedAt",
+  ]) {
+    if (normalized[field]) {
+      normalized[field] = toDate(normalized[field]);
+    }
+  }
+  return normalized;
 }
 
 function deriveAgoraChannel(callId) {
@@ -676,14 +1429,24 @@ function toDate(value) {
 }
 
 module.exports = {
+  ACCEPTED_JOIN_DURATION_MS,
   ACTION_START_CALL,
+  ACTION_ACCEPT_CALL,
+  ACTION_CANCEL_CALL,
+  ACTION_DECLINE_CALL,
+  ACTION_END_CALL,
   CALL_SCHEMA_VERSION,
   COMMAND_TTL_MS,
   ERROR_CODES,
   LOCK_EXPIRY_SAFETY_BUFFER_MS,
   OPS_RETENTION_MS,
+  PUBLIC_HISTORY_RETENTION_MS,
   RINGING_DURATION_MS,
   CallV2Error,
+  acceptCallV2,
+  cancelCallV2,
+  declineCallV2,
   deriveRtcUid,
+  endCallV2,
   startCallV2,
 };

@@ -6,12 +6,18 @@ const { after, beforeEach, test } = require("node:test");
 const admin = require("firebase-admin");
 
 const {
+  ACCEPTED_JOIN_DURATION_MS,
   COMMAND_TTL_MS,
   ERROR_CODES,
   LOCK_EXPIRY_SAFETY_BUFFER_MS,
   OPS_RETENTION_MS,
+  PUBLIC_HISTORY_RETENTION_MS,
   RINGING_DURATION_MS,
   CallV2Error,
+  acceptCallV2,
+  cancelCallV2,
+  declineCallV2,
+  endCallV2,
   startCallV2,
 } = require("../../call_v2/start_call_v2");
 
@@ -145,6 +151,18 @@ test("creates ringing call, participants, locks, ops, and idempotency atomically
   assert.equal(ops.terminalAt, null);
   assert.equal(ops.latestOpsVersion, 1);
   assert.equal(millis(ops.opsRetentionExpiresAt), fixedMs() + OPS_RETENTION_MS);
+  assert.deepEqual(ops.lockClaims, {
+    caller: {
+      uid: "caller",
+      fencingToken: callerLock.fencingToken,
+    },
+    callee: {
+      uid: "callee",
+      fencingToken: calleeLock.fencingToken,
+    },
+  });
+  assert.equal(call.lockClaims, undefined);
+  assert.equal(call.fencingToken, undefined);
 
   const commandDocs = await db.collection("callOps/call_1/commands").get();
   assert.equal(commandDocs.size, 1);
@@ -693,18 +711,500 @@ test("private command records are stored only under callOps", async () => {
   assert.equal((await db.collection("callOps/call_1/commands").get()).size, 1);
 });
 
+test("callee accepts ringing call and updates call, participant, locks, and ops", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const beforeCallerLock = await requiredData("activeCallLocks/caller");
+  const beforeCalleeLock = await requiredData("activeCallLocks/callee");
+
+  const result = await acceptCall();
+
+  assert.equal(result.callId, "call_1");
+  assert.equal(result.lifecycleState, "accepted");
+  assert.equal(result.version, 2);
+  assert.equal(millis(result.acceptedAt), fixedMs());
+  assert.equal(
+    millis(result.acceptedJoinDeadlineAt),
+    fixedMs() + ACCEPTED_JOIN_DURATION_MS,
+  );
+  assert.equal(result.idempotentReplay, false);
+
+  const call = await requiredData("calls/call_1");
+  assert.equal(call.lifecycleState, "accepted");
+  assert.equal(call.terminal, false);
+  assert.equal(call.version, 2);
+  assert.equal(millis(call.acceptedAt), fixedMs());
+  assert.equal(call.acceptedByUid, "callee");
+  assert.equal(
+    millis(call.acceptedJoinDeadlineAt),
+    fixedMs() + ACCEPTED_JOIN_DURATION_MS,
+  );
+  assert.equal(millis(call.updatedAt), fixedMs());
+  assert.equal(millis(call.lastPublicEventAt), fixedMs());
+
+  const calleeParticipant = await requiredData(
+    "calls/call_1/participants/callee",
+  );
+  assert.equal(millis(calleeParticipant.acceptedAt), fixedMs());
+
+  const callerLock = await requiredData("activeCallLocks/caller");
+  const calleeLock = await requiredData("activeCallLocks/callee");
+  assert.equal(callerLock.state, "accepted");
+  assert.equal(calleeLock.state, "accepted");
+  assert.equal(callerLock.fencingToken, beforeCallerLock.fencingToken);
+  assert.equal(calleeLock.fencingToken, beforeCalleeLock.fencingToken);
+  assert.equal(
+    millis(callerLock.expiresAt),
+    fixedMs() + ACCEPTED_JOIN_DURATION_MS + LOCK_EXPIRY_SAFETY_BUFFER_MS,
+  );
+  assert.equal(
+    millis(calleeLock.expiresAt),
+    fixedMs() + ACCEPTED_JOIN_DURATION_MS + LOCK_EXPIRY_SAFETY_BUFFER_MS,
+  );
+
+  const ops = await requiredData("callOps/call_1");
+  assert.equal(ops.latestOpsVersion, 2);
+  assert.equal(ops.terminalAt, null);
+  assert.equal(await commandCountForAction("call_1", "acceptCall"), 1);
+});
+
+test("caller and nonparticipant cannot accept", async () => {
+  await seedUsers("caller", "callee", "intruder");
+  await startCall();
+
+  await assertCallError(
+    ERROR_CODES.forbidden,
+    acceptCall({ authUid: "caller", request: lifecycleRequest("call_1", "a") }),
+  );
+  await assertCallError(
+    ERROR_CODES.forbidden,
+    acceptCall({
+      authUid: "intruder",
+      request: lifecycleRequest("call_1", "b"),
+    }),
+  );
+  assert.equal((await requiredData("calls/call_1")).lifecycleState, "ringing");
+  assert.equal(await commandCountForAction("call_1", "acceptCall"), 0);
+});
+
+test("already accepted and terminal calls reject a new non-replay accept", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall({ request: lifecycleRequest("call_1", "accept_once") });
+
+  await assertCallError(
+    ERROR_CODES.invalidState,
+    acceptCall({ request: lifecycleRequest("call_1", "accept_twice") }),
+  );
+
+  await endCall({ request: lifecycleRequest("call_1", "end_after_accept") });
+  await assertCallError(
+    ERROR_CODES.invalidState,
+    acceptCall({ request: lifecycleRequest("call_1", "accept_terminal") }),
+  );
+  assert.equal(await commandCountForAction("call_1", "acceptCall"), 1);
+});
+
+test("missing or mismatched accept lock returns lock_recovery_required without writes", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await db.doc("activeCallLocks/callee").delete();
+
+  await assertCallError(
+    ERROR_CODES.lockRecoveryRequired,
+    acceptCall({ request: lifecycleRequest("call_1", "accept_missing") }),
+  );
+  assert.equal((await requiredData("calls/call_1")).lifecycleState, "ringing");
+  assert.equal(await commandCountForAction("call_1", "acceptCall"), 0);
+  assert.equal((await db.collection("callCommandKeys").get()).size, 1);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  await db.doc("activeCallLocks/caller").update({ fencingToken: 999 });
+  await assertCallError(
+    ERROR_CODES.lockRecoveryRequired,
+    acceptCall({ request: lifecycleRequest("call_1", "accept_mismatch") }),
+  );
+  assert.equal((await requiredData("calls/call_1")).lifecycleState, "ringing");
+  assert.equal(await commandCountForAction("call_1", "acceptCall"), 0);
+});
+
+test("matching accept idempotency replay returns the same result", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+
+  const first = await acceptCall();
+  const replay = await acceptCall();
+
+  assert.equal(replay.callId, first.callId);
+  assert.equal(replay.version, first.version);
+  assert.equal(replay.idempotentReplay, true);
+  assert.equal(millis(replay.acceptedAt), millis(first.acceptedAt));
+  assert.equal(await commandCountForAction("call_1", "acceptCall"), 1);
+});
+
+test("concurrent identical accepts create one transition and one replay", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+
+  const results = await Promise.all([
+    acceptCall({ request: lifecycleRequest("call_1", "same_accept") }),
+    acceptCall({ request: lifecycleRequest("call_1", "same_accept") }),
+  ]);
+
+  assert.equal(new Set(results.map((result) => result.version)).size, 1);
+  assert.equal(results.filter((result) => result.idempotentReplay).length, 1);
+  assert.equal(results.filter((result) => !result.idempotentReplay).length, 1);
+  assert.equal((await requiredData("calls/call_1")).version, 2);
+  assert.equal(await commandCountForAction("call_1", "acceptCall"), 1);
+});
+
+test("concurrent accept versus decline results in exactly one valid transition", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+
+  const results = await Promise.allSettled([
+    acceptCall({ request: lifecycleRequest("call_1", "accept_race") }),
+    declineCall({ request: lifecycleRequest("call_1", "decline_race") }),
+  ]);
+
+  assertOneSuccessAndOneInvalidState(results);
+  const call = await requiredData("calls/call_1");
+  assert.ok(["accepted", "declined"].includes(call.lifecycleState));
+  assert.equal(call.version, 2);
+});
+
+test("callee declines ringing call with terminal fields and lock release", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+
+  const result = await declineCall();
+
+  assertTerminalResult(result, {
+    lifecycleState: "declined",
+    endReason: "declined",
+  });
+  assert.deepEqual(result.lockReleaseResults, {
+    caller: "released",
+    callee: "released",
+  });
+  const call = await requiredData("calls/call_1");
+  assert.equal(call.lifecycleState, "declined");
+  assert.equal(call.terminal, true);
+  assert.equal(call.version, 2);
+  assert.equal(millis(call.historyExpiresAt), fixedMs() + PUBLIC_HISTORY_RETENTION_MS);
+  assert.equal((await db.doc("activeCallLocks/caller").get()).exists, false);
+  assert.equal((await db.doc("activeCallLocks/callee").get()).exists, false);
+  const ops = await requiredData("callOps/call_1");
+  assert.equal(ops.terminalState, "declined");
+  assert.equal(ops.terminalReason, "declined");
+  assert.equal(millis(ops.terminalAt), fixedMs());
+  assert.deepEqual(ops.lockReleaseResults, result.lockReleaseResults);
+});
+
+test("caller cannot decline", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+
+  await assertCallError(
+    ERROR_CODES.forbidden,
+    declineCall({ authUid: "caller" }),
+  );
+  assert.equal((await requiredData("calls/call_1")).lifecycleState, "ringing");
+});
+
+test("decline does not delete unrelated or fencing-mismatched locks", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await db.doc("activeCallLocks/caller").update({ callId: "other_call" });
+  await db.doc("activeCallLocks/callee").update({ fencingToken: 999 });
+
+  const result = await declineCall();
+
+  assert.deepEqual(result.lockReleaseResults, {
+    caller: "call_mismatch",
+    callee: "fencing_mismatch",
+  });
+  assert.equal((await db.doc("activeCallLocks/caller").get()).exists, true);
+  assert.equal((await db.doc("activeCallLocks/callee").get()).exists, true);
+});
+
+test("caller cancels ringing call and releases only matching locks", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+
+  const result = await cancelCall();
+
+  assertTerminalResult(result, {
+    lifecycleState: "cancelled",
+    endReason: "cancelled",
+  });
+  assert.deepEqual(result.lockReleaseResults, {
+    caller: "released",
+    callee: "released",
+  });
+  assert.equal((await requiredData("calls/call_1")).lifecycleState, "cancelled");
+  assert.equal((await db.doc("activeCallLocks/caller").get()).exists, false);
+  assert.equal((await db.doc("activeCallLocks/callee").get()).exists, false);
+});
+
+test("callee cannot cancel", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+
+  await assertCallError(
+    ERROR_CODES.forbidden,
+    cancelCall({ authUid: "callee" }),
+  );
+  assert.equal((await requiredData("calls/call_1")).lifecycleState, "ringing");
+});
+
+test("concurrent cancel versus accept results in exactly one transition", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+
+  const results = await Promise.allSettled([
+    cancelCall({ request: lifecycleRequest("call_1", "cancel_race") }),
+    acceptCall({ request: lifecycleRequest("call_1", "accept_cancel_race") }),
+  ]);
+
+  assertOneSuccessAndOneInvalidState(results);
+  const call = await requiredData("calls/call_1");
+  assert.ok(["cancelled", "accepted"].includes(call.lifecycleState));
+  assert.equal(call.version, 2);
+});
+
+test("either participant can end an accepted call", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+
+  const result = await endCall({ authUid: "caller" });
+
+  assertTerminalResult(result, {
+    lifecycleState: "completed",
+    endReason: "ended_by_participant",
+    version: 3,
+  });
+  assert.equal((await requiredData("calls/call_1")).lifecycleState, "completed");
+});
+
+test("either participant can end an active call", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+  await db.doc("calls/call_1").update({
+    lifecycleState: "active",
+    activeAt: FIXED_NOW,
+    version: 3,
+  });
+  await db.doc("callOps/call_1").update({ latestOpsVersion: 3 });
+
+  const result = await endCall({
+    authUid: "callee",
+    request: lifecycleRequest("call_1", "end_active"),
+  });
+
+  assertTerminalResult(result, {
+    lifecycleState: "completed",
+    endReason: "ended_by_participant",
+    version: 4,
+  });
+});
+
+test("end while ringing returns invalid_state", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+
+  await assertCallError(
+    ERROR_CODES.invalidState,
+    endCall(),
+  );
+  assert.equal((await requiredData("calls/call_1")).lifecycleState, "ringing");
+});
+
+test("end produces completed terminal state and exact history retention", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+
+  await endCall();
+
+  const call = await requiredData("calls/call_1");
+  assert.equal(call.lifecycleState, "completed");
+  assert.equal(call.terminal, true);
+  assert.equal(call.endReason, "ended_by_participant");
+  assert.equal(millis(call.endedAt), fixedMs());
+  assert.equal(millis(call.historyExpiresAt), fixedMs() + PUBLIC_HISTORY_RETENTION_MS);
+});
+
+test("concurrent end commands increment version only once", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+
+  const results = await Promise.allSettled([
+    endCall({
+      authUid: "caller",
+      request: lifecycleRequest("call_1", "end_race_caller"),
+    }),
+    endCall({
+      authUid: "callee",
+      request: lifecycleRequest("call_1", "end_race_callee"),
+    }),
+  ]);
+
+  assertOneSuccessAndOneInvalidState(results);
+  const call = await requiredData("calls/call_1");
+  assert.equal(call.lifecycleState, "completed");
+  assert.equal(call.version, 3);
+});
+
+test("same end idempotency key replays the original result", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+
+  const first = await endCall({ request: lifecycleRequest("call_1", "end_same") });
+  const replay = await endCall({ request: lifecycleRequest("call_1", "end_same") });
+
+  assert.equal(replay.idempotentReplay, true);
+  assert.equal(replay.callId, first.callId);
+  assert.equal(replay.version, first.version);
+  assert.equal(millis(replay.endedAt), millis(first.endedAt));
+  assert.equal(await commandCountForAction("call_1", "endCall"), 1);
+});
+
+test("same lifecycle idempotency key with changed call ID conflicts", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall({ request: lifecycleRequest("call_1", "same_key") });
+
+  await assertCallError(
+    ERROR_CODES.idempotencyConflict,
+    acceptCall({ request: lifecycleRequest("other_call", "same_key") }),
+  );
+});
+
+test("nonexistent and legacy calls cannot be mutated", async () => {
+  await assertCallError(
+    ERROR_CODES.callNotFound,
+    cancelCall({ request: lifecycleRequest("missing_call", "missing") }),
+  );
+  assert.equal((await db.collection("callCommandKeys").get()).size, 0);
+
+  await db.doc("calls/legacy_call").set({
+    callSystem: "legacy",
+    lifecycleState: "ringing",
+  });
+  await assertCallError(
+    ERROR_CODES.callNotFound,
+    cancelCall({ request: lifecycleRequest("legacy_call", "legacy") }),
+  );
+  assert.equal((await db.collection("callCommandKeys").get()).size, 0);
+});
+
+test("malformed version is rejected without lifecycle writes", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await db.doc("calls/call_1").update({ version: Number.MAX_SAFE_INTEGER });
+  const beforeCall = normalizeFirestoreData(await requiredData("calls/call_1"));
+
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    cancelCall(),
+  );
+
+  assert.deepEqual(
+    normalizeFirestoreData(await requiredData("calls/call_1")),
+    beforeCall,
+  );
+  assert.equal(await commandCountForAction("call_1", "cancelCall"), 0);
+});
+
+test("terminal command metadata and release results stay private", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await cancelCall();
+
+  const call = await requiredData("calls/call_1");
+  const callerParticipant = await requiredData(
+    "calls/call_1/participants/caller",
+  );
+  const ops = await requiredData("callOps/call_1");
+
+  assert.equal(call.lockClaims, undefined);
+  assert.equal(call.lockReleaseResults, undefined);
+  assert.equal(call.commands, undefined);
+  assert.equal(callerParticipant.lockClaims, undefined);
+  assert.equal(callerParticipant.lockReleaseResults, undefined);
+  assert.equal(ops.terminalState, "cancelled");
+  assert.deepEqual(ops.lockReleaseResults, {
+    caller: "released",
+    callee: "released",
+  });
+  assert.equal(await commandCountForAction("call_1", "cancelCall"), 1);
+});
+
 test("exports the expected stable error code vocabulary", () => {
   assert.deepEqual(Object.values(ERROR_CODES).sort(), [
     "call_id_conflict",
+    "call_not_found",
     "callee_not_found",
+    "forbidden",
     "idempotency_conflict",
     "invalid_argument",
+    "invalid_state",
     "lock_recovery_required",
     "transaction_failed",
     "unauthenticated",
     "user_busy",
   ]);
 });
+
+function acceptCall(overrides = {}) {
+  return acceptCallV2({
+    db,
+    authUid: overrides.authUid || "callee",
+    request: overrides.request || lifecycleRequest("call_1", "accept_1"),
+    now: overrides.now || FIXED_NOW,
+  });
+}
+
+function declineCall(overrides = {}) {
+  return declineCallV2({
+    db,
+    authUid: overrides.authUid || "callee",
+    request: overrides.request || lifecycleRequest("call_1", "decline_1"),
+    now: overrides.now || FIXED_NOW,
+  });
+}
+
+function cancelCall(overrides = {}) {
+  return cancelCallV2({
+    db,
+    authUid: overrides.authUid || "caller",
+    request: overrides.request || lifecycleRequest("call_1", "cancel_1"),
+    now: overrides.now || FIXED_NOW,
+  });
+}
+
+function endCall(overrides = {}) {
+  return endCallV2({
+    db,
+    authUid: overrides.authUid || "caller",
+    request: overrides.request || lifecycleRequest("call_1", "end_1"),
+    now: overrides.now || FIXED_NOW,
+  });
+}
+
+function lifecycleRequest(callId, idempotencyKey) {
+  return {
+    callId,
+    idempotencyKey,
+  };
+}
 
 function startCall(overrides = {}) {
   return startCallV2({
@@ -723,6 +1223,25 @@ function request(overrides = {}) {
     idempotencyKey: "idem_1",
     ...overrides,
   };
+}
+
+function assertTerminalResult(result, expected) {
+  assert.equal(result.callId, "call_1");
+  assert.equal(result.lifecycleState, expected.lifecycleState);
+  assert.equal(result.terminal, true);
+  assert.equal(result.version, expected.version || 2);
+  assert.equal(millis(result.endedAt), fixedMs());
+  assert.equal(result.endReason, expected.endReason);
+  assert.equal(result.idempotentReplay, false);
+}
+
+function assertOneSuccessAndOneInvalidState(results) {
+  const fulfilled = results.filter((result) => result.status === "fulfilled");
+  const rejected = results.filter((result) => result.status === "rejected");
+  assert.equal(fulfilled.length, 1);
+  assert.equal(rejected.length, 1);
+  assert.ok(rejected[0].reason instanceof CallV2Error);
+  assert.equal(rejected[0].reason.code, ERROR_CODES.invalidState);
 }
 
 async function seedUsers(...uids) {
@@ -776,6 +1295,11 @@ async function assertNoCollisionPartials(callId) {
   assert.equal((await db.collection("callCommandKeys").get()).size, 0);
   assert.equal((await db.collection(`calls/${callId}/participants`).get()).size, 0);
   assert.equal((await db.collection(`callOps/${callId}/commands`).get()).size, 0);
+}
+
+async function commandCountForAction(callId, action) {
+  const snapshot = await db.collection(`callOps/${callId}/commands`).get();
+  return snapshot.docs.filter((doc) => doc.data().action === action).length;
 }
 
 function assertExactKeys(value, expectedKeys) {
