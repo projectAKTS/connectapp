@@ -8,6 +8,7 @@ enum NativePresentationState {
   callkitPresented,
   acceptedNatively,
   declinedNatively,
+  endingRequested,
   endedNatively;
 }
 
@@ -15,6 +16,15 @@ enum CallRouteState {
   notRequested,
   opening,
   open,
+  failed,
+  closed;
+}
+
+enum IncomingRouteState {
+  notRequested,
+  opening,
+  presented,
+  failed,
   closed;
 }
 
@@ -32,9 +42,11 @@ class CallSessionState {
     required this.localParticipantRole,
     required this.localMediaState,
     required this.peerMediaState,
+    required this.localMediaVersion,
+    required this.peerMediaVersion,
     required this.localPhase,
     required this.nativePresentationState,
-    required this.incomingRoutePresented,
+    required this.incomingRouteState,
     required this.callRouteState,
     required this.cleanupStatus,
     List<String> processedEventIds = const <String>[],
@@ -48,9 +60,11 @@ class CallSessionState {
       localParticipantRole: null,
       localMediaState: ParticipantMediaState.notJoined,
       peerMediaState: ParticipantMediaState.notJoined,
+      localMediaVersion: 0,
+      peerMediaVersion: 0,
       localPhase: CallLocalPhase.idle,
       nativePresentationState: NativePresentationState.notPresented,
-      incomingRoutePresented: false,
+      incomingRouteState: IncomingRouteState.notRequested,
       callRouteState: CallRouteState.notRequested,
       cleanupStatus: CleanupStatus.notRequested,
     );
@@ -64,9 +78,11 @@ class CallSessionState {
   final CallParticipantRole? localParticipantRole;
   final ParticipantMediaState localMediaState;
   final ParticipantMediaState peerMediaState;
+  final int localMediaVersion;
+  final int peerMediaVersion;
   final CallLocalPhase localPhase;
   final NativePresentationState nativePresentationState;
-  final bool incomingRoutePresented;
+  final IncomingRouteState incomingRouteState;
   final CallRouteState callRouteState;
   final CleanupStatus cleanupStatus;
   final List<String> processedEventIds;
@@ -82,9 +98,11 @@ class CallSessionState {
     Object? localParticipantRole = _notSet,
     ParticipantMediaState? localMediaState,
     ParticipantMediaState? peerMediaState,
+    int? localMediaVersion,
+    int? peerMediaVersion,
     CallLocalPhase? localPhase,
     NativePresentationState? nativePresentationState,
-    bool? incomingRoutePresented,
+    IncomingRouteState? incomingRouteState,
     CallRouteState? callRouteState,
     CleanupStatus? cleanupStatus,
     List<String>? processedEventIds,
@@ -101,11 +119,12 @@ class CallSessionState {
           : localParticipantRole as CallParticipantRole?,
       localMediaState: localMediaState ?? this.localMediaState,
       peerMediaState: peerMediaState ?? this.peerMediaState,
+      localMediaVersion: localMediaVersion ?? this.localMediaVersion,
+      peerMediaVersion: peerMediaVersion ?? this.peerMediaVersion,
       localPhase: localPhase ?? this.localPhase,
       nativePresentationState:
           nativePresentationState ?? this.nativePresentationState,
-      incomingRoutePresented:
-          incomingRoutePresented ?? this.incomingRoutePresented,
+      incomingRouteState: incomingRouteState ?? this.incomingRouteState,
       callRouteState: callRouteState ?? this.callRouteState,
       cleanupStatus: cleanupStatus ?? this.cleanupStatus,
       processedEventIds: processedEventIds ?? this.processedEventIds,

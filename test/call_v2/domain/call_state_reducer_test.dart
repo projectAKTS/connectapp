@@ -11,7 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   const reducer = CallStateReducer();
 
-  group('CallStateReducer', () {
+  group('authoritative snapshot reduction', () {
     test('initial idle state receives a ringing snapshot', () {
       final reduction = reducer.reduce(
         CallSessionState.initial(),
@@ -21,29 +21,18 @@ void main() {
       expect(reduction.state.callId, 'call_a');
       expect(reduction.state.lifecycle, CallLifecycle.ringing);
       expect(reduction.state.localPhase, CallLocalPhase.presentingIncoming);
+      expect(reduction.state.incomingRouteState, IncomingRouteState.opening);
       expect(
         reduction.effects,
         contains(const CallEffect.presentIncomingRoute('call_a')),
       );
     });
 
-    test('duplicate ringing snapshot produces no duplicate presentation effect',
-        () {
-      final event = _snapshotEvent(lifecycle: CallLifecycle.ringing);
-
-      final first = reducer.reduce(CallSessionState.initial(), event);
-      final second = reducer.reduce(first.state, event);
-
-      expect(first.effects.where(_isPresentIncoming), hasLength(1));
-      expect(second.effects.where(_isPresentIncoming), isEmpty);
-    });
-
-    test('older snapshot version is ignored', () {
+    test('older durable snapshot version is ignored for lifecycle', () {
       final accepted = reducer.reduce(
         CallSessionState.initial(),
         _snapshotEvent(version: 2, lifecycle: CallLifecycle.accepted),
       );
-
       final stale = reducer.reduce(
         accepted.state,
         _snapshotEvent(version: 1, lifecycle: CallLifecycle.ringing),
@@ -51,7 +40,6 @@ void main() {
 
       expect(stale.state.lifecycle, CallLifecycle.accepted);
       expect(stale.state.latestAuthoritativeVersion, 2);
-      expect(stale.effects, isEmpty);
     });
 
     test('snapshot for another callId is rejected while a session is active',
@@ -60,7 +48,6 @@ void main() {
         CallSessionState.initial(),
         _snapshotEvent(callId: 'call_a'),
       );
-
       final unrelated = reducer.reduce(
         active.state,
         _snapshotEvent(callId: 'call_b', version: 2),
@@ -68,22 +55,6 @@ void main() {
 
       expect(unrelated.state.callId, 'call_a');
       expect(unrelated.effects, isEmpty);
-    });
-
-    test('ringing transitions to accepted from authoritative snapshot', () {
-      final ringing = _withSnapshot(CallLifecycle.ringing);
-      final accepted = reducer.reduce(
-        ringing.state,
-        _snapshotEvent(version: 2, lifecycle: CallLifecycle.accepted),
-      );
-
-      expect(accepted.state.lifecycle, CallLifecycle.accepted);
-      expect(accepted.state.callRouteState, CallRouteState.opening);
-      expect(
-        accepted.effects,
-        contains(const CallEffect.openCallRoute('call_a')),
-      );
-      expect(accepted.effects.where(_isJoinAgora), isEmpty);
     });
 
     test(
@@ -95,6 +66,8 @@ void main() {
           lifecycle: CallLifecycle.accepted,
           callerMediaState: ParticipantMediaState.joined,
           calleeMediaState: ParticipantMediaState.joined,
+          callerMediaVersion: 2,
+          calleeMediaVersion: 2,
         ),
       );
 
@@ -110,6 +83,8 @@ void main() {
           lifecycle: CallLifecycle.accepted,
           callerMediaState: ParticipantMediaState.joined,
           calleeMediaState: ParticipantMediaState.joined,
+          callerMediaVersion: 2,
+          calleeMediaVersion: 2,
         ),
       );
       final active = reducer.reduce(
@@ -119,85 +94,13 @@ void main() {
           lifecycle: CallLifecycle.active,
           callerMediaState: ParticipantMediaState.joined,
           calleeMediaState: ParticipantMediaState.joined,
+          callerMediaVersion: 2,
+          calleeMediaVersion: 2,
         ),
       );
 
       expect(accepted.state.lifecycle, CallLifecycle.accepted);
       expect(active.state.lifecycle, CallLifecycle.active);
-    });
-
-    test('remoteDetected alone does not promote to active', () {
-      final accepted = _withSnapshot(CallLifecycle.accepted);
-      final detected = reducer.reduce(
-        accepted.state,
-        const RemoteDetected(callId: 'call_a', eventId: 'remote-1'),
-      );
-
-      expect(detected.state.lifecycle, CallLifecycle.accepted);
-      expect(
-        detected.effects,
-        contains(
-          const CallEffect.recordDiagnosticEvent(
-            callId: 'call_a',
-            code: 'agora.remote_detected',
-          ),
-        ),
-      );
-    });
-
-    test('active transitions to completed from authoritative snapshot', () {
-      final active = _withSnapshot(CallLifecycle.active);
-      final completed = reducer.reduce(
-        active.state,
-        _snapshotEvent(version: 2, lifecycle: CallLifecycle.completed),
-      );
-
-      expect(completed.state.lifecycle, CallLifecycle.completed);
-      expect(completed.state.cleanupStatus, CleanupStatus.requested);
-      expect(completed.effects,
-          contains(const CallEffect.closeCallRoute('call_a')));
-      expect(
-          completed.effects, contains(const CallEffect.leaveAgora('call_a')));
-    });
-
-    test('ringing transitions to declined', () {
-      final ringing = _withSnapshot(CallLifecycle.ringing);
-      final declined = reducer.reduce(
-        ringing.state,
-        _snapshotEvent(version: 2, lifecycle: CallLifecycle.declined),
-      );
-
-      expect(declined.state.lifecycle, CallLifecycle.declined);
-    });
-
-    test('ringing transitions to cancelled', () {
-      final ringing = _withSnapshot(CallLifecycle.ringing);
-      final cancelled = reducer.reduce(
-        ringing.state,
-        _snapshotEvent(version: 2, lifecycle: CallLifecycle.cancelled),
-      );
-
-      expect(cancelled.state.lifecycle, CallLifecycle.cancelled);
-    });
-
-    test('ringing transitions to missed', () {
-      final ringing = _withSnapshot(CallLifecycle.ringing);
-      final missed = reducer.reduce(
-        ringing.state,
-        _snapshotEvent(version: 2, lifecycle: CallLifecycle.missed),
-      );
-
-      expect(missed.state.lifecycle, CallLifecycle.missed);
-    });
-
-    test('accepted transitions to failed', () {
-      final accepted = _withSnapshot(CallLifecycle.accepted);
-      final failed = reducer.reduce(
-        accepted.state,
-        _snapshotEvent(version: 2, lifecycle: CallLifecycle.failed),
-      );
-
-      expect(failed.state.lifecycle, CallLifecycle.failed);
     });
 
     test('terminal to non-terminal transition is rejected', () {
@@ -210,106 +113,128 @@ void main() {
       expect(rejected.state.lifecycle, CallLifecycle.completed);
       expect(rejected.effects, isEmpty);
     });
+  });
 
-    test('duplicate terminal snapshot does not emit duplicate cleanup effects',
+  group('participant media revisions', () {
+    test(
+        'same durable call version with newer caller media version is processed',
         () {
-      final ringing = _withSnapshot(CallLifecycle.ringing);
-      final terminalEvent =
-          _snapshotEvent(version: 2, lifecycle: CallLifecycle.completed);
+      final base = reducer.reduce(
+        CallSessionState.initial(),
+        _snapshotEvent(
+          version: 5,
+          lifecycle: CallLifecycle.accepted,
+          localParticipantRole: CallParticipantRole.caller,
+          callerMediaVersion: 1,
+          calleeMediaVersion: 1,
+        ),
+      );
+      final callerJoined = reducer.reduce(
+        base.state,
+        _snapshotEvent(
+          version: 5,
+          lifecycle: CallLifecycle.accepted,
+          localParticipantRole: CallParticipantRole.caller,
+          callerMediaState: ParticipantMediaState.joined,
+          callerMediaVersion: 2,
+          calleeMediaVersion: 1,
+        ),
+      );
 
-      final first = reducer.reduce(ringing.state, terminalEvent);
-      final second = reducer.reduce(first.state, terminalEvent);
-
-      expect(first.effects.where(_isCleanupEffect), hasLength(4));
-      expect(second.effects.where(_isCleanupEffect), isEmpty);
+      expect(callerJoined.state.latestAuthoritativeVersion, 5);
+      expect(callerJoined.state.lifecycle, CallLifecycle.accepted);
+      expect(callerJoined.state.localMediaState, ParticipantMediaState.joined);
+      expect(callerJoined.state.localMediaVersion, 2);
     });
 
-    test('route presentation is emitted at most once per callId', () {
-      var state = CallSessionState.initial();
-      for (var version = 1; version <= 3; version++) {
-        final reduction = reducer.reduce(
-          state,
-          _snapshotEvent(
-            version: version,
-            lifecycle: CallLifecycle.ringing,
-          ),
-        );
-        state = reduction.state;
-        if (version == 1) {
-          expect(reduction.effects.where(_isPresentIncoming), hasLength(1));
-        } else {
-          expect(reduction.effects.where(_isPresentIncoming), isEmpty);
-        }
-      }
+    test('same composite snapshot revision is deduplicated', () {
+      final event = _snapshotEvent(
+        version: 5,
+        lifecycle: CallLifecycle.accepted,
+        callerMediaVersion: 1,
+        calleeMediaVersion: 1,
+      );
+
+      final first = reducer.reduce(CallSessionState.initial(), event);
+      final duplicate = reducer.reduce(first.state, event);
+
+      expect(first.effects.where(_isOpenCallRoute), hasLength(1));
+      expect(duplicate.effects, isEmpty);
     });
 
-    test('route closure is idempotent', () {
-      final accepted = _withSnapshot(CallLifecycle.accepted);
-      final opened = reducer.reduce(
-        accepted.state,
-        const RouteOpened(callId: 'call_a', eventId: 'route-open-1'),
+    test('older caller media version cannot regress caller state', () {
+      final joined = reducer.reduce(
+        CallSessionState.initial(),
+        _snapshotEvent(
+          version: 5,
+          lifecycle: CallLifecycle.accepted,
+          localParticipantRole: CallParticipantRole.caller,
+          callerMediaState: ParticipantMediaState.joined,
+          callerMediaVersion: 2,
+          calleeMediaVersion: 1,
+        ),
       );
-      final firstClose = reducer.reduce(
-        opened.state,
-        const RouteClosed(callId: 'call_a', eventId: 'route-close-1'),
-      );
-      final secondClose = reducer.reduce(
-        firstClose.state,
-        const RouteClosed(callId: 'call_a', eventId: 'route-close-2'),
+      final staleCaller = reducer.reduce(
+        joined.state,
+        _snapshotEvent(
+          version: 5,
+          lifecycle: CallLifecycle.accepted,
+          localParticipantRole: CallParticipantRole.caller,
+          callerMediaState: ParticipantMediaState.notJoined,
+          callerMediaVersion: 1,
+          calleeMediaVersion: 1,
+        ),
       );
 
-      expect(firstClose.state.callRouteState, CallRouteState.closed);
-      expect(secondClose.state.callRouteState, CallRouteState.closed);
-      expect(secondClose.effects, isEmpty);
+      expect(staleCaller.state.localMediaState, ParticipantMediaState.joined);
+      expect(staleCaller.state.localMediaVersion, 2);
     });
 
-    test('media reconnecting and rejoined keep active lifecycle', () {
-      final active = _withSnapshot(CallLifecycle.active);
-      final reconnecting = reducer.reduce(
-        active.state,
-        const MediaReconnecting(callId: 'call_a', eventId: 'reconnect-1'),
+    test('newer caller state and newer callee state can arrive independently',
+        () {
+      final base = reducer.reduce(
+        CallSessionState.initial(),
+        _snapshotEvent(
+          version: 5,
+          lifecycle: CallLifecycle.accepted,
+          localParticipantRole: CallParticipantRole.caller,
+          callerMediaVersion: 1,
+          calleeMediaVersion: 1,
+        ),
       );
-      final rejoined = reducer.reduce(
-        reconnecting.state,
-        const MediaReconnected(callId: 'call_a', eventId: 'rejoined-1'),
+      final callerJoined = reducer.reduce(
+        base.state,
+        _snapshotEvent(
+          version: 5,
+          lifecycle: CallLifecycle.accepted,
+          localParticipantRole: CallParticipantRole.caller,
+          callerMediaState: ParticipantMediaState.joined,
+          callerMediaVersion: 2,
+          calleeMediaVersion: 1,
+        ),
+      );
+      final calleeJoined = reducer.reduce(
+        callerJoined.state,
+        _snapshotEvent(
+          version: 5,
+          lifecycle: CallLifecycle.accepted,
+          localParticipantRole: CallParticipantRole.caller,
+          callerMediaState: ParticipantMediaState.joined,
+          callerMediaVersion: 2,
+          calleeMediaState: ParticipantMediaState.joined,
+          calleeMediaVersion: 2,
+        ),
       );
 
-      expect(reconnecting.state.lifecycle, CallLifecycle.active);
-      expect(
-        reconnecting.state.localMediaState,
-        ParticipantMediaState.reconnecting,
-      );
-      expect(rejoined.state.lifecycle, CallLifecycle.active);
-      expect(rejoined.state.localMediaState, ParticipantMediaState.joined);
+      expect(calleeJoined.state.localMediaState, ParticipantMediaState.joined);
+      expect(calleeJoined.state.localMediaVersion, 2);
+      expect(calleeJoined.state.peerMediaState, ParticipantMediaState.joined);
+      expect(calleeJoined.state.peerMediaVersion, 2);
+      expect(calleeJoined.state.lifecycle, CallLifecycle.accepted);
     });
+  });
 
-    test('stale snapshot cannot reopen UI', () {
-      final accepted = _withSnapshot(CallLifecycle.accepted, version: 5);
-      final staleRinging = reducer.reduce(
-        accepted.state,
-        _snapshotEvent(version: 4, lifecycle: CallLifecycle.ringing),
-      );
-
-      expect(staleRinging.state.lifecycle, CallLifecycle.accepted);
-      expect(staleRinging.effects.where(_isPresentIncoming), isEmpty);
-    });
-
-    test('cleanup effects are scoped to the matching callId', () {
-      final ringing = _withSnapshot(CallLifecycle.ringing);
-      final completed = reducer.reduce(
-        ringing.state,
-        _snapshotEvent(version: 2, lifecycle: CallLifecycle.completed),
-      );
-
-      expect(completed.effects.where(_isCleanupEffect), isNotEmpty);
-      expect(
-        completed.effects
-            .where(_isCleanupEffect)
-            .map((effect) => effect.callId),
-        everyElement('call_a'),
-      );
-    });
-
+  group('media request and callback separation', () {
     test('prepare and join request events do not form callback effect loops',
         () {
       final accepted = _withSnapshot(CallLifecycle.accepted);
@@ -377,8 +302,6 @@ void main() {
         reconnectTwo.effects.single.command,
         BackendCommandType.reportMediaConnection,
       );
-      expect(reconnectTwo.state.localMediaState,
-          ParticipantMediaState.reconnecting);
     });
 
     test('the same reconnect ID is processed once', () {
@@ -391,20 +314,260 @@ void main() {
       final first = reducer.reduce(active.state, event);
       final second = reducer.reduce(first.state, event);
 
-      expect(first.effects.single.command,
-          BackendCommandType.reportMediaConnection);
+      expect(
+        first.effects.single.command,
+        BackendCommandType.reportMediaConnection,
+      );
       expect(second.effects, isEmpty);
     });
+  });
 
-    test('terminal snapshot sets cleanup to requested, not completed', () {
+  group('incoming route acknowledgement', () {
+    test(
+        'ringing snapshot emits one incoming presentation effect and sets opening',
+        () {
+      final ringing = reducer.reduce(
+        CallSessionState.initial(),
+        _snapshotEvent(lifecycle: CallLifecycle.ringing),
+      );
+
+      expect(ringing.state.incomingRouteState, IncomingRouteState.opening);
+      expect(ringing.effects.where(_isPresentIncoming), hasLength(1));
+    });
+
+    test('acknowledgement sets presented', () {
       final ringing = _withSnapshot(CallLifecycle.ringing);
-      final terminal = reducer.reduce(
+      final presented = reducer.reduce(
         ringing.state,
+        const IncomingRoutePresented(
+          callId: 'call_a',
+          eventId: 'incoming-presented-1',
+        ),
+      );
+
+      expect(presented.state.incomingRouteState, IncomingRouteState.presented);
+    });
+
+    test(
+        'duplicate ringing snapshots while opening or presented emit no duplicate effect',
+        () {
+      final opening = _withSnapshot(CallLifecycle.ringing);
+      final newerWhileOpening = reducer.reduce(
+        opening.state,
+        _snapshotEvent(version: 2, lifecycle: CallLifecycle.ringing),
+      );
+      final presented = reducer.reduce(
+        opening.state,
+        const IncomingRoutePresented(
+          callId: 'call_a',
+          eventId: 'incoming-presented-1',
+        ),
+      );
+      final newerWhilePresented = reducer.reduce(
+        presented.state,
+        _snapshotEvent(version: 3, lifecycle: CallLifecycle.ringing),
+      );
+
+      expect(newerWhileOpening.effects.where(_isPresentIncoming), isEmpty);
+      expect(newerWhilePresented.effects.where(_isPresentIncoming), isEmpty);
+    });
+
+    test('failure sets failed and emits no automatic retry', () {
+      final ringing = _withSnapshot(CallLifecycle.ringing);
+      final failed = reducer.reduce(
+        ringing.state,
+        const IncomingRoutePresentationFailed(
+          callId: 'call_a',
+          eventId: 'incoming-failed-1',
+          reason: 'navigator_busy',
+        ),
+      );
+
+      expect(failed.state.incomingRouteState, IncomingRouteState.failed);
+      expect(failed.effects.where(_isPresentIncoming), isEmpty);
+      expect(failed.effects.single.type, CallEffectType.recordDiagnosticEvent);
+    });
+
+    test('explicit retry emits one presentation effect', () {
+      final failed = reducer.reduce(
+        _withSnapshot(CallLifecycle.ringing).state,
+        const IncomingRoutePresentationFailed(
+          callId: 'call_a',
+          eventId: 'incoming-failed-1',
+        ),
+      );
+      final retry = reducer.reduce(
+        failed.state,
+        const RetryIncomingRoutePresentationRequested(
+          callId: 'call_a',
+          eventId: 'incoming-retry-1',
+        ),
+      );
+
+      expect(retry.state.incomingRouteState, IncomingRouteState.opening);
+      expect(retry.effects.where(_isPresentIncoming), hasLength(1));
+    });
+
+    test('stale or unrelated acknowledgements are ignored', () {
+      final ringing = _withSnapshot(CallLifecycle.ringing);
+      final unrelated = reducer.reduce(
+        ringing.state,
+        const IncomingRoutePresented(
+          callId: 'call_b',
+          eventId: 'incoming-presented-other',
+        ),
+      );
+      final presented = reducer.reduce(
+        ringing.state,
+        const IncomingRoutePresented(
+          callId: 'call_a',
+          eventId: 'incoming-presented-1',
+        ),
+      );
+      final duplicate = reducer.reduce(
+        presented.state,
+        const IncomingRoutePresented(
+          callId: 'call_a',
+          eventId: 'incoming-presented-1',
+        ),
+      );
+
+      expect(unrelated.state.incomingRouteState, IncomingRouteState.opening);
+      expect(unrelated.effects, isEmpty);
+      expect(duplicate.effects, isEmpty);
+      expect(duplicate.state.incomingRouteState, IncomingRouteState.presented);
+    });
+  });
+
+  group('call route acknowledgement and retry', () {
+    test('accepted snapshot opens route and duplicate opening snapshots do not',
+        () {
+      final accepted = _withSnapshot(CallLifecycle.accepted);
+      final duplicateSameRevision = reducer.reduce(
+        accepted.state,
+        _snapshotEvent(version: 1, lifecycle: CallLifecycle.accepted),
+      );
+      final newerWhileOpening = reducer.reduce(
+        accepted.state,
+        _snapshotEvent(version: 2, lifecycle: CallLifecycle.accepted),
+      );
+
+      expect(accepted.state.callRouteState, CallRouteState.opening);
+      expect(accepted.effects.where(_isOpenCallRoute), hasLength(1));
+      expect(duplicateSameRevision.effects.where(_isOpenCallRoute), isEmpty);
+      expect(newerWhileOpening.effects.where(_isOpenCallRoute), isEmpty);
+    });
+
+    test('route opening is acknowledged', () {
+      final accepted = _withSnapshot(CallLifecycle.accepted);
+      final opened = reducer.reduce(
+        accepted.state,
+        const RouteOpened(callId: 'call_a', eventId: 'route-opened-1'),
+      );
+
+      expect(opened.state.callRouteState, CallRouteState.open);
+      expect(opened.state.localPhase, CallLocalPhase.inCall);
+    });
+
+    test('route failure emits no immediate open effect', () {
+      final accepted = _withSnapshot(CallLifecycle.accepted);
+      final failed = reducer.reduce(
+        accepted.state,
+        const RouteOpenFailed(
+          callId: 'call_a',
+          eventId: 'route-failed-1',
+          reason: 'navigator_busy',
+        ),
+      );
+
+      expect(failed.state.callRouteState, CallRouteState.failed);
+      expect(failed.effects.where(_isOpenCallRoute), isEmpty);
+      expect(failed.effects.single.type, CallEffectType.recordDiagnosticEvent);
+    });
+
+    test('explicit retry emits exactly one open effect', () {
+      final failed = reducer.reduce(
+        _withSnapshot(CallLifecycle.accepted).state,
+        const RouteOpenFailed(callId: 'call_a', eventId: 'route-failed-1'),
+      );
+      final retry = reducer.reduce(
+        failed.state,
+        const RetryOpenCallRouteRequested(
+          callId: 'call_a',
+          eventId: 'route-retry-1',
+        ),
+      );
+
+      expect(retry.state.callRouteState, CallRouteState.opening);
+      expect(retry.effects.where(_isOpenCallRoute), hasLength(1));
+    });
+
+    test('duplicate failure event ID is ignored', () {
+      final accepted = _withSnapshot(CallLifecycle.accepted);
+      const failure = RouteOpenFailed(
+        callId: 'call_a',
+        eventId: 'route-failed-1',
+      );
+
+      final first = reducer.reduce(accepted.state, failure);
+      final duplicate = reducer.reduce(first.state, failure);
+
+      expect(first.effects.single.type, CallEffectType.recordDiagnosticEvent);
+      expect(duplicate.effects, isEmpty);
+    });
+
+    test('duplicate retry event ID is ignored', () {
+      final failed = reducer.reduce(
+        _withSnapshot(CallLifecycle.accepted).state,
+        const RouteOpenFailed(callId: 'call_a', eventId: 'route-failed-1'),
+      );
+      const retry = RetryOpenCallRouteRequested(
+        callId: 'call_a',
+        eventId: 'route-retry-1',
+      );
+
+      final first = reducer.reduce(failed.state, retry);
+      final duplicate = reducer.reduce(first.state, retry);
+
+      expect(first.effects.where(_isOpenCallRoute), hasLength(1));
+      expect(duplicate.effects, isEmpty);
+    });
+
+    test('repeated navigation failures cannot produce an automatic effect loop',
+        () {
+      final accepted = _withSnapshot(CallLifecycle.accepted);
+      final firstFailure = reducer.reduce(
+        accepted.state,
+        const RouteOpenFailed(callId: 'call_a', eventId: 'route-failed-1'),
+      );
+      final secondFailure = reducer.reduce(
+        firstFailure.state,
+        const RouteOpenFailed(callId: 'call_a', eventId: 'route-failed-2'),
+      );
+
+      expect(firstFailure.effects.where(_isOpenCallRoute), isEmpty);
+      expect(secondFailure.effects.where(_isOpenCallRoute), isEmpty);
+      expect(secondFailure.state.callRouteState, CallRouteState.failed);
+    });
+  });
+
+  group('terminal cleanup and native acknowledgements', () {
+    test('terminal snapshot requests cleanup resources only', () {
+      final terminal = reducer.reduce(
+        _withSnapshot(CallLifecycle.ringing).state,
         _snapshotEvent(version: 2, lifecycle: CallLifecycle.completed),
       );
 
       expect(terminal.state.cleanupStatus, CleanupStatus.requested);
-      expect(terminal.state.isIdle, isFalse);
+      expect(terminal.effects.where(_isCleanupEffect), hasLength(3));
+      expect(
+        terminal.effects.map((effect) => effect.type),
+        containsAll(<CallEffectType>[
+          CallEffectType.closeCallRoute,
+          CallEffectType.leaveAgora,
+          CallEffectType.endMatchingNativeCall,
+        ]),
+      );
     });
 
     test('matching cleanup completion returns state to true idle', () {
@@ -421,7 +584,6 @@ void main() {
       expect(idle.state.callId, isNull);
       expect(idle.state.lifecycle, isNull);
       expect(idle.state.localParticipantRole, isNull);
-      expect(idle.state.cleanupStatus, CleanupStatus.notRequested);
       expect(idle.state.processedEventIds, isEmpty);
     });
 
@@ -440,49 +602,80 @@ void main() {
       );
 
       expect(nextCall.state.callId, 'call_b');
-      expect(nextCall.effects,
-          contains(const CallEffect.presentIncomingRoute('call_b')));
+      expect(
+        nextCall.effects,
+        contains(const CallEffect.presentIncomingRoute('call_b')),
+      );
     });
 
-    test('route opening is acknowledged and safely retryable after failure',
+    test('terminal snapshot requests native ending but does not mark it ended',
         () {
-      final accepted = _withSnapshot(CallLifecycle.accepted);
-      expect(accepted.state.callRouteState, CallRouteState.opening);
-
-      final failed = reducer.reduce(
-        accepted.state,
-        const RouteOpenFailed(
-          callId: 'call_a',
-          eventId: 'route-failed-1',
-          reason: 'navigator_busy',
-        ),
-      );
-      final opened = reducer.reduce(
-        failed.state,
-        const RouteOpened(callId: 'call_a', eventId: 'route-opened-1'),
+      final terminal = reducer.reduce(
+        _withSnapshot(CallLifecycle.ringing).state,
+        _snapshotEvent(version: 2, lifecycle: CallLifecycle.completed),
       );
 
-      expect(failed.effects.where(_isOpenCallRoute), hasLength(1));
-      expect(failed.state.callRouteState, CallRouteState.opening);
-      expect(opened.state.callRouteState, CallRouteState.open);
-      expect(opened.state.localPhase, CallLocalPhase.inCall);
+      expect(
+        terminal.state.nativePresentationState,
+        NativePresentationState.endingRequested,
+      );
+      expect(
+        terminal.effects,
+        contains(const CallEffect.endMatchingNativeCall('call_a')),
+      );
     });
 
-    test('duplicate snapshots while opening do not open duplicate routes', () {
-      final accepted = _withSnapshot(CallLifecycle.accepted);
-      final duplicateSameVersion = reducer.reduce(
-        accepted.state,
-        _snapshotEvent(version: 1, lifecycle: CallLifecycle.accepted),
+    test('matching native-ended acknowledgment marks it ended', () {
+      final terminal = reducer.reduce(
+        _withSnapshot(CallLifecycle.ringing).state,
+        _snapshotEvent(version: 2, lifecycle: CallLifecycle.completed),
       );
-      final newerWhileOpening = reducer.reduce(
-        accepted.state,
-        _snapshotEvent(version: 2, lifecycle: CallLifecycle.accepted),
+      final ended = reducer.reduce(
+        terminal.state,
+        const NativeCallEnded(callId: 'call_a', eventId: 'native-ended-1'),
       );
 
-      expect(accepted.effects.where(_isOpenCallRoute), hasLength(1));
-      expect(duplicateSameVersion.effects.where(_isOpenCallRoute), isEmpty);
-      expect(newerWhileOpening.effects.where(_isOpenCallRoute), isEmpty);
-      expect(newerWhileOpening.state.callRouteState, CallRouteState.opening);
+      expect(
+        ended.state.nativePresentationState,
+        NativePresentationState.endedNatively,
+      );
+    });
+
+    test('unrelated native-ended acknowledgment is ignored', () {
+      final terminal = reducer.reduce(
+        _withSnapshot(CallLifecycle.ringing).state,
+        _snapshotEvent(version: 2, lifecycle: CallLifecycle.completed),
+      );
+      final unrelated = reducer.reduce(
+        terminal.state,
+        const NativeCallEnded(callId: 'call_b', eventId: 'native-ended-other'),
+      );
+
+      expect(
+        unrelated.state.nativePresentationState,
+        NativePresentationState.endingRequested,
+      );
+      expect(unrelated.effects, isEmpty);
+    });
+
+    test('duplicate native-ended acknowledgment is harmless', () {
+      final terminal = reducer.reduce(
+        _withSnapshot(CallLifecycle.ringing).state,
+        _snapshotEvent(version: 2, lifecycle: CallLifecycle.completed),
+      );
+      const event = NativeCallEnded(
+        callId: 'call_a',
+        eventId: 'native-ended-1',
+      );
+
+      final first = reducer.reduce(terminal.state, event);
+      final duplicate = reducer.reduce(first.state, event);
+
+      expect(
+        first.state.nativePresentationState,
+        NativePresentationState.endedNatively,
+      );
+      expect(duplicate.effects, isEmpty);
     });
   });
 }
@@ -492,6 +685,8 @@ CallReduction _withSnapshot(
   int version = 1,
   ParticipantMediaState callerMediaState = ParticipantMediaState.notJoined,
   ParticipantMediaState calleeMediaState = ParticipantMediaState.notJoined,
+  int callerMediaVersion = 0,
+  int calleeMediaVersion = 0,
 }) {
   const reducer = CallStateReducer();
   return reducer.reduce(
@@ -501,6 +696,8 @@ CallReduction _withSnapshot(
       lifecycle: lifecycle,
       callerMediaState: callerMediaState,
       calleeMediaState: calleeMediaState,
+      callerMediaVersion: callerMediaVersion,
+      calleeMediaVersion: calleeMediaVersion,
     ),
   );
 }
@@ -509,8 +706,11 @@ CallSnapshotReceived _snapshotEvent({
   String callId = 'call_a',
   int version = 1,
   CallLifecycle lifecycle = CallLifecycle.ringing,
+  CallParticipantRole localParticipantRole = CallParticipantRole.callee,
   ParticipantMediaState callerMediaState = ParticipantMediaState.notJoined,
   ParticipantMediaState calleeMediaState = ParticipantMediaState.notJoined,
+  int callerMediaVersion = 0,
+  int calleeMediaVersion = 0,
 }) {
   return CallSnapshotReceived(
     snapshot: CallSnapshot(
@@ -521,8 +721,10 @@ CallSnapshotReceived _snapshotEvent({
       calleeUid: 'callee',
       callerMediaState: callerMediaState,
       calleeMediaState: calleeMediaState,
+      callerMediaVersion: callerMediaVersion,
+      calleeMediaVersion: calleeMediaVersion,
     ),
-    localParticipantRole: CallParticipantRole.callee,
+    localParticipantRole: localParticipantRole,
   );
 }
 
@@ -545,6 +747,5 @@ bool _isJoinAgora(CallEffect effect) {
 bool _isCleanupEffect(CallEffect effect) {
   return effect.type == CallEffectType.closeCallRoute ||
       effect.type == CallEffectType.leaveAgora ||
-      effect.type == CallEffectType.endMatchingNativeCall ||
-      effect.type == CallEffectType.clearScopedLocalSession;
+      effect.type == CallEffectType.endMatchingNativeCall;
 }

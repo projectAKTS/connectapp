@@ -26,7 +26,7 @@ void main() {
       expect(reopened.effects, isEmpty);
     });
 
-    test('authoritative version is controlled by snapshots only', () {
+    test('authoritative call version is controlled by snapshots only', () {
       final versionThree = reducer.reduce(
         _stateWith(CallLifecycle.ringing),
         _snapshotEvent(version: 3, lifecycle: CallLifecycle.accepted),
@@ -45,7 +45,7 @@ void main() {
       expect(media.state.latestAuthoritativeVersion, 3);
     });
 
-    test('older snapshot cannot reduce authoritative version', () {
+    test('older snapshot cannot reduce authoritative call version', () {
       final versionThree = reducer.reduce(
         _stateWith(CallLifecycle.ringing),
         _snapshotEvent(version: 3, lifecycle: CallLifecycle.accepted),
@@ -96,6 +96,8 @@ void main() {
           lifecycle: CallLifecycle.accepted,
           callerMediaState: ParticipantMediaState.joined,
           calleeMediaState: ParticipantMediaState.joined,
+          callerMediaVersion: 2,
+          calleeMediaVersion: 2,
         ),
       );
       final active = reducer.reduce(
@@ -105,6 +107,8 @@ void main() {
           lifecycle: CallLifecycle.active,
           callerMediaState: ParticipantMediaState.joined,
           calleeMediaState: ParticipantMediaState.joined,
+          callerMediaVersion: 2,
+          calleeMediaVersion: 2,
         ),
       );
 
@@ -176,6 +180,8 @@ CallSnapshotReceived _snapshotEvent({
   CallLifecycle lifecycle = CallLifecycle.ringing,
   ParticipantMediaState callerMediaState = ParticipantMediaState.notJoined,
   ParticipantMediaState calleeMediaState = ParticipantMediaState.notJoined,
+  int callerMediaVersion = 0,
+  int calleeMediaVersion = 0,
 }) {
   return CallSnapshotReceived(
     snapshot: CallSnapshot(
@@ -186,6 +192,8 @@ CallSnapshotReceived _snapshotEvent({
       calleeUid: 'callee',
       callerMediaState: callerMediaState,
       calleeMediaState: calleeMediaState,
+      callerMediaVersion: callerMediaVersion,
+      calleeMediaVersion: calleeMediaVersion,
     ),
     localParticipantRole: CallParticipantRole.callee,
   );

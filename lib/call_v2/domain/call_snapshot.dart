@@ -24,6 +24,8 @@ class CallSnapshot {
     required this.calleeUid,
     this.callerMediaState = ParticipantMediaState.notJoined,
     this.calleeMediaState = ParticipantMediaState.notJoined,
+    this.callerMediaVersion = 0,
+    this.calleeMediaVersion = 0,
     this.createdAt,
     this.acceptedAt,
     this.activeAt,
@@ -39,6 +41,8 @@ class CallSnapshot {
   final String calleeUid;
   final ParticipantMediaState callerMediaState;
   final ParticipantMediaState calleeMediaState;
+  final int callerMediaVersion;
+  final int calleeMediaVersion;
   final DateTime? createdAt;
   final DateTime? acceptedAt;
   final DateTime? activeAt;
@@ -57,5 +61,18 @@ class CallSnapshot {
 
   ParticipantMediaState peerMediaStateFor(CallParticipantRole role) {
     return mediaStateFor(role.peer);
+  }
+
+  int mediaVersionFor(CallParticipantRole role) {
+    switch (role) {
+      case CallParticipantRole.caller:
+        return callerMediaVersion;
+      case CallParticipantRole.callee:
+        return calleeMediaVersion;
+    }
+  }
+
+  int peerMediaVersionFor(CallParticipantRole role) {
+    return mediaVersionFor(role.peer);
   }
 }

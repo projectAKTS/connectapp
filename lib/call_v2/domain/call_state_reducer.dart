@@ -118,9 +118,24 @@ class CallStateReducer {
           BackendCommandType.declineCall,
           'callkit.declined',
         ),
+      NativeCallEnded() => _reduceNativeCallEnded(current, event),
       RouteOpened() => _reduceRouteOpened(current, event),
       RouteOpenFailed() => _reduceRouteOpenFailed(current, event),
+      RetryOpenCallRouteRequested() => _reduceRouteOpenRetry(current, event),
       RouteClosed() => _reduceRouteClosed(current, event),
+      IncomingRoutePresented() => _reduceIncomingRoutePresented(
+          current,
+          event,
+        ),
+      IncomingRoutePresentationFailed() => _reduceIncomingRouteFailed(
+          current,
+          event,
+        ),
+      RetryIncomingRoutePresentationRequested() => _reduceIncomingRouteRetry(
+          current,
+          event,
+        ),
+      IncomingRouteClosed() => _reduceIncomingRouteClosed(current, event),
       AppResumed() => _reduceDiagnosticOnly(
           current,
           event,
@@ -137,16 +152,16 @@ class CallStateReducer {
     }
 
     if (event case CallSnapshotReceived(:final snapshot)) {
-      if (snapshot.version < current.latestAuthoritativeVersion) {
-        return false;
-      }
       if (current.isTerminal && snapshot.lifecycle.isNonTerminal) {
         return false;
       }
     }
 
     if (current.isTerminal && event is! CallSnapshotReceived) {
-      return event is CleanupCompleted || event is RouteClosed;
+      return event is CleanupCompleted ||
+          event is RouteClosed ||
+          event is IncomingRouteClosed ||
+          event is NativeCallEnded;
     }
 
     return true;
@@ -157,27 +172,59 @@ class CallStateReducer {
     CallSnapshotReceived event,
   ) {
     final snapshot = event.snapshot;
-    final lifecycle = snapshot.lifecycle;
     final callId = snapshot.callId;
+    final localRole =
+        current.localParticipantRole ?? event.localParticipantRole;
     final effects = <CallEffect>[];
-    var incomingRoutePresented = current.incomingRoutePresented;
+
+    var lifecycle = current.lifecycle;
+    var latestAuthoritativeVersion = current.latestAuthoritativeVersion;
+    var localMediaState = current.localMediaState;
+    var peerMediaState = current.peerMediaState;
+    var localMediaVersion = current.localMediaVersion;
+    var peerMediaVersion = current.peerMediaVersion;
+    var incomingRouteState = current.incomingRouteState;
     var callRouteState = current.callRouteState;
     var cleanupStatus = current.cleanupStatus;
     var nativePresentationState = current.nativePresentationState;
     var localPhase = current.localPhase;
 
+    final canUpdateLifecycle = current.lifecycle == null ||
+        snapshot.version > current.latestAuthoritativeVersion;
+    if (canUpdateLifecycle) {
+      lifecycle = snapshot.lifecycle;
+      latestAuthoritativeVersion = snapshot.version;
+    }
+
+    final snapshotLocalMediaVersion = snapshot.mediaVersionFor(localRole);
+    if (current.callId == null ||
+        snapshotLocalMediaVersion > current.localMediaVersion) {
+      localMediaState = snapshot.mediaStateFor(localRole);
+      localMediaVersion = snapshotLocalMediaVersion;
+    }
+
+    final snapshotPeerMediaVersion = snapshot.peerMediaVersionFor(localRole);
+    if (current.callId == null ||
+        snapshotPeerMediaVersion > current.peerMediaVersion) {
+      peerMediaState = snapshot.peerMediaStateFor(localRole);
+      peerMediaVersion = snapshotPeerMediaVersion;
+    }
+
     if (lifecycle == CallLifecycle.ringing) {
-      if (event.localParticipantRole == CallParticipantRole.callee &&
-          !incomingRoutePresented) {
+      if (localRole == CallParticipantRole.callee &&
+          incomingRouteState == IncomingRouteState.notRequested) {
         effects.add(CallEffect.presentIncomingRoute(callId));
-        incomingRoutePresented = true;
+        incomingRouteState = IncomingRouteState.opening;
       }
-      localPhase = event.localParticipantRole == CallParticipantRole.callee
+      localPhase = localRole == CallParticipantRole.callee
           ? CallLocalPhase.presentingIncoming
           : CallLocalPhase.outgoingRinging;
     } else if (lifecycle == CallLifecycle.accepted ||
         lifecycle == CallLifecycle.active) {
-      incomingRoutePresented = false;
+      if (incomingRouteState == IncomingRouteState.opening ||
+          incomingRouteState == IncomingRouteState.presented) {
+        incomingRouteState = IncomingRouteState.closed;
+      }
       if (callRouteState == CallRouteState.notRequested ||
           callRouteState == CallRouteState.closed) {
         effects.add(CallEffect.openCallRoute(callId));
@@ -186,9 +233,10 @@ class CallStateReducer {
       localPhase = callRouteState == CallRouteState.open
           ? CallLocalPhase.inCall
           : CallLocalPhase.openingCallRoute;
-    } else if (lifecycle.isTerminal) {
-      incomingRoutePresented = false;
-      nativePresentationState = NativePresentationState.endedNatively;
+    } else if (lifecycle?.isTerminal == true) {
+      if (nativePresentationState != NativePresentationState.endedNatively) {
+        nativePresentationState = NativePresentationState.endingRequested;
+      }
       if (cleanupStatus == CleanupStatus.notRequested) {
         effects.addAll(_terminalCleanupEffects(callId));
         cleanupStatus = CleanupStatus.requested;
@@ -199,15 +247,16 @@ class CallStateReducer {
     final next = current
         .copyWith(
           callId: callId,
-          latestAuthoritativeVersion: snapshot.version,
+          latestAuthoritativeVersion: latestAuthoritativeVersion,
           lifecycle: lifecycle,
-          localParticipantRole: event.localParticipantRole,
-          localMediaState: snapshot.mediaStateFor(event.localParticipantRole),
-          peerMediaState:
-              snapshot.peerMediaStateFor(event.localParticipantRole),
+          localParticipantRole: localRole,
+          localMediaState: localMediaState,
+          peerMediaState: peerMediaState,
+          localMediaVersion: localMediaVersion,
+          peerMediaVersion: peerMediaVersion,
           localPhase: localPhase,
           nativePresentationState: nativePresentationState,
-          incomingRoutePresented: incomingRoutePresented,
+          incomingRouteState: incomingRouteState,
           callRouteState: callRouteState,
           cleanupStatus: cleanupStatus,
         )
@@ -369,6 +418,19 @@ class CallStateReducer {
     );
   }
 
+  CallReduction _reduceNativeCallEnded(
+    CallSessionState current,
+    NativeCallEnded event,
+  ) {
+    if (current.callId == null) {
+      return CallReduction(state: current, effects: const <CallEffect>[]);
+    }
+    final next = current.copyWith(
+      nativePresentationState: NativePresentationState.endedNatively,
+    );
+    return _withEffects(next, event, const <CallEffect>[]);
+  }
+
   CallReduction _reduceRouteOpened(
     CallSessionState current,
     RouteOpened event,
@@ -377,7 +439,6 @@ class CallStateReducer {
       return CallReduction(state: current, effects: const <CallEffect>[]);
     }
     final next = current.copyWith(
-      incomingRoutePresented: false,
       callRouteState: CallRouteState.open,
       localPhase:
           current.isTerminal ? CallLocalPhase.closing : CallLocalPhase.inCall,
@@ -392,34 +453,43 @@ class CallStateReducer {
     if (current.callId == null || current.isTerminal) {
       return CallReduction(state: current, effects: const <CallEffect>[]);
     }
-    if (current.lifecycle != CallLifecycle.accepted &&
-        current.lifecycle != CallLifecycle.active) {
-      return _withEffects(
-        current,
-        event,
-        <CallEffect>[
-          CallEffect.recordDiagnosticEvent(
-            callId: event.callId,
-            code: 'route.open_failed_ignored',
-            reason: event.reason,
-          ),
-        ],
-      );
-    }
+    final next = current.copyWith(
+      callRouteState: CallRouteState.failed,
+      localPhase: CallLocalPhase.openingCallRoute,
+    );
+    return _withEffects(
+      next,
+      event,
+      <CallEffect>[
+        CallEffect.recordDiagnosticEvent(
+          callId: event.callId,
+          code: 'route.open_failed',
+          reason: event.reason,
+        ),
+      ],
+    );
+  }
 
-    final effects = <CallEffect>[
-      CallEffect.recordDiagnosticEvent(
-        callId: event.callId,
-        code: 'route.open_failed',
-        reason: event.reason,
-      ),
-      CallEffect.openCallRoute(event.callId),
-    ];
+  CallReduction _reduceRouteOpenRetry(
+    CallSessionState current,
+    RetryOpenCallRouteRequested event,
+  ) {
+    if (current.callId == null ||
+        current.isTerminal ||
+        current.callRouteState != CallRouteState.failed ||
+        (current.lifecycle != CallLifecycle.accepted &&
+            current.lifecycle != CallLifecycle.active)) {
+      return CallReduction(state: current, effects: const <CallEffect>[]);
+    }
     final next = current.copyWith(
       callRouteState: CallRouteState.opening,
       localPhase: CallLocalPhase.openingCallRoute,
     );
-    return _withEffects(next, event, effects);
+    return _withEffects(
+      next,
+      event,
+      <CallEffect>[CallEffect.openCallRoute(event.callId)],
+    );
   }
 
   CallReduction _reduceRouteClosed(
@@ -430,10 +500,78 @@ class CallStateReducer {
       return CallReduction(state: current, effects: const <CallEffect>[]);
     }
     final next = current.copyWith(
-      incomingRoutePresented: false,
       callRouteState: CallRouteState.closed,
       localPhase:
           current.isTerminal ? CallLocalPhase.closing : current.localPhase,
+    );
+    return _withEffects(next, event, const <CallEffect>[]);
+  }
+
+  CallReduction _reduceIncomingRoutePresented(
+    CallSessionState current,
+    IncomingRoutePresented event,
+  ) {
+    if (current.callId == null ||
+        current.incomingRouteState != IncomingRouteState.opening) {
+      return CallReduction(state: current, effects: const <CallEffect>[]);
+    }
+    final next = current.copyWith(
+      incomingRouteState: IncomingRouteState.presented,
+    );
+    return _withEffects(next, event, const <CallEffect>[]);
+  }
+
+  CallReduction _reduceIncomingRouteFailed(
+    CallSessionState current,
+    IncomingRoutePresentationFailed event,
+  ) {
+    if (current.callId == null || current.isTerminal) {
+      return CallReduction(state: current, effects: const <CallEffect>[]);
+    }
+    final next = current.copyWith(
+      incomingRouteState: IncomingRouteState.failed,
+    );
+    return _withEffects(
+      next,
+      event,
+      <CallEffect>[
+        CallEffect.recordDiagnosticEvent(
+          callId: event.callId,
+          code: 'incoming_route.present_failed',
+          reason: event.reason,
+        ),
+      ],
+    );
+  }
+
+  CallReduction _reduceIncomingRouteRetry(
+    CallSessionState current,
+    RetryIncomingRoutePresentationRequested event,
+  ) {
+    if (current.callId == null ||
+        current.lifecycle != CallLifecycle.ringing ||
+        current.incomingRouteState != IncomingRouteState.failed) {
+      return CallReduction(state: current, effects: const <CallEffect>[]);
+    }
+    final next = current.copyWith(
+      incomingRouteState: IncomingRouteState.opening,
+    );
+    return _withEffects(
+      next,
+      event,
+      <CallEffect>[CallEffect.presentIncomingRoute(event.callId)],
+    );
+  }
+
+  CallReduction _reduceIncomingRouteClosed(
+    CallSessionState current,
+    IncomingRouteClosed event,
+  ) {
+    if (current.callId == null) {
+      return CallReduction(state: current, effects: const <CallEffect>[]);
+    }
+    final next = current.copyWith(
+      incomingRouteState: IncomingRouteState.closed,
     );
     return _withEffects(next, event, const <CallEffect>[]);
   }
@@ -468,7 +606,6 @@ class CallStateReducer {
       CallEffect.closeCallRoute(callId),
       CallEffect.leaveAgora(callId),
       CallEffect.endMatchingNativeCall(callId),
-      CallEffect.clearScopedLocalSession(callId),
     ];
   }
 }

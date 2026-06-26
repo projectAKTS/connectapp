@@ -7,8 +7,7 @@ enum CallEffectType {
   joinAgora,
   leaveAgora,
   endMatchingNativeCall,
-  recordDiagnosticEvent,
-  clearScopedLocalSession;
+  recordDiagnosticEvent;
 }
 
 enum BackendCommandType {
@@ -74,9 +73,6 @@ class CallEffect {
           code: code,
           reason: reason,
         );
-
-  const CallEffect.clearScopedLocalSession(String callId)
-      : this(type: CallEffectType.clearScopedLocalSession, callId: callId);
 
   final CallEffectType type;
   final String callId;

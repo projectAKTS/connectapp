@@ -17,7 +17,8 @@ base class CallSnapshotReceived extends CallEvent {
     required this.localParticipantRole,
   }) : super(
           callId: snapshot.callId,
-          eventId: 'snapshot:${snapshot.callId}:${snapshot.version}',
+          eventId: 'snapshot:${snapshot.callId}:${snapshot.version}:'
+              '${snapshot.callerMediaVersion}:${snapshot.calleeMediaVersion}',
         );
 
   final CallSnapshot snapshot;
@@ -173,8 +174,46 @@ final class RouteOpenFailed extends CallEvent {
   final String? reason;
 }
 
+final class RetryOpenCallRouteRequested extends CallEvent {
+  const RetryOpenCallRouteRequested({
+    required super.callId,
+    required super.eventId,
+  });
+}
+
 final class RouteClosed extends CallEvent {
   const RouteClosed({
+    required super.callId,
+    required super.eventId,
+  });
+}
+
+final class IncomingRoutePresented extends CallEvent {
+  const IncomingRoutePresented({
+    required super.callId,
+    required super.eventId,
+  });
+}
+
+final class IncomingRoutePresentationFailed extends CallEvent {
+  const IncomingRoutePresentationFailed({
+    required super.callId,
+    required super.eventId,
+    this.reason,
+  });
+
+  final String? reason;
+}
+
+final class RetryIncomingRoutePresentationRequested extends CallEvent {
+  const RetryIncomingRoutePresentationRequested({
+    required super.callId,
+    required super.eventId,
+  });
+}
+
+final class IncomingRouteClosed extends CallEvent {
+  const IncomingRouteClosed({
     required super.callId,
     required super.eventId,
   });
@@ -189,6 +228,13 @@ final class AppResumed extends CallEvent {
 
 final class CleanupCompleted extends CallEvent {
   const CleanupCompleted({
+    required super.callId,
+    required super.eventId,
+  });
+}
+
+final class NativeCallEnded extends CallEvent {
+  const NativeCallEnded({
     required super.callId,
     required super.eventId,
   });
