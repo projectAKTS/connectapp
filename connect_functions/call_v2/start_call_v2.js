@@ -22,6 +22,7 @@ const ACTION_DECLINE_CALL = "declineCall";
 const ACTION_CANCEL_CALL = "cancelCall";
 const ACTION_END_CALL = "endCall";
 const ACTION_REPORT_PARTICIPANT_MEDIA = "reportParticipantMedia";
+const ACTION_PROCESS_CALL_TIMEOUT = "processCallTimeout";
 const CALL_SCHEMA_VERSION = 2;
 const RINGING_DURATION_MS = 45 * 1000;
 const ACCEPTED_JOIN_DURATION_MS = 30 * 1000;
@@ -51,6 +52,34 @@ const MEDIA_TRANSITIONS = Object.freeze({
   disconnected: Object.freeze(["reconnecting", "joined", "media_failed", "left"]),
   media_failed: Object.freeze(["preparing", "left"]),
   left: Object.freeze([]),
+});
+const TIMEOUT_KINDS = Object.freeze([
+  "ringing",
+  "accepted_join",
+  "reconnect",
+]);
+const TIMEOUT_CONFIG = Object.freeze({
+  ringing: Object.freeze({
+    lifecycleState: "ringing",
+    deadlineField: "ringingDeadlineAt",
+    terminalState: "missed",
+    endReason: "ringing_timeout",
+    failureCode: null,
+  }),
+  accepted_join: Object.freeze({
+    lifecycleState: "accepted",
+    deadlineField: "acceptedJoinDeadlineAt",
+    terminalState: "failed",
+    endReason: "accepted_join_timeout",
+    failureCode: "accepted_join_timeout",
+  }),
+  reconnect: Object.freeze({
+    lifecycleState: "active",
+    deadlineField: "reconnectDeadlineAt",
+    terminalState: "failed",
+    endReason: "reconnect_timeout",
+    failureCode: "reconnect_timeout",
+  }),
 });
 
 class CallV2Error extends Error {
@@ -687,6 +716,193 @@ function reportParticipantMediaV2({ db, authUid, request, now }) {
     );
 }
 
+function processCallTimeoutV2({ db, request, now }) {
+  assertDbDependency(db);
+  const nowDate = resolveNow(now);
+  const validatedRequest = validateTimeoutRequestInput(request);
+  const config = TIMEOUT_CONFIG[validatedRequest.timeoutKind];
+  const command = buildTimeoutCommandContext(validatedRequest);
+  const refs = buildTimeoutRefs(db, {
+    callId: validatedRequest.callId,
+    commandId: command.commandId,
+  });
+
+  return db
+    .runTransaction(async (transaction) => {
+      const commandSnapshot = await transaction.get(refs.commandRef);
+      if (commandSnapshot.exists) {
+        return handleExistingTimeoutCommandRecord(
+          commandSnapshot.data(),
+          {
+            callId: validatedRequest.callId,
+            timeoutKind: validatedRequest.timeoutKind,
+            requestHash: command.requestHash,
+          },
+        );
+      }
+
+      const callSnapshot = await transaction.get(refs.callRef);
+      if (!callSnapshot.exists) {
+        return buildTimeoutNoopResult({
+          callId: validatedRequest.callId,
+          timeoutKind: validatedRequest.timeoutKind,
+          status: "missing",
+        });
+      }
+
+      const call = requireExistingV2CallForTimeout(
+        callSnapshot,
+        validatedRequest.callId,
+      );
+      if (call.terminal) {
+        return buildTimeoutNoopResult({
+          callId: call.id,
+          timeoutKind: validatedRequest.timeoutKind,
+          status: "already_terminal",
+          call,
+        });
+      }
+      if (
+        call.lifecycleState !== config.lifecycleState ||
+        call.version !== validatedRequest.expectedCallVersion
+      ) {
+        return buildTimeoutNoopResult({
+          callId: call.id,
+          timeoutKind: validatedRequest.timeoutKind,
+          status: "stale",
+          call,
+        });
+      }
+
+      const authoritativeDeadline = requireTimeoutDeadline(
+        call,
+        validatedRequest.timeoutKind,
+        config,
+      );
+      if (authoritativeDeadline.millis !== validatedRequest.expectedDeadlineMs) {
+        return buildTimeoutNoopResult({
+          callId: call.id,
+          timeoutKind: validatedRequest.timeoutKind,
+          status: "stale",
+          call,
+        });
+      }
+      validateTimeoutTemporalFields(call, validatedRequest.timeoutKind);
+      if (nowDate.getTime() < authoritativeDeadline.millis) {
+        return buildTimeoutNoopResult({
+          callId: call.id,
+          timeoutKind: validatedRequest.timeoutKind,
+          status: "not_due",
+          call,
+        });
+      }
+
+      let participants = null;
+      if (validatedRequest.timeoutKind === "reconnect") {
+        const participantSnapshots = await readCallParticipantSnapshots(
+          transaction,
+          refs.callRef,
+          call,
+        );
+        participants = validateMediaParticipantSnapshots(
+          participantSnapshots.byRole,
+          call,
+        );
+        if (
+          participants.byRole.caller.data.mediaState === "joined" &&
+          participants.byRole.callee.data.mediaState === "joined"
+        ) {
+          throw new CallV2Error(
+            ERROR_CODES.transactionFailed,
+            "The reconnect timeout state is inconsistent.",
+          );
+        }
+      }
+
+      const callOpsSnapshot = await transaction.get(refs.callOpsRef);
+      const callOps = requireCallOps(callOpsSnapshot, call.id);
+      const lockSnapshots = await readParticipantLockSnapshots(
+        transaction,
+        db,
+        call,
+      );
+      const nextCallVersion = nextMonotonicVersion(call.version);
+      const nextOpsVersion = nextMonotonicVersion(callOps.latestOpsVersion);
+      const lockReleaseResults = releaseScopedLocks(
+        transaction,
+        lockSnapshots.byRole,
+        callOps,
+        call,
+      );
+      const historyExpiresAt = addMilliseconds(
+        nowDate,
+        PUBLIC_HISTORY_RETENTION_MS,
+      );
+      const result = Object.freeze({
+        callId: call.id,
+        timeoutKind: validatedRequest.timeoutKind,
+        status: "terminalized",
+        lifecycleState: config.terminalState,
+        terminal: true,
+        version: nextCallVersion,
+        endedAt: nowDate,
+        endReason: config.endReason,
+        failureCode: config.failureCode,
+        lockReleaseResults,
+        idempotentReplay: false,
+      });
+
+      transaction.update(refs.callRef, {
+        lifecycleState: config.terminalState,
+        terminal: true,
+        version: nextCallVersion,
+        updatedAt: nowDate,
+        lastPublicEventAt: nowDate,
+        endedAt: nowDate,
+        endedByUid: null,
+        endReason: config.endReason,
+        failureCode: config.failureCode,
+        historyVisible: true,
+        historyExpiresAt,
+      });
+      transaction.update(refs.callOpsRef, {
+        latestOpsVersion: nextOpsVersion,
+        terminalAt: nowDate,
+        terminalState: config.terminalState,
+        terminalReason: config.endReason,
+        failureCode: config.failureCode,
+        timeoutKind: validatedRequest.timeoutKind,
+        timeoutDeadlineAt: authoritativeDeadline.value,
+        timeoutProcessedAt: nowDate,
+        lockReleaseResults,
+        opsRetentionExpiresAt: addMilliseconds(nowDate, OPS_RETENTION_MS),
+      });
+      createTimeoutCommandRecord(transaction, refs.commandRef, {
+        command,
+        timeoutKind: validatedRequest.timeoutKind,
+        expectedCallVersion: validatedRequest.expectedCallVersion,
+        timeoutDeadlineAt: authoritativeDeadline.value,
+        callId: call.id,
+        nowDate,
+        result,
+      });
+
+      return result;
+    })
+    .catch((error) =>
+      recoverTimeoutCommandCreateConflictOrThrow({
+        error,
+        commandRef: refs.commandRef,
+        expected: {
+          callId: validatedRequest.callId,
+          timeoutKind: validatedRequest.timeoutKind,
+          requestHash: command.requestHash,
+        },
+        fallbackMessage: "The timeout transaction failed.",
+      }),
+    );
+}
+
 function runTerminalLifecycleCommand({
   db,
   authUid,
@@ -930,6 +1146,65 @@ function validateMediaReportInput(authUid, request) {
   };
 }
 
+function validateTimeoutRequestInput(request) {
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A timeout request object is required.",
+    );
+  }
+
+  const allowedKeys = new Set([
+    "callId",
+    "timeoutKind",
+    "expectedCallVersion",
+    "expectedDeadlineAt",
+  ]);
+  for (const key of Object.keys(request)) {
+    if (!allowedKeys.has(key)) {
+      throw new CallV2Error(
+        ERROR_CODES.invalidArgument,
+        `Unsupported timeout field: ${key}.`,
+      );
+    }
+  }
+  if (!isValidIdentifier(request.callId, 160)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid callId is required.",
+    );
+  }
+  if (!TIMEOUT_KINDS.includes(request.timeoutKind)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A supported timeoutKind is required.",
+    );
+  }
+  if (!Number.isSafeInteger(request.expectedCallVersion) ||
+    request.expectedCallVersion <= 0
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A positive safe expectedCallVersion is required.",
+    );
+  }
+  const expectedDeadlineMs = strictTimestampMillis(request.expectedDeadlineAt);
+  if (expectedDeadlineMs === null) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A strict expectedDeadlineAt timestamp is required.",
+    );
+  }
+
+  return {
+    callId: request.callId,
+    timeoutKind: request.timeoutKind,
+    expectedCallVersion: request.expectedCallVersion,
+    expectedDeadlineAt: request.expectedDeadlineAt,
+    expectedDeadlineMs,
+  };
+}
+
 function buildLifecycleCommandContext({
   actorUid,
   action,
@@ -958,6 +1233,36 @@ function buildLifecycleCommandContext({
   };
 }
 
+function buildTimeoutCommandContext({
+  callId,
+  timeoutKind,
+  expectedCallVersion,
+  expectedDeadlineMs,
+}) {
+  const requestHash = sha256Hex(
+    canonicalJson({
+      action: ACTION_PROCESS_CALL_TIMEOUT,
+      callId,
+      timeoutKind,
+      expectedCallVersion,
+      expectedDeadlineMs,
+    }),
+  );
+  const commandId = `timeout_${sha256Hex(
+    [
+      callId,
+      timeoutKind,
+      String(expectedCallVersion),
+      String(expectedDeadlineMs),
+    ].join("\u0000"),
+  ).slice(0, 48)}`;
+
+  return {
+    commandId,
+    requestHash,
+  };
+}
+
 function commandIdPrefix(action) {
   return action.replace(/[^A-Za-z0-9]/g, "_").toLowerCase();
 }
@@ -980,6 +1285,19 @@ function buildLifecycleRefs(
   };
 }
 
+function buildTimeoutRefs(db, { callId, commandId }) {
+  const callRef = db.collection("calls").doc(callId);
+  return {
+    callRef,
+    callOpsRef: db.collection("callOps").doc(callId),
+    commandRef: db
+      .collection("callOps")
+      .doc(callId)
+      .collection("commands")
+      .doc(commandId),
+  };
+}
+
 function requireMutableV2Call(snapshot, callId) {
   if (!snapshot.exists) {
     throw new CallV2Error(
@@ -995,6 +1313,21 @@ function requireMutableV2Call(snapshot, callId) {
     throw new CallV2Error(
       ERROR_CODES.callNotFound,
       "The requested call is not a V2 call.",
+    );
+  }
+  validateAuthoritativeCallData(call);
+  return call;
+}
+
+function requireExistingV2CallForTimeout(snapshot, callId) {
+  const call = {
+    ...snapshot.data(),
+    id: callId,
+  };
+  if (call.schemaVersion !== CALL_SCHEMA_VERSION || call.callSystem !== "v2") {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The call document is not an authoritative V2 call.",
     );
   }
   validateAuthoritativeCallData(call);
@@ -1402,6 +1735,37 @@ function requireActiveTemporalFields(call) {
   }
 }
 
+function validateTimeoutTemporalFields(call, timeoutKind) {
+  if (timeoutKind === "accepted_join") {
+    requireAcceptedTemporalFields(call);
+    return;
+  }
+  if (timeoutKind === "reconnect") {
+    requireActiveTemporalFields(call);
+  }
+}
+
+function requireTimeoutDeadline(call, timeoutKind, config) {
+  const deadline = call[config.deadlineField];
+  if (deadline === null || deadline === undefined) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      `The ${timeoutKind} timeout deadline is missing.`,
+    );
+  }
+  const millis = strictTimestampMillis(deadline);
+  if (millis === null) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      `The ${timeoutKind} timeout deadline is malformed.`,
+    );
+  }
+  return {
+    value: deadline,
+    millis,
+  };
+}
+
 function requireOpenReconnectWindowIfPresent(call, nowDate) {
   if (
     call.reconnectDeadlineAt !== null &&
@@ -1744,6 +2108,59 @@ function createCommandRecords(
   });
 }
 
+function createTimeoutCommandRecord(
+  transaction,
+  commandRef,
+  {
+    command,
+    timeoutKind,
+    expectedCallVersion,
+    timeoutDeadlineAt,
+    callId,
+    nowDate,
+    result,
+  },
+) {
+  const ttlAt = addMilliseconds(nowDate, COMMAND_TTL_MS);
+  transaction.create(commandRef, {
+    commandId: command.commandId,
+    actorType: "system",
+    actorUid: null,
+    action: ACTION_PROCESS_CALL_TIMEOUT,
+    requestHash: command.requestHash,
+    callId,
+    timeoutKind,
+    expectedCallVersion,
+    timeoutDeadlineAt,
+    status: "completed",
+    result,
+    createdAt: nowDate,
+    completedAt: nowDate,
+    ttlAt,
+  });
+}
+
+function buildTimeoutNoopResult({
+  callId,
+  timeoutKind,
+  status,
+  call = null,
+}) {
+  return Object.freeze({
+    callId,
+    timeoutKind,
+    status,
+    lifecycleState: call ? call.lifecycleState : null,
+    terminal: call ? call.terminal : null,
+    version: call ? call.version : null,
+    endedAt: call ? toDateOrNull(call.endedAt) : null,
+    endReason: call ? call.endReason ?? null : null,
+    failureCode: call ? call.failureCode ?? null : null,
+    lockReleaseResults: null,
+    idempotentReplay: false,
+  });
+}
+
 function nextMonotonicVersion(value) {
   if (!isIncrementablePositiveInteger(value)) {
     throw new CallV2Error(
@@ -1804,6 +2221,33 @@ async function recoverIdempotencyCreateConflictOrThrow({
   );
 }
 
+async function recoverTimeoutCommandCreateConflictOrThrow({
+  error,
+  commandRef,
+  expected,
+  fallbackMessage,
+}) {
+  if (error instanceof CallV2Error) {
+    throw error;
+  }
+  if (isAlreadyExistsError(error)) {
+    const commandSnapshot = await commandRef.get();
+    if (commandSnapshot.exists) {
+      return handleExistingTimeoutCommandRecord(
+        commandSnapshot.data(),
+        expected,
+      );
+    }
+  }
+  throw new CallV2Error(
+    ERROR_CODES.transactionFailed,
+    fallbackMessage,
+    {
+      causeMessage: error && error.message ? error.message : String(error),
+    },
+  );
+}
+
 function isAlreadyExistsError(error) {
   return (
     error &&
@@ -1834,6 +2278,30 @@ function handleExistingIdempotencyRecord(
     throw new CallV2Error(
       ERROR_CODES.transactionFailed,
       "The idempotency record is incomplete.",
+    );
+  }
+
+  return normalizeReplayResult(record.result);
+}
+
+function handleExistingTimeoutCommandRecord(record, expected) {
+  if (
+    !record ||
+    record.actorType !== "system" ||
+    record.actorUid !== null ||
+    record.action !== ACTION_PROCESS_CALL_TIMEOUT ||
+    record.callId !== expected.callId ||
+    record.timeoutKind !== expected.timeoutKind ||
+    record.requestHash !== expected.requestHash ||
+    record.status !== "completed" ||
+    !record.result ||
+    record.result.callId !== expected.callId ||
+    record.result.timeoutKind !== expected.timeoutKind ||
+    record.result.status !== "terminalized"
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The timeout command record is malformed or conflicting.",
     );
   }
 
@@ -2262,6 +2730,7 @@ module.exports = {
   ACTION_CANCEL_CALL,
   ACTION_DECLINE_CALL,
   ACTION_END_CALL,
+  ACTION_PROCESS_CALL_TIMEOUT,
   ACTION_REPORT_PARTICIPANT_MEDIA,
   CALL_SCHEMA_VERSION,
   COMMAND_TTL_MS,
@@ -2277,6 +2746,7 @@ module.exports = {
   declineCallV2,
   deriveRtcUid,
   endCallV2,
+  processCallTimeoutV2,
   reportParticipantMediaV2,
   startCallV2,
 };

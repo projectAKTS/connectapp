@@ -19,6 +19,7 @@ const {
   cancelCallV2,
   declineCallV2,
   endCallV2,
+  processCallTimeoutV2,
   reportParticipantMediaV2,
   startCallV2,
 } = require("../../call_v2/start_call_v2");
@@ -2308,6 +2309,622 @@ test("participant can end active call after reconnect deadline", async () => {
   assert.equal((await requiredData("calls/call_1")).lifecycleState, "completed");
 });
 
+test("ringing timeout before deadline returns not_due without writes", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const deadline = (await requiredData("calls/call_1")).ringingDeadlineAt;
+  const before = await captureMutationState();
+
+  const result = await processTimeout({
+    now: new Date(millis(deadline) - 1),
+    request: timeoutRequest("call_1", "ringing", 1, deadline),
+  });
+
+  assert.equal(result.status, "not_due");
+  assert.equal(result.lifecycleState, "ringing");
+  await assertMutationStateUnchanged(before);
+  assert.equal(await commandCountForAction("call_1", "processCallTimeout"), 0);
+});
+
+test("ringing timeout at and after deadline creates missed with exact fields", async () => {
+  const cases = [
+    {
+      name: "at deadline",
+      offsetMs: 0,
+    },
+    {
+      name: "after deadline",
+      offsetMs: 1,
+    },
+  ];
+
+  for (const testCase of cases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await startCall();
+    const deadline = (await requiredData("calls/call_1")).ringingDeadlineAt;
+    const processedAt = new Date(millis(deadline) + testCase.offsetMs);
+
+    const result = await processTimeout({
+      now: processedAt,
+      request: timeoutRequest("call_1", "ringing", 1, deadline),
+    });
+
+    assert.equal(result.status, "terminalized");
+    assert.equal(result.lifecycleState, "missed");
+    assert.equal(result.terminal, true);
+    assert.equal(result.version, 2);
+    assert.equal(millis(result.endedAt), processedAt.getTime());
+    assert.equal(result.endReason, "ringing_timeout");
+    assert.equal(result.failureCode, null);
+    assert.deepEqual(result.lockReleaseResults, {
+      caller: "released",
+      callee: "released",
+    });
+    const call = await requiredData("calls/call_1");
+    assert.equal(call.lifecycleState, "missed");
+    assert.equal(call.terminal, true);
+    assert.equal(call.version, 2);
+    assert.equal(millis(call.endedAt), processedAt.getTime());
+    assert.equal(call.endedByUid, null);
+    assert.equal(call.endReason, "ringing_timeout");
+    assert.equal(call.failureCode, null);
+    assert.equal(call.historyVisible, true);
+    assert.equal(
+      millis(call.historyExpiresAt),
+      processedAt.getTime() + PUBLIC_HISTORY_RETENTION_MS,
+    );
+    assert.equal((await db.doc("activeCallLocks/caller").get()).exists, false);
+    assert.equal((await db.doc("activeCallLocks/callee").get()).exists, false);
+  }
+});
+
+test("accepted-join timeout before deadline returns not_due", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+  const call = await requiredData("calls/call_1");
+  const before = await captureMutationState();
+
+  const result = await processTimeout({
+    now: new Date(millis(call.acceptedJoinDeadlineAt) - 1),
+    request: timeoutRequest(
+      "call_1",
+      "accepted_join",
+      2,
+      call.acceptedJoinDeadlineAt,
+    ),
+  });
+
+  assert.equal(result.status, "not_due");
+  assert.equal(result.lifecycleState, "accepted");
+  await assertMutationStateUnchanged(before);
+});
+
+test("accepted-join timeout at deadline creates failed with controlled fields", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+  const call = await requiredData("calls/call_1");
+  const processedAt = new Date(millis(call.acceptedJoinDeadlineAt));
+
+  const result = await processTimeout({
+    now: processedAt,
+    request: timeoutRequest(
+      "call_1",
+      "accepted_join",
+      2,
+      call.acceptedJoinDeadlineAt,
+    ),
+  });
+
+  assert.equal(result.status, "terminalized");
+  assert.equal(result.lifecycleState, "failed");
+  assert.equal(result.version, 3);
+  assert.equal(result.endReason, "accepted_join_timeout");
+  assert.equal(result.failureCode, "accepted_join_timeout");
+  const updated = await requiredData("calls/call_1");
+  assert.equal(updated.lifecycleState, "failed");
+  assert.equal(updated.endReason, "accepted_join_timeout");
+  assert.equal(updated.failureCode, "accepted_join_timeout");
+  assert.equal(millis(updated.historyExpiresAt), processedAt.getTime() + PUBLIC_HISTORY_RETENTION_MS);
+});
+
+test("reconnect timeout before deadline returns not_due", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const deadline = new Date(fixedMs() + RECONNECT_GRACE_DURATION_MS);
+  await setActiveReconnectScenario({
+    reconnectDeadlineAt: deadline,
+    callerMediaState: "reconnecting",
+    calleeMediaState: "joined",
+  });
+  const before = await captureMutationState();
+
+  const result = await processTimeout({
+    now: new Date(deadline.getTime() - 1),
+    request: timeoutRequest("call_1", "reconnect", 3, deadline),
+  });
+
+  assert.equal(result.status, "not_due");
+  assert.equal(result.lifecycleState, "active");
+  await assertMutationStateUnchanged(before);
+});
+
+test("reconnect timeout at deadline creates failed with controlled fields", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const deadline = new Date(fixedMs() + RECONNECT_GRACE_DURATION_MS);
+  await setActiveReconnectScenario({
+    reconnectDeadlineAt: deadline,
+    callerMediaState: "reconnecting",
+    calleeMediaState: "joined",
+  });
+
+  const result = await processTimeout({
+    now: deadline,
+    request: timeoutRequest("call_1", "reconnect", 3, deadline),
+  });
+
+  assert.equal(result.status, "terminalized");
+  assert.equal(result.lifecycleState, "failed");
+  assert.equal(result.version, 4);
+  assert.equal(result.endReason, "reconnect_timeout");
+  assert.equal(result.failureCode, "reconnect_timeout");
+  const call = await requiredData("calls/call_1");
+  assert.equal(call.lifecycleState, "failed");
+  assert.equal(call.endReason, "reconnect_timeout");
+  assert.equal(call.failureCode, "reconnect_timeout");
+});
+
+test("timeout missing, terminal, stale version, lifecycle, and deadline are no-op results", async () => {
+  const missing = await processTimeout({
+    request: timeoutRequest(
+      "missing_call",
+      "ringing",
+      1,
+      new Date(fixedMs() + RINGING_DURATION_MS),
+    ),
+  });
+  assert.equal(missing.status, "missing");
+
+  await seedUsers("caller", "callee");
+  await startCall();
+  await cancelCall();
+  const terminalCall = await requiredData("calls/call_1");
+  const terminalBefore = await captureMutationState();
+  const alreadyTerminal = await processTimeout({
+    request: timeoutRequest("call_1", "ringing", 1, terminalCall.ringingDeadlineAt),
+  });
+  assert.equal(alreadyTerminal.status, "already_terminal");
+  await assertMutationStateUnchanged(terminalBefore);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  const ringingCall = await requiredData("calls/call_1");
+  const staleCases = [
+    {
+      name: "version mismatch",
+      request: timeoutRequest("call_1", "ringing", 999, ringingCall.ringingDeadlineAt),
+    },
+    {
+      name: "deadline mismatch",
+      request: timeoutRequest(
+        "call_1",
+        "ringing",
+        1,
+        new Date(millis(ringingCall.ringingDeadlineAt) + 1),
+      ),
+    },
+  ];
+  for (const testCase of staleCases) {
+    const before = await captureMutationState();
+    const result = await processTimeout({ request: testCase.request });
+    assert.equal(result.status, "stale", testCase.name);
+    await assertMutationStateUnchanged(before);
+  }
+
+  await acceptCall();
+  const acceptedCall = await requiredData("calls/call_1");
+  const lifecycleBefore = await captureMutationState();
+  const lifecycleMismatch = await processTimeout({
+    request: timeoutRequest("call_1", "ringing", 2, acceptedCall.ringingDeadlineAt),
+  });
+  assert.equal(lifecycleMismatch.status, "stale");
+  await assertMutationStateUnchanged(lifecycleBefore);
+});
+
+test("timeout rejects malformed requests, deadlines, call schema, and callOps without writes", async () => {
+  await assertCallError(
+    ERROR_CODES.invalidArgument,
+    () => processCallTimeoutV2({
+      db,
+      request: {
+        ...timeoutRequest("call_1", "ringing", 1, FIXED_NOW),
+        actorUid: "caller",
+      },
+      now: FIXED_NOW,
+    }),
+  );
+  await assertCallError(
+    ERROR_CODES.invalidArgument,
+    () => processCallTimeoutV2({
+      db,
+      request: timeoutRequest("call_1", "ringing", 1, "bad"),
+      now: FIXED_NOW,
+    }),
+  );
+
+  const fieldDelete = admin.firestore.FieldValue.delete();
+  const malformedDeadlineCases = [
+    {
+      name: "missing ringing deadline",
+      setup: async () => {
+        await startCall();
+        await db.doc("calls/call_1").update({ ringingDeadlineAt: fieldDelete });
+        return timeoutRequest("call_1", "ringing", 1, new Date(fixedMs()));
+      },
+    },
+    {
+      name: "malformed accepted deadline",
+      setup: async () => {
+        await startCall();
+        await acceptCall();
+        await db.doc("calls/call_1").update({ acceptedJoinDeadlineAt: "bad" });
+        return timeoutRequest("call_1", "accepted_join", 2, new Date(fixedMs()));
+      },
+    },
+    {
+      name: "null reconnect deadline",
+      setup: async () => {
+        await promoteCallToActive();
+        return timeoutRequest("call_1", "reconnect", 3, new Date(fixedMs()));
+      },
+    },
+  ];
+  for (const testCase of malformedDeadlineCases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    const request = await testCase.setup();
+    const before = await captureMutationState();
+    await assertCallError(
+      ERROR_CODES.transactionFailed,
+      processTimeout({ request }),
+    );
+    await assertMutationStateUnchanged(before);
+  }
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  const deadline = (await requiredData("calls/call_1")).ringingDeadlineAt;
+  await db.doc("calls/call_1").update({ schemaVersion: 3 });
+  const badSchema = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    processTimeout({ request: timeoutRequest("call_1", "ringing", 1, deadline) }),
+  );
+  await assertMutationStateUnchanged(badSchema);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  const call = await requiredData("calls/call_1");
+  await db.doc("callOps/call_1").update({ latestOpsVersion: "bad" });
+  const badOps = await captureMutationState();
+    await assertCallError(
+      ERROR_CODES.transactionFailed,
+      processTimeout({
+        now: new Date(millis(call.ringingDeadlineAt)),
+        request: timeoutRequest("call_1", "ringing", 1, call.ringingDeadlineAt),
+      }),
+    );
+  await assertMutationStateUnchanged(badOps);
+});
+
+test("timeout scoped lock release reports missing, mismatched, and missing-claim locks", async () => {
+  const cases = [
+    {
+      name: "missing locks",
+      mutate: async () => {
+        await db.doc("activeCallLocks/caller").delete();
+        await db.doc("activeCallLocks/callee").delete();
+      },
+      expected: {
+        caller: "missing",
+        callee: "missing",
+      },
+      assertLocks: async () => {
+        assert.equal((await db.doc("activeCallLocks/caller").get()).exists, false);
+        assert.equal((await db.doc("activeCallLocks/callee").get()).exists, false);
+      },
+    },
+    {
+      name: "unrelated locks",
+      mutate: async () => {
+        await db.doc("activeCallLocks/caller").update({ callId: "other_call" });
+      },
+      expected: {
+        caller: "call_mismatch",
+        callee: "released",
+      },
+      assertLocks: async () => {
+        assert.equal((await requiredData("activeCallLocks/caller")).callId, "other_call");
+        assert.equal((await db.doc("activeCallLocks/callee").get()).exists, false);
+      },
+    },
+    {
+      name: "fencing mismatch",
+      mutate: async () => {
+        await db.doc("activeCallLocks/caller").update({ fencingToken: 999 });
+      },
+      expected: {
+        caller: "fencing_mismatch",
+        callee: "released",
+      },
+      assertLocks: async () => {
+        assert.equal((await requiredData("activeCallLocks/caller")).fencingToken, 999);
+        assert.equal((await db.doc("activeCallLocks/callee").get()).exists, false);
+      },
+    },
+    {
+      name: "missing claim",
+      mutate: async () => {
+        await db.doc("callOps/call_1").update({
+          "lockClaims.caller": admin.firestore.FieldValue.delete(),
+        });
+      },
+      expected: {
+        caller: "claim_missing",
+        callee: "released",
+      },
+      assertLocks: async () => {
+        assert.equal((await db.doc("activeCallLocks/caller").get()).exists, true);
+        assert.equal((await db.doc("activeCallLocks/callee").get()).exists, false);
+      },
+    },
+  ];
+
+  for (const testCase of cases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await startCall();
+    const call = await requiredData("calls/call_1");
+    await testCase.mutate();
+
+    const result = await processTimeout({
+      now: new Date(millis(call.ringingDeadlineAt)),
+      request: timeoutRequest("call_1", "ringing", 1, call.ringingDeadlineAt),
+    });
+
+    assert.deepEqual(result.lockReleaseResults, testCase.expected, testCase.name);
+    assert.deepEqual(
+      (await requiredData("callOps/call_1")).lockReleaseResults,
+      testCase.expected,
+    );
+    await testCase.assertLocks();
+  }
+});
+
+test("timeout updates callOps metadata and creates only private command record", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const call = await requiredData("calls/call_1");
+  const beforeOps = await requiredData("callOps/call_1");
+  const beforeIdempotencySize = (await db.collection("callCommandKeys").get()).size;
+
+  await processTimeout({
+    now: new Date(millis(call.ringingDeadlineAt)),
+    request: timeoutRequest("call_1", "ringing", 1, call.ringingDeadlineAt),
+  });
+
+  const updatedCall = await requiredData("calls/call_1");
+  const ops = await requiredData("callOps/call_1");
+  assert.equal(updatedCall.version, call.version + 1);
+  assert.equal(ops.latestOpsVersion, beforeOps.latestOpsVersion + 1);
+  assert.equal(millis(ops.terminalAt), millis(call.ringingDeadlineAt));
+  assert.equal(ops.terminalState, "missed");
+  assert.equal(ops.terminalReason, "ringing_timeout");
+  assert.equal(ops.failureCode, null);
+  assert.equal(ops.timeoutKind, "ringing");
+  assert.equal(millis(ops.timeoutDeadlineAt), millis(call.ringingDeadlineAt));
+  assert.equal(millis(ops.timeoutProcessedAt), millis(call.ringingDeadlineAt));
+  assert.equal(
+    millis(ops.opsRetentionExpiresAt),
+    millis(call.ringingDeadlineAt) + OPS_RETENTION_MS,
+  );
+  assert.equal(await commandCountForAction("call_1", "processCallTimeout"), 1);
+  assert.equal((await db.collection("callCommandKeys").get()).size, beforeIdempotencySize);
+  assert.equal(updatedCall.timeoutKind, undefined);
+  assert.equal(updatedCall.lockClaims, undefined);
+});
+
+test("duplicate timeout delivery replays original result and creates one command", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const call = await requiredData("calls/call_1");
+  const request = timeoutRequest("call_1", "ringing", 1, call.ringingDeadlineAt);
+
+  const first = await processTimeout({
+    now: new Date(millis(call.ringingDeadlineAt)),
+    request,
+  });
+  const replay = await processTimeout({ now: new Date(millis(call.ringingDeadlineAt) + 1), request });
+
+  assert.equal(first.status, "terminalized");
+  assert.equal(replay.idempotentReplay, true);
+  assert.equal(replay.status, "terminalized");
+  assert.equal(replay.version, first.version);
+  assert.equal(await commandCountForAction("call_1", "processCallTimeout"), 1);
+
+  const command = (await db.collection("callOps/call_1/commands").get()).docs
+    .find((doc) => doc.data().action === "processCallTimeout")
+    .data();
+  await db.doc(`callOps/call_1/commands/${command.commandId}`).update({
+    status: "pending",
+  });
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    processTimeout({ now: new Date(millis(call.ringingDeadlineAt)), request }),
+  );
+});
+
+test("timeout lifecycle races produce one authoritative outcome", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  let call = await requiredData("calls/call_1");
+  let results = await Promise.allSettled([
+    processTimeout({
+      now: new Date(millis(call.ringingDeadlineAt)),
+      request: timeoutRequest("call_1", "ringing", 1, call.ringingDeadlineAt),
+    }),
+    acceptCall({ request: lifecycleRequest("call_1", "accept_timeout_race") }),
+  ]);
+  await assertTimeoutRaceOutcome(results, ["accepted", "missed"]);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  call = await requiredData("calls/call_1");
+  results = await Promise.allSettled([
+    processTimeout({
+      now: new Date(millis(call.ringingDeadlineAt)),
+      request: timeoutRequest("call_1", "ringing", 1, call.ringingDeadlineAt),
+    }),
+    cancelCall({ request: lifecycleRequest("call_1", "cancel_timeout_race") }),
+  ]);
+  await assertTimeoutRaceOutcome(results, ["cancelled", "missed"]);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+  await reportMedia({
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "caller_joined_before_timeout"),
+  });
+  call = await requiredData("calls/call_1");
+  results = await Promise.allSettled([
+    processTimeout({
+      now: new Date(millis(call.acceptedJoinDeadlineAt)),
+      request: timeoutRequest(
+        "call_1",
+        "accepted_join",
+        2,
+        call.acceptedJoinDeadlineAt,
+      ),
+    }),
+    reportMedia({
+      authUid: "callee",
+      mediaState: "joined",
+      request: mediaRequest("call_1", "joined", "callee_join_timeout_race"),
+    }),
+  ]);
+  await assertTimeoutRaceOutcome(results, ["active", "failed"]);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const reconnectDeadline = new Date(fixedMs() + RECONNECT_GRACE_DURATION_MS);
+  await setActiveReconnectScenario({
+    reconnectDeadlineAt: reconnectDeadline,
+    callerMediaState: "reconnecting",
+    calleeMediaState: "joined",
+  });
+  results = await Promise.allSettled([
+    processTimeout({
+      now: reconnectDeadline,
+      request: timeoutRequest("call_1", "reconnect", 3, reconnectDeadline),
+    }),
+    reportMedia({
+      now: new Date(reconnectDeadline.getTime() - 1),
+      mediaState: "joined",
+      request: mediaRequest("call_1", "joined", "recover_timeout_race"),
+    }),
+  ]);
+  await assertTimeoutRaceOutcome(results, ["active", "failed"]);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const endDeadline = new Date(fixedMs() + RECONNECT_GRACE_DURATION_MS);
+  await setActiveReconnectScenario({
+    reconnectDeadlineAt: endDeadline,
+    callerMediaState: "reconnecting",
+    calleeMediaState: "joined",
+  });
+  results = await Promise.allSettled([
+    processTimeout({
+      now: endDeadline,
+      request: timeoutRequest("call_1", "reconnect", 3, endDeadline),
+    }),
+    endCall({
+      now: endDeadline,
+      request: lifecycleRequest("call_1", "end_timeout_race"),
+    }),
+  ]);
+  await assertTimeoutRaceOutcome(results, ["completed", "failed"]);
+});
+
+test("stale old reconnect task cannot terminalize newer reconnect generation", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const oldDeadline = new Date(fixedMs() + RECONNECT_GRACE_DURATION_MS);
+  const newDeadline = new Date(oldDeadline.getTime() + RECONNECT_GRACE_DURATION_MS);
+  await setActiveReconnectScenario({
+    reconnectDeadlineAt: newDeadline,
+    callerMediaState: "reconnecting",
+    calleeMediaState: "joined",
+  });
+  await db.doc("calls/call_1").update({ version: 4 });
+  const before = await captureMutationState();
+
+  const result = await processTimeout({
+    now: new Date(oldDeadline.getTime() + 1),
+    request: timeoutRequest("call_1", "reconnect", 3, oldDeadline),
+  });
+
+  assert.equal(result.status, "stale");
+  await assertMutationStateUnchanged(before);
+});
+
+test("reconnect timeout rejects malformed participants and joined inconsistency", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  let deadline = new Date(fixedMs() + RECONNECT_GRACE_DURATION_MS);
+  await setActiveReconnectScenario({
+    reconnectDeadlineAt: deadline,
+    callerMediaState: "reconnecting",
+    calleeMediaState: "joined",
+  });
+  await db.doc("calls/call_1/participants/caller").update({ role: "callee" });
+  let before = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    processTimeout({
+      now: deadline,
+      request: timeoutRequest("call_1", "reconnect", 3, deadline),
+    }),
+  );
+  await assertMutationStateUnchanged(before);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  deadline = new Date(fixedMs() + RECONNECT_GRACE_DURATION_MS);
+  await db.doc("calls/call_1").update({ reconnectDeadlineAt: deadline });
+  before = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    processTimeout({
+      now: deadline,
+      request: timeoutRequest("call_1", "reconnect", 3, deadline),
+    }),
+  );
+  await assertMutationStateUnchanged(before);
+});
+
 test("accepted call promotes to active only after both participants joined", async () => {
   await seedUsers("caller", "callee");
   await startCall();
@@ -2639,6 +3256,19 @@ function reportMedia(overrides = {}) {
   });
 }
 
+function processTimeout(overrides = {}) {
+  return processCallTimeoutV2({
+    db,
+    request: overrides.request || timeoutRequest(
+      "call_1",
+      "ringing",
+      1,
+      new Date(fixedMs() + RINGING_DURATION_MS),
+    ),
+    now: overrides.now || FIXED_NOW,
+  });
+}
+
 function lifecycleRequest(callId, idempotencyKey) {
   return {
     callId,
@@ -2651,6 +3281,20 @@ function mediaRequest(callId, mediaState, idempotencyKey) {
     callId,
     mediaState,
     idempotencyKey,
+  };
+}
+
+function timeoutRequest(
+  callId,
+  timeoutKind,
+  expectedCallVersion,
+  expectedDeadlineAt,
+) {
+  return {
+    callId,
+    timeoutKind,
+    expectedCallVersion,
+    expectedDeadlineAt,
   };
 }
 
@@ -2722,6 +3366,28 @@ function assertOneSuccessAndOneInvalidState(results) {
   assert.equal(rejected.length, 1);
   assert.ok(rejected[0].reason instanceof CallV2Error);
   assert.equal(rejected[0].reason.code, ERROR_CODES.invalidState);
+}
+
+async function assertTimeoutRaceOutcome(results, allowedLifecycleStates) {
+  const timeoutResult = results[0];
+  assert.equal(timeoutResult.status, "fulfilled");
+  assert.ok(
+    ["terminalized", "stale", "already_terminal"].includes(
+      timeoutResult.value.status,
+    ),
+    timeoutResult.value.status,
+  );
+  if (results[1].status === "rejected") {
+    assert.ok(results[1].reason instanceof CallV2Error);
+    assert.ok(
+      [ERROR_CODES.invalidState, ERROR_CODES.transactionFailed].includes(
+        results[1].reason.code,
+      ),
+      results[1].reason.code,
+    );
+  }
+  const finalCall = await requiredData("calls/call_1");
+  assert.ok(allowedLifecycleStates.includes(finalCall.lifecycleState));
 }
 
 async function seedUsers(...uids) {
