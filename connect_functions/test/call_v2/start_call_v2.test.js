@@ -7,6 +7,7 @@ const admin = require("firebase-admin");
 
 const {
   ACCEPTED_JOIN_DURATION_MS,
+  ACTIVE_LEASE_DURATION_MS,
   COMMAND_TTL_MS,
   ERROR_CODES,
   LOCK_EXPIRY_SAFETY_BUFFER_MS,
@@ -19,8 +20,10 @@ const {
   cancelCallV2,
   declineCallV2,
   endCallV2,
+  processActiveLeaseTimeoutV2,
   processCallTimeoutV2,
   reportParticipantMediaV2,
+  renewActiveCallLeaseV2,
   startCallV2,
 } = require("../../call_v2/start_call_v2");
 
@@ -126,11 +129,13 @@ test("creates ringing call, participants, locks, ops, and idempotency atomically
   assert.equal(callerParticipant.role, "caller");
   assert.equal(callerParticipant.mediaState, "not_joined");
   assert.equal(callerParticipant.mediaVersion, 0);
+  assert.equal(callerParticipant.heartbeatVersion, 0);
   assert.equal(callerParticipant.rtcUid, result.callerRtcUid);
   assert.equal(calleeParticipant.uid, "callee");
   assert.equal(calleeParticipant.role, "callee");
   assert.equal(calleeParticipant.mediaState, "not_joined");
   assert.equal(calleeParticipant.mediaVersion, 0);
+  assert.equal(calleeParticipant.heartbeatVersion, 0);
   assert.equal(calleeParticipant.rtcUid, result.calleeRtcUid);
 
   const callerLock = await requiredData("activeCallLocks/caller");
@@ -2957,6 +2962,14 @@ test("accepted call promotes to active only after both participants joined", asy
   assert.equal((await requiredData("activeCallLocks/caller")).state, "active");
   assert.equal((await requiredData("activeCallLocks/callee")).state, "active");
   assert.equal(
+    millis((await requiredData("activeCallLocks/caller")).expiresAt),
+    fixedMs() + ACTIVE_LEASE_DURATION_MS,
+  );
+  assert.equal(
+    millis((await requiredData("activeCallLocks/callee")).expiresAt),
+    fixedMs() + ACTIVE_LEASE_DURATION_MS,
+  );
+  assert.equal(
     (await requiredData("activeCallLocks/caller")).fencingToken,
     callerLockBefore.fencingToken,
   );
@@ -2964,6 +2977,861 @@ test("accepted call promotes to active only after both participants joined", asy
     (await requiredData("activeCallLocks/callee")).fencingToken,
     calleeLockBefore.fencingToken,
   );
+  assert.equal(
+    (await requiredData("calls/call_1/participants/caller")).heartbeatVersion,
+    0,
+  );
+  assert.equal(
+    (await requiredData("calls/call_1/participants/callee")).heartbeatVersion,
+    0,
+  );
+});
+
+test("caller heartbeat renews only caller lock with exact versions and ops", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const heartbeatAt = new Date(fixedMs() + 10 * 1000);
+  const beforeCall = await requiredData("calls/call_1");
+  const beforeOps = await requiredData("callOps/call_1");
+  const beforeCaller = await requiredData("calls/call_1/participants/caller");
+  const beforeCallee = await requiredData("calls/call_1/participants/callee");
+  const beforeCallerLock = await requiredData("activeCallLocks/caller");
+  const beforeCalleeLock = await requiredData("activeCallLocks/callee");
+
+  const result = await renewLease({
+    now: heartbeatAt,
+    request: heartbeatRequest("call_1", 1, "caller_heartbeat_1"),
+  });
+
+  assert.equal(result.callId, "call_1");
+  assert.equal(result.participantUid, "caller");
+  assert.equal(result.heartbeatVersion, 1);
+  assert.equal(millis(result.lastHeartbeatAt), heartbeatAt.getTime());
+  assert.equal(
+    millis(result.leaseExpiresAt),
+    heartbeatAt.getTime() + ACTIVE_LEASE_DURATION_MS,
+  );
+  assert.equal(result.lifecycleState, "active");
+  assert.equal(result.callVersion, beforeCall.version);
+  assert.equal(result.idempotentReplay, false);
+
+  const caller = await requiredData("calls/call_1/participants/caller");
+  const callee = await requiredData("calls/call_1/participants/callee");
+  assert.equal(caller.heartbeatVersion, 1);
+  assert.equal(caller.mediaVersion, beforeCaller.mediaVersion);
+  assert.equal(caller.mediaState, beforeCaller.mediaState);
+  assert.equal(millis(caller.lastHeartbeatAt), heartbeatAt.getTime());
+  assert.deepEqual(
+    normalizeFirestoreData(callee),
+    normalizeFirestoreData(beforeCallee),
+  );
+
+  const callerLock = await requiredData("activeCallLocks/caller");
+  const calleeLock = await requiredData("activeCallLocks/callee");
+  assert.equal(callerLock.state, "active");
+  assert.equal(callerLock.fencingToken, beforeCallerLock.fencingToken);
+  assert.equal(millis(callerLock.updatedAt), heartbeatAt.getTime());
+  assert.equal(
+    millis(callerLock.expiresAt),
+    heartbeatAt.getTime() + ACTIVE_LEASE_DURATION_MS,
+  );
+  assert.deepEqual(
+    normalizeFirestoreData(calleeLock),
+    normalizeFirestoreData(beforeCalleeLock),
+  );
+
+  const call = await requiredData("calls/call_1");
+  const ops = await requiredData("callOps/call_1");
+  assert.equal(call.version, beforeCall.version);
+  assert.equal(call.lifecycleState, "active");
+  assert.equal(call.reconnectDeadlineAt, null);
+  assert.equal(ops.latestOpsVersion, beforeOps.latestOpsVersion + 1);
+  assert.equal(
+    millis(ops.opsRetentionExpiresAt),
+    heartbeatAt.getTime() + OPS_RETENTION_MS,
+  );
+  assert.equal(await commandCountForAction("call_1", "renewActiveCallLease"), 1);
+  for (const publicDoc of [call, caller]) {
+    assert.equal(publicDoc.commandId, undefined);
+    assert.equal(publicDoc.idempotencyKey, undefined);
+    assert.equal(publicDoc.lockClaims, undefined);
+    assertNoPrivatePublicFields(publicDoc);
+  }
+});
+
+test("callee heartbeat renews only callee lock", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const heartbeatAt = new Date(fixedMs() + 15 * 1000);
+  const beforeCallerLock = await requiredData("activeCallLocks/caller");
+
+  const result = await renewLease({
+    authUid: "callee",
+    now: heartbeatAt,
+    request: heartbeatRequest("call_1", 1, "callee_heartbeat_1"),
+  });
+
+  assert.equal(result.participantUid, "callee");
+  assert.equal(result.heartbeatVersion, 1);
+  assert.deepEqual(
+    normalizeFirestoreData(await requiredData("activeCallLocks/caller")),
+    normalizeFirestoreData(beforeCallerLock),
+  );
+  const calleeLock = await requiredData("activeCallLocks/callee");
+  assert.equal(millis(calleeLock.updatedAt), heartbeatAt.getTime());
+  assert.equal(
+    millis(calleeLock.expiresAt),
+    heartbeatAt.getTime() + ACTIVE_LEASE_DURATION_MS,
+  );
+  assert.equal(
+    (await requiredData("calls/call_1/participants/callee")).heartbeatVersion,
+    1,
+  );
+});
+
+test("heartbeat idempotency replays, conflicts, and handles duplicate concurrency", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+
+  const first = await renewLease({
+    request: heartbeatRequest("call_1", 1, "heartbeat_replay"),
+  });
+  const replay = await renewLease({
+    request: heartbeatRequest("call_1", 1, "heartbeat_replay"),
+  });
+  assert.equal(replay.idempotentReplay, true);
+  assert.equal(replay.heartbeatVersion, first.heartbeatVersion);
+  assert.equal(millis(replay.leaseExpiresAt), millis(first.leaseExpiresAt));
+  await assertCallError(
+    ERROR_CODES.idempotencyConflict,
+    renewLease({
+      request: heartbeatRequest("call_1", 2, "heartbeat_replay"),
+    }),
+  );
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const results = await Promise.all([
+    renewLease({ request: heartbeatRequest("call_1", 1, "heartbeat_dupe") }),
+    renewLease({ request: heartbeatRequest("call_1", 1, "heartbeat_dupe") }),
+  ]);
+
+  assert.equal(results.filter((result) => result.idempotentReplay).length, 1);
+  assert.equal(
+    results.filter((result) => !result.idempotentReplay).length,
+    1,
+  );
+  assert.equal(
+    (await requiredData("calls/call_1/participants/caller")).heartbeatVersion,
+    1,
+  );
+  assert.equal(await commandCountForAction("call_1", "renewActiveCallLease"), 1);
+});
+
+test("heartbeat rejects old and skipped versions without renewing", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  await renewLease({ request: heartbeatRequest("call_1", 1, "heartbeat_first") });
+  let before = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.invalidState,
+    renewLease({ request: heartbeatRequest("call_1", 1, "heartbeat_old") }),
+  );
+  await assertMutationStateUnchanged(before);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  before = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.invalidState,
+    renewLease({ request: heartbeatRequest("call_1", 2, "heartbeat_skipped") }),
+  );
+  await assertMutationStateUnchanged(before);
+});
+
+test("heartbeat rejects invalid actors, lifecycles, and media states", async () => {
+  await seedUsers("caller", "callee", "other");
+  await promoteCallToActive();
+  await db.doc("calls/call_1/participants/caller").update({ role: "callee" });
+  let before = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    renewLease({ request: heartbeatRequest("call_1", 1, "wrong_role") }),
+  );
+  await assertMutationStateUnchanged(before);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee", "other");
+  await promoteCallToActive();
+  await assertCallError(
+    ERROR_CODES.forbidden,
+    renewLease({
+      authUid: "other",
+      request: heartbeatRequest("call_1", 1, "nonparticipant"),
+    }),
+  );
+
+  const lifecycleCases = [
+    {
+      name: "ringing",
+      setup: async () => startCall(),
+    },
+    {
+      name: "accepted",
+      setup: async () => {
+        await startCall();
+        await acceptCall();
+      },
+    },
+    {
+      name: "terminal",
+      setup: async () => {
+        await promoteCallToActive();
+        await endCall();
+      },
+    },
+  ];
+  for (const testCase of lifecycleCases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await testCase.setup();
+    before = await captureMutationState();
+    await assertCallError(
+      ERROR_CODES.invalidState,
+      renewLease({
+        request: heartbeatRequest("call_1", 1, `heartbeat_${testCase.name}`),
+      }),
+    );
+    await assertMutationStateUnchanged(before);
+  }
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  await db.doc("calls/call_1/participants/caller").update({
+    mediaState: "disconnected",
+    mediaVersion: 2,
+  });
+  before = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.invalidState,
+    renewLease({ request: heartbeatRequest("call_1", 1, "bad_media_state") }),
+  );
+  await assertMutationStateUnchanged(before);
+});
+
+test("heartbeat lock validation and deadline boundaries are authoritative", async () => {
+  const lockCases = [
+    {
+      name: "missing lock",
+      mutate: () => db.doc("activeCallLocks/caller").delete(),
+    },
+    {
+      name: "mismatched lock",
+      mutate: () => db.doc("activeCallLocks/caller").update({ callId: "other" }),
+    },
+    {
+      name: "missing claim",
+      mutate: () =>
+        db.doc("callOps/call_1").update({
+          "lockClaims.caller": admin.firestore.FieldValue.delete(),
+        }),
+    },
+    {
+      name: "wrong state",
+      mutate: () => db.doc("activeCallLocks/caller").update({ state: "accepted" }),
+    },
+  ];
+  for (const testCase of lockCases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await promoteCallToActive();
+    await testCase.mutate();
+    const before = await captureMutationState();
+    await assertCallError(
+      ERROR_CODES.lockRecoveryRequired,
+      renewLease({
+        request: heartbeatRequest("call_1", 1, `heartbeat_${testCase.name}`),
+      }),
+    );
+    await assertMutationStateUnchanged(before);
+  }
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  let lock = await requiredData("activeCallLocks/caller");
+  const beforeExpiry = await renewLease({
+    now: new Date(millis(lock.expiresAt) - 1),
+    request: heartbeatRequest("call_1", 1, "heartbeat_before_expiry"),
+  });
+  assert.equal(beforeExpiry.heartbeatVersion, 1);
+
+  for (const offsetMs of [0, 1]) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await promoteCallToActive();
+    lock = await requiredData("activeCallLocks/caller");
+    const before = await captureMutationState();
+    await assertCallError(
+      ERROR_CODES.invalidState,
+      renewLease({
+        now: new Date(millis(lock.expiresAt) + offsetMs),
+        request: heartbeatRequest(
+          "call_1",
+          1,
+          `heartbeat_expired_${offsetMs}`,
+        ),
+      }),
+    );
+    await assertMutationStateUnchanged(before);
+  }
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const reconnectDeadline = new Date(fixedMs() + RECONNECT_GRACE_DURATION_MS);
+  await db.doc("calls/call_1").update({ reconnectDeadlineAt: reconnectDeadline });
+  const openReconnect = await renewLease({
+    now: new Date(reconnectDeadline.getTime() - 1),
+    request: heartbeatRequest("call_1", 1, "heartbeat_open_reconnect"),
+  });
+  assert.equal(openReconnect.heartbeatVersion, 1);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  await db.doc("calls/call_1").update({ reconnectDeadlineAt: reconnectDeadline });
+  const before = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.invalidState,
+    renewLease({
+      now: reconnectDeadline,
+      request: heartbeatRequest("call_1", 1, "heartbeat_expired_reconnect"),
+    }),
+  );
+  await assertMutationStateUnchanged(before);
+});
+
+test("active lease timeout before expiry returns not_due without writes", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const request = await activeLeaseTimeoutRequestFromState("caller");
+  const before = await captureMutationState();
+
+  const result = await processActiveLeaseTimeout({
+    now: new Date(millis(request.expectedLeaseExpiresAt) - 1),
+    request,
+  });
+
+  assert.equal(result.status, "not_due");
+  assert.equal(result.lifecycleState, "active");
+  await assertMutationStateUnchanged(before);
+  assert.equal(
+    await commandCountForAction("call_1", "processActiveLeaseTimeout"),
+    0,
+  );
+});
+
+test("active lease timeout at and after expiry terminalizes exactly", async () => {
+  for (const offsetMs of [0, 1]) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await promoteCallToActive();
+    const request = await activeLeaseTimeoutRequestFromState("caller");
+    const processedAt = new Date(millis(request.expectedLeaseExpiresAt) + offsetMs);
+    const beforeOps = await requiredData("callOps/call_1");
+    const beforeIdempotencySize = (await db.collection("callCommandKeys").get()).size;
+
+    const result = await processActiveLeaseTimeout({
+      now: processedAt,
+      request,
+    });
+
+    assert.equal(result.status, "terminalized");
+    assert.equal(result.timeoutKind, "active_lease");
+    assert.equal(result.lifecycleState, "failed");
+    assert.equal(result.terminal, true);
+    assert.equal(result.version, 4);
+    assert.equal(millis(result.endedAt), processedAt.getTime());
+    assert.equal(result.endReason, "active_lease_timeout");
+    assert.equal(result.failureCode, "active_lease_timeout");
+    assert.deepEqual(result.lockReleaseResults, {
+      caller: "released",
+      callee: "released",
+    });
+
+    const call = await requiredData("calls/call_1");
+    const ops = await requiredData("callOps/call_1");
+    assert.equal(call.lifecycleState, "failed");
+    assert.equal(call.terminal, true);
+    assert.equal(call.version, 4);
+    assert.equal(call.endedByUid, null);
+    assert.equal(call.endReason, "active_lease_timeout");
+    assert.equal(call.failureCode, "active_lease_timeout");
+    assert.equal(call.historyVisible, true);
+    assert.equal(
+      millis(call.historyExpiresAt),
+      processedAt.getTime() + PUBLIC_HISTORY_RETENTION_MS,
+    );
+    assert.equal(ops.latestOpsVersion, beforeOps.latestOpsVersion + 1);
+    assert.equal(millis(ops.terminalAt), processedAt.getTime());
+    assert.equal(ops.terminalState, "failed");
+    assert.equal(ops.terminalReason, "active_lease_timeout");
+    assert.equal(ops.failureCode, "active_lease_timeout");
+    assert.equal(ops.timeoutKind, "active_lease");
+    assert.equal(ops.timeoutParticipantUid, "caller");
+    assert.equal(
+      millis(ops.timeoutDeadlineAt),
+      millis(request.expectedLeaseExpiresAt),
+    );
+    assert.equal(millis(ops.timeoutProcessedAt), processedAt.getTime());
+    assert.deepEqual(ops.lockReleaseResults, {
+      caller: "released",
+      callee: "released",
+    });
+    assert.equal((await db.doc("activeCallLocks/caller").get()).exists, false);
+    assert.equal((await db.doc("activeCallLocks/callee").get()).exists, false);
+    assert.equal(
+      await commandCountForAction("call_1", "processActiveLeaseTimeout"),
+      1,
+    );
+    assert.equal((await db.collection("callCommandKeys").get()).size, beforeIdempotencySize);
+  }
+});
+
+test("active lease timeout scoped release preserves unrelated peer locks", async () => {
+  const cases = [
+    {
+      name: "peer call mismatch",
+      mutate: () =>
+        db.doc("activeCallLocks/callee").update({ callId: "other_call" }),
+      expected: {
+        caller: "released",
+        callee: "call_mismatch",
+      },
+      assertLocks: async () => {
+        assert.equal((await db.doc("activeCallLocks/caller").get()).exists, false);
+        assert.equal((await requiredData("activeCallLocks/callee")).callId, "other_call");
+      },
+    },
+    {
+      name: "peer fencing mismatch",
+      mutate: () =>
+        db.doc("activeCallLocks/callee").update({ fencingToken: 999 }),
+      expected: {
+        caller: "released",
+        callee: "fencing_mismatch",
+      },
+      assertLocks: async () => {
+        assert.equal((await db.doc("activeCallLocks/caller").get()).exists, false);
+        assert.equal((await requiredData("activeCallLocks/callee")).fencingToken, 999);
+      },
+    },
+    {
+      name: "peer claim missing",
+      mutate: () =>
+        db.doc("callOps/call_1").update({
+          "lockClaims.callee": admin.firestore.FieldValue.delete(),
+        }),
+      expected: {
+        caller: "released",
+        callee: "claim_missing",
+      },
+      assertLocks: async () => {
+        assert.equal((await db.doc("activeCallLocks/caller").get()).exists, false);
+        assert.equal((await db.doc("activeCallLocks/callee").get()).exists, true);
+      },
+    },
+  ];
+
+  for (const testCase of cases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await promoteCallToActive();
+    const request = await activeLeaseTimeoutRequestFromState("caller");
+    await testCase.mutate();
+
+    const result = await processActiveLeaseTimeout({
+      now: new Date(millis(request.expectedLeaseExpiresAt)),
+      request,
+    });
+
+    assert.deepEqual(result.lockReleaseResults, testCase.expected, testCase.name);
+    assert.deepEqual(
+      (await requiredData("callOps/call_1")).lockReleaseResults,
+      testCase.expected,
+    );
+    await testCase.assertLocks();
+  }
+});
+
+test("active lease timeout safe no-op stale statuses create no command", async () => {
+  const missing = await processActiveLeaseTimeout({
+    request: activeLeaseTimeoutRequest(
+      "missing_call",
+      "caller",
+      3,
+      0,
+      1,
+      new Date(fixedMs() + ACTIVE_LEASE_DURATION_MS),
+    ),
+  });
+  assert.equal(missing.status, "missing");
+
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  let request = await activeLeaseTimeoutRequestFromState("caller");
+  await endCall();
+  let before = await captureMutationState();
+  let result = await processActiveLeaseTimeout({
+    now: new Date(millis(request.expectedLeaseExpiresAt)),
+    request,
+  });
+  assert.equal(result.status, "already_terminal");
+  await assertMutationStateUnchanged(before);
+
+  const staleCases = [
+    {
+      name: "changed call version",
+      mutate: async () => db.doc("calls/call_1").update({ version: 4 }),
+    },
+    {
+      name: "renewed heartbeat",
+      mutate: async () =>
+        db.doc("calls/call_1/participants/caller").update({
+          heartbeatVersion: 1,
+          lastHeartbeatAt: FIXED_NOW,
+        }),
+    },
+    {
+      name: "renewed lock expiry",
+      mutate: async () =>
+        db.doc("activeCallLocks/caller").update({
+          expiresAt: new Date(millis(request.expectedLeaseExpiresAt) + 1000),
+        }),
+    },
+    {
+      name: "reconnect deadline",
+      mutate: async () =>
+        db.doc("calls/call_1").update({
+          reconnectDeadlineAt: new Date(fixedMs() + RECONNECT_GRACE_DURATION_MS),
+        }),
+    },
+  ];
+
+  for (const testCase of staleCases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await promoteCallToActive();
+    request = await activeLeaseTimeoutRequestFromState("caller");
+    await testCase.mutate();
+    before = await captureMutationState();
+    result = await processActiveLeaseTimeout({
+      now: new Date(millis(request.expectedLeaseExpiresAt) + 1),
+      request,
+    });
+    assert.equal(result.status, "stale", testCase.name);
+    await assertMutationStateUnchanged(before);
+    assert.equal(
+      await commandCountForAction("call_1", "processActiveLeaseTimeout"),
+      0,
+    );
+  }
+});
+
+test("active lease timeout handles fencing changes and duplicate delivery", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  let request = await activeLeaseTimeoutRequestFromState("caller");
+  await db.doc("activeCallLocks/caller").update({ fencingToken: 2 });
+  await db.doc("callOps/call_1").update({
+    "lockClaims.caller.fencingToken": 2,
+  });
+  let before = await captureMutationState();
+  let result = await processActiveLeaseTimeout({
+    now: new Date(millis(request.expectedLeaseExpiresAt)),
+    request,
+  });
+  assert.equal(result.status, "stale");
+  await assertMutationStateUnchanged(before);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  request = await activeLeaseTimeoutRequestFromState("caller");
+  await db.doc("activeCallLocks/caller").update({ fencingToken: 2 });
+  before = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.lockRecoveryRequired,
+    processActiveLeaseTimeout({
+      now: new Date(millis(request.expectedLeaseExpiresAt)),
+      request,
+    }),
+  );
+  await assertMutationStateUnchanged(before);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  request = await activeLeaseTimeoutRequestFromState("caller");
+  const first = await processActiveLeaseTimeout({
+    now: new Date(millis(request.expectedLeaseExpiresAt)),
+    request,
+  });
+  const replay = await processActiveLeaseTimeout({
+    now: new Date(millis(request.expectedLeaseExpiresAt) + 1),
+    request,
+  });
+  assert.equal(first.status, "terminalized");
+  assert.equal(replay.idempotentReplay, true);
+  assert.equal(replay.status, "terminalized");
+  assert.equal(replay.version, first.version);
+  assert.equal(
+    await commandCountForAction("call_1", "processActiveLeaseTimeout"),
+    1,
+  );
+
+  const command = (await db.collection("callOps/call_1/commands").get()).docs
+    .find((doc) => doc.data().action === "processActiveLeaseTimeout")
+    .data();
+  await db.doc(`callOps/call_1/commands/${command.commandId}`).update({
+    status: "pending",
+  });
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    processActiveLeaseTimeout({
+      now: new Date(millis(request.expectedLeaseExpiresAt)),
+      request,
+    }),
+  );
+});
+
+test("active lease timeout rejects malformed active heartbeat state", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  let request = await activeLeaseTimeoutRequestFromState("caller");
+  await db.doc("calls/call_1/participants/callee").update({
+    mediaState: "reconnecting",
+    mediaVersion: 2,
+  });
+  let before = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    processActiveLeaseTimeout({
+      now: new Date(millis(request.expectedLeaseExpiresAt)),
+      request,
+    }),
+  );
+  await assertMutationStateUnchanged(before);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  await db.doc("calls/call_1/participants/caller").update({
+    heartbeatVersion: 1,
+    lastHeartbeatAt: null,
+  });
+  request = await activeLeaseTimeoutRequestFromState("caller");
+  before = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    processActiveLeaseTimeout({
+      now: new Date(millis(request.expectedLeaseExpiresAt)),
+      request,
+    }),
+  );
+  await assertMutationStateUnchanged(before);
+});
+
+test("active lease services reject missing or malformed participant documents", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  await db.doc("calls/call_1/participants/caller").delete();
+  let before = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    renewLease({ request: heartbeatRequest("call_1", 1, "missing_participant") }),
+  );
+  await assertMutationStateUnchanged(before);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  let request = await activeLeaseTimeoutRequestFromState("caller");
+  await db.doc("calls/call_1/participants/callee").delete();
+  before = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    processActiveLeaseTimeout({
+      now: new Date(millis(request.expectedLeaseExpiresAt)),
+      request,
+    }),
+  );
+  await assertMutationStateUnchanged(before);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  await db.doc("calls/call_1/participants/caller").update({
+    heartbeatVersion: "bad",
+  });
+  request = activeLeaseTimeoutRequest(
+    "call_1",
+    "caller",
+    3,
+    0,
+    (await requiredData("activeCallLocks/caller")).fencingToken,
+    (await requiredData("activeCallLocks/caller")).expiresAt,
+  );
+  before = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    processActiveLeaseTimeout({
+      now: new Date(millis(request.expectedLeaseExpiresAt)),
+      request,
+    }),
+  );
+  await assertMutationStateUnchanged(before);
+});
+
+test("malformed active lease lock claims do not repair or delete unrelated locks", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  await db.doc("callOps/call_1").update({
+    "lockClaims.caller.fencingToken": "bad",
+  });
+  let before = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.lockRecoveryRequired,
+    renewLease({ request: heartbeatRequest("call_1", 1, "bad_claim_heartbeat") }),
+  );
+  await assertMutationStateUnchanged(before);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const request = await activeLeaseTimeoutRequestFromState("caller");
+  await db.doc("callOps/call_1").update({
+    "lockClaims.caller": admin.firestore.FieldValue.delete(),
+  });
+  before = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.lockRecoveryRequired,
+    processActiveLeaseTimeout({
+      now: new Date(millis(request.expectedLeaseExpiresAt)),
+      request,
+    }),
+  );
+  await assertMutationStateUnchanged(before);
+  assert.equal((await db.doc("activeCallLocks/callee").get()).exists, true);
+});
+
+test("old active lease timeout cannot terminalize after successful heartbeat", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const oldRequest = await activeLeaseTimeoutRequestFromState("caller");
+  await renewLease({
+    now: new Date(millis(oldRequest.expectedLeaseExpiresAt) - 1),
+    request: heartbeatRequest("call_1", 1, "renew_before_old_timeout"),
+  });
+  const before = await captureMutationState();
+
+  const result = await processActiveLeaseTimeout({
+    now: new Date(millis(oldRequest.expectedLeaseExpiresAt) + 1),
+    request: oldRequest,
+  });
+
+  assert.equal(result.status, "stale");
+  await assertMutationStateUnchanged(before);
+  assert.equal(
+    await commandCountForAction("call_1", "processActiveLeaseTimeout"),
+    0,
+  );
+});
+
+test("heartbeat versus active lease timeout race produces one authoritative outcome", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const request = await activeLeaseTimeoutRequestFromState("caller");
+  const results = await Promise.allSettled([
+    processActiveLeaseTimeout({
+      now: new Date(millis(request.expectedLeaseExpiresAt)),
+      request,
+    }),
+    renewLease({
+      now: new Date(millis(request.expectedLeaseExpiresAt) - 1),
+      request: heartbeatRequest("call_1", 1, "heartbeat_timeout_race"),
+    }),
+  ]);
+
+  await assertActiveLeaseRaceOutcome(results, ["active", "failed"]);
+  const call = await requiredData("calls/call_1");
+  if (call.lifecycleState === "active") {
+    assert.equal(
+      (await requiredData("calls/call_1/participants/caller")).heartbeatVersion,
+      1,
+    );
+    assert.equal(
+      await commandCountForAction("call_1", "processActiveLeaseTimeout"),
+      0,
+    );
+  } else {
+    assert.equal(call.endReason, "active_lease_timeout");
+    assert.equal(
+      await commandCountForAction("call_1", "processActiveLeaseTimeout"),
+      1,
+    );
+  }
+});
+
+test("racing active lease timeouts and participant end create one terminal transition", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  let callerRequest = await activeLeaseTimeoutRequestFromState("caller");
+  let calleeRequest = await activeLeaseTimeoutRequestFromState("callee");
+  let results = await Promise.allSettled([
+    processActiveLeaseTimeout({
+      now: new Date(millis(callerRequest.expectedLeaseExpiresAt)),
+      request: callerRequest,
+    }),
+    processActiveLeaseTimeout({
+      now: new Date(millis(calleeRequest.expectedLeaseExpiresAt)),
+      request: calleeRequest,
+    }),
+  ]);
+
+  await assertActiveLeaseRaceOutcome(results, ["failed"]);
+  let call = await requiredData("calls/call_1");
+  assert.equal(call.terminal, true);
+  assert.equal(call.version, 4);
+  assert.equal(
+    await commandCountForAction("call_1", "processActiveLeaseTimeout"),
+    1,
+  );
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  callerRequest = await activeLeaseTimeoutRequestFromState("caller");
+  results = await Promise.allSettled([
+    processActiveLeaseTimeout({
+      now: new Date(millis(callerRequest.expectedLeaseExpiresAt)),
+      request: callerRequest,
+    }),
+    endCall({
+      now: new Date(millis(callerRequest.expectedLeaseExpiresAt)),
+      request: lifecycleRequest("call_1", "end_active_lease_race"),
+    }),
+  ]);
+
+  await assertActiveLeaseRaceOutcome(results, ["completed", "failed"]);
+  call = await requiredData("calls/call_1");
+  assert.equal(call.terminal, true);
+  assert.equal(call.version, 4);
+  assert.ok(["completed", "failed"].includes(call.lifecycleState));
 });
 
 test("same-state joined report still evaluates active promotion", async () => {
@@ -3256,6 +4124,19 @@ function reportMedia(overrides = {}) {
   });
 }
 
+function renewLease(overrides = {}) {
+  return renewActiveCallLeaseV2({
+    db,
+    authUid: overrides.authUid || "caller",
+    request: overrides.request || heartbeatRequest(
+      "call_1",
+      1,
+      "heartbeat_1",
+    ),
+    now: overrides.now || FIXED_NOW,
+  });
+}
+
 function processTimeout(overrides = {}) {
   return processCallTimeoutV2({
     db,
@@ -3264,6 +4145,21 @@ function processTimeout(overrides = {}) {
       "ringing",
       1,
       new Date(fixedMs() + RINGING_DURATION_MS),
+    ),
+    now: overrides.now || FIXED_NOW,
+  });
+}
+
+function processActiveLeaseTimeout(overrides = {}) {
+  return processActiveLeaseTimeoutV2({
+    db,
+    request: overrides.request || activeLeaseTimeoutRequest(
+      "call_1",
+      "caller",
+      3,
+      0,
+      1,
+      new Date(fixedMs() + ACTIVE_LEASE_DURATION_MS),
     ),
     now: overrides.now || FIXED_NOW,
   });
@@ -3284,6 +4180,14 @@ function mediaRequest(callId, mediaState, idempotencyKey) {
   };
 }
 
+function heartbeatRequest(callId, heartbeatVersion, idempotencyKey) {
+  return {
+    callId,
+    heartbeatVersion,
+    idempotencyKey,
+  };
+}
+
 function timeoutRequest(
   callId,
   timeoutKind,
@@ -3295,6 +4199,24 @@ function timeoutRequest(
     timeoutKind,
     expectedCallVersion,
     expectedDeadlineAt,
+  };
+}
+
+function activeLeaseTimeoutRequest(
+  callId,
+  participantUid,
+  expectedCallVersion,
+  expectedHeartbeatVersion,
+  expectedFencingToken,
+  expectedLeaseExpiresAt,
+) {
+  return {
+    callId,
+    participantUid,
+    expectedCallVersion,
+    expectedHeartbeatVersion,
+    expectedFencingToken,
+    expectedLeaseExpiresAt,
   };
 }
 
@@ -3315,6 +4237,22 @@ function request(overrides = {}) {
     idempotencyKey: "idem_1",
     ...overrides,
   };
+}
+
+async function activeLeaseTimeoutRequestFromState(participantUid = "caller") {
+  const call = await requiredData("calls/call_1");
+  const participant = await requiredData(
+    `calls/call_1/participants/${participantUid}`,
+  );
+  const lock = await requiredData(`activeCallLocks/${participantUid}`);
+  return activeLeaseTimeoutRequest(
+    "call_1",
+    participantUid,
+    call.version,
+    participant.heartbeatVersion,
+    lock.fencingToken,
+    lock.expiresAt,
+  );
 }
 
 async function promoteCallToActive() {
@@ -3388,6 +4326,30 @@ async function assertTimeoutRaceOutcome(results, allowedLifecycleStates) {
   }
   const finalCall = await requiredData("calls/call_1");
   assert.ok(allowedLifecycleStates.includes(finalCall.lifecycleState));
+}
+
+async function assertActiveLeaseRaceOutcome(results, allowedLifecycleStates) {
+  const finalCall = await requiredData("calls/call_1");
+  assert.ok(allowedLifecycleStates.includes(finalCall.lifecycleState));
+  for (const result of results) {
+    if (result.status === "rejected") {
+      assert.ok(result.reason instanceof CallV2Error);
+      assert.ok(
+        [ERROR_CODES.invalidState, ERROR_CODES.transactionFailed].includes(
+          result.reason.code,
+        ),
+        result.reason.code,
+      );
+    }
+  }
+  if (finalCall.terminal) {
+    const terminalizedTimeouts = results.filter(
+      (result) =>
+        result.status === "fulfilled" &&
+        result.value.status === "terminalized",
+    );
+    assert.ok(terminalizedTimeouts.length <= 1);
+  }
 }
 
 async function seedUsers(...uids) {
@@ -3491,6 +4453,7 @@ function assertParticipantSchema(participant) {
   assertExactKeys(participant, [
     "acceptedAt",
     "failureCode",
+    "heartbeatVersion",
     "lastHeartbeatAt",
     "lastMediaStateAt",
     "localJoinStartedAt",
@@ -3508,6 +4471,7 @@ function assertParticipantSchema(participant) {
   assert.equal(participant.mediaLeftAt, null);
   assert.equal(participant.lastMediaStateAt, null);
   assert.equal(participant.lastHeartbeatAt, null);
+  assert.equal(participant.heartbeatVersion, 0);
   assert.equal(participant.failureCode, null);
 }
 
@@ -3585,12 +4549,14 @@ function fakeActiveMediaReportData(callOverrides = {}) {
       role: "caller",
       mediaState: "joined",
       mediaVersion: 1,
+      heartbeatVersion: 0,
     },
     "calls/call_1/participants/callee": {
       uid: "callee",
       role: "callee",
       mediaState: "joined",
       mediaVersion: 1,
+      heartbeatVersion: 0,
     },
     "activeCallLocks/caller": {
       uid: "caller",

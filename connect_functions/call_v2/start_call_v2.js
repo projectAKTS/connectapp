@@ -23,10 +23,13 @@ const ACTION_CANCEL_CALL = "cancelCall";
 const ACTION_END_CALL = "endCall";
 const ACTION_REPORT_PARTICIPANT_MEDIA = "reportParticipantMedia";
 const ACTION_PROCESS_CALL_TIMEOUT = "processCallTimeout";
+const ACTION_RENEW_ACTIVE_CALL_LEASE = "renewActiveCallLease";
+const ACTION_PROCESS_ACTIVE_LEASE_TIMEOUT = "processActiveLeaseTimeout";
 const CALL_SCHEMA_VERSION = 2;
 const RINGING_DURATION_MS = 45 * 1000;
 const ACCEPTED_JOIN_DURATION_MS = 30 * 1000;
 const RECONNECT_GRACE_DURATION_MS = 25 * 1000;
+const ACTIVE_LEASE_DURATION_MS = 60 * 1000;
 const LOCK_EXPIRY_SAFETY_BUFFER_MS = 5 * 1000;
 const COMMAND_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const OPS_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -903,6 +906,401 @@ function processCallTimeoutV2({ db, request, now }) {
     );
 }
 
+function renewActiveCallLeaseV2({ db, authUid, request, now }) {
+  assertDbDependency(db);
+  const validatedRequest = validateActiveLeaseRenewalInput(authUid, request);
+  const nowDate = resolveNow(now);
+  const leaseExpiresAt = addMilliseconds(nowDate, ACTIVE_LEASE_DURATION_MS);
+  const command = buildLifecycleCommandContext({
+    actorUid: authUid,
+    action: ACTION_RENEW_ACTIVE_CALL_LEASE,
+    callId: validatedRequest.callId,
+    idempotencyKey: validatedRequest.idempotencyKey,
+    controlledPayload: {
+      heartbeatVersion: validatedRequest.heartbeatVersion,
+    },
+  });
+  const refs = buildLifecycleRefs(db, {
+    callId: validatedRequest.callId,
+    actorUid: authUid,
+    idempotencyLookupId: command.idempotencyLookupId,
+    commandId: command.commandId,
+  });
+
+  return db
+    .runTransaction(async (transaction) => {
+      const idempotencySnapshot = await transaction.get(refs.idempotencyRef);
+      if (idempotencySnapshot.exists) {
+        return handleExistingIdempotencyRecord(
+          idempotencySnapshot.data(),
+          {
+            actorUid: authUid,
+            action: ACTION_RENEW_ACTIVE_CALL_LEASE,
+          },
+          command.requestHash,
+        );
+      }
+
+      const callSnapshot = await transaction.get(refs.callRef);
+      const call = requireMutableV2Call(callSnapshot, validatedRequest.callId);
+      if (call.terminal || call.lifecycleState !== "active") {
+        throw new CallV2Error(
+          ERROR_CODES.invalidState,
+          "Only an active call can renew its active lease.",
+        );
+      }
+      const actorRole = roleForParticipant(call, authUid);
+      if (!actorRole) {
+        throw new CallV2Error(
+          ERROR_CODES.forbidden,
+          "The actor is not a participant in this call.",
+        );
+      }
+      requireActiveTemporalFields(call);
+      requireOpenReconnectWindowIfPresent(call, nowDate);
+
+      const callOpsSnapshot = await transaction.get(refs.callOpsRef);
+      const callOps = requireCallOps(callOpsSnapshot, validatedRequest.callId);
+      const participantSnapshots = await readCallParticipantSnapshots(
+        transaction,
+        refs.callRef,
+        call,
+      );
+      const participants = validateMediaParticipantSnapshots(
+        participantSnapshots.byRole,
+        call,
+      );
+      const lockSnapshots = await readParticipantLockSnapshots(
+        transaction,
+        db,
+        call,
+      );
+      const claims = requireLockClaims(callOps, call);
+      const participant = participants.byRole[actorRole].data;
+
+      if (!["joined", "reconnecting"].includes(participant.mediaState)) {
+        throw new CallV2Error(
+          ERROR_CODES.invalidState,
+          "The participant media state cannot renew an active lease.",
+        );
+      }
+      if (!isIncrementableHeartbeatVersion(participant.heartbeatVersion)) {
+        throw new CallV2Error(
+          ERROR_CODES.transactionFailed,
+          "The participant heartbeat version cannot be safely incremented.",
+        );
+      }
+      if (
+        validatedRequest.heartbeatVersion !==
+        participant.heartbeatVersion + 1
+      ) {
+        throw new CallV2Error(
+          ERROR_CODES.invalidState,
+          "The heartbeat version is not the next expected version.",
+        );
+      }
+
+      requireReportingActiveLeaseLock({
+        lockEntry: lockSnapshots.byRole[actorRole],
+        claim: claims[actorRole],
+        call,
+        role: actorRole,
+        nowDate,
+      });
+
+      const nextOpsVersion = nextMonotonicVersion(callOps.latestOpsVersion);
+      const result = Object.freeze({
+        callId: call.id,
+        participantUid: authUid,
+        heartbeatVersion: validatedRequest.heartbeatVersion,
+        lastHeartbeatAt: nowDate,
+        leaseExpiresAt,
+        lifecycleState: call.lifecycleState,
+        callVersion: call.version,
+        idempotentReplay: false,
+      });
+
+      transaction.update(participants.byRole[actorRole].ref, {
+        heartbeatVersion: validatedRequest.heartbeatVersion,
+        lastHeartbeatAt: nowDate,
+      });
+      transaction.update(lockSnapshots.byRole[actorRole].ref, {
+        updatedAt: nowDate,
+        expiresAt: leaseExpiresAt,
+      });
+      transaction.update(refs.callOpsRef, {
+        latestOpsVersion: nextOpsVersion,
+        opsRetentionExpiresAt: addMilliseconds(nowDate, OPS_RETENTION_MS),
+      });
+      createCommandRecords(transaction, refs, {
+        command,
+        actorUid: authUid,
+        action: ACTION_RENEW_ACTIVE_CALL_LEASE,
+        callId: call.id,
+        nowDate,
+        result,
+      });
+
+      return result;
+    })
+    .catch((error) =>
+      recoverIdempotencyCreateConflictOrThrow({
+        error,
+        idempotencyRef: refs.idempotencyRef,
+        expected: {
+          actorUid: authUid,
+          action: ACTION_RENEW_ACTIVE_CALL_LEASE,
+        },
+        requestHash: command.requestHash,
+        fallbackMessage: "The active lease renewal transaction failed.",
+      }),
+    );
+}
+
+function processActiveLeaseTimeoutV2({ db, request, now }) {
+  assertDbDependency(db);
+  const nowDate = resolveNow(now);
+  const validatedRequest = validateActiveLeaseTimeoutRequestInput(request);
+  const command = buildActiveLeaseTimeoutCommandContext(validatedRequest);
+  const refs = buildTimeoutRefs(db, {
+    callId: validatedRequest.callId,
+    commandId: command.commandId,
+  });
+
+  return db
+    .runTransaction(async (transaction) => {
+      const commandSnapshot = await transaction.get(refs.commandRef);
+      if (commandSnapshot.exists) {
+        return handleExistingActiveLeaseTimeoutCommandRecord(
+          commandSnapshot.data(),
+          {
+            callId: validatedRequest.callId,
+            participantUid: validatedRequest.participantUid,
+            requestHash: command.requestHash,
+          },
+        );
+      }
+
+      const callSnapshot = await transaction.get(refs.callRef);
+      if (!callSnapshot.exists) {
+        return buildActiveLeaseTimeoutNoopResult({
+          callId: validatedRequest.callId,
+          participantUid: validatedRequest.participantUid,
+          status: "missing",
+        });
+      }
+
+      const call = requireExistingV2CallForTimeout(
+        callSnapshot,
+        validatedRequest.callId,
+      );
+      if (call.terminal) {
+        return buildActiveLeaseTimeoutNoopResult({
+          callId: call.id,
+          participantUid: validatedRequest.participantUid,
+          status: "already_terminal",
+          call,
+        });
+      }
+      if (
+        call.lifecycleState !== "active" ||
+        call.version !== validatedRequest.expectedCallVersion
+      ) {
+        return buildActiveLeaseTimeoutNoopResult({
+          callId: call.id,
+          participantUid: validatedRequest.participantUid,
+          status: "stale",
+          call,
+        });
+      }
+      requireActiveTemporalFields(call);
+      if (call.reconnectDeadlineAt !== null) {
+        return buildActiveLeaseTimeoutNoopResult({
+          callId: call.id,
+          participantUid: validatedRequest.participantUid,
+          status: "stale",
+          call,
+        });
+      }
+
+      const targetRole = roleForParticipant(
+        call,
+        validatedRequest.participantUid,
+      );
+      if (!targetRole) {
+        throw new CallV2Error(
+          ERROR_CODES.transactionFailed,
+          "The timeout participant is not part of the call.",
+        );
+      }
+
+      const participantSnapshots = await readCallParticipantSnapshots(
+        transaction,
+        refs.callRef,
+        call,
+      );
+      const participants = validateMediaParticipantSnapshots(
+        participantSnapshots.byRole,
+        call,
+      );
+      if (
+        participants.byRole.caller.data.mediaState !== "joined" ||
+        participants.byRole.callee.data.mediaState !== "joined"
+      ) {
+        throw new CallV2Error(
+          ERROR_CODES.transactionFailed,
+          "The active lease timeout state is inconsistent.",
+        );
+      }
+
+      const targetParticipant = participants.byRole[targetRole].data;
+      if (
+        targetParticipant.heartbeatVersion !==
+        validatedRequest.expectedHeartbeatVersion
+      ) {
+        return buildActiveLeaseTimeoutNoopResult({
+          callId: call.id,
+          participantUid: validatedRequest.participantUid,
+          status: "stale",
+          call,
+        });
+      }
+      if (
+        targetParticipant.heartbeatVersion > 0 &&
+        !isValidTimestampValue(targetParticipant.lastHeartbeatAt)
+      ) {
+        throw new CallV2Error(
+          ERROR_CODES.transactionFailed,
+          "The participant heartbeat timestamp is malformed.",
+        );
+      }
+
+      const callOpsSnapshot = await transaction.get(refs.callOpsRef);
+      const callOps = requireCallOps(callOpsSnapshot, call.id);
+      const lockSnapshots = await readParticipantLockSnapshots(
+        transaction,
+        db,
+        call,
+      );
+      const targetClaim = lockClaimForRole(
+        callOps,
+        targetRole,
+        validatedRequest.participantUid,
+      );
+      const targetLock = requireTargetActiveLeaseLock({
+        lockEntry: lockSnapshots.byRole[targetRole],
+        claim: targetClaim,
+        call,
+        role: targetRole,
+      });
+      if (targetLock.fencingToken !== validatedRequest.expectedFencingToken) {
+        return buildActiveLeaseTimeoutNoopResult({
+          callId: call.id,
+          participantUid: validatedRequest.participantUid,
+          status: "stale",
+          call,
+        });
+      }
+
+      const currentLeaseExpiresMs = strictTimestampMillis(targetLock.expiresAt);
+      if (currentLeaseExpiresMs !== validatedRequest.expectedLeaseExpiresMs) {
+        return buildActiveLeaseTimeoutNoopResult({
+          callId: call.id,
+          participantUid: validatedRequest.participantUid,
+          status: "stale",
+          call,
+        });
+      }
+      if (nowDate.getTime() < currentLeaseExpiresMs) {
+        return buildActiveLeaseTimeoutNoopResult({
+          callId: call.id,
+          participantUid: validatedRequest.participantUid,
+          status: "not_due",
+          call,
+        });
+      }
+
+      const nextCallVersion = nextMonotonicVersion(call.version);
+      const nextOpsVersion = nextMonotonicVersion(callOps.latestOpsVersion);
+      const lockReleaseResults = releaseScopedLocks(
+        transaction,
+        lockSnapshots.byRole,
+        callOps,
+        call,
+      );
+      const historyExpiresAt = addMilliseconds(
+        nowDate,
+        PUBLIC_HISTORY_RETENTION_MS,
+      );
+      const result = Object.freeze({
+        callId: call.id,
+        participantUid: validatedRequest.participantUid,
+        timeoutKind: "active_lease",
+        status: "terminalized",
+        lifecycleState: "failed",
+        terminal: true,
+        version: nextCallVersion,
+        endedAt: nowDate,
+        endReason: "active_lease_timeout",
+        failureCode: "active_lease_timeout",
+        lockReleaseResults,
+        idempotentReplay: false,
+      });
+
+      transaction.update(refs.callRef, {
+        lifecycleState: "failed",
+        terminal: true,
+        version: nextCallVersion,
+        updatedAt: nowDate,
+        lastPublicEventAt: nowDate,
+        endedAt: nowDate,
+        endedByUid: null,
+        endReason: "active_lease_timeout",
+        failureCode: "active_lease_timeout",
+        historyVisible: true,
+        historyExpiresAt,
+      });
+      transaction.update(refs.callOpsRef, {
+        latestOpsVersion: nextOpsVersion,
+        terminalAt: nowDate,
+        terminalState: "failed",
+        terminalReason: "active_lease_timeout",
+        failureCode: "active_lease_timeout",
+        timeoutKind: "active_lease",
+        timeoutParticipantUid: validatedRequest.participantUid,
+        timeoutDeadlineAt: targetLock.expiresAt,
+        timeoutProcessedAt: nowDate,
+        lockReleaseResults,
+        opsRetentionExpiresAt: addMilliseconds(nowDate, OPS_RETENTION_MS),
+      });
+      createActiveLeaseTimeoutCommandRecord(transaction, refs.commandRef, {
+        command,
+        callId: call.id,
+        participantUid: validatedRequest.participantUid,
+        expectedCallVersion: validatedRequest.expectedCallVersion,
+        expectedHeartbeatVersion: validatedRequest.expectedHeartbeatVersion,
+        expectedFencingToken: validatedRequest.expectedFencingToken,
+        timeoutDeadlineAt: targetLock.expiresAt,
+        nowDate,
+        result,
+      });
+
+      return result;
+    })
+    .catch((error) =>
+      recoverActiveLeaseTimeoutCommandCreateConflictOrThrow({
+        error,
+        commandRef: refs.commandRef,
+        expected: {
+          callId: validatedRequest.callId,
+          participantUid: validatedRequest.participantUid,
+          requestHash: command.requestHash,
+        },
+        fallbackMessage: "The active lease timeout transaction failed.",
+      }),
+    );
+}
+
 function runTerminalLifecycleCommand({
   db,
   authUid,
@@ -1205,6 +1603,140 @@ function validateTimeoutRequestInput(request) {
   };
 }
 
+function validateActiveLeaseRenewalInput(authUid, request) {
+  if (!isValidIdentifier(authUid, MAX_UID_LENGTH)) {
+    throw new CallV2Error(
+      ERROR_CODES.unauthenticated,
+      "An authenticated actor is required.",
+    );
+  }
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "An active lease renewal request object is required.",
+    );
+  }
+
+  const allowedKeys = new Set([
+    "callId",
+    "heartbeatVersion",
+    "idempotencyKey",
+  ]);
+  for (const key of Object.keys(request)) {
+    if (!allowedKeys.has(key)) {
+      throw new CallV2Error(
+        ERROR_CODES.invalidArgument,
+        `Unsupported active lease renewal field: ${key}.`,
+      );
+    }
+  }
+  if (!isValidIdentifier(request.callId, 160)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid callId is required.",
+    );
+  }
+  if (
+    !Number.isSafeInteger(request.heartbeatVersion) ||
+    request.heartbeatVersion <= 0
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A positive safe heartbeatVersion is required.",
+    );
+  }
+  if (!isValidIdentifier(request.idempotencyKey, MAX_IDEMPOTENCY_KEY_LENGTH)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid idempotencyKey is required.",
+    );
+  }
+
+  return {
+    callId: request.callId,
+    heartbeatVersion: request.heartbeatVersion,
+    idempotencyKey: request.idempotencyKey,
+  };
+}
+
+function validateActiveLeaseTimeoutRequestInput(request) {
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "An active lease timeout request object is required.",
+    );
+  }
+
+  const allowedKeys = new Set([
+    "callId",
+    "participantUid",
+    "expectedCallVersion",
+    "expectedHeartbeatVersion",
+    "expectedFencingToken",
+    "expectedLeaseExpiresAt",
+  ]);
+  for (const key of Object.keys(request)) {
+    if (!allowedKeys.has(key)) {
+      throw new CallV2Error(
+        ERROR_CODES.invalidArgument,
+        `Unsupported active lease timeout field: ${key}.`,
+      );
+    }
+  }
+  if (!isValidIdentifier(request.callId, 160)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid callId is required.",
+    );
+  }
+  if (!isValidIdentifier(request.participantUid, MAX_UID_LENGTH)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid participantUid is required.",
+    );
+  }
+  if (
+    !Number.isSafeInteger(request.expectedCallVersion) ||
+    request.expectedCallVersion <= 0
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A positive safe expectedCallVersion is required.",
+    );
+  }
+  if (!isValidHeartbeatVersion(request.expectedHeartbeatVersion)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A non-negative safe expectedHeartbeatVersion is required.",
+    );
+  }
+  if (!isValidFencingToken(request.expectedFencingToken)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid expectedFencingToken is required.",
+    );
+  }
+  const expectedLeaseExpiresMs = strictTimestampMillis(
+    request.expectedLeaseExpiresAt,
+  );
+  if (expectedLeaseExpiresMs === null) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A strict expectedLeaseExpiresAt timestamp is required.",
+    );
+  }
+
+  return {
+    callId: request.callId,
+    participantUid: request.participantUid,
+    expectedCallVersion: request.expectedCallVersion,
+    expectedHeartbeatVersion: request.expectedHeartbeatVersion,
+    expectedFencingToken: request.expectedFencingToken,
+    expectedLeaseExpiresAt: request.expectedLeaseExpiresAt,
+    expectedLeaseExpiresMs,
+  };
+}
+
 function buildLifecycleCommandContext({
   actorUid,
   action,
@@ -1254,6 +1786,42 @@ function buildTimeoutCommandContext({
       timeoutKind,
       String(expectedCallVersion),
       String(expectedDeadlineMs),
+    ].join("\u0000"),
+  ).slice(0, 48)}`;
+
+  return {
+    commandId,
+    requestHash,
+  };
+}
+
+function buildActiveLeaseTimeoutCommandContext({
+  callId,
+  participantUid,
+  expectedCallVersion,
+  expectedHeartbeatVersion,
+  expectedFencingToken,
+  expectedLeaseExpiresMs,
+}) {
+  const requestHash = sha256Hex(
+    canonicalJson({
+      action: ACTION_PROCESS_ACTIVE_LEASE_TIMEOUT,
+      callId,
+      participantUid,
+      expectedCallVersion,
+      expectedHeartbeatVersion,
+      expectedFencingToken,
+      expectedLeaseExpiresMs,
+    }),
+  );
+  const commandId = `active_lease_timeout_${sha256Hex(
+    [
+      callId,
+      participantUid,
+      String(expectedCallVersion),
+      String(expectedHeartbeatVersion),
+      String(expectedFencingToken),
+      String(expectedLeaseExpiresMs),
     ].join("\u0000"),
   ).slice(0, 48)}`;
 
@@ -1470,7 +2038,8 @@ function validateMediaParticipantSnapshots(participantSnapshotsByRole, call) {
       participant.uid !== expectedUid ||
       participant.role !== role ||
       !isSupportedMediaState(participant.mediaState) ||
-      !isValidMediaVersion(participant.mediaVersion)
+      !isValidMediaVersion(participant.mediaVersion) ||
+      !isValidHeartbeatVersion(participant.heartbeatVersion)
     ) {
       throw new CallV2Error(
         ERROR_CODES.transactionFailed,
@@ -1909,6 +2478,81 @@ function requireReportingParticipantLock({
   }
 }
 
+function requireReportingActiveLeaseLock({
+  lockEntry,
+  claim,
+  call,
+  role,
+  nowDate,
+}) {
+  if (!claim || !lockEntry || !lockEntry.snapshot.exists) {
+    throw new CallV2Error(
+      ERROR_CODES.lockRecoveryRequired,
+      "The reporting participant active lease lock is missing.",
+    );
+  }
+  const lock = lockEntry.snapshot.data();
+  const expectedUid = role === "caller" ? call.callerUid : call.calleeUid;
+  if (
+    !lock ||
+    lock.uid !== expectedUid ||
+    lock.uid !== claim.uid ||
+    lock.callId !== call.id ||
+    lock.fencingToken !== claim.fencingToken ||
+    !isValidFencingToken(lock.fencingToken) ||
+    lock.state !== "active" ||
+    !isValidTimestampValue(lock.expiresAt)
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.lockRecoveryRequired,
+      "The reporting participant active lease lock is malformed.",
+    );
+  }
+  if (nowDate.getTime() >= toMillis(lock.expiresAt)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidState,
+      "The active lease has expired.",
+    );
+  }
+}
+
+function requireTargetActiveLeaseLock({
+  lockEntry,
+  claim,
+  call,
+  role,
+}) {
+  if (!claim || !lockEntry || !lockEntry.snapshot.exists) {
+    throw new CallV2Error(
+      ERROR_CODES.lockRecoveryRequired,
+      "The target active lease lock is missing.",
+    );
+  }
+  const lock = lockEntry.snapshot.data();
+  const expectedUid = role === "caller" ? call.callerUid : call.calleeUid;
+  if (
+    !lock ||
+    lock.uid !== expectedUid ||
+    lock.uid !== claim.uid ||
+    lock.callId !== call.id ||
+    !isValidFencingToken(lock.fencingToken) ||
+    lock.state !== "active" ||
+    !isValidTimestampValue(lock.expiresAt)
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.lockRecoveryRequired,
+      "The target active lease lock is malformed.",
+    );
+  }
+  if (lock.fencingToken !== claim.fencingToken) {
+    throw new CallV2Error(
+      ERROR_CODES.lockRecoveryRequired,
+      "The target active lease lock does not match its private claim.",
+    );
+  }
+  return lock;
+}
+
 function computeMediaCallUpdate({
   call,
   callOps,
@@ -1928,6 +2572,10 @@ function computeMediaCallUpdate({
     requireOpenAcceptedJoinWindow(call, nowDate);
     requirePromotionLocks(lockSnapshots, claims, call, nowDate);
     const callVersion = nextMonotonicVersion(call.version);
+    const activeLeaseExpiresAt = addMilliseconds(
+      nowDate,
+      ACTIVE_LEASE_DURATION_MS,
+    );
     return {
       lifecycleState: "active",
       callVersion,
@@ -1948,6 +2596,7 @@ function computeMediaCallUpdate({
           fields: {
             state: "active",
             updatedAt: nowDate,
+            expiresAt: activeLeaseExpiresAt,
           },
         },
         {
@@ -1955,6 +2604,7 @@ function computeMediaCallUpdate({
           fields: {
             state: "active",
             updatedAt: nowDate,
+            expiresAt: activeLeaseExpiresAt,
           },
         },
       ],
@@ -2140,6 +2790,42 @@ function createTimeoutCommandRecord(
   });
 }
 
+function createActiveLeaseTimeoutCommandRecord(
+  transaction,
+  commandRef,
+  {
+    command,
+    callId,
+    participantUid,
+    expectedCallVersion,
+    expectedHeartbeatVersion,
+    expectedFencingToken,
+    timeoutDeadlineAt,
+    nowDate,
+    result,
+  },
+) {
+  const ttlAt = addMilliseconds(nowDate, COMMAND_TTL_MS);
+  transaction.create(commandRef, {
+    commandId: command.commandId,
+    actorType: "system",
+    actorUid: null,
+    action: ACTION_PROCESS_ACTIVE_LEASE_TIMEOUT,
+    requestHash: command.requestHash,
+    callId,
+    participantUid,
+    expectedCallVersion,
+    expectedHeartbeatVersion,
+    expectedFencingToken,
+    timeoutDeadlineAt,
+    status: "completed",
+    result,
+    createdAt: nowDate,
+    completedAt: nowDate,
+    ttlAt,
+  });
+}
+
 function buildTimeoutNoopResult({
   callId,
   timeoutKind,
@@ -2149,6 +2835,28 @@ function buildTimeoutNoopResult({
   return Object.freeze({
     callId,
     timeoutKind,
+    status,
+    lifecycleState: call ? call.lifecycleState : null,
+    terminal: call ? call.terminal : null,
+    version: call ? call.version : null,
+    endedAt: call ? toDateOrNull(call.endedAt) : null,
+    endReason: call ? call.endReason ?? null : null,
+    failureCode: call ? call.failureCode ?? null : null,
+    lockReleaseResults: null,
+    idempotentReplay: false,
+  });
+}
+
+function buildActiveLeaseTimeoutNoopResult({
+  callId,
+  participantUid,
+  status,
+  call = null,
+}) {
+  return Object.freeze({
+    callId,
+    participantUid,
+    timeoutKind: "active_lease",
     status,
     lifecycleState: call ? call.lifecycleState : null,
     terminal: call ? call.terminal : null,
@@ -2202,15 +2910,13 @@ async function recoverIdempotencyCreateConflictOrThrow({
   if (error instanceof CallV2Error) {
     throw error;
   }
-  if (isAlreadyExistsError(error)) {
-    const idempotencySnapshot = await idempotencyRef.get();
-    if (idempotencySnapshot.exists) {
-      return handleExistingIdempotencyRecord(
-        idempotencySnapshot.data(),
-        expected,
-        requestHash,
-      );
-    }
+  const idempotencySnapshot = await idempotencyRef.get();
+  if (idempotencySnapshot.exists) {
+    return handleExistingIdempotencyRecord(
+      idempotencySnapshot.data(),
+      expected,
+      requestHash,
+    );
   }
   throw new CallV2Error(
     ERROR_CODES.transactionFailed,
@@ -2234,6 +2940,33 @@ async function recoverTimeoutCommandCreateConflictOrThrow({
     const commandSnapshot = await commandRef.get();
     if (commandSnapshot.exists) {
       return handleExistingTimeoutCommandRecord(
+        commandSnapshot.data(),
+        expected,
+      );
+    }
+  }
+  throw new CallV2Error(
+    ERROR_CODES.transactionFailed,
+    fallbackMessage,
+    {
+      causeMessage: error && error.message ? error.message : String(error),
+    },
+  );
+}
+
+async function recoverActiveLeaseTimeoutCommandCreateConflictOrThrow({
+  error,
+  commandRef,
+  expected,
+  fallbackMessage,
+}) {
+  if (error instanceof CallV2Error) {
+    throw error;
+  }
+  if (isAlreadyExistsError(error)) {
+    const commandSnapshot = await commandRef.get();
+    if (commandSnapshot.exists) {
+      return handleExistingActiveLeaseTimeoutCommandRecord(
         commandSnapshot.data(),
         expected,
       );
@@ -2302,6 +3035,31 @@ function handleExistingTimeoutCommandRecord(record, expected) {
     throw new CallV2Error(
       ERROR_CODES.transactionFailed,
       "The timeout command record is malformed or conflicting.",
+    );
+  }
+
+  return normalizeReplayResult(record.result);
+}
+
+function handleExistingActiveLeaseTimeoutCommandRecord(record, expected) {
+  if (
+    !record ||
+    record.actorType !== "system" ||
+    record.actorUid !== null ||
+    record.action !== ACTION_PROCESS_ACTIVE_LEASE_TIMEOUT ||
+    record.callId !== expected.callId ||
+    record.participantUid !== expected.participantUid ||
+    record.requestHash !== expected.requestHash ||
+    record.status !== "completed" ||
+    !record.result ||
+    record.result.callId !== expected.callId ||
+    record.result.participantUid !== expected.participantUid ||
+    record.result.timeoutKind !== "active_lease" ||
+    record.result.status !== "terminalized"
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The active lease timeout command record is malformed or conflicting.",
     );
   }
 
@@ -2421,6 +3179,7 @@ function buildParticipantDocument({ uid, role, rtcUid }) {
     role,
     mediaState: "not_joined",
     mediaVersion: 0,
+    heartbeatVersion: 0,
     rtcUid,
     acceptedAt: null,
     localJoinStartedAt: null,
@@ -2590,6 +3349,14 @@ function isIncrementableMediaVersion(value) {
   return isValidMediaVersion(value) && value < Number.MAX_SAFE_INTEGER;
 }
 
+function isValidHeartbeatVersion(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function isIncrementableHeartbeatVersion(value) {
+  return isValidHeartbeatVersion(value) && value < Number.MAX_SAFE_INTEGER;
+}
+
 function normalizeReplayResult(result) {
   const normalized = {
     ...result,
@@ -2602,6 +3369,9 @@ function normalizeReplayResult(result) {
     "endedAt",
     "activeAt",
     "reconnectDeadlineAt",
+    "lastHeartbeatAt",
+    "leaseExpiresAt",
+    "timeoutDeadlineAt",
   ]) {
     if (normalized[field]) {
       normalized[field] = toDate(normalized[field]);
@@ -2725,13 +3495,16 @@ function toDate(value) {
 
 module.exports = {
   ACCEPTED_JOIN_DURATION_MS,
+  ACTIVE_LEASE_DURATION_MS,
   ACTION_START_CALL,
   ACTION_ACCEPT_CALL,
   ACTION_CANCEL_CALL,
   ACTION_DECLINE_CALL,
   ACTION_END_CALL,
+  ACTION_PROCESS_ACTIVE_LEASE_TIMEOUT,
   ACTION_PROCESS_CALL_TIMEOUT,
   ACTION_REPORT_PARTICIPANT_MEDIA,
+  ACTION_RENEW_ACTIVE_CALL_LEASE,
   CALL_SCHEMA_VERSION,
   COMMAND_TTL_MS,
   ERROR_CODES,
@@ -2746,7 +3519,9 @@ module.exports = {
   declineCallV2,
   deriveRtcUid,
   endCallV2,
+  processActiveLeaseTimeoutV2,
   processCallTimeoutV2,
   reportParticipantMediaV2,
+  renewActiveCallLeaseV2,
   startCallV2,
 };
