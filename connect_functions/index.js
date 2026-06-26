@@ -9,8 +9,17 @@ const {
   onDocumentUpdated,
 } = require("firebase-functions/v2/firestore");
 const functionsV1 = require("firebase-functions/v1");
-const { defineSecret } = require("firebase-functions/params");
+const {
+  defineBoolean,
+  defineSecret,
+  defineString,
+} = require("firebase-functions/params");
 const { RtcTokenBuilder, RtcRole } = require("agora-token");
+const { CloudTasksClient } = require("@google-cloud/tasks");
+const { OAuth2Client } = require("google-auth-library");
+const {
+  createCallV2FirebaseWiring,
+} = require("./call_v2/firebase_wiring_v2");
 const admin = require("firebase-admin");
 admin.initializeApp();
 
@@ -23,6 +32,76 @@ const APNS_KEY_ID = defineSecret("APNS_KEY_ID");
 const APNS_TEAM_ID = defineSecret("APNS_TEAM_ID");
 const APNS_BUNDLE_ID = defineSecret("APNS_BUNDLE_ID");
 const APNS_VOIP_KEY_P8 = defineSecret("APNS_VOIP_KEY_P8");
+const CALL_V2_ENABLED = defineBoolean("CALL_V2_ENABLED", { default: false });
+const CALL_V2_INTERNAL_TASKS_ENABLED = defineBoolean(
+  "CALL_V2_INTERNAL_TASKS_ENABLED",
+  { default: false }
+);
+const CALL_V2_REGION = defineString("CALL_V2_REGION");
+const CALL_V2_TASKS_PROJECT_ID = defineString("CALL_V2_TASKS_PROJECT_ID");
+const CALL_V2_TASKS_LOCATION = defineString("CALL_V2_TASKS_LOCATION");
+const CALL_V2_TASKS_QUEUE_ID = defineString("CALL_V2_TASKS_QUEUE_ID");
+const CALL_V2_TASKS_TARGET_URL = defineString("CALL_V2_TASKS_TARGET_URL");
+const CALL_V2_TASKS_SERVICE_ACCOUNT_EMAIL = defineString(
+  "CALL_V2_TASKS_SERVICE_ACCOUNT_EMAIL"
+);
+const CALL_V2_TASKS_AUDIENCE = defineString("CALL_V2_TASKS_AUDIENCE", {
+  default: "",
+});
+
+const callV2Config = Object.freeze({
+  callV2Enabled: () => CALL_V2_ENABLED.value(),
+  callV2InternalTasksEnabled: () => CALL_V2_INTERNAL_TASKS_ENABLED.value(),
+  tasksProjectId: () => CALL_V2_TASKS_PROJECT_ID.value(),
+  tasksLocation: () => CALL_V2_TASKS_LOCATION.value(),
+  tasksQueueId: () => CALL_V2_TASKS_QUEUE_ID.value(),
+  tasksTargetUrl: () => CALL_V2_TASKS_TARGET_URL.value(),
+  tasksServiceAccountEmail: () => CALL_V2_TASKS_SERVICE_ACCOUNT_EMAIL.value(),
+  tasksAudience: () => CALL_V2_TASKS_AUDIENCE.value(),
+});
+let callV2CloudTasksClient = null;
+let callV2TokenVerifier = null;
+let callV2Wiring = null;
+let callV2TimeoutHttpHandler = null;
+
+function getCallV2CloudTasksClient() {
+  if (!callV2CloudTasksClient) {
+    callV2CloudTasksClient = new CloudTasksClient();
+  }
+  return callV2CloudTasksClient;
+}
+
+function getCallV2TokenVerifier() {
+  if (!callV2TokenVerifier) {
+    callV2TokenVerifier = new OAuth2Client();
+  }
+  return callV2TokenVerifier;
+}
+
+function getCallV2Wiring() {
+  if (!callV2Wiring) {
+    callV2Wiring = createCallV2FirebaseWiring({
+      db,
+      cloudTasksClient: {
+        createTask: (request) => getCallV2CloudTasksClient().createTask(request),
+      },
+      tokenVerifier: {
+        verifyIdToken: (request) =>
+          getCallV2TokenVerifier().verifyIdToken(request),
+      },
+      config: callV2Config,
+      now: () => new Date(),
+    });
+  }
+  return callV2Wiring;
+}
+
+function getCallV2TimeoutHttpHandler() {
+  if (!callV2TimeoutHttpHandler) {
+    callV2TimeoutHttpHandler = getCallV2Wiring().createTimeoutHttpHandler();
+  }
+  return callV2TimeoutHttpHandler;
+}
 
 // --- Stripe Client Helper ---
 function getStripeClient() {
@@ -1420,6 +1499,61 @@ exports.onAuthUserCreated = functionsV1.auth.user().onCreate(async (user) => {
 exports.healthCheck = onRequest(
   { region: "us-central1" },
   (_req, res) => res.status(200).send("OK")
+);
+
+/* ============================================================
+   Helperly Call System V2 — guarded exports
+   ============================================================ */
+
+exports.startCallV2 = onCall(
+  { region: CALL_V2_REGION, invoker: "public" },
+  (request) => getCallV2Wiring().callableHandlers.startCallV2(request)
+);
+
+exports.acceptCallV2 = onCall(
+  { region: CALL_V2_REGION, invoker: "public" },
+  (request) => getCallV2Wiring().callableHandlers.acceptCallV2(request)
+);
+
+exports.declineCallV2 = onCall(
+  { region: CALL_V2_REGION, invoker: "public" },
+  (request) => getCallV2Wiring().callableHandlers.declineCallV2(request)
+);
+
+exports.cancelCallV2 = onCall(
+  { region: CALL_V2_REGION, invoker: "public" },
+  (request) => getCallV2Wiring().callableHandlers.cancelCallV2(request)
+);
+
+exports.endCallV2 = onCall(
+  { region: CALL_V2_REGION, invoker: "public" },
+  (request) => getCallV2Wiring().callableHandlers.endCallV2(request)
+);
+
+exports.reportParticipantMediaV2 = onCall(
+  { region: CALL_V2_REGION, invoker: "public" },
+  (request) =>
+    getCallV2Wiring().callableHandlers.reportParticipantMediaV2(request)
+);
+
+exports.renewActiveCallLeaseV2 = onCall(
+  { region: CALL_V2_REGION, invoker: "public" },
+  (request) =>
+    getCallV2Wiring().callableHandlers.renewActiveCallLeaseV2(request)
+);
+
+exports.onCallV2TaskOutboxCreated = onDocumentCreated(
+  {
+    document: "callOps/{callId}/taskOutbox/{taskId}",
+    region: CALL_V2_REGION,
+    retry: true,
+  },
+  (event) => getCallV2Wiring().handleTaskOutboxCreated(event)
+);
+
+exports.executeCallTimeoutTaskV2 = onRequest(
+  { region: CALL_V2_REGION },
+  (req, res) => getCallV2TimeoutHttpHandler()(req, res)
 );
 
 /* ============================================================
