@@ -437,6 +437,67 @@ void main() {
       expect(duplicate.effects, isEmpty);
       expect(duplicate.state.incomingRouteState, IncomingRouteState.presented);
     });
+
+    test('delayed incoming failure after successful presentation is ignored',
+        () {
+      final presented = reducer.reduce(
+        _withSnapshot(CallLifecycle.ringing).state,
+        const IncomingRoutePresented(
+          callId: 'call_a',
+          eventId: 'incoming-presented-1',
+        ),
+      );
+      final lateFailure = reducer.reduce(
+        presented.state,
+        const IncomingRoutePresentationFailed(
+          callId: 'call_a',
+          eventId: 'incoming-failed-late-1',
+        ),
+      );
+
+      expect(
+          lateFailure.state.incomingRouteState, IncomingRouteState.presented);
+      expect(lateFailure.effects, isEmpty);
+    });
+
+    test('delayed incoming success after failure is ignored until retry', () {
+      final failed = reducer.reduce(
+        _withSnapshot(CallLifecycle.ringing).state,
+        const IncomingRoutePresentationFailed(
+          callId: 'call_a',
+          eventId: 'incoming-failed-1',
+        ),
+      );
+      final lateSuccess = reducer.reduce(
+        failed.state,
+        const IncomingRoutePresented(
+          callId: 'call_a',
+          eventId: 'incoming-presented-late-1',
+        ),
+      );
+      final retry = reducer.reduce(
+        failed.state,
+        const RetryIncomingRoutePresentationRequested(
+          callId: 'call_a',
+          eventId: 'incoming-retry-1',
+        ),
+      );
+      final successAfterRetry = reducer.reduce(
+        retry.state,
+        const IncomingRoutePresented(
+          callId: 'call_a',
+          eventId: 'incoming-presented-2',
+        ),
+      );
+
+      expect(lateSuccess.state.incomingRouteState, IncomingRouteState.failed);
+      expect(lateSuccess.effects, isEmpty);
+      expect(retry.state.incomingRouteState, IncomingRouteState.opening);
+      expect(
+        successAfterRetry.state.incomingRouteState,
+        IncomingRouteState.presented,
+      );
+    });
   });
 
   group('call route acknowledgement and retry', () {
@@ -467,6 +528,50 @@ void main() {
 
       expect(opened.state.callRouteState, CallRouteState.open);
       expect(opened.state.localPhase, CallLocalPhase.inCall);
+    });
+
+    test('delayed route failure after success is ignored', () {
+      final opened = reducer.reduce(
+        _withSnapshot(CallLifecycle.accepted).state,
+        const RouteOpened(callId: 'call_a', eventId: 'route-opened-1'),
+      );
+      final lateFailure = reducer.reduce(
+        opened.state,
+        const RouteOpenFailed(
+          callId: 'call_a',
+          eventId: 'route-failed-late-1',
+        ),
+      );
+
+      expect(lateFailure.state.callRouteState, CallRouteState.open);
+      expect(lateFailure.effects, isEmpty);
+    });
+
+    test('delayed route success after failure is ignored until retry', () {
+      final failed = reducer.reduce(
+        _withSnapshot(CallLifecycle.accepted).state,
+        const RouteOpenFailed(callId: 'call_a', eventId: 'route-failed-1'),
+      );
+      final lateSuccess = reducer.reduce(
+        failed.state,
+        const RouteOpened(callId: 'call_a', eventId: 'route-opened-late-1'),
+      );
+      final retry = reducer.reduce(
+        failed.state,
+        const RetryOpenCallRouteRequested(
+          callId: 'call_a',
+          eventId: 'route-retry-1',
+        ),
+      );
+      final successAfterRetry = reducer.reduce(
+        retry.state,
+        const RouteOpened(callId: 'call_a', eventId: 'route-opened-2'),
+      );
+
+      expect(lateSuccess.state.callRouteState, CallRouteState.failed);
+      expect(lateSuccess.effects, isEmpty);
+      expect(retry.state.callRouteState, CallRouteState.opening);
+      expect(successAfterRetry.state.callRouteState, CallRouteState.open);
     });
 
     test('route failure emits no immediate open effect', () {
@@ -639,6 +744,20 @@ void main() {
         ended.state.nativePresentationState,
         NativePresentationState.endedNatively,
       );
+    });
+
+    test('native-ended acknowledgment before ending requested is ignored', () {
+      final ringing = _withSnapshot(CallLifecycle.ringing);
+      final ignored = reducer.reduce(
+        ringing.state,
+        const NativeCallEnded(callId: 'call_a', eventId: 'native-ended-early'),
+      );
+
+      expect(
+        ignored.state.nativePresentationState,
+        NativePresentationState.notPresented,
+      );
+      expect(ignored.effects, isEmpty);
     });
 
     test('unrelated native-ended acknowledgment is ignored', () {

@@ -422,7 +422,9 @@ class CallStateReducer {
     CallSessionState current,
     NativeCallEnded event,
   ) {
-    if (current.callId == null) {
+    if (current.callId == null ||
+        current.nativePresentationState !=
+            NativePresentationState.endingRequested) {
       return CallReduction(state: current, effects: const <CallEffect>[]);
     }
     final next = current.copyWith(
@@ -435,7 +437,8 @@ class CallStateReducer {
     CallSessionState current,
     RouteOpened event,
   ) {
-    if (current.callId == null) {
+    if (current.callId == null ||
+        current.callRouteState != CallRouteState.opening) {
       return CallReduction(state: current, effects: const <CallEffect>[]);
     }
     final next = current.copyWith(
@@ -450,7 +453,9 @@ class CallStateReducer {
     CallSessionState current,
     RouteOpenFailed event,
   ) {
-    if (current.callId == null || current.isTerminal) {
+    if (current.callId == null ||
+        current.isTerminal ||
+        current.callRouteState != CallRouteState.opening) {
       return CallReduction(state: current, effects: const <CallEffect>[]);
     }
     final next = current.copyWith(
@@ -525,7 +530,9 @@ class CallStateReducer {
     CallSessionState current,
     IncomingRoutePresentationFailed event,
   ) {
-    if (current.callId == null || current.isTerminal) {
+    if (current.callId == null ||
+        current.isTerminal ||
+        current.incomingRouteState != IncomingRouteState.opening) {
       return CallReduction(state: current, effects: const <CallEffect>[]);
     }
     final next = current.copyWith(
