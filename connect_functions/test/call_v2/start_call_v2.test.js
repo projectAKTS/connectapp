@@ -15,13 +15,21 @@ const {
   PUBLIC_HISTORY_RETENTION_MS,
   RECONNECT_GRACE_DURATION_MS,
   RINGING_DURATION_MS,
+  TASK_DISPATCH_CLAIM_DURATION_MS,
+  TASK_DISPATCH_MAX_ATTEMPTS,
   TASK_OUTBOX_RETENTION_MS,
   TASK_OUTBOX_SCHEMA_VERSION,
   CallV2Error,
+  TaskPublisherError,
   acceptCallV2,
   cancelCallV2,
+  claimTaskOutboxDispatchV2,
   declineCallV2,
+  deterministicExternalTaskId,
+  dispatchTaskOutboxV2,
   endCallV2,
+  finalizeTaskOutboxDispatchFailureV2,
+  finalizeTaskOutboxDispatchSuccessV2,
   processActiveLeaseTimeoutV2,
   processCallTimeoutV2,
   reportParticipantMediaV2,
@@ -4197,6 +4205,612 @@ test("task outbox collision rolls back heartbeat renewal", async () => {
   assert.equal(await commandCountForAction("call_1", "renewActiveCallLease"), 0);
 });
 
+test("new outbox tasks contain dispatcher schema for all task kinds", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  assertTaskSchema(await singleTaskForKind("ringing_timeout"));
+
+  await acceptCall();
+  assertTaskSchema(await singleTaskForKind("accepted_join_timeout"));
+
+  await reportMedia({
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "schema_caller_joined"),
+  });
+  await reportMedia({
+    authUid: "callee",
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "schema_callee_joined"),
+  });
+  for (const task of await tasksForKind("active_lease_timeout")) {
+    assertTaskSchema(task);
+  }
+
+  await reportMedia({
+    mediaState: "reconnecting",
+    request: mediaRequest("call_1", "reconnecting", "schema_reconnect"),
+  });
+  assertTaskSchema(await singleTaskForKind("reconnect_timeout"));
+
+  await reportMedia({
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "schema_recovery"),
+  });
+  assert.equal((await tasksForKind("active_lease_timeout")).length, 4);
+
+  await renewLease({
+    now: new Date(fixedMs() + 5 * 1000),
+    request: heartbeatRequest("call_1", 1, "schema_heartbeat"),
+  });
+  assert.equal((await tasksForKind("active_lease_timeout")).length, 5);
+
+  const publicState = await captureMutationState();
+  for (const publicDoc of [
+    publicState.call.data,
+    publicState.callerParticipant.data,
+    publicState.calleeParticipant.data,
+  ]) {
+    assertNoPrivatePublicFields(publicDoc);
+  }
+});
+
+test("malformed partial outbox tasks are rejected by dispatcher", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const task = await singleTaskForKind("ringing_timeout");
+  await db.doc(`callOps/${task.callId}/taskOutbox/${task.taskId}`).set({
+    schemaVersion: TASK_OUTBOX_SCHEMA_VERSION,
+    taskId: task.taskId,
+    callId: task.callId,
+    taskKind: task.taskKind,
+    status: "pending",
+    dueAt: task.dueAt,
+    payload: task.payload,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    dispatchAttempts: 0,
+    dispatchedAt: null,
+    completedAt: null,
+    lastDispatchError: null,
+    ttlAt: task.ttlAt,
+  });
+
+  const before = await captureMutationState();
+  await assertCallError(ERROR_CODES.transactionFailed, claimTask({ task }));
+  await assertMutationStateUnchanged(before);
+});
+
+test("claiming pending, future-due, busy, reclaim, dispatched, and dead-letter states", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const task = await singleTaskForKind("ringing_timeout");
+  const beforePublic = await captureMutationState();
+  const claim = await claimTask({
+    task,
+    generateClaimToken: () => "claim_one",
+  });
+
+  assert.equal(claim.status, "claimed");
+  assert.equal(claim.dispatchAttempt, 1);
+  assert.equal(claim.claimToken, "claim_one");
+  assert.equal(
+    millis(claim.claimExpiresAt),
+    fixedMs() + TASK_DISPATCH_CLAIM_DURATION_MS,
+  );
+  assert.equal(millis(claim.dueAt), millis(task.dueAt));
+  assert.deepEqual(
+    normalizeFirestoreData(claim.payload),
+    normalizeFirestoreData(task.payload),
+  );
+  assert.equal(
+    claim.deterministicExternalTaskId,
+    deterministicExternalTaskId(task),
+  );
+  let stored = await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`);
+  assert.equal(stored.status, "dispatching");
+  assert.equal(stored.dispatchAttempts, 1);
+  assert.equal(stored.claimToken, "claim_one");
+  assert.equal(stored.lastDispatchError, null);
+  assert.equal(stored.lastDispatchErrorCode, null);
+  assert.deepEqual(beforePublic.call, (await captureMutationState()).call);
+
+  const busyBefore = await captureMutationState();
+  const busy = await claimTask({
+    task,
+    now: new Date(fixedMs() + TASK_DISPATCH_CLAIM_DURATION_MS - 1),
+    generateClaimToken: () => "claim_busy_unused",
+  });
+  assert.deepEqual(busy, {
+    callId: task.callId,
+    taskId: task.taskId,
+    status: "busy",
+  });
+  await assertMutationStateUnchanged(busyBefore);
+
+  const reclaim = await claimTask({
+    task,
+    now: new Date(fixedMs() + TASK_DISPATCH_CLAIM_DURATION_MS),
+    generateClaimToken: () => "claim_two",
+  });
+  assert.equal(reclaim.status, "claimed");
+  assert.equal(reclaim.claimToken, "claim_two");
+  assert.equal(reclaim.dispatchAttempt, 2);
+  assert.equal(reclaim.deterministicExternalTaskId, claim.deterministicExternalTaskId);
+  stored = await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`);
+  assert.equal(stored.claimToken, "claim_two");
+  assert.equal(stored.dispatchAttempts, 2);
+
+  await setTaskFields(task, {
+    status: "dispatched",
+    claimToken: null,
+    claimExpiresAt: null,
+    externalTaskName: externalTaskNameForId(reclaim.deterministicExternalTaskId),
+    dispatchedAt: FIXED_NOW,
+    lastDispatchErrorCode: null,
+  });
+  assert.equal((await claimTask({ task })).status, "already_dispatched");
+
+  await setTaskFields(task, {
+    status: "dead_letter",
+    externalTaskName: null,
+    dispatchedAt: null,
+    lastDispatchErrorCode: "publisher_permanent",
+  });
+  assert.equal((await claimTask({ task })).status, "dead_letter");
+});
+
+test("concurrent claims produce one owner and one busy without duplicate attempts", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const task = await singleTaskForKind("ringing_timeout");
+
+  const results = await Promise.all([
+    claimTask({ task, generateClaimToken: () => "claim_a" }),
+    claimTask({ task, generateClaimToken: () => "claim_b" }),
+  ]);
+
+  assert.equal(results.filter((result) => result.status === "claimed").length, 1);
+  assert.equal(results.filter((result) => result.status === "busy").length, 1);
+  const stored = await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`);
+  assert.equal(stored.dispatchAttempts, 1);
+});
+
+test("claim max attempts and expired ttl move task to dead-letter without publishing", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  let task = await singleTaskForKind("ringing_timeout");
+  await setTaskFields(task, {
+    dispatchAttempts: TASK_DISPATCH_MAX_ATTEMPTS,
+  });
+  let result = await claimTask({ task });
+  assert.equal(result.status, "dead_letter");
+  assert.equal(
+    (await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`))
+      .lastDispatchErrorCode,
+    "max_dispatch_attempts",
+  );
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  task = await singleTaskForKind("ringing_timeout");
+  const calls = [];
+  result = await dispatchTask({
+    task,
+    now: new Date(millis(task.ttlAt)),
+    publisher: publisherReturning("created", calls),
+  });
+  assert.equal(result.status, "dead_letter");
+  assert.equal(calls.length, 0);
+  assert.equal(
+    (await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`))
+      .lastDispatchErrorCode,
+    "outbox_ttl_expired",
+  );
+});
+
+test("success finalization is idempotent and stale-safe", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const task = await singleTaskForKind("ringing_timeout");
+  const claim = await claimTask({
+    task,
+    generateClaimToken: () => "success_claim",
+  });
+  const externalTaskName = externalTaskNameForId(
+    claim.deterministicExternalTaskId,
+  );
+
+  let result = await finalizeSuccess({
+    request: {
+      callId: task.callId,
+      taskId: task.taskId,
+      claimToken: claim.claimToken,
+      externalTaskName,
+      publisherOutcome: "created",
+    },
+  });
+  assert.equal(result.status, "dispatched");
+  assert.equal(result.publisherOutcome, "created");
+  assert.equal(result.dispatchAttempts, 1);
+  assert.equal(millis(result.dispatchedAt), fixedMs());
+  let stored = await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`);
+  assert.equal(stored.status, "dispatched");
+  assert.equal(stored.externalTaskName, externalTaskName);
+  assert.equal(stored.claimToken, null);
+  assert.equal(stored.claimExpiresAt, null);
+  assert.equal(stored.lastDispatchError, null);
+  assert.equal(stored.lastDispatchErrorCode, null);
+
+  result = await finalizeSuccess({
+    request: {
+      callId: task.callId,
+      taskId: task.taskId,
+      claimToken: claim.claimToken,
+      externalTaskName,
+      publisherOutcome: "already_exists",
+    },
+  });
+  assert.equal(result.status, "already_dispatched");
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  const staleTask = await singleTaskForKind("ringing_timeout");
+  const staleClaim = await claimTask({
+    task: staleTask,
+    generateClaimToken: () => "stale_claim",
+  });
+  const before = await captureMutationState();
+  result = await finalizeSuccess({
+    request: {
+      callId: staleTask.callId,
+      taskId: staleTask.taskId,
+      claimToken: "wrong_claim",
+      externalTaskName: externalTaskNameForId(
+        staleClaim.deterministicExternalTaskId,
+      ),
+      publisherOutcome: "created",
+    },
+  });
+  assert.equal(result.status, "stale");
+  await assertMutationStateUnchanged(before);
+
+  result = await finalizeSuccess({
+    now: new Date(fixedMs() + TASK_DISPATCH_CLAIM_DURATION_MS),
+    request: {
+      callId: staleTask.callId,
+      taskId: staleTask.taskId,
+      claimToken: staleClaim.claimToken,
+      externalTaskName: externalTaskNameForId(
+        staleClaim.deterministicExternalTaskId,
+      ),
+      publisherOutcome: "created",
+    },
+  });
+  assert.equal(result.status, "stale");
+  await assertMutationStateUnchanged(before);
+
+  const newClaim = await claimTask({
+    task: staleTask,
+    now: new Date(fixedMs() + TASK_DISPATCH_CLAIM_DURATION_MS),
+    generateClaimToken: () => "new_claim",
+  });
+  result = await finalizeSuccess({
+    request: {
+      callId: staleTask.callId,
+      taskId: staleTask.taskId,
+      claimToken: staleClaim.claimToken,
+      externalTaskName: externalTaskNameForId(
+        staleClaim.deterministicExternalTaskId,
+      ),
+      publisherOutcome: "created",
+    },
+  });
+  assert.equal(result.status, "stale");
+  stored = await requiredData(`callOps/${staleTask.callId}/taskOutbox/${staleTask.taskId}`);
+  assert.equal(stored.claimToken, newClaim.claimToken);
+  assert.equal(stored.status, "dispatching");
+});
+
+test("failure finalization handles retryable, permanent, exhausted, and stale callbacks", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  let task = await singleTaskForKind("ringing_timeout");
+  let claim = await claimTask({ task, generateClaimToken: () => "failure_claim" });
+  let result = await finalizeFailure({
+    request: {
+      callId: task.callId,
+      taskId: task.taskId,
+      claimToken: claim.claimToken,
+      errorCode: "publisher_retryable",
+      retryable: true,
+    },
+  });
+  assert.equal(result.status, "retryable");
+  let stored = await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`);
+  assert.equal(stored.status, "pending");
+  assert.equal(stored.dispatchAttempts, 1);
+  assert.equal(stored.lastDispatchError, null);
+  assert.equal(stored.lastDispatchErrorCode, "publisher_retryable");
+
+  claim = await claimTask({ task, generateClaimToken: () => "failure_claim_two" });
+  result = await finalizeFailure({
+    request: {
+      callId: task.callId,
+      taskId: task.taskId,
+      claimToken: claim.claimToken,
+      errorCode: "publisher_permanent",
+      retryable: false,
+    },
+  });
+  assert.equal(result.status, "dead_letter");
+  stored = await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`);
+  assert.equal(stored.status, "dead_letter");
+  assert.equal(stored.lastDispatchErrorCode, "publisher_permanent");
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  task = await singleTaskForKind("ringing_timeout");
+  await setTaskFields(task, {
+    dispatchAttempts: TASK_DISPATCH_MAX_ATTEMPTS - 1,
+  });
+  claim = await claimTask({ task, generateClaimToken: () => "exhaust_claim" });
+  result = await finalizeFailure({
+    request: {
+      callId: task.callId,
+      taskId: task.taskId,
+      claimToken: claim.claimToken,
+      errorCode: "publisher_retryable",
+      retryable: true,
+    },
+  });
+  assert.equal(result.status, "dead_letter");
+  assert.equal(
+    (await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`))
+      .lastDispatchErrorCode,
+    "max_dispatch_attempts",
+  );
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  task = await singleTaskForKind("ringing_timeout");
+  claim = await claimTask({ task, generateClaimToken: () => "old_failure_claim" });
+  const before = await captureMutationState();
+  result = await finalizeFailure({
+    request: {
+      callId: task.callId,
+      taskId: task.taskId,
+      claimToken: "wrong_claim",
+      errorCode: "publisher_retryable",
+      retryable: true,
+    },
+  });
+  assert.equal(result.status, "stale");
+  await assertMutationStateUnchanged(before);
+  await assertCallError(
+    ERROR_CODES.invalidArgument,
+    () => finalizeFailure({
+      request: {
+        callId: task.callId,
+        taskId: task.taskId,
+        claimToken: claim.claimToken,
+        errorCode: "publisher_retryable",
+        retryable: true,
+        message: "raw provider details",
+      },
+    }),
+  );
+});
+
+test("orchestrator publishes once and finalizes created or already-exists outcomes", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  let task = await singleTaskForKind("ringing_timeout");
+  let calls = [];
+  let result = await dispatchTask({
+    task,
+    generateClaimToken: () => "dispatch_claim",
+    publisher: publisherReturning("created", calls),
+  });
+  assert.equal(result.status, "dispatched");
+  assert.equal(result.publishOutcome, "created");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].externalTaskId, deterministicExternalTaskId(task));
+  assert.equal(calls[0].taskKind, task.taskKind);
+  assert.equal(millis(calls[0].scheduleTime), millis(task.dueAt));
+  assert.deepEqual(
+    normalizeFirestoreData(calls[0].payload),
+    normalizeFirestoreData(task.payload),
+  );
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  task = await singleTaskForKind("ringing_timeout");
+  calls = [];
+  result = await dispatchTask({
+    task,
+    generateClaimToken: () => "dispatch_claim_exists",
+    publisher: publisherReturning("already_exists", calls),
+  });
+  assert.equal(result.status, "dispatched");
+  assert.equal(result.publishOutcome, "already_exists");
+  assert.equal(calls.length, 1);
+});
+
+test("orchestrator handles no-publish states and controlled publisher failures", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  let task = await singleTaskForKind("ringing_timeout");
+  await claimTask({ task, generateClaimToken: () => "busy_claim" });
+  let calls = [];
+  let result = await dispatchTask({
+    task,
+    publisher: publisherReturning("created", calls),
+  });
+  assert.equal(result.status, "busy");
+  assert.equal(calls.length, 0);
+
+  await setTaskFields(task, {
+    status: "dispatched",
+    claimToken: null,
+    claimExpiresAt: null,
+    externalTaskName: externalTaskNameForId(deterministicExternalTaskId(task)),
+    dispatchedAt: FIXED_NOW,
+    lastDispatchErrorCode: null,
+  });
+  result = await dispatchTask({
+    task,
+    publisher: publisherReturning("created", calls),
+  });
+  assert.equal(result.status, "already_dispatched");
+  assert.equal(calls.length, 0);
+
+  await setTaskFields(task, {
+    status: "dead_letter",
+    externalTaskName: null,
+    dispatchedAt: null,
+    lastDispatchErrorCode: "publisher_permanent",
+  });
+  result = await dispatchTask({
+    task,
+    publisher: publisherReturning("created", calls),
+  });
+  assert.equal(result.status, "dead_letter");
+  assert.equal(calls.length, 0);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  task = await singleTaskForKind("ringing_timeout");
+  calls = [];
+  result = await dispatchTask({
+    task,
+    generateClaimToken: () => "retry_claim",
+    publisher: publisherFailing(
+      new TaskPublisherError({ code: "publisher_retryable", retryable: true }),
+      calls,
+    ),
+  });
+  assert.equal(result.status, "retryable");
+  assert.equal(result.errorCode, "publisher_retryable");
+  assert.equal(calls.length, 1);
+  assert.equal(
+    (await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`))
+      .lastDispatchErrorCode,
+    "publisher_retryable",
+  );
+
+  result = await dispatchTask({
+    task,
+    generateClaimToken: () => "permanent_claim",
+    publisher: publisherFailing(
+      new TaskPublisherError({ code: "publisher_permanent", retryable: false }),
+    ),
+  });
+  assert.equal(result.status, "dead_letter");
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  task = await singleTaskForKind("ringing_timeout");
+  result = await dispatchTask({
+    task,
+    generateClaimToken: () => "unexpected_claim",
+    publisher: publisherFailing(new Error("raw provider stack")),
+  });
+  assert.equal(result.status, "retryable");
+  assert.equal(result.errorCode, "publisher_unexpected_error");
+  const stored = await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`);
+  assert.equal(stored.lastDispatchError, null);
+  assert.equal(stored.lastDispatchErrorCode, "publisher_unexpected_error");
+});
+
+test("two orchestrators racing call publisher once and do not alter public lifecycle", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const task = await singleTaskForKind("ringing_timeout");
+  const publicBefore = {
+    call: await docState("calls/call_1"),
+    caller: await docState("calls/call_1/participants/caller"),
+    callee: await docState("calls/call_1/participants/callee"),
+  };
+  const calls = [];
+  const publisher = publisherReturning("created", calls);
+
+  const results = await Promise.all([
+    dispatchTask({
+      task,
+      generateClaimToken: () => "race_claim_a",
+      publisher,
+    }),
+    dispatchTask({
+      task,
+      generateClaimToken: () => "race_claim_b",
+      publisher,
+    }),
+  ]);
+
+  assert.equal(results.filter((result) => result.status === "dispatched").length, 1);
+  assert.equal(
+    results.filter((result) =>
+      ["busy", "already_dispatched"].includes(result.status),
+    ).length,
+    1,
+  );
+  assert.equal(calls.length, 1);
+  assert.deepEqual(publicBefore.call, await docState("calls/call_1"));
+  assert.deepEqual(publicBefore.caller, await docState("calls/call_1/participants/caller"));
+  assert.deepEqual(publicBefore.callee, await docState("calls/call_1/participants/callee"));
+});
+
+test("dispatcher accepts every task kind and payload remains processor-compatible", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+  await reportMedia({
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "dispatcher_caller_joined"),
+  });
+  await reportMedia({
+    authUid: "callee",
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "dispatcher_callee_joined"),
+  });
+  await reportMedia({
+    mediaState: "reconnecting",
+    request: mediaRequest("call_1", "reconnecting", "dispatcher_reconnect"),
+  });
+  const tasks = await taskOutboxData();
+  assert.deepEqual(
+    [...new Set(tasks.map((task) => task.taskKind))].sort(),
+    [
+      "accepted_join_timeout",
+      "active_lease_timeout",
+      "reconnect_timeout",
+      "ringing_timeout",
+    ],
+  );
+  for (const [index, task] of tasks.entries()) {
+    const calls = [];
+    const result = await dispatchTask({
+      task,
+      now: new Date(fixedMs() + 1000 + index),
+      generateClaimToken: () => `kind_claim_${index}`,
+      publisher: publisherReturning("created", calls),
+    });
+    assert.equal(result.status, "dispatched");
+    assert.deepEqual(
+      normalizeFirestoreData(calls[0].payload),
+      normalizeFirestoreData(task.payload),
+    );
+  }
+
+});
+
 test("same-state joined report still evaluates active promotion", async () => {
   await seedUsers("caller", "callee");
   await startCall();
@@ -4619,6 +5233,41 @@ function processActiveLeaseTimeout(overrides = {}) {
   });
 }
 
+function claimTask(overrides = {}) {
+  return claimTaskOutboxDispatchV2({
+    db,
+    request: overrides.request || taskRequest(overrides.task),
+    now: overrides.now || FIXED_NOW,
+    generateClaimToken: overrides.generateClaimToken || claimTokenGenerator(),
+  });
+}
+
+function finalizeSuccess(overrides = {}) {
+  return finalizeTaskOutboxDispatchSuccessV2({
+    db,
+    request: overrides.request,
+    now: overrides.now || FIXED_NOW,
+  });
+}
+
+function finalizeFailure(overrides = {}) {
+  return finalizeTaskOutboxDispatchFailureV2({
+    db,
+    request: overrides.request,
+    now: overrides.now || FIXED_NOW,
+  });
+}
+
+function dispatchTask(overrides = {}) {
+  return dispatchTaskOutboxV2({
+    db,
+    request: overrides.request || taskRequest(overrides.task),
+    now: overrides.now || FIXED_NOW,
+    generateClaimToken: overrides.generateClaimToken || claimTokenGenerator(),
+    publisher: overrides.publisher || publisherReturning("created"),
+  });
+}
+
 function lifecycleRequest(callId, idempotencyKey) {
   return {
     callId,
@@ -4671,6 +5320,19 @@ function activeLeaseTimeoutRequest(
     expectedHeartbeatVersion,
     expectedFencingToken,
     expectedLeaseExpiresAt,
+  };
+}
+
+function taskRequest(task) {
+  if (!task) {
+    return {
+      callId: "call_1",
+      taskId: "task_1",
+    };
+  }
+  return {
+    callId: task.callId,
+    taskId: task.taskId,
   };
 }
 
@@ -4906,12 +5568,16 @@ async function singleTaskForKind(taskKind, callId = "call_1") {
 function assertTaskSchema(task) {
   assertExactKeys(task, [
     "callId",
+    "claimExpiresAt",
+    "claimToken",
     "completedAt",
     "createdAt",
     "dispatchAttempts",
     "dispatchedAt",
     "dueAt",
+    "externalTaskName",
     "lastDispatchError",
+    "lastDispatchErrorCode",
     "payload",
     "schemaVersion",
     "status",
@@ -4926,6 +5592,10 @@ function assertTaskSchema(task) {
   assert.equal(task.dispatchedAt, null);
   assert.equal(task.completedAt, null);
   assert.equal(task.lastDispatchError, null);
+  assert.equal(task.claimToken, null);
+  assert.equal(task.claimExpiresAt, null);
+  assert.equal(task.externalTaskName, null);
+  assert.equal(task.lastDispatchErrorCode, null);
   assert.equal(millis(task.ttlAt), millis(task.dueAt) + TASK_OUTBOX_RETENTION_MS);
   assert.equal(task.taskId.startsWith(`${task.taskKind}_`), true);
 }
@@ -5018,6 +5688,40 @@ function assertOneSuccessAndOneBusy(results) {
   assert.equal(rejected.length, 1);
   assert.ok(rejected[0].reason instanceof CallV2Error);
   assert.equal(rejected[0].reason.code, ERROR_CODES.userBusy);
+}
+
+function claimTokenGenerator(prefix = "claim") {
+  let count = 0;
+  return () => `${prefix}_${++count}`;
+}
+
+function publisherReturning(outcome = "created", calls = []) {
+  return {
+    async publishTimeoutTask(request) {
+      calls.push(request);
+      return {
+        outcome,
+        externalTaskName: externalTaskNameForId(request.externalTaskId),
+      };
+    },
+  };
+}
+
+function publisherFailing(error, calls = []) {
+  return {
+    async publishTimeoutTask(request) {
+      calls.push(request);
+      throw error;
+    },
+  };
+}
+
+function externalTaskNameForId(externalTaskId) {
+  return `projects/test/locations/test/queues/test/tasks/${externalTaskId}`;
+}
+
+async function setTaskFields(task, fields) {
+  await db.doc(`callOps/${task.callId}/taskOutbox/${task.taskId}`).update(fields);
 }
 
 function assertNoPrivatePublicFields(value) {

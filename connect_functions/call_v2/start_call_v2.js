@@ -36,6 +36,9 @@ const OPS_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const PUBLIC_HISTORY_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 const TASK_OUTBOX_SCHEMA_VERSION = 1;
 const TASK_OUTBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const TASK_DISPATCH_CLAIM_DURATION_MS = 2 * 60 * 1000;
+const TASK_DISPATCH_MAX_ATTEMPTS = 20;
+const TASK_DISPATCH_ERROR_CODE_MAX_LENGTH = 120;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 160;
 const MAX_UID_LENGTH = 160;
 const SUPPORTED_MEDIA_STATES = Object.freeze([
@@ -74,6 +77,16 @@ const TASK_TIMEOUT_KIND_BY_TASK_KIND = Object.freeze({
   accepted_join_timeout: "accepted_join",
   reconnect_timeout: "reconnect",
 });
+const TASK_OUTBOX_STATUSES = Object.freeze([
+  "pending",
+  "dispatching",
+  "dispatched",
+  "dead_letter",
+]);
+const TASK_PUBLISHER_OUTCOMES = Object.freeze([
+  "created",
+  "already_exists",
+]);
 const TIMEOUT_CONFIG = Object.freeze({
   ringing: Object.freeze({
     lifecycleState: "ringing",
@@ -106,6 +119,27 @@ class CallV2Error extends Error {
     if (details !== undefined) {
       this.details = details;
     }
+  }
+}
+
+class TaskPublisherError extends Error {
+  constructor({ code, retryable }) {
+    if (!isControlledDispatchErrorCode(code)) {
+      throw new CallV2Error(
+        ERROR_CODES.invalidArgument,
+        "A controlled publisher error code is required.",
+      );
+    }
+    if (typeof retryable !== "boolean") {
+      throw new CallV2Error(
+        ERROR_CODES.invalidArgument,
+        "A publisher retryable flag is required.",
+      );
+    }
+    super(code);
+    this.name = "TaskPublisherError";
+    this.code = code;
+    this.retryable = retryable;
   }
 }
 
@@ -2052,6 +2086,329 @@ function taskOutboxRef(callOpsRef, taskId) {
   return callOpsRef.collection("taskOutbox").doc(taskId);
 }
 
+function claimTaskOutboxDispatchV2({
+  db,
+  request,
+  now,
+  generateClaimToken,
+}) {
+  assertDbDependency(db);
+  const validatedRequest = validateTaskOutboxRequest(request);
+  const nowDate = resolveNow(now);
+  if (typeof generateClaimToken !== "function") {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A claim token generator is required.",
+    );
+  }
+
+  const ref = db
+    .collection("callOps")
+    .doc(validatedRequest.callId)
+    .collection("taskOutbox")
+    .doc(validatedRequest.taskId);
+
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    const task = requireValidTaskOutboxDocument(snapshot, validatedRequest);
+
+    if (task.status === "dispatched") {
+      return Object.freeze({
+        callId: task.callId,
+        taskId: task.taskId,
+        status: "already_dispatched",
+      });
+    }
+
+    if (task.status === "dead_letter") {
+      return Object.freeze({
+        callId: task.callId,
+        taskId: task.taskId,
+        status: "dead_letter",
+      });
+    }
+
+    if (nowDate.getTime() >= task.ttlMs) {
+      transaction.update(ref, {
+        status: "dead_letter",
+        claimToken: null,
+        claimExpiresAt: null,
+        updatedAt: nowDate,
+        lastDispatchError: null,
+        lastDispatchErrorCode: "outbox_ttl_expired",
+      });
+      return Object.freeze({
+        callId: task.callId,
+        taskId: task.taskId,
+        status: "dead_letter",
+      });
+    }
+
+    if (
+      task.status === "dispatching" &&
+      nowDate.getTime() < task.claimExpiresMs
+    ) {
+      return Object.freeze({
+        callId: task.callId,
+        taskId: task.taskId,
+        status: "busy",
+      });
+    }
+
+    if (task.dispatchAttempts >= TASK_DISPATCH_MAX_ATTEMPTS) {
+      transaction.update(ref, {
+        status: "dead_letter",
+        claimToken: null,
+        claimExpiresAt: null,
+        updatedAt: nowDate,
+        lastDispatchError: null,
+        lastDispatchErrorCode: "max_dispatch_attempts",
+      });
+      return Object.freeze({
+        callId: task.callId,
+        taskId: task.taskId,
+        status: "dead_letter",
+      });
+    }
+
+    const claimToken = validateGeneratedClaimToken(generateClaimToken);
+    const claimExpiresAt = addMilliseconds(
+      nowDate,
+      TASK_DISPATCH_CLAIM_DURATION_MS,
+    );
+    const dispatchAttempt = task.dispatchAttempts + 1;
+    transaction.update(ref, {
+      status: "dispatching",
+      claimToken,
+      claimExpiresAt,
+      dispatchAttempts: dispatchAttempt,
+      updatedAt: nowDate,
+      lastDispatchError: null,
+      lastDispatchErrorCode: null,
+    });
+
+    return Object.freeze({
+      callId: task.callId,
+      taskId: task.taskId,
+      taskKind: task.taskKind,
+      dueAt: task.dueAt,
+      payload: task.payload,
+      claimToken,
+      claimExpiresAt,
+      dispatchAttempt,
+      deterministicExternalTaskId: deterministicExternalTaskId(task),
+      status: "claimed",
+      idempotentReplay: false,
+    });
+  }).catch(wrapTransactionError);
+}
+
+function finalizeTaskOutboxDispatchSuccessV2({ db, request, now }) {
+  assertDbDependency(db);
+  const validatedRequest = validateDispatchSuccessRequest(request);
+  const nowDate = resolveNow(now);
+  const ref = db
+    .collection("callOps")
+    .doc(validatedRequest.callId)
+    .collection("taskOutbox")
+    .doc(validatedRequest.taskId);
+
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    const task = requireValidTaskOutboxDocument(snapshot, validatedRequest);
+
+    if (task.status === "dispatched") {
+      return Object.freeze({
+        callId: task.callId,
+        taskId: task.taskId,
+        status: "already_dispatched",
+      });
+    }
+
+    if (
+      task.status !== "dispatching" ||
+      task.claimToken !== validatedRequest.claimToken ||
+      nowDate.getTime() >= task.claimExpiresMs
+    ) {
+      return Object.freeze({
+        callId: task.callId,
+        taskId: task.taskId,
+        status: "stale",
+      });
+    }
+
+    const expectedExternalTaskId = deterministicExternalTaskId(task);
+    if (
+      !externalTaskNameMatchesId(
+        validatedRequest.externalTaskName,
+        expectedExternalTaskId,
+      )
+    ) {
+      throw new CallV2Error(
+        ERROR_CODES.invalidArgument,
+        "The external task name does not match the outbox task identity.",
+      );
+    }
+
+    transaction.update(ref, {
+      status: "dispatched",
+      externalTaskName: validatedRequest.externalTaskName,
+      dispatchedAt: nowDate,
+      updatedAt: nowDate,
+      claimToken: null,
+      claimExpiresAt: null,
+      lastDispatchError: null,
+      lastDispatchErrorCode: null,
+    });
+
+    return Object.freeze({
+      callId: task.callId,
+      taskId: task.taskId,
+      status: "dispatched",
+      externalTaskName: validatedRequest.externalTaskName,
+      dispatchedAt: nowDate,
+      dispatchAttempts: task.dispatchAttempts,
+      publisherOutcome: validatedRequest.publisherOutcome,
+    });
+  }).catch(wrapTransactionError);
+}
+
+function finalizeTaskOutboxDispatchFailureV2({ db, request, now }) {
+  assertDbDependency(db);
+  const validatedRequest = validateDispatchFailureRequest(request);
+  const nowDate = resolveNow(now);
+  const ref = db
+    .collection("callOps")
+    .doc(validatedRequest.callId)
+    .collection("taskOutbox")
+    .doc(validatedRequest.taskId);
+
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    const task = requireValidTaskOutboxDocument(snapshot, validatedRequest);
+
+    if (
+      task.status !== "dispatching" ||
+      task.claimToken !== validatedRequest.claimToken ||
+      nowDate.getTime() >= task.claimExpiresMs
+    ) {
+      return Object.freeze({
+        callId: task.callId,
+        taskId: task.taskId,
+        status: "stale",
+      });
+    }
+
+    const exhausted = task.dispatchAttempts >= TASK_DISPATCH_MAX_ATTEMPTS;
+    if (validatedRequest.retryable && !exhausted) {
+      transaction.update(ref, {
+        status: "pending",
+        claimToken: null,
+        claimExpiresAt: null,
+        updatedAt: nowDate,
+        lastDispatchError: null,
+        lastDispatchErrorCode: validatedRequest.errorCode,
+      });
+      return Object.freeze({
+        callId: task.callId,
+        taskId: task.taskId,
+        status: "retryable",
+      });
+    }
+
+    transaction.update(ref, {
+      status: "dead_letter",
+      claimToken: null,
+      claimExpiresAt: null,
+      updatedAt: nowDate,
+      lastDispatchError: null,
+      lastDispatchErrorCode: exhausted
+        ? "max_dispatch_attempts"
+        : validatedRequest.errorCode,
+    });
+    return Object.freeze({
+      callId: task.callId,
+      taskId: task.taskId,
+      status: "dead_letter",
+    });
+  }).catch(wrapTransactionError);
+}
+
+async function dispatchTaskOutboxV2({
+  db,
+  request,
+  now,
+  generateClaimToken,
+  publisher,
+}) {
+  if (!publisher || typeof publisher.publishTimeoutTask !== "function") {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A timeout task publisher dependency is required.",
+    );
+  }
+
+  const claim = await claimTaskOutboxDispatchV2({
+    db,
+    request,
+    now,
+    generateClaimToken,
+  });
+  if (claim.status !== "claimed") {
+    return claim;
+  }
+
+  try {
+    const publishResult = normalizePublishResult(
+      await publisher.publishTimeoutTask({
+        externalTaskId: claim.deterministicExternalTaskId,
+        taskKind: claim.taskKind,
+        scheduleTime: claim.dueAt,
+        payload: claim.payload,
+      }),
+    );
+    const success = await finalizeTaskOutboxDispatchSuccessV2({
+      db,
+      request: {
+        callId: claim.callId,
+        taskId: claim.taskId,
+        claimToken: claim.claimToken,
+        externalTaskName: publishResult.externalTaskName,
+        publisherOutcome: publishResult.outcome,
+      },
+      now,
+    });
+    return Object.freeze({
+      ...success,
+      publishOutcome: publishResult.outcome,
+    });
+  } catch (error) {
+    const controlledError =
+      error instanceof TaskPublisherError
+        ? error
+        : new TaskPublisherError({
+          code: "publisher_unexpected_error",
+          retryable: true,
+        });
+    const failure = await finalizeTaskOutboxDispatchFailureV2({
+      db,
+      request: {
+        callId: claim.callId,
+        taskId: claim.taskId,
+        claimToken: claim.claimToken,
+        errorCode: controlledError.code,
+        retryable: controlledError.retryable,
+      },
+      now,
+    });
+    return Object.freeze({
+      ...failure,
+      errorCode: controlledError.code,
+      retryable: controlledError.retryable,
+    });
+  }
+}
+
 function requireMutableV2Call(snapshot, callId) {
   if (!snapshot.exists) {
     throw new CallV2Error(
@@ -3042,8 +3399,405 @@ function createTaskOutboxDocument(transaction, callOpsRef, intent) {
     dispatchedAt: null,
     completedAt: null,
     lastDispatchError: null,
+    claimToken: null,
+    claimExpiresAt: null,
+    externalTaskName: null,
+    lastDispatchErrorCode: null,
     ttlAt: intent.ttlAt,
   });
+}
+
+function requireValidTaskOutboxDocument(snapshot, expected) {
+  if (!snapshot.exists) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The task outbox document is missing.",
+    );
+  }
+  const task = snapshot.data();
+  const exactKeys = [
+    "callId",
+    "claimExpiresAt",
+    "claimToken",
+    "completedAt",
+    "createdAt",
+    "dispatchAttempts",
+    "dispatchedAt",
+    "dueAt",
+    "externalTaskName",
+    "lastDispatchError",
+    "lastDispatchErrorCode",
+    "payload",
+    "schemaVersion",
+    "status",
+    "taskId",
+    "taskKind",
+    "ttlAt",
+    "updatedAt",
+  ];
+  if (
+    !task ||
+    snapshot.id !== expected.taskId ||
+    task.schemaVersion !== TASK_OUTBOX_SCHEMA_VERSION ||
+    task.callId !== expected.callId ||
+    task.taskId !== expected.taskId ||
+    !TASK_OUTBOX_STATUSES.includes(task.status) ||
+    !Object.keys(task).every((key) => exactKeys.includes(key)) ||
+    Object.keys(task).length !== exactKeys.length ||
+    !Object.values(TASK_KINDS).includes(task.taskKind) ||
+    task.lastDispatchError !== null ||
+    task.completedAt !== null ||
+    !Number.isSafeInteger(task.dispatchAttempts) ||
+    task.dispatchAttempts < 0
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The task outbox document is malformed.",
+    );
+  }
+
+  const dueMs = strictTimestampMillis(task.dueAt);
+  const createdMs = strictTimestampMillis(task.createdAt);
+  const updatedMs = strictTimestampMillis(task.updatedAt);
+  const ttlMs = strictTimestampMillis(task.ttlAt);
+  if (
+    dueMs === null ||
+    createdMs === null ||
+    updatedMs === null ||
+    ttlMs === null ||
+    ttlMs < dueMs ||
+    !isValidTaskPayload(task.taskKind, task.callId, task.payload)
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The task outbox document is malformed.",
+    );
+  }
+
+  const claimExpiresMs =
+    task.claimExpiresAt === null
+      ? null
+      : strictTimestampMillis(task.claimExpiresAt);
+  if (task.claimExpiresAt !== null && claimExpiresMs === null) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The task outbox claim expiry is malformed.",
+    );
+  }
+
+  if (!taskStatusFieldsAreConsistent(task, claimExpiresMs)) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The task outbox status fields are inconsistent.",
+    );
+  }
+
+  return {
+    ...task,
+    dueMs,
+    ttlMs,
+    claimExpiresMs,
+  };
+}
+
+function taskStatusFieldsAreConsistent(task, claimExpiresMs) {
+  if (task.status === "pending") {
+    return (
+      task.claimToken === null &&
+      task.claimExpiresAt === null &&
+      task.externalTaskName === null &&
+      task.dispatchedAt === null &&
+      task.lastDispatchErrorCode === null ||
+      task.claimToken === null &&
+      task.claimExpiresAt === null &&
+      task.externalTaskName === null &&
+      task.dispatchedAt === null &&
+      isControlledDispatchErrorCode(task.lastDispatchErrorCode)
+    );
+  }
+  if (task.status === "dispatching") {
+    return (
+      isValidIdentifier(task.claimToken, 160) &&
+      claimExpiresMs !== null &&
+      task.externalTaskName === null &&
+      task.dispatchedAt === null &&
+      (task.lastDispatchErrorCode === null ||
+        isControlledDispatchErrorCode(task.lastDispatchErrorCode))
+    );
+  }
+  if (task.status === "dispatched") {
+    return (
+      task.claimToken === null &&
+      task.claimExpiresAt === null &&
+      isValidExternalTaskName(task.externalTaskName) &&
+      strictTimestampMillis(task.dispatchedAt) !== null &&
+      task.lastDispatchErrorCode === null
+    );
+  }
+  if (task.status === "dead_letter") {
+    return (
+      task.claimToken === null &&
+      task.claimExpiresAt === null &&
+      task.externalTaskName === null &&
+      task.dispatchedAt === null &&
+      isControlledDispatchErrorCode(task.lastDispatchErrorCode)
+    );
+  }
+  return false;
+}
+
+function isValidTaskPayload(taskKind, callId, payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return false;
+  }
+  if (taskKind === TASK_KINDS.activeLeaseTimeout) {
+    return (
+      exactObjectKeys(payload, [
+        "callId",
+        "expectedCallVersion",
+        "expectedFencingToken",
+        "expectedHeartbeatVersion",
+        "expectedLeaseExpiresAt",
+        "participantUid",
+      ]) &&
+      payload.callId === callId &&
+      isValidIdentifier(payload.participantUid, MAX_UID_LENGTH) &&
+      Number.isSafeInteger(payload.expectedCallVersion) &&
+      payload.expectedCallVersion > 0 &&
+      isValidHeartbeatVersion(payload.expectedHeartbeatVersion) &&
+      isValidFencingToken(payload.expectedFencingToken) &&
+      strictTimestampMillis(payload.expectedLeaseExpiresAt) !== null
+    );
+  }
+
+  const timeoutKind = TASK_TIMEOUT_KIND_BY_TASK_KIND[taskKind];
+  return (
+    Boolean(timeoutKind) &&
+    exactObjectKeys(payload, [
+      "callId",
+      "expectedCallVersion",
+      "expectedDeadlineAt",
+      "timeoutKind",
+    ]) &&
+    payload.callId === callId &&
+    payload.timeoutKind === timeoutKind &&
+    Number.isSafeInteger(payload.expectedCallVersion) &&
+    payload.expectedCallVersion > 0 &&
+    strictTimestampMillis(payload.expectedDeadlineAt) !== null
+  );
+}
+
+function deterministicExternalTaskId(task) {
+  const dueMs = task.dueMs ?? strictTimestampMillis(task.dueAt);
+  const payloadHash = sha256Hex(canonicalJson(normalizeTaskPayloadIdentity(
+    task.payload,
+  )));
+  const digest = sha256Hex(
+    canonicalJson({
+      callId: task.callId,
+      taskId: task.taskId,
+      taskKind: task.taskKind,
+      dueMs,
+      payloadHash,
+    }),
+  ).slice(0, 48);
+  return `helperly-call-v2-${digest}`;
+}
+
+function normalizeTaskPayloadIdentity(payload) {
+  const normalized = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (value instanceof Date) {
+      normalized[key] = value.getTime();
+    } else if (value && typeof value.toMillis === "function") {
+      normalized[key] = value.toMillis();
+    } else {
+      normalized[key] = value;
+    }
+  }
+  return normalized;
+}
+
+function validateTaskOutboxRequest(request) {
+  requireExactRequestKeys(request, ["callId", "taskId"], "task outbox");
+  if (!isValidIdentifier(request.callId, 160)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid callId is required.",
+    );
+  }
+  if (!isValidIdentifier(request.taskId, 220)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid taskId is required.",
+    );
+  }
+  return {
+    callId: request.callId,
+    taskId: request.taskId,
+  };
+}
+
+function validateDispatchSuccessRequest(request) {
+  requireExactRequestKeys(
+    request,
+    ["callId", "claimToken", "externalTaskName", "publisherOutcome", "taskId"],
+    "task dispatch success",
+  );
+  const base = validateTaskOutboxRequest({
+    callId: request.callId,
+    taskId: request.taskId,
+  });
+  if (!isValidIdentifier(request.claimToken, 160)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid claimToken is required.",
+    );
+  }
+  if (!isValidExternalTaskName(request.externalTaskName)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid externalTaskName is required.",
+    );
+  }
+  if (!TASK_PUBLISHER_OUTCOMES.includes(request.publisherOutcome)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A supported publisherOutcome is required.",
+    );
+  }
+  return {
+    ...base,
+    claimToken: request.claimToken,
+    externalTaskName: request.externalTaskName,
+    publisherOutcome: request.publisherOutcome,
+  };
+}
+
+function validateDispatchFailureRequest(request) {
+  requireExactRequestKeys(
+    request,
+    ["callId", "claimToken", "errorCode", "retryable", "taskId"],
+    "task dispatch failure",
+  );
+  const base = validateTaskOutboxRequest({
+    callId: request.callId,
+    taskId: request.taskId,
+  });
+  if (!isValidIdentifier(request.claimToken, 160)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid claimToken is required.",
+    );
+  }
+  if (!isControlledDispatchErrorCode(request.errorCode)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A controlled errorCode is required.",
+    );
+  }
+  if (typeof request.retryable !== "boolean") {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A retryable boolean is required.",
+    );
+  }
+  return {
+    ...base,
+    claimToken: request.claimToken,
+    errorCode: request.errorCode,
+    retryable: request.retryable,
+  };
+}
+
+function requireExactRequestKeys(request, allowedKeys, label) {
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      `A ${label} request object is required.`,
+    );
+  }
+  for (const key of Object.keys(request)) {
+    if (!allowedKeys.includes(key)) {
+      throw new CallV2Error(
+        ERROR_CODES.invalidArgument,
+        `Unsupported ${label} field: ${key}.`,
+      );
+    }
+  }
+  for (const key of allowedKeys) {
+    if (!Object.prototype.hasOwnProperty.call(request, key)) {
+      throw new CallV2Error(
+        ERROR_CODES.invalidArgument,
+        `Missing ${label} field: ${key}.`,
+      );
+    }
+  }
+}
+
+function validateGeneratedClaimToken(generateClaimToken) {
+  const claimToken = generateClaimToken();
+  if (!isValidIdentifier(claimToken, 160)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "The generated claim token is invalid.",
+    );
+  }
+  return claimToken;
+}
+
+function normalizePublishResult(result) {
+  if (
+    !result ||
+    typeof result !== "object" ||
+    Array.isArray(result) ||
+    !TASK_PUBLISHER_OUTCOMES.includes(result.outcome) ||
+    !isValidExternalTaskName(result.externalTaskName)
+  ) {
+    throw new TaskPublisherError({
+      code: "publisher_invalid_result",
+      retryable: true,
+    });
+  }
+  return {
+    outcome: result.outcome,
+    externalTaskName: result.externalTaskName,
+  };
+}
+
+function externalTaskNameMatchesId(externalTaskName, externalTaskId) {
+  return (
+    externalTaskName === externalTaskId ||
+    externalTaskName.endsWith(`/tasks/${externalTaskId}`)
+  );
+}
+
+function isValidExternalTaskName(value) {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 512 &&
+    value.trim() === value &&
+    !/[\r\n]/.test(value)
+  );
+}
+
+function isControlledDispatchErrorCode(value) {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= TASK_DISPATCH_ERROR_CODE_MAX_LENGTH &&
+    value.trim() === value &&
+    /^[a-z][a-z0-9_]*$/.test(value)
+  );
+}
+
+function exactObjectKeys(value, expectedKeys) {
+  const keys = Object.keys(value).sort();
+  return (
+    keys.length === expectedKeys.length &&
+    keys.every((key, index) => key === [...expectedKeys].sort()[index])
+  );
 }
 
 function createTimeoutCommandRecord(
@@ -3801,14 +4555,23 @@ module.exports = {
   PUBLIC_HISTORY_RETENTION_MS,
   RECONNECT_GRACE_DURATION_MS,
   RINGING_DURATION_MS,
+  TASK_DISPATCH_CLAIM_DURATION_MS,
+  TASK_DISPATCH_ERROR_CODE_MAX_LENGTH,
+  TASK_DISPATCH_MAX_ATTEMPTS,
   TASK_OUTBOX_RETENTION_MS,
   TASK_OUTBOX_SCHEMA_VERSION,
   CallV2Error,
+  TaskPublisherError,
   acceptCallV2,
   cancelCallV2,
+  claimTaskOutboxDispatchV2,
   declineCallV2,
+  deterministicExternalTaskId,
+  dispatchTaskOutboxV2,
   deriveRtcUid,
   endCallV2,
+  finalizeTaskOutboxDispatchFailureV2,
+  finalizeTaskOutboxDispatchSuccessV2,
   processActiveLeaseTimeoutV2,
   processCallTimeoutV2,
   reportParticipantMediaV2,
