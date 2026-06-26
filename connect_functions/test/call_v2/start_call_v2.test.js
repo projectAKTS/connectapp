@@ -55,6 +55,34 @@ test("creates ringing call, participants, locks, ops, and idempotency atomically
   assert.ok(Number.isInteger(result.calleeRtcUid));
 
   const call = await requiredData("calls/call_1");
+  assertExactKeys(call, [
+    "acceptedAt",
+    "acceptedByUid",
+    "acceptedJoinDeadlineAt",
+    "activeAt",
+    "agoraChannel",
+    "callSystem",
+    "calleeUid",
+    "callerUid",
+    "createdAt",
+    "endedAt",
+    "endedByUid",
+    "endReason",
+    "failureCode",
+    "historyExpiresAt",
+    "historyVisible",
+    "isVideo",
+    "lastPublicEventAt",
+    "lifecycleState",
+    "mediaProvider",
+    "participantUids",
+    "reconnectDeadlineAt",
+    "ringingDeadlineAt",
+    "schemaVersion",
+    "terminal",
+    "updatedAt",
+    "version",
+  ]);
   assert.equal(call.schemaVersion, 2);
   assert.equal(call.callSystem, "v2");
   assert.equal(call.lifecycleState, "ringing");
@@ -69,6 +97,10 @@ test("creates ringing call, participants, locks, ops, and idempotency atomically
   assert.equal(millis(call.updatedAt), fixedMs());
   assert.equal(millis(call.ringingDeadlineAt), fixedMs() + RINGING_DURATION_MS);
   assert.equal(call.acceptedAt, null);
+  assert.equal(call.acceptedByUid, null);
+  assert.equal(call.acceptedJoinDeadlineAt, null);
+  assert.equal(call.activeAt, null);
+  assert.equal(call.reconnectDeadlineAt, null);
   assert.equal(call.historyVisible, true);
   assert.equal(call.historyExpiresAt, null);
   assert.equal(millis(call.lastPublicEventAt), fixedMs());
@@ -79,6 +111,8 @@ test("creates ringing call, participants, locks, ops, and idempotency atomically
   const calleeParticipant = await requiredData(
     "calls/call_1/participants/callee",
   );
+  assertParticipantSchema(callerParticipant);
+  assertParticipantSchema(calleeParticipant);
   assert.equal(callerParticipant.uid, "caller");
   assert.equal(callerParticipant.role, "caller");
   assert.equal(callerParticipant.mediaState, "not_joined");
@@ -276,6 +310,68 @@ test("rejects idempotency conflicts for changed canonical requests", async () =>
   assert.equal((await db.collection("calls").get()).size, 1);
 });
 
+test("existing call with generated call ID is never overwritten", async () => {
+  await seedUsers("caller", "callee");
+  const existingCall = {
+    marker: "existing-call",
+    schemaVersion: 1,
+    terminal: false,
+    participantUids: ["someone_else"],
+  };
+  await db.doc("calls/call_1").set(existingCall);
+
+  await assertCallError(
+    ERROR_CODES.callIdConflict,
+    startCall(),
+  );
+
+  assert.deepEqual(await requiredData("calls/call_1"), existingCall);
+  await assertNoCollisionPartials("call_1");
+  assert.equal((await db.collection("callOps").get()).size, 0);
+});
+
+test("existing callOps with generated call ID is never overwritten", async () => {
+  await seedUsers("caller", "callee");
+  const existingOps = {
+    callId: "call_1",
+    marker: "existing-ops",
+    latestOpsVersion: 41,
+  };
+  await db.doc("callOps/call_1").set(existingOps);
+
+  await assertCallError(
+    ERROR_CODES.callIdConflict,
+    startCall(),
+  );
+
+  assert.deepEqual(await requiredData("callOps/call_1"), existingOps);
+  assert.equal((await db.collection("calls").get()).size, 0);
+  await assertNoCollisionPartials("call_1");
+});
+
+test("existing participant with generated call ID is never overwritten", async () => {
+  await seedUsers("caller", "callee");
+  const existingParticipant = {
+    uid: "caller",
+    marker: "existing-participant",
+  };
+  await db.doc("calls/call_1/participants/caller").set(existingParticipant);
+
+  await assertCallError(
+    ERROR_CODES.callIdConflict,
+    startCall(),
+  );
+
+  assert.deepEqual(
+    await requiredData("calls/call_1/participants/caller"),
+    existingParticipant,
+  );
+  assert.equal((await db.collection("calls").get()).size, 0);
+  assert.equal((await db.collection("callOps").get()).size, 0);
+  assert.equal((await db.collection("activeCallLocks").get()).size, 0);
+  assert.equal((await db.collection("callCommandKeys").get()).size, 0);
+});
+
 test("allows only one concurrent start sharing the same caller", async () => {
   await seedUsers("caller", "callee_a", "callee_b");
   const ids = sequencedCallIds("call");
@@ -293,6 +389,59 @@ test("allows only one concurrent start sharing the same caller", async () => {
 
   assertOneSuccessAndOneBusy(results);
   assert.equal((await db.collection("calls").get()).size, 1);
+});
+
+test("concurrent matching idempotency requests both return the same call", async () => {
+  await seedUsers("caller", "callee");
+
+  const results = await Promise.all([
+    startCall({ generateCallId: () => "call_candidate_a" }),
+    startCall({ generateCallId: () => "call_candidate_b" }),
+  ]);
+
+  assert.equal(new Set(results.map((result) => result.callId)).size, 1);
+  assert.equal(results.filter((result) => result.idempotentReplay).length, 1);
+  assert.equal(results.filter((result) => !result.idempotentReplay).length, 1);
+
+  const finalCallId = results[0].callId;
+  assert.equal((await db.collection("calls").get()).size, 1);
+  assert.equal((await db.collection("activeCallLocks").get()).size, 2);
+  assert.equal((await db.collection("callCommandKeys").get()).size, 1);
+  assert.equal(
+    (await db.collection(`callOps/${finalCallId}/commands`).get()).size,
+    1,
+  );
+});
+
+test("concurrent idempotency payload conflict creates only one call", async () => {
+  await seedUsers("caller", "callee");
+
+  const results = await Promise.allSettled([
+    startCall({
+      generateCallId: () => "call_candidate_a",
+      request: request({ isVideo: true }),
+    }),
+    startCall({
+      generateCallId: () => "call_candidate_b",
+      request: request({ isVideo: false }),
+    }),
+  ]);
+
+  const fulfilled = results.filter((result) => result.status === "fulfilled");
+  const rejected = results.filter((result) => result.status === "rejected");
+  assert.equal(fulfilled.length, 1);
+  assert.equal(rejected.length, 1);
+  assert.ok(rejected[0].reason instanceof CallV2Error);
+  assert.equal(rejected[0].reason.code, ERROR_CODES.idempotencyConflict);
+
+  const finalCallId = fulfilled[0].value.callId;
+  assert.equal((await db.collection("calls").get()).size, 1);
+  assert.equal((await db.collection("activeCallLocks").get()).size, 2);
+  assert.equal((await db.collection("callCommandKeys").get()).size, 1);
+  assert.equal(
+    (await db.collection(`callOps/${finalCallId}/commands`).get()).size,
+    1,
+  );
 });
 
 test("allows only one concurrent start sharing the same callee", async () => {
@@ -391,19 +540,96 @@ test("increments fencing tokens independently for each replaced expired lock", a
   assert.equal((await requiredData("activeCallLocks/callee")).fencingToken, 10);
 });
 
-test("transaction failure before writes leaves no partial public or private docs", async () => {
+test("malformed expired-lock fencing token requires recovery without writes", async () => {
   await seedUsers("caller", "callee");
+  await writeLock("caller", {
+    callId: "missing_call",
+    expiresAt: new Date(fixedMs() - 1000),
+    fencingToken: "bad-token",
+  });
+  const beforeLock = normalizeFirestoreData(
+    await requiredData("activeCallLocks/caller"),
+  );
 
   await assertCallError(
-    ERROR_CODES.transactionFailed,
-    startCall({
-      beforeWrites: () => {
-        throw new Error("injected failure");
-      },
-    }),
+    ERROR_CODES.lockRecoveryRequired,
+    startCall(),
+  );
+  assert.deepEqual(
+    normalizeFirestoreData(await requiredData("activeCallLocks/caller")),
+    beforeLock,
   );
   await assertNoCallArtifacts();
-  assert.equal((await db.collection("activeCallLocks").get()).size, 0);
+  assert.equal((await db.collection("callCommandKeys").get()).size, 0);
+});
+
+test("zero expired-lock fencing token requires recovery without writes", async () => {
+  await seedUsers("caller", "callee");
+  await writeLock("caller", {
+    callId: "missing_call",
+    expiresAt: new Date(fixedMs() - 1000),
+    fencingToken: 0,
+  });
+  const beforeLock = normalizeFirestoreData(
+    await requiredData("activeCallLocks/caller"),
+  );
+
+  await assertCallError(
+    ERROR_CODES.lockRecoveryRequired,
+    startCall(),
+  );
+  assert.deepEqual(
+    normalizeFirestoreData(await requiredData("activeCallLocks/caller")),
+    beforeLock,
+  );
+  await assertNoCallArtifacts();
+});
+
+test("negative and non-integer fencing tokens require recovery", async () => {
+  for (const fencingToken of [-1, 1.5]) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await writeLock("caller", {
+      callId: "missing_call",
+      expiresAt: new Date(fixedMs() - 1000),
+      fencingToken,
+    });
+    const beforeLock = normalizeFirestoreData(
+      await requiredData("activeCallLocks/caller"),
+    );
+
+    await assertCallError(
+      ERROR_CODES.lockRecoveryRequired,
+      startCall(),
+    );
+    assert.deepEqual(
+      normalizeFirestoreData(await requiredData("activeCallLocks/caller")),
+      beforeLock,
+    );
+    await assertNoCallArtifacts();
+  }
+});
+
+test("overflow expired-lock fencing token requires recovery without writes", async () => {
+  await seedUsers("caller", "callee");
+  await writeLock("caller", {
+    callId: "missing_call",
+    expiresAt: new Date(fixedMs() - 1000),
+    fencingToken: Number.MAX_SAFE_INTEGER,
+  });
+  const beforeLock = normalizeFirestoreData(
+    await requiredData("activeCallLocks/caller"),
+  );
+
+  await assertCallError(
+    ERROR_CODES.lockRecoveryRequired,
+    startCall(),
+  );
+  assert.deepEqual(
+    normalizeFirestoreData(await requiredData("activeCallLocks/caller")),
+    beforeLock,
+  );
+  await assertNoCallArtifacts();
 });
 
 test("public call and participant documents do not contain private operational fields", async () => {
@@ -469,6 +695,7 @@ test("private command records are stored only under callOps", async () => {
 
 test("exports the expected stable error code vocabulary", () => {
   assert.deepEqual(Object.values(ERROR_CODES).sort(), [
+    "call_id_conflict",
     "callee_not_found",
     "idempotency_conflict",
     "invalid_argument",
@@ -486,7 +713,6 @@ function startCall(overrides = {}) {
     request: overrides.request || request(),
     now: overrides.now || FIXED_NOW,
     generateCallId: overrides.generateCallId || (() => "call_1"),
-    beforeWrites: overrides.beforeWrites,
   });
 }
 
@@ -519,7 +745,7 @@ async function writeLock(uid, overrides = {}) {
     acquiredAt: FIXED_NOW,
     updatedAt: FIXED_NOW,
     expiresAt: overrides.expiresAt || new Date(fixedMs() + 60 * 1000),
-    fencingToken: overrides.fencingToken || 1,
+    fencingToken: overrides.fencingToken ?? 1,
     acquiredByCommandId: "existing_command",
   });
 }
@@ -543,6 +769,41 @@ async function assertNoCallArtifacts() {
   assert.equal((await db.collection("calls").get()).size, 0);
   assert.equal((await db.collection("callOps").get()).size, 0);
   assert.equal((await db.collection("callCommandKeys").get()).size, 0);
+}
+
+async function assertNoCollisionPartials(callId) {
+  assert.equal((await db.collection("activeCallLocks").get()).size, 0);
+  assert.equal((await db.collection("callCommandKeys").get()).size, 0);
+  assert.equal((await db.collection(`calls/${callId}/participants`).get()).size, 0);
+  assert.equal((await db.collection(`callOps/${callId}/commands`).get()).size, 0);
+}
+
+function assertExactKeys(value, expectedKeys) {
+  assert.deepEqual(Object.keys(value).sort(), [...expectedKeys].sort());
+}
+
+function assertParticipantSchema(participant) {
+  assertExactKeys(participant, [
+    "acceptedAt",
+    "failureCode",
+    "lastHeartbeatAt",
+    "lastMediaStateAt",
+    "localJoinStartedAt",
+    "mediaJoinedAt",
+    "mediaLeftAt",
+    "mediaState",
+    "mediaVersion",
+    "role",
+    "rtcUid",
+    "uid",
+  ]);
+  assert.equal(participant.acceptedAt, null);
+  assert.equal(participant.localJoinStartedAt, null);
+  assert.equal(participant.mediaJoinedAt, null);
+  assert.equal(participant.mediaLeftAt, null);
+  assert.equal(participant.lastMediaStateAt, null);
+  assert.equal(participant.lastHeartbeatAt, null);
+  assert.equal(participant.failureCode, null);
 }
 
 function assertLock(lock, expected) {
@@ -583,6 +844,24 @@ function assertNoPrivatePublicFields(value) {
 function sequencedCallIds(prefix) {
   let count = 0;
   return () => `${prefix}_${++count}`;
+}
+
+function normalizeFirestoreData(value) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeFirestoreData(entry));
+  }
+  if (value && typeof value.toMillis === "function") {
+    return { timestampMillis: value.toMillis() };
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        normalizeFirestoreData(entry),
+      ]),
+    );
+  }
+  return value;
 }
 
 function fixedMs() {

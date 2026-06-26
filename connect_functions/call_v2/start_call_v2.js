@@ -8,6 +8,7 @@ const ERROR_CODES = Object.freeze({
   calleeNotFound: "callee_not_found",
   userBusy: "user_busy",
   idempotencyConflict: "idempotency_conflict",
+  callIdConflict: "call_id_conflict",
   lockRecoveryRequired: "lock_recovery_required",
   transactionFailed: "transaction_failed",
 });
@@ -38,7 +39,6 @@ function startCallV2({
   request,
   now,
   generateCallId,
-  beforeWrites,
 }) {
   if (!db || typeof db.runTransaction !== "function") {
     throw new CallV2Error(
@@ -146,16 +146,18 @@ function startCallV2({
         nowDate,
       );
 
+      const collisionSnapshots = await readGeneratedIdCollisionTargets(
+        transaction,
+        refs,
+      );
+      verifyGeneratedIdIsUnused(collisionSnapshots);
+
       const calleeSnapshot = await transaction.get(refs.calleeUserRef);
       if (!calleeSnapshot.exists) {
         throw new CallV2Error(
           ERROR_CODES.calleeNotFound,
           "The requested callee does not exist.",
         );
-      }
-
-      if (beforeWrites) {
-        await beforeWrites();
       }
 
       const callerLock = buildLockDocument({
@@ -183,7 +185,7 @@ function startCallV2({
         ),
       });
 
-      transaction.set(refs.callRef, {
+      transaction.create(refs.callRef, {
         schemaVersion: CALL_SCHEMA_VERSION,
         callSystem: "v2",
         lifecycleState: "ringing",
@@ -202,9 +204,11 @@ function startCallV2({
         updatedAt: nowDate,
         ringingDeadlineAt,
         acceptedAt: null,
+        // Server-owned audit field for the participant who accepts the call.
         acceptedByUid: null,
+        acceptedJoinDeadlineAt: null,
         activeAt: null,
-        reconnectGraceEndsAt: null,
+        reconnectDeadlineAt: null,
         endedAt: null,
         endedByUid: null,
         endReason: null,
@@ -214,7 +218,7 @@ function startCallV2({
         lastPublicEventAt: nowDate,
       });
 
-      transaction.set(
+      transaction.create(
         refs.callerParticipantRef,
         buildParticipantDocument({
           uid: validatedRequest.callerUid,
@@ -222,7 +226,7 @@ function startCallV2({
           rtcUid: callerRtcUid,
         }),
       );
-      transaction.set(
+      transaction.create(
         refs.calleeParticipantRef,
         buildParticipantDocument({
           uid: validatedRequest.calleeUid,
@@ -234,7 +238,7 @@ function startCallV2({
       transaction.set(refs.callerLockRef, callerLock);
       transaction.set(refs.calleeLockRef, calleeLock);
 
-      transaction.set(refs.callOpsRef, {
+      transaction.create(refs.callOpsRef, {
         callId,
         createdAt: nowDate,
         terminalAt: null,
@@ -242,7 +246,7 @@ function startCallV2({
         opsRetentionExpiresAt,
       });
 
-      transaction.set(refs.commandRef, {
+      transaction.create(refs.commandRef, {
         commandId,
         actorUid: validatedRequest.callerUid,
         action: ACTION_START_CALL,
@@ -255,7 +259,7 @@ function startCallV2({
         ttlAt: commandTtlAt,
       });
 
-      transaction.set(refs.idempotencyRef, {
+      transaction.create(refs.idempotencyRef, {
         actorUid: validatedRequest.callerUid,
         action: ACTION_START_CALL,
         requestHash,
@@ -424,9 +428,11 @@ function buildParticipantDocument({ uid, role, rtcUid }) {
     mediaVersion: 0,
     rtcUid,
     acceptedAt: null,
-    localJoinRequestedAt: null,
+    localJoinStartedAt: null,
     mediaJoinedAt: null,
-    mediaUpdatedAt: null,
+    mediaLeftAt: null,
+    lastMediaStateAt: null,
+    lastHeartbeatAt: null,
     failureCode: null,
   };
 }
@@ -435,6 +441,35 @@ function sortByDocumentId(entries) {
   return [...entries].sort((left, right) =>
     left.ref.id.localeCompare(right.ref.id),
   );
+}
+
+async function readGeneratedIdCollisionTargets(transaction, refs) {
+  const targets = [
+    { label: "call", ref: refs.callRef },
+    { label: "callerParticipant", ref: refs.callerParticipantRef },
+    { label: "calleeParticipant", ref: refs.calleeParticipantRef },
+    { label: "callOps", ref: refs.callOpsRef },
+    { label: "command", ref: refs.commandRef },
+  ];
+
+  const snapshots = [];
+  for (const target of targets) {
+    snapshots.push({
+      label: target.label,
+      snapshot: await transaction.get(target.ref),
+    });
+  }
+  return snapshots;
+}
+
+function verifyGeneratedIdIsUnused(collisionSnapshots) {
+  const collision = collisionSnapshots.find((entry) => entry.snapshot.exists);
+  if (collision) {
+    throw new CallV2Error(
+      ERROR_CODES.callIdConflict,
+      `The generated call ID conflicts with an existing ${collision.label} document.`,
+    );
+  }
 }
 
 function expiredLockCallRefs(db, lockSnapshots, nowDate) {
@@ -469,6 +504,12 @@ function verifyLocksCanBeAcquired(
         "A participant already has an active call lock.",
       );
     }
+    if (!isIncrementableFencingToken(lock.fencingToken)) {
+      throw new CallV2Error(
+        ERROR_CODES.lockRecoveryRequired,
+        "An expired lock has a fencing token that cannot be safely incremented.",
+      );
+    }
 
     const referencedCall =
       lock && isNonEmptyString(lock.callId)
@@ -492,7 +533,13 @@ function nextFencingToken(lockSnapshots, uid) {
     return 1;
   }
   const previous = entry.snapshot.data().fencingToken;
-  return Number.isSafeInteger(previous) && previous > 0 ? previous + 1 : 1;
+  if (!isIncrementableFencingToken(previous)) {
+    throw new CallV2Error(
+      ERROR_CODES.lockRecoveryRequired,
+      "An expired lock has a fencing token that cannot be safely incremented.",
+    );
+  }
+  return previous + 1;
 }
 
 function isExpiredLock(lock, nowDate) {
@@ -500,6 +547,14 @@ function isExpiredLock(lock, nowDate) {
     return false;
   }
   return toMillis(lock.expiresAt) <= nowDate.getTime();
+}
+
+function isIncrementableFencingToken(value) {
+  return (
+    Number.isSafeInteger(value) &&
+    value > 0 &&
+    value < Number.MAX_SAFE_INTEGER
+  );
 }
 
 function normalizeReplayResult(result) {

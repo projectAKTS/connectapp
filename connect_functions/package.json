@@ -8,7 +8,7 @@
   "scripts": {
     "deploy": "firebase deploy --only functions",
     "test:call-v2": "node --test test/call_v2/*.test.js",
-    "test:call-v2:emulator": "PATH=/opt/homebrew/opt/openjdk@17/bin:$PATH firebase --project demo-helperly-call-v2 --config ../firebase.json emulators:exec --only firestore \"npm run test:call-v2\"",
+    "test:call-v2:emulator": "firebase --project demo-helperly-call-v2 --config ../firebase.json emulators:exec --only firestore \"npm run test:call-v2\"",
     "check:call-v2": "node --check call_v2/*.js && node --check test/call_v2/*.js"
   },
   "dependencies": {
