@@ -15,6 +15,8 @@ const {
   PUBLIC_HISTORY_RETENTION_MS,
   RECONNECT_GRACE_DURATION_MS,
   RINGING_DURATION_MS,
+  TASK_OUTBOX_RETENTION_MS,
+  TASK_OUTBOX_SCHEMA_VERSION,
   CallV2Error,
   acceptCallV2,
   cancelCallV2,
@@ -437,6 +439,56 @@ test("concurrent matching idempotency requests both return the same call", async
     (await db.collection(`callOps/${finalCallId}/commands`).get()).size,
     1,
   );
+});
+
+test("start creates deterministic ringing timeout task intent", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+
+  let task = await singleTaskForKind("ringing_timeout");
+  const firstTaskId = task.taskId;
+  const call = await requiredData("calls/call_1");
+  assertTaskSchema(task);
+  assert.equal(task.callId, "call_1");
+  assert.equal(millis(task.dueAt), millis(call.ringingDeadlineAt));
+  assertExactKeys(task.payload, [
+    "callId",
+    "expectedCallVersion",
+    "expectedDeadlineAt",
+    "timeoutKind",
+  ]);
+  assert.deepEqual(normalizeFirestoreData(task.payload), {
+    callId: "call_1",
+    timeoutKind: "ringing",
+    expectedCallVersion: 1,
+    expectedDeadlineAt: normalizeFirestoreData(call.ringingDeadlineAt),
+  });
+  assert.equal(millis(task.createdAt), fixedMs());
+  assert.equal(millis(task.updatedAt), fixedMs());
+
+  await startCall();
+  assert.equal((await taskOutboxDocs()).length, 1);
+  assert.equal((await singleTaskForKind("ringing_timeout")).taskId, firstTaskId);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  task = await singleTaskForKind("ringing_timeout");
+  assert.equal(task.taskId, firstTaskId);
+});
+
+test("concurrent matching starts create one ringing timeout task", async () => {
+  await seedUsers("caller", "callee");
+
+  await Promise.all([
+    startCall({ generateCallId: () => "call_candidate_a" }),
+    startCall({ generateCallId: () => "call_candidate_b" }),
+  ]);
+
+  const calls = await db.collection("calls").get();
+  assert.equal(calls.size, 1);
+  const callId = calls.docs[0].id;
+  assert.equal((await tasksForKind("ringing_timeout", callId)).length, 1);
 });
 
 test("concurrent idempotency payload conflict creates only one call", async () => {
@@ -921,6 +973,34 @@ test("callee accepts ringing call and updates call, participant, locks, and ops"
   assert.equal(await commandCountForAction("call_1", "acceptCall"), 1);
 });
 
+test("accept creates accepted-join task and preserves ringing task", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const ringingBefore = await singleTaskForKind("ringing_timeout");
+
+  await acceptCall();
+
+  const tasks = await taskOutboxData();
+  assert.equal(tasks.length, 2);
+  assert.deepEqual(
+    normalizeFirestoreData(await singleTaskForKind("ringing_timeout")),
+    normalizeFirestoreData(ringingBefore),
+  );
+  const acceptedTask = await singleTaskForKind("accepted_join_timeout");
+  const call = await requiredData("calls/call_1");
+  assertTaskSchema(acceptedTask);
+  assert.equal(millis(acceptedTask.dueAt), millis(call.acceptedJoinDeadlineAt));
+  assert.deepEqual(normalizeFirestoreData(acceptedTask.payload), {
+    callId: "call_1",
+    timeoutKind: "accepted_join",
+    expectedCallVersion: call.version,
+    expectedDeadlineAt: normalizeFirestoreData(call.acceptedJoinDeadlineAt),
+  });
+
+  await acceptCall();
+  assert.equal((await tasksForKind("accepted_join_timeout")).length, 1);
+});
+
 test("caller and nonparticipant cannot accept", async () => {
   await seedUsers("caller", "callee", "intruder");
   await startCall();
@@ -1150,6 +1230,7 @@ test("concurrent accept versus decline results in exactly one valid transition",
 test("callee declines ringing call with terminal fields and lock release", async () => {
   await seedUsers("caller", "callee");
   await startCall();
+  const beforeTaskCount = (await taskOutboxDocs()).length;
 
   const result = await declineCall();
 
@@ -1168,6 +1249,7 @@ test("callee declines ringing call with terminal fields and lock release", async
   assert.equal(millis(call.historyExpiresAt), fixedMs() + PUBLIC_HISTORY_RETENTION_MS);
   assert.equal((await db.doc("activeCallLocks/caller").get()).exists, false);
   assert.equal((await db.doc("activeCallLocks/callee").get()).exists, false);
+  assert.equal((await taskOutboxDocs()).length, beforeTaskCount);
   const ops = await requiredData("callOps/call_1");
   assert.equal(ops.terminalState, "declined");
   assert.equal(ops.terminalReason, "declined");
@@ -1205,6 +1287,7 @@ test("decline does not delete unrelated or fencing-mismatched locks", async () =
 test("caller cancels ringing call and releases only matching locks", async () => {
   await seedUsers("caller", "callee");
   await startCall();
+  const beforeTaskCount = (await taskOutboxDocs()).length;
 
   const result = await cancelCall();
 
@@ -1219,6 +1302,7 @@ test("caller cancels ringing call and releases only matching locks", async () =>
   assert.equal((await requiredData("calls/call_1")).lifecycleState, "cancelled");
   assert.equal((await db.doc("activeCallLocks/caller").get()).exists, false);
   assert.equal((await db.doc("activeCallLocks/callee").get()).exists, false);
+  assert.equal((await taskOutboxDocs()).length, beforeTaskCount);
 });
 
 test("callee cannot cancel", async () => {
@@ -2944,6 +3028,7 @@ test("accepted call promotes to active only after both participants joined", asy
   assert.equal(first.promotedToActive, false);
   assert.equal(first.callVersion, 2);
   assert.equal((await requiredData("calls/call_1")).lifecycleState, "accepted");
+  assert.equal((await tasksForKind("active_lease_timeout")).length, 0);
 
   const second = await reportMedia({
     authUid: "callee",
@@ -2985,6 +3070,29 @@ test("accepted call promotes to active only after both participants joined", asy
     (await requiredData("calls/call_1/participants/callee")).heartbeatVersion,
     0,
   );
+  const leaseTasks = await tasksForKind("active_lease_timeout");
+  assert.equal(leaseTasks.length, 2);
+  const tasksByUid = Object.fromEntries(
+    leaseTasks.map((task) => [task.payload.participantUid, task]),
+  );
+  const ops = await requiredData("callOps/call_1");
+  const callerLock = await requiredData("activeCallLocks/caller");
+  const calleeLock = await requiredData("activeCallLocks/callee");
+  assert.deepEqual(Object.keys(tasksByUid).sort(), ["callee", "caller"]);
+  for (const [uid, task] of Object.entries(tasksByUid)) {
+    const role = uid === "caller" ? "caller" : "callee";
+    const lock = uid === "caller" ? callerLock : calleeLock;
+    assertTaskSchema(task);
+    assert.equal(millis(task.dueAt), millis(lock.expiresAt));
+    assert.deepEqual(normalizeFirestoreData(task.payload), {
+      callId: "call_1",
+      participantUid: uid,
+      expectedCallVersion: 3,
+      expectedHeartbeatVersion: 0,
+      expectedFencingToken: ops.lockClaims[role].fencingToken,
+      expectedLeaseExpiresAt: normalizeFirestoreData(lock.expiresAt),
+    });
+  }
 });
 
 test("caller heartbeat renews only caller lock with exact versions and ops", async () => {
@@ -3051,6 +3159,20 @@ test("caller heartbeat renews only caller lock with exact versions and ops", asy
     heartbeatAt.getTime() + OPS_RETENTION_MS,
   );
   assert.equal(await commandCountForAction("call_1", "renewActiveCallLease"), 1);
+  const leaseTasks = await tasksForKind("active_lease_timeout");
+  assert.equal(leaseTasks.length, 3);
+  const heartbeatTasks = leaseTasks.filter(
+    (task) => task.payload.expectedHeartbeatVersion === 1,
+  );
+  assert.equal(heartbeatTasks.length, 1);
+  assert.deepEqual(normalizeFirestoreData(heartbeatTasks[0].payload), {
+    callId: "call_1",
+    participantUid: "caller",
+    expectedCallVersion: beforeCall.version,
+    expectedHeartbeatVersion: 1,
+    expectedFencingToken: beforeCallerLock.fencingToken,
+    expectedLeaseExpiresAt: normalizeFirestoreData(callerLock.expiresAt),
+  });
   for (const publicDoc of [call, caller]) {
     assert.equal(publicDoc.commandId, undefined);
     assert.equal(publicDoc.idempotencyKey, undefined);
@@ -3087,6 +3209,13 @@ test("callee heartbeat renews only callee lock", async () => {
     (await requiredData("calls/call_1/participants/callee")).heartbeatVersion,
     1,
   );
+  const calleeTasks = (await tasksForKind("active_lease_timeout")).filter(
+    (task) =>
+      task.payload.participantUid === "callee" &&
+      task.payload.expectedHeartbeatVersion === 1,
+  );
+  assert.equal(calleeTasks.length, 1);
+  assert.equal(millis(calleeTasks[0].dueAt), millis(calleeLock.expiresAt));
 });
 
 test("heartbeat idempotency replays, conflicts, and handles duplicate concurrency", async () => {
@@ -3127,6 +3256,12 @@ test("heartbeat idempotency replays, conflicts, and handles duplicate concurrenc
     1,
   );
   assert.equal(await commandCountForAction("call_1", "renewActiveCallLease"), 1);
+  assert.equal(
+    (await tasksForKind("active_lease_timeout")).filter(
+      (task) => task.payload.expectedHeartbeatVersion === 1,
+    ).length,
+    1,
+  );
 });
 
 test("heartbeat rejects old and skipped versions without renewing", async () => {
@@ -3299,6 +3434,12 @@ test("heartbeat lock validation and deadline boundaries are authoritative", asyn
     request: heartbeatRequest("call_1", 1, "heartbeat_open_reconnect"),
   });
   assert.equal(openReconnect.heartbeatVersion, 1);
+  assert.equal(
+    (await tasksForKind("active_lease_timeout")).filter(
+      (task) => task.payload.expectedHeartbeatVersion === 1,
+    ).length,
+    0,
+  );
 
   await clearFirestore();
   await seedUsers("caller", "callee");
@@ -3646,6 +3787,96 @@ test("active lease timeout rejects malformed active heartbeat state", async () =
   await assertMutationStateUnchanged(before);
 });
 
+test("outbox timeout payloads are processor-compatible", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  let task = await singleTaskForKind("ringing_timeout");
+  let result = await processTimeout({
+    now: new Date(millis(task.dueAt) - 1),
+    request: task.payload,
+  });
+  assert.equal(result.status, "not_due");
+  result = await processTimeout({ now: new Date(millis(task.dueAt)), request: task.payload });
+  assert.equal(result.status, "terminalized");
+  assert.equal(result.lifecycleState, "missed");
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+  task = await singleTaskForKind("accepted_join_timeout");
+  result = await processTimeout({
+    now: new Date(millis(task.dueAt) - 1),
+    request: task.payload,
+  });
+  assert.equal(result.status, "not_due");
+  result = await processTimeout({ now: new Date(millis(task.dueAt)), request: task.payload });
+  assert.equal(result.status, "terminalized");
+  assert.equal(result.lifecycleState, "failed");
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  await reportMedia({
+    mediaState: "reconnecting",
+    request: mediaRequest("call_1", "reconnecting", "processor_reconnect"),
+  });
+  task = await singleTaskForKind("reconnect_timeout");
+  result = await processTimeout({
+    now: new Date(millis(task.dueAt) - 1),
+    request: task.payload,
+  });
+  assert.equal(result.status, "not_due");
+  result = await processTimeout({ now: new Date(millis(task.dueAt)), request: task.payload });
+  assert.equal(result.status, "terminalized");
+  assert.equal(result.lifecycleState, "failed");
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  task = (await tasksForKind("active_lease_timeout")).find(
+    (candidate) => candidate.payload.participantUid === "caller",
+  );
+  result = await processActiveLeaseTimeout({
+    now: new Date(millis(task.dueAt) - 1),
+    request: task.payload,
+  });
+  assert.equal(result.status, "not_due");
+  result = await processActiveLeaseTimeout({
+    now: new Date(millis(task.dueAt)),
+    request: task.payload,
+  });
+  assert.equal(result.status, "terminalized");
+  assert.equal(result.lifecycleState, "failed");
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  task = (await tasksForKind("active_lease_timeout")).find(
+    (candidate) => candidate.payload.participantUid === "caller",
+  );
+  await renewLease({
+    now: new Date(millis(task.dueAt) - 1),
+    request: heartbeatRequest("call_1", 1, "processor_stale_hb"),
+  });
+  result = await processActiveLeaseTimeout({
+    now: new Date(millis(task.dueAt)),
+    request: task.payload,
+  });
+  assert.equal(result.status, "stale");
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  task = await singleTaskForKind("ringing_timeout");
+  await cancelCall();
+  result = await processTimeout({
+    now: new Date(millis(task.dueAt)),
+    request: task.payload,
+  });
+  assert.equal(result.status, "already_terminal");
+});
+
 test("active lease services reject missing or malformed participant documents", async () => {
   await seedUsers("caller", "callee");
   await promoteCallToActive();
@@ -3733,10 +3964,28 @@ test("old active lease timeout cannot terminalize after successful heartbeat", a
   await seedUsers("caller", "callee");
   await promoteCallToActive();
   const oldRequest = await activeLeaseTimeoutRequestFromState("caller");
+  const oldTask = (await tasksForKind("active_lease_timeout")).find(
+    (task) =>
+      task.payload.participantUid === "caller" &&
+      task.payload.expectedHeartbeatVersion === 0,
+  );
   await renewLease({
     now: new Date(millis(oldRequest.expectedLeaseExpiresAt) - 1),
     request: heartbeatRequest("call_1", 1, "renew_before_old_timeout"),
   });
+  const unchangedOldTask = (await taskOutboxData()).find(
+    (task) => task.taskId === oldTask.taskId,
+  );
+  const newTask = (await tasksForKind("active_lease_timeout")).find(
+    (task) =>
+      task.payload.participantUid === "caller" &&
+      task.payload.expectedHeartbeatVersion === 1,
+  );
+  assert.notEqual(newTask.taskId, oldTask.taskId);
+  assert.deepEqual(
+    normalizeFirestoreData(unchangedOldTask),
+    normalizeFirestoreData(oldTask),
+  );
   const before = await captureMutationState();
 
   const result = await processActiveLeaseTimeout({
@@ -3834,6 +4083,120 @@ test("racing active lease timeouts and participant end create one terminal trans
   assert.ok(["completed", "failed"].includes(call.lifecycleState));
 });
 
+test("task outbox collisions roll back start and accept transactions", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const ringingTaskId = (await singleTaskForKind("ringing_timeout")).taskId;
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await writeConflictingTask("call_1", ringingTaskId);
+  await assertCallError(ERROR_CODES.transactionFailed, startCall());
+  assert.equal((await db.collection("calls").get()).size, 0);
+  assert.deepEqual(
+    await requiredData(`callOps/call_1/taskOutbox/${ringingTaskId}`),
+    conflictingTaskData(ringingTaskId),
+  );
+  assert.equal((await db.collection("callCommandKeys").get()).size, 0);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+  const acceptedTaskId = (await singleTaskForKind(
+    "accepted_join_timeout",
+  )).taskId;
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  await writeConflictingTask("call_1", acceptedTaskId);
+  const before = await captureMutationState();
+  await assertCallError(ERROR_CODES.transactionFailed, acceptCall());
+  await assertMutationStateUnchanged(before);
+  assert.equal((await requiredData("calls/call_1")).lifecycleState, "ringing");
+  assert.equal(await commandCountForAction("call_1", "acceptCall"), 0);
+});
+
+test("task outbox collisions roll back media scheduling transactions", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const calleePromotionTaskId = (await tasksForKind("active_lease_timeout"))
+    .find((task) => task.payload.participantUid === "callee")
+    .taskId;
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+  await reportMedia({
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "caller_ready_for_conflict"),
+  });
+  await writeConflictingTask("call_1", calleePromotionTaskId);
+  let before = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    reportMedia({
+      authUid: "callee",
+      mediaState: "joined",
+      request: mediaRequest("call_1", "joined", "promotion_task_conflict"),
+    }),
+  );
+  await assertMutationStateUnchanged(before);
+  assert.equal((await requiredData("calls/call_1")).lifecycleState, "accepted");
+  assert.equal((await tasksForKind("active_lease_timeout")).length, 0);
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  await reportMedia({
+    mediaState: "reconnecting",
+    request: mediaRequest("call_1", "reconnecting", "make_reconnect_task"),
+  });
+  const reconnectTaskId = (await singleTaskForKind("reconnect_timeout")).taskId;
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  await writeConflictingTask("call_1", reconnectTaskId);
+  before = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    reportMedia({
+      mediaState: "reconnecting",
+      request: mediaRequest("call_1", "reconnecting", "reconnect_task_conflict"),
+    }),
+  );
+  await assertMutationStateUnchanged(before);
+  assert.equal((await requiredData("calls/call_1")).reconnectDeadlineAt, null);
+});
+
+test("task outbox collision rolls back heartbeat renewal", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  await renewLease({ request: heartbeatRequest("call_1", 1, "make_hb_task") });
+  const heartbeatTaskId = (await tasksForKind("active_lease_timeout"))
+    .find((task) => task.payload.expectedHeartbeatVersion === 1)
+    .taskId;
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  await writeConflictingTask("call_1", heartbeatTaskId);
+  const before = await captureMutationState();
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    renewLease({ request: heartbeatRequest("call_1", 1, "hb_task_conflict") }),
+  );
+  await assertMutationStateUnchanged(before);
+  assert.equal(
+    (await requiredData("calls/call_1/participants/caller")).heartbeatVersion,
+    0,
+  );
+  assert.equal(await commandCountForAction("call_1", "renewActiveCallLease"), 0);
+});
+
 test("same-state joined report still evaluates active promotion", async () => {
   await seedUsers("caller", "callee");
   await startCall();
@@ -3910,6 +4273,7 @@ test("concurrent joined reports promote exactly once", async () => {
   const call = await requiredData("calls/call_1");
   assert.equal(call.lifecycleState, "active");
   assert.equal(call.version, 3);
+  assert.equal((await tasksForKind("active_lease_timeout")).length, 2);
 });
 
 test("concurrent duplicate media report creates one transition and one replay", async () => {
@@ -3952,6 +4316,14 @@ test("active reconnect deadline set, preserved, and cleared with versions", asyn
     millis(reconnecting.reconnectDeadlineAt),
     fixedMs() + RECONNECT_GRACE_DURATION_MS,
   );
+  const reconnectTask = await singleTaskForKind("reconnect_timeout");
+  assertTaskSchema(reconnectTask);
+  assert.deepEqual(normalizeFirestoreData(reconnectTask.payload), {
+    callId: "call_1",
+    timeoutKind: "reconnect",
+    expectedCallVersion: 4,
+    expectedDeadlineAt: normalizeFirestoreData(reconnectTask.dueAt),
+  });
 
   await reportMedia({
     mediaState: "reconnecting",
@@ -3962,6 +4334,7 @@ test("active reconnect deadline set, preserved, and cleared with versions", asyn
     millis((await requiredData("calls/call_1")).reconnectDeadlineAt),
     fixedMs() + RECONNECT_GRACE_DURATION_MS,
   );
+  assert.equal((await tasksForKind("reconnect_timeout")).length, 1);
 
   await reportMedia({
     authUid: "callee",
@@ -3987,6 +4360,55 @@ test("active reconnect deadline set, preserved, and cleared with versions", asyn
   assert.equal(cleared.callVersion, 5);
   assert.equal(cleared.reconnectDeadlineAt, null);
   assert.equal((await requiredData("calls/call_1")).reconnectDeadlineAt, null);
+  assert.equal((await tasksForKind("reconnect_timeout")).length, 1);
+  const leaseTasks = await tasksForKind("active_lease_timeout");
+  assert.equal(leaseTasks.length, 4);
+  const recoveryTasks = leaseTasks.filter(
+    (task) => task.payload.expectedCallVersion === 5,
+  );
+  assert.equal(recoveryTasks.length, 2);
+  const ops = await requiredData("callOps/call_1");
+  for (const task of recoveryTasks) {
+    const uid = task.payload.participantUid;
+    const role = uid === "caller" ? "caller" : "callee";
+    const participant = await requiredData(`calls/call_1/participants/${uid}`);
+    const lock = await requiredData(`activeCallLocks/${uid}`);
+    assert.equal(task.payload.expectedHeartbeatVersion, participant.heartbeatVersion);
+    assert.equal(task.payload.expectedFencingToken, ops.lockClaims[role].fencingToken);
+    assert.equal(millis(task.dueAt), millis(lock.expiresAt));
+  }
+});
+
+test("reconnect recovery tasks preserve already-due active lease expiries", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const expiredLease = new Date(fixedMs() - 1);
+  const reconnectDeadline = new Date(fixedMs() + RECONNECT_GRACE_DURATION_MS);
+  await setActiveReconnectScenario({
+    reconnectDeadlineAt: reconnectDeadline,
+    callerMediaState: "reconnecting",
+    calleeMediaState: "joined",
+  });
+  await db.doc("activeCallLocks/caller").update({ expiresAt: expiredLease });
+  await db.doc("activeCallLocks/callee").update({ expiresAt: expiredLease });
+
+  const result = await reportMedia({
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "recover_due_leases"),
+  });
+
+  assert.equal(result.callVersion, 4);
+  const recoveryTasks = (await tasksForKind("active_lease_timeout")).filter(
+    (task) => task.payload.expectedCallVersion === 4,
+  );
+  assert.equal(recoveryTasks.length, 2);
+  for (const task of recoveryTasks) {
+    assert.equal(millis(task.dueAt), expiredLease.getTime());
+    assert.equal(
+      millis(task.payload.expectedLeaseExpiresAt),
+      expiredLease.getTime(),
+    );
+  }
 });
 
 test("media failure uses controlled code and recovery clears it", async () => {
@@ -4060,6 +4482,38 @@ test("media command records stay private and callOps increments once per command
     assert.equal(publicDoc.lockClaims, undefined);
     assert.equal(publicDoc.diagnostics, undefined);
   }
+});
+
+test("task outbox data stays private under callOps", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  await renewLease({ request: heartbeatRequest("call_1", 1, "private_task_hb") });
+
+  assert.ok((await taskOutboxDocs()).length > 0);
+  assert.equal((await db.collection("calls/call_1/taskOutbox").get()).size, 0);
+  assert.equal(
+    (await db.collection("calls/call_1/participants/caller/taskOutbox").get())
+      .size,
+    0,
+  );
+
+  const call = await requiredData("calls/call_1");
+  const caller = await requiredData("calls/call_1/participants/caller");
+  const callee = await requiredData("calls/call_1/participants/callee");
+  for (const publicDoc of [call, caller, callee]) {
+    assert.equal(publicDoc.taskId, undefined);
+    assert.equal(publicDoc.taskKind, undefined);
+    assert.equal(publicDoc.payload, undefined);
+    assert.equal(publicDoc.dispatchAttempts, undefined);
+    assert.equal(publicDoc.expectedFencingToken, undefined);
+    assertNoPrivatePublicFields(publicDoc);
+  }
+
+  await clearFirestore();
+  await seedUsers("caller", "callee");
+  await startCall();
+  assert.equal((await taskOutboxDocs()).length, 1);
+  assert.equal((await db.collection("callCommandKeys").get()).size, 1);
 });
 
 test("exports the expected stable error code vocabulary", () => {
@@ -4377,6 +4831,19 @@ async function writeLock(uid, overrides = {}) {
   });
 }
 
+async function writeConflictingTask(callId, taskId) {
+  await db
+    .doc(`callOps/${callId}/taskOutbox/${taskId}`)
+    .set(conflictingTaskData(taskId));
+}
+
+function conflictingTaskData(taskId) {
+  return {
+    taskId,
+    marker: "preexisting-conflict",
+  };
+}
+
 async function requiredData(path) {
   const snapshot = await db.doc(path).get();
   assert.equal(snapshot.exists, true, `${path} should exist`);
@@ -4410,6 +4877,59 @@ async function commandCountForAction(callId, action) {
   return snapshot.docs.filter((doc) => doc.data().action === action).length;
 }
 
+async function taskOutboxDocs(callId = "call_1") {
+  const snapshot = await db.collection(`callOps/${callId}/taskOutbox`).get();
+  return snapshot.docs
+    .map((doc) => ({
+      id: doc.id,
+      data: doc.data(),
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+}
+
+async function taskOutboxData(callId = "call_1") {
+  return (await taskOutboxDocs(callId)).map((doc) => doc.data);
+}
+
+async function tasksForKind(taskKind, callId = "call_1") {
+  return (await taskOutboxData(callId)).filter(
+    (task) => task.taskKind === taskKind,
+  );
+}
+
+async function singleTaskForKind(taskKind, callId = "call_1") {
+  const tasks = await tasksForKind(taskKind, callId);
+  assert.equal(tasks.length, 1, `${taskKind} task count`);
+  return tasks[0];
+}
+
+function assertTaskSchema(task) {
+  assertExactKeys(task, [
+    "callId",
+    "completedAt",
+    "createdAt",
+    "dispatchAttempts",
+    "dispatchedAt",
+    "dueAt",
+    "lastDispatchError",
+    "payload",
+    "schemaVersion",
+    "status",
+    "taskId",
+    "taskKind",
+    "ttlAt",
+    "updatedAt",
+  ]);
+  assert.equal(task.schemaVersion, TASK_OUTBOX_SCHEMA_VERSION);
+  assert.equal(task.status, "pending");
+  assert.equal(task.dispatchAttempts, 0);
+  assert.equal(task.dispatchedAt, null);
+  assert.equal(task.completedAt, null);
+  assert.equal(task.lastDispatchError, null);
+  assert.equal(millis(task.ttlAt), millis(task.dueAt) + TASK_OUTBOX_RETENTION_MS);
+  assert.equal(task.taskId.startsWith(`${task.taskKind}_`), true);
+}
+
 async function captureMutationState(callId = "call_1") {
   return {
     call: await docState(`calls/${callId}`),
@@ -4419,6 +4939,7 @@ async function captureMutationState(callId = "call_1") {
     callerLock: await docState("activeCallLocks/caller"),
     calleeLock: await docState("activeCallLocks/callee"),
     commands: await collectionState(`callOps/${callId}/commands`),
+    taskOutbox: await collectionState(`callOps/${callId}/taskOutbox`),
     idempotency: await collectionState("callCommandKeys"),
   };
 }
@@ -4507,6 +5028,9 @@ function assertNoPrivatePublicFields(value) {
     assert.equal(normalizedKey.includes("diagnostic"), false, key);
     assert.equal(normalizedKey.includes("secret"), false, key);
     assert.equal(normalizedKey.includes("notification"), false, key);
+    assert.equal(normalizedKey.includes("task"), false, key);
+    assert.equal(normalizedKey.includes("dispatch"), false, key);
+    assert.equal(normalizedKey.includes("payload"), false, key);
   }
 }
 

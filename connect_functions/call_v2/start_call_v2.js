@@ -34,6 +34,8 @@ const LOCK_EXPIRY_SAFETY_BUFFER_MS = 5 * 1000;
 const COMMAND_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const OPS_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const PUBLIC_HISTORY_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+const TASK_OUTBOX_SCHEMA_VERSION = 1;
+const TASK_OUTBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 160;
 const MAX_UID_LENGTH = 160;
 const SUPPORTED_MEDIA_STATES = Object.freeze([
@@ -61,6 +63,17 @@ const TIMEOUT_KINDS = Object.freeze([
   "accepted_join",
   "reconnect",
 ]);
+const TASK_KINDS = Object.freeze({
+  ringingTimeout: "ringing_timeout",
+  acceptedJoinTimeout: "accepted_join_timeout",
+  reconnectTimeout: "reconnect_timeout",
+  activeLeaseTimeout: "active_lease_timeout",
+});
+const TASK_TIMEOUT_KIND_BY_TASK_KIND = Object.freeze({
+  ringing_timeout: "ringing",
+  accepted_join_timeout: "accepted_join",
+  reconnect_timeout: "reconnect",
+});
 const TIMEOUT_CONFIG = Object.freeze({
   ringing: Object.freeze({
     lifecycleState: "ringing",
@@ -348,6 +361,17 @@ function startCallV2({
         completedAt: nowDate,
         ttlAt: commandTtlAt,
       });
+      createTaskOutboxDocument(
+        transaction,
+        refs.callOpsRef,
+        buildCallTimeoutTaskIntent({
+          callId,
+          taskKind: TASK_KINDS.ringingTimeout,
+          expectedCallVersion: 1,
+          expectedDeadlineAt: ringingDeadlineAt,
+          createdAt: nowDate,
+        }),
+      );
 
       return response;
     })
@@ -482,6 +506,17 @@ function acceptCallV2({ db, authUid, request, now }) {
         nowDate,
         result,
       });
+      createTaskOutboxDocument(
+        transaction,
+        refs.callOpsRef,
+        buildCallTimeoutTaskIntent({
+          callId: call.id,
+          taskKind: TASK_KINDS.acceptedJoinTimeout,
+          expectedCallVersion: nextCallVersion,
+          expectedDeadlineAt: acceptedJoinDeadlineAt,
+          createdAt: nowDate,
+        }),
+      );
 
       return result;
     })
@@ -654,6 +689,14 @@ function reportParticipantMediaV2({ db, authUid, request, now }) {
         mediaChanged,
         nowDate,
       });
+      const taskIntents = buildMediaTaskOutboxIntents({
+        call,
+        callUpdate,
+        participants,
+        claims,
+        lockSnapshots: lockSnapshots.byRole,
+        nowDate,
+      });
 
       const nextOpsVersion = nextMonotonicVersion(callOps.latestOpsVersion);
       const nextMediaVersion = mediaChanged
@@ -702,6 +745,9 @@ function reportParticipantMediaV2({ db, authUid, request, now }) {
         nowDate,
         result,
       });
+      for (const intent of taskIntents) {
+        createTaskOutboxDocument(transaction, refs.callOpsRef, intent);
+      }
 
       return result;
     })
@@ -1009,6 +1055,19 @@ function renewActiveCallLeaseV2({ db, authUid, request, now }) {
       });
 
       const nextOpsVersion = nextMonotonicVersion(callOps.latestOpsVersion);
+      const taskIntents = call.reconnectDeadlineAt === null
+        ? [
+            buildActiveLeaseTimeoutTaskIntent({
+              callId: call.id,
+              participantUid: authUid,
+              expectedCallVersion: call.version,
+              expectedHeartbeatVersion: validatedRequest.heartbeatVersion,
+              expectedFencingToken: claims[actorRole].fencingToken,
+              expectedLeaseExpiresAt: leaseExpiresAt,
+              createdAt: nowDate,
+            }),
+          ]
+        : [];
       const result = Object.freeze({
         callId: call.id,
         participantUid: authUid,
@@ -1040,6 +1099,9 @@ function renewActiveCallLeaseV2({ db, authUid, request, now }) {
         nowDate,
         result,
       });
+      for (const intent of taskIntents) {
+        createTaskOutboxDocument(transaction, refs.callOpsRef, intent);
+      }
 
       return result;
     })
@@ -1831,6 +1893,126 @@ function buildActiveLeaseTimeoutCommandContext({
   };
 }
 
+function buildCallTimeoutTaskIntent({
+  callId,
+  taskKind,
+  expectedCallVersion,
+  expectedDeadlineAt,
+  createdAt,
+}) {
+  const timeoutKind = TASK_TIMEOUT_KIND_BY_TASK_KIND[taskKind];
+  if (!timeoutKind) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The call timeout task kind is unsupported.",
+    );
+  }
+  const deadlineMs = strictTimestampMillis(expectedDeadlineAt);
+  if (deadlineMs === null) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The call timeout task deadline is malformed.",
+    );
+  }
+  if (!Number.isSafeInteger(expectedCallVersion) || expectedCallVersion <= 0) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The call timeout task version is malformed.",
+    );
+  }
+
+  const identity = {
+    taskKind,
+    callId,
+    expectedCallVersion,
+    deadlineMs,
+  };
+  const taskId = `${taskKind}_${sha256Hex(canonicalJson(identity)).slice(0, 48)}`;
+  return Object.freeze({
+    taskId,
+    callId,
+    taskKind,
+    dueAt: expectedDeadlineAt,
+    payload: Object.freeze({
+      callId,
+      timeoutKind,
+      expectedCallVersion,
+      expectedDeadlineAt,
+    }),
+    createdAt,
+    updatedAt: createdAt,
+    ttlAt: addMilliseconds(toDate(expectedDeadlineAt), TASK_OUTBOX_RETENTION_MS),
+  });
+}
+
+function buildActiveLeaseTimeoutTaskIntent({
+  callId,
+  participantUid,
+  expectedCallVersion,
+  expectedHeartbeatVersion,
+  expectedFencingToken,
+  expectedLeaseExpiresAt,
+  createdAt,
+}) {
+  const leaseExpiresMs = strictTimestampMillis(expectedLeaseExpiresAt);
+  if (leaseExpiresMs === null) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The active lease timeout task deadline is malformed.",
+    );
+  }
+  if (!Number.isSafeInteger(expectedCallVersion) || expectedCallVersion <= 0) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The active lease timeout task call version is malformed.",
+    );
+  }
+  if (!isValidHeartbeatVersion(expectedHeartbeatVersion)) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The active lease timeout task heartbeat version is malformed.",
+    );
+  }
+  if (!isValidFencingToken(expectedFencingToken)) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The active lease timeout task fencing token is malformed.",
+    );
+  }
+
+  const taskKind = TASK_KINDS.activeLeaseTimeout;
+  const identity = {
+    taskKind,
+    callId,
+    participantUid,
+    expectedCallVersion,
+    expectedHeartbeatVersion,
+    expectedFencingToken,
+    leaseExpiresMs,
+  };
+  const taskId = `${taskKind}_${sha256Hex(canonicalJson(identity)).slice(0, 48)}`;
+  return Object.freeze({
+    taskId,
+    callId,
+    taskKind,
+    dueAt: expectedLeaseExpiresAt,
+    payload: Object.freeze({
+      callId,
+      participantUid,
+      expectedCallVersion,
+      expectedHeartbeatVersion,
+      expectedFencingToken,
+      expectedLeaseExpiresAt,
+    }),
+    createdAt,
+    updatedAt: createdAt,
+    ttlAt: addMilliseconds(
+      toDate(expectedLeaseExpiresAt),
+      TASK_OUTBOX_RETENTION_MS,
+    ),
+  });
+}
+
 function commandIdPrefix(action) {
   return action.replace(/[^A-Za-z0-9]/g, "_").toLowerCase();
 }
@@ -1864,6 +2046,10 @@ function buildTimeoutRefs(db, { callId, commandId }) {
       .collection("commands")
       .doc(commandId),
   };
+}
+
+function taskOutboxRef(callOpsRef, taskId) {
+  return callOpsRef.collection("taskOutbox").doc(taskId);
 }
 
 function requireMutableV2Call(snapshot, callId) {
@@ -2553,6 +2739,15 @@ function requireTargetActiveLeaseLock({
   return lock;
 }
 
+function requireTaskActiveLeaseLock({ lockEntry, claim, call, role }) {
+  return requireTargetActiveLeaseLock({
+    lockEntry,
+    claim,
+    call,
+    role,
+  });
+}
+
 function computeMediaCallUpdate({
   call,
   callOps,
@@ -2581,6 +2776,7 @@ function computeMediaCallUpdate({
       callVersion,
       promotedToActive: true,
       activeAt: nowDate,
+      activeLeaseExpiresAt,
       reconnectDeadlineAt: null,
       callFields: {
         lifecycleState: "active",
@@ -2627,6 +2823,7 @@ function computeMediaCallUpdate({
         callVersion,
         promotedToActive: false,
         activeAt: toDateOrNull(call.activeAt),
+        activeLeaseExpiresAt: null,
         reconnectDeadlineAt: reconnectUpdate.reconnectDeadlineAt,
         callFields: {
           version: callVersion,
@@ -2644,10 +2841,82 @@ function computeMediaCallUpdate({
     callVersion: call.version,
     promotedToActive: false,
     activeAt: toDateOrNull(call.activeAt),
+    activeLeaseExpiresAt: null,
     reconnectDeadlineAt: toDateOrNull(call.reconnectDeadlineAt),
     callFields: null,
     lockUpdates: [],
   };
+}
+
+function buildMediaTaskOutboxIntents({
+  call,
+  callUpdate,
+  participants,
+  claims,
+  lockSnapshots,
+  nowDate,
+}) {
+  if (!callUpdate.callFields) {
+    return [];
+  }
+
+  if (callUpdate.promotedToActive) {
+    return ["caller", "callee"].map((role) =>
+      buildActiveLeaseTimeoutTaskIntent({
+        callId: call.id,
+        participantUid: role === "caller" ? call.callerUid : call.calleeUid,
+        expectedCallVersion: callUpdate.callVersion,
+        expectedHeartbeatVersion:
+          participants.byRole[role].data.heartbeatVersion,
+        expectedFencingToken: claims[role].fencingToken,
+        expectedLeaseExpiresAt: callUpdate.activeLeaseExpiresAt,
+        createdAt: nowDate,
+      }),
+    );
+  }
+
+  if (
+    call.lifecycleState === "active" &&
+    call.reconnectDeadlineAt === null &&
+    callUpdate.reconnectDeadlineAt !== null
+  ) {
+    return [
+      buildCallTimeoutTaskIntent({
+        callId: call.id,
+        taskKind: TASK_KINDS.reconnectTimeout,
+        expectedCallVersion: callUpdate.callVersion,
+        expectedDeadlineAt: callUpdate.reconnectDeadlineAt,
+        createdAt: nowDate,
+      }),
+    ];
+  }
+
+  if (
+    call.lifecycleState === "active" &&
+    call.reconnectDeadlineAt !== null &&
+    callUpdate.reconnectDeadlineAt === null
+  ) {
+    return ["caller", "callee"].map((role) => {
+      const lock = requireTaskActiveLeaseLock({
+        lockEntry: lockSnapshots[role],
+        claim: claims[role],
+        call,
+        role,
+      });
+      return buildActiveLeaseTimeoutTaskIntent({
+        callId: call.id,
+        participantUid: role === "caller" ? call.callerUid : call.calleeUid,
+        expectedCallVersion: callUpdate.callVersion,
+        expectedHeartbeatVersion:
+          participants.byRole[role].data.heartbeatVersion,
+        expectedFencingToken: claims[role].fencingToken,
+        expectedLeaseExpiresAt: lock.expiresAt,
+        createdAt: nowDate,
+      });
+    });
+  }
+
+  return [];
 }
 
 function requirePromotionLocks(lockSnapshotsByRole, claims, call, nowDate) {
@@ -2755,6 +3024,25 @@ function createCommandRecords(
     createdAt: nowDate,
     completedAt: nowDate,
     ttlAt,
+  });
+}
+
+function createTaskOutboxDocument(transaction, callOpsRef, intent) {
+  transaction.create(taskOutboxRef(callOpsRef, intent.taskId), {
+    schemaVersion: TASK_OUTBOX_SCHEMA_VERSION,
+    taskId: intent.taskId,
+    callId: intent.callId,
+    taskKind: intent.taskKind,
+    status: "pending",
+    dueAt: intent.dueAt,
+    payload: intent.payload,
+    createdAt: intent.createdAt,
+    updatedAt: intent.updatedAt,
+    dispatchAttempts: 0,
+    dispatchedAt: null,
+    completedAt: null,
+    lastDispatchError: null,
+    ttlAt: intent.ttlAt,
   });
 }
 
@@ -3513,6 +3801,8 @@ module.exports = {
   PUBLIC_HISTORY_RETENTION_MS,
   RECONNECT_GRACE_DURATION_MS,
   RINGING_DURATION_MS,
+  TASK_OUTBOX_RETENTION_MS,
+  TASK_OUTBOX_SCHEMA_VERSION,
   CallV2Error,
   acceptCallV2,
   cancelCallV2,
