@@ -21,15 +21,37 @@ const ACTION_ACCEPT_CALL = "acceptCall";
 const ACTION_DECLINE_CALL = "declineCall";
 const ACTION_CANCEL_CALL = "cancelCall";
 const ACTION_END_CALL = "endCall";
+const ACTION_REPORT_PARTICIPANT_MEDIA = "reportParticipantMedia";
 const CALL_SCHEMA_VERSION = 2;
 const RINGING_DURATION_MS = 45 * 1000;
 const ACCEPTED_JOIN_DURATION_MS = 30 * 1000;
+const RECONNECT_GRACE_DURATION_MS = 25 * 1000;
 const LOCK_EXPIRY_SAFETY_BUFFER_MS = 5 * 1000;
 const COMMAND_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const OPS_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const PUBLIC_HISTORY_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 160;
 const MAX_UID_LENGTH = 160;
+const SUPPORTED_MEDIA_STATES = Object.freeze([
+  "not_joined",
+  "preparing",
+  "joining",
+  "joined",
+  "reconnecting",
+  "disconnected",
+  "left",
+  "media_failed",
+]);
+const MEDIA_TRANSITIONS = Object.freeze({
+  not_joined: Object.freeze(["preparing", "joining", "joined", "media_failed"]),
+  preparing: Object.freeze(["joining", "joined", "media_failed", "left"]),
+  joining: Object.freeze(["joined", "disconnected", "media_failed", "left"]),
+  joined: Object.freeze(["reconnecting", "disconnected", "media_failed", "left"]),
+  reconnecting: Object.freeze(["joined", "disconnected", "media_failed", "left"]),
+  disconnected: Object.freeze(["reconnecting", "joined", "media_failed", "left"]),
+  media_failed: Object.freeze(["preparing", "left"]),
+  left: Object.freeze([]),
+});
 
 class CallV2Error extends Error {
   constructor(code, message, details = undefined) {
@@ -484,6 +506,183 @@ function endCallV2({ db, authUid, request, now }) {
   });
 }
 
+function reportParticipantMediaV2({ db, authUid, request, now }) {
+  assertDbDependency(db);
+  const validatedRequest = validateMediaReportInput(authUid, request);
+  const nowDate = resolveNow(now);
+  const command = buildLifecycleCommandContext({
+    actorUid: authUid,
+    action: ACTION_REPORT_PARTICIPANT_MEDIA,
+    callId: validatedRequest.callId,
+    idempotencyKey: validatedRequest.idempotencyKey,
+    controlledPayload: {
+      mediaState: validatedRequest.mediaState,
+    },
+  });
+  const refs = buildLifecycleRefs(db, {
+    callId: validatedRequest.callId,
+    actorUid: authUid,
+    idempotencyLookupId: command.idempotencyLookupId,
+    commandId: command.commandId,
+  });
+
+  return db
+    .runTransaction(async (transaction) => {
+      const idempotencySnapshot = await transaction.get(refs.idempotencyRef);
+      if (idempotencySnapshot.exists) {
+        return handleExistingIdempotencyRecord(
+          idempotencySnapshot.data(),
+          {
+            actorUid: authUid,
+            action: ACTION_REPORT_PARTICIPANT_MEDIA,
+          },
+          command.requestHash,
+        );
+      }
+
+      const callSnapshot = await transaction.get(refs.callRef);
+      const call = requireMutableV2Call(callSnapshot, validatedRequest.callId);
+      const callOpsSnapshot = await transaction.get(refs.callOpsRef);
+      const callOps = requireCallOps(callOpsSnapshot, validatedRequest.callId);
+      const participantSnapshots = await readCallParticipantSnapshots(
+        transaction,
+        refs.callRef,
+        call,
+      );
+      const lockSnapshots = await readParticipantLockSnapshots(
+        transaction,
+        db,
+        call,
+      );
+
+      const actorRole = roleForParticipant(call, authUid);
+      if (!actorRole) {
+        throw new CallV2Error(
+          ERROR_CODES.forbidden,
+          "The actor is not a participant in this call.",
+        );
+      }
+      const participants = validateMediaParticipantSnapshots(
+        participantSnapshots.byRole,
+        call,
+      );
+      if (call.terminal) {
+        throw new CallV2Error(
+          ERROR_CODES.invalidState,
+          "Terminal calls cannot accept new media reports.",
+        );
+      }
+
+      validateMediaLifecycleAllowsReport(
+        call,
+        nowDate,
+        participants.byRole[actorRole].data.mediaState,
+        validatedRequest.mediaState,
+      );
+      const claims = requireLockClaims(callOps, call);
+      requireReportingParticipantLock({
+        lockEntry: lockSnapshots.byRole[actorRole],
+        claim: claims[actorRole],
+        call,
+        role: actorRole,
+        nowDate,
+      });
+
+      const currentParticipant = participants.byRole[actorRole].data;
+      const mediaChanged =
+        currentParticipant.mediaState !== validatedRequest.mediaState;
+      if (
+        mediaChanged &&
+        !isIncrementableMediaVersion(currentParticipant.mediaVersion)
+      ) {
+        throw new CallV2Error(
+          ERROR_CODES.transactionFailed,
+          "The participant media version cannot be safely incremented.",
+        );
+      }
+
+      const resultingMediaStates = {
+        caller: participants.byRole.caller.data.mediaState,
+        callee: participants.byRole.callee.data.mediaState,
+      };
+      resultingMediaStates[actorRole] = validatedRequest.mediaState;
+
+      const callUpdate = computeMediaCallUpdate({
+        call,
+        callOps,
+        claims,
+        lockSnapshots: lockSnapshots.byRole,
+        resultingMediaStates,
+        previousMediaState: currentParticipant.mediaState,
+        nextMediaState: validatedRequest.mediaState,
+        mediaChanged,
+        nowDate,
+      });
+
+      const nextOpsVersion = nextMonotonicVersion(callOps.latestOpsVersion);
+      const nextMediaVersion = mediaChanged
+        ? currentParticipant.mediaVersion + 1
+        : currentParticipant.mediaVersion;
+      const result = Object.freeze({
+        callId: call.id,
+        participantUid: authUid,
+        mediaState: validatedRequest.mediaState,
+        mediaVersion: nextMediaVersion,
+        mediaChanged,
+        lifecycleState: callUpdate.lifecycleState,
+        callVersion: callUpdate.callVersion,
+        promotedToActive: callUpdate.promotedToActive,
+        activeAt: callUpdate.activeAt,
+        reconnectDeadlineAt: callUpdate.reconnectDeadlineAt,
+        idempotentReplay: false,
+      });
+
+      if (mediaChanged) {
+        transaction.update(
+          participants.byRole[actorRole].ref,
+          buildMediaParticipantUpdate({
+            participant: currentParticipant,
+            nextMediaState: validatedRequest.mediaState,
+            nextMediaVersion,
+            nowDate,
+          }),
+        );
+      }
+      if (callUpdate.callFields) {
+        transaction.update(refs.callRef, callUpdate.callFields);
+      }
+      for (const lockUpdate of callUpdate.lockUpdates) {
+        transaction.update(lockUpdate.ref, lockUpdate.fields);
+      }
+      transaction.update(refs.callOpsRef, {
+        latestOpsVersion: nextOpsVersion,
+        opsRetentionExpiresAt: addMilliseconds(nowDate, OPS_RETENTION_MS),
+      });
+      createCommandRecords(transaction, refs, {
+        command,
+        actorUid: authUid,
+        action: ACTION_REPORT_PARTICIPANT_MEDIA,
+        callId: call.id,
+        nowDate,
+        result,
+      });
+
+      return result;
+    })
+    .catch((error) =>
+      recoverIdempotencyCreateConflictOrThrow({
+        error,
+        idempotencyRef: refs.idempotencyRef,
+        expected: {
+          actorUid: authUid,
+          action: ACTION_REPORT_PARTICIPANT_MEDIA,
+        },
+        requestHash: command.requestHash,
+        fallbackMessage: "The media report transaction failed.",
+      }),
+    );
+}
+
 function runTerminalLifecycleCommand({
   db,
   authUid,
@@ -678,6 +877,55 @@ function validateLifecycleCommandInput(authUid, request) {
   };
 }
 
+function validateMediaReportInput(authUid, request) {
+  if (!isValidIdentifier(authUid, MAX_UID_LENGTH)) {
+    throw new CallV2Error(
+      ERROR_CODES.unauthenticated,
+      "An authenticated actor is required.",
+    );
+  }
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A media report request object is required.",
+    );
+  }
+
+  const allowedKeys = new Set(["callId", "mediaState", "idempotencyKey"]);
+  for (const key of Object.keys(request)) {
+    if (!allowedKeys.has(key)) {
+      throw new CallV2Error(
+        ERROR_CODES.invalidArgument,
+        `Unsupported media report field: ${key}.`,
+      );
+    }
+  }
+  if (!isValidIdentifier(request.callId, 160)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid callId is required.",
+    );
+  }
+  if (!isSupportedMediaState(request.mediaState)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A supported mediaState is required.",
+    );
+  }
+  if (!isValidIdentifier(request.idempotencyKey, MAX_IDEMPOTENCY_KEY_LENGTH)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidArgument,
+      "A valid idempotencyKey is required.",
+    );
+  }
+
+  return {
+    callId: request.callId,
+    mediaState: request.mediaState,
+    idempotencyKey: request.idempotencyKey,
+  };
+}
+
 function buildLifecycleCommandContext({
   actorUid,
   action,
@@ -841,6 +1089,77 @@ async function readParticipantLockSnapshots(transaction, db, call) {
   };
 }
 
+async function readCallParticipantSnapshots(transaction, callRef, call) {
+  const entries = sortByDocumentId([
+    {
+      role: "caller",
+      uid: call.callerUid,
+      ref: callRef.collection("participants").doc(call.callerUid),
+    },
+    {
+      role: "callee",
+      uid: call.calleeUid,
+      ref: callRef.collection("participants").doc(call.calleeUid),
+    },
+  ]);
+  const byRole = {};
+  for (const entry of entries) {
+    byRole[entry.role] = {
+      ...entry,
+      snapshot: await transaction.get(entry.ref),
+    };
+  }
+  return {
+    entries,
+    byRole,
+  };
+}
+
+function validateMediaParticipantSnapshots(participantSnapshotsByRole, call) {
+  const byRole = {};
+  for (const role of ["caller", "callee"]) {
+    const expectedUid = role === "caller" ? call.callerUid : call.calleeUid;
+    const entry = participantSnapshotsByRole[role];
+    if (!entry || !entry.snapshot.exists) {
+      throw new CallV2Error(
+        ERROR_CODES.transactionFailed,
+        "A participant document is missing.",
+      );
+    }
+    const participant = entry.snapshot.data();
+    if (
+      entry.snapshot.id !== expectedUid ||
+      !participant ||
+      participant.uid !== expectedUid ||
+      participant.role !== role ||
+      !isSupportedMediaState(participant.mediaState) ||
+      !isValidMediaVersion(participant.mediaVersion)
+    ) {
+      throw new CallV2Error(
+        ERROR_CODES.transactionFailed,
+        "A participant document is malformed.",
+      );
+    }
+    byRole[role] = {
+      ...entry,
+      data: participant,
+    };
+  }
+  return {
+    byRole,
+  };
+}
+
+function roleForParticipant(call, uid) {
+  if (uid === call.callerUid) {
+    return "caller";
+  }
+  if (uid === call.calleeUid) {
+    return "callee";
+  }
+  return null;
+}
+
 function requireParticipantAuthorization(participantSnapshot, call, authUid) {
   if (!call.participantUids.includes(authUid)) {
     throw new CallV2Error(
@@ -958,6 +1277,110 @@ function requireOpenRingingWindow(call, nowDate) {
   }
 }
 
+function validateMediaLifecycleAllowsReport(
+  call,
+  nowDate,
+  currentMediaState,
+  requestedMediaState,
+) {
+  if (call.lifecycleState === "ringing") {
+    requireOpenRingingWindow(call, nowDate);
+    if (
+      currentMediaState === requestedMediaState ||
+      requestedMediaState === "preparing" ||
+      requestedMediaState === "media_failed"
+    ) {
+      return;
+    }
+    throw new CallV2Error(
+      ERROR_CODES.invalidState,
+      "The requested media state is not allowed while ringing.",
+    );
+  }
+
+  if (call.lifecycleState === "accepted") {
+    requireOpenAcceptedJoinWindow(call, nowDate);
+    requireAllowedMediaTransition(currentMediaState, requestedMediaState);
+    return;
+  }
+
+  if (call.lifecycleState === "active") {
+    requireAllowedMediaTransition(currentMediaState, requestedMediaState);
+    return;
+  }
+
+  throw new CallV2Error(
+    ERROR_CODES.invalidState,
+    "The call is not in a valid state for media reports.",
+  );
+}
+
+function requireOpenAcceptedJoinWindow(call, nowDate) {
+  if (!isValidTimestampValue(call.acceptedJoinDeadlineAt)) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The accepted join deadline is malformed.",
+    );
+  }
+  if (nowDate.getTime() >= toMillis(call.acceptedJoinDeadlineAt)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidState,
+      "The accepted join window has expired.",
+    );
+  }
+}
+
+function requireAllowedMediaTransition(currentMediaState, requestedMediaState) {
+  if (currentMediaState === requestedMediaState) {
+    return;
+  }
+  const allowedNextStates = MEDIA_TRANSITIONS[currentMediaState] || [];
+  if (!allowedNextStates.includes(requestedMediaState)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidState,
+      "The requested media state transition is not allowed.",
+    );
+  }
+}
+
+function buildMediaParticipantUpdate({
+  participant,
+  nextMediaState,
+  nextMediaVersion,
+  nowDate,
+}) {
+  const update = {
+    mediaState: nextMediaState,
+    mediaVersion: nextMediaVersion,
+    lastMediaStateAt: nowDate,
+  };
+  if (nextMediaState === "joining") {
+    update.localJoinStartedAt = nowDate;
+  }
+  if (nextMediaState === "joined") {
+    if (participant.mediaJoinedAt === null) {
+      update.mediaJoinedAt = nowDate;
+    }
+    update.failureCode = null;
+  }
+  if (nextMediaState === "left") {
+    update.mediaLeftAt = nowDate;
+  }
+  if (nextMediaState === "media_failed") {
+    update.failureCode = "client_reported_media_failure";
+  }
+  if (
+    participant.mediaState === "media_failed" &&
+    ["preparing", "joining", "joined"].includes(nextMediaState)
+  ) {
+    update.failureCode = null;
+  }
+  if (["joining", "joined"].includes(nextMediaState)) {
+    update.failureCode = null;
+  }
+  return update;
+}
+
 function updateAcceptedLock(transaction, lockRef, { nowDate, lockExpiresAt }) {
   transaction.update(lockRef, {
     state: "accepted",
@@ -995,6 +1418,215 @@ function releaseScopedLocks(transaction, lockSnapshotsByRole, callOps, call) {
     results[role] = "released";
   }
   return results;
+}
+
+function requireReportingParticipantLock({
+  lockEntry,
+  claim,
+  call,
+  role,
+  nowDate,
+}) {
+  if (!claim || !lockEntry || !lockEntry.snapshot.exists) {
+    throw new CallV2Error(
+      ERROR_CODES.lockRecoveryRequired,
+      "The reporting participant lock is missing.",
+    );
+  }
+  const lock = lockEntry.snapshot.data();
+  const expectedState = expectedLockStateForLifecycle(call.lifecycleState);
+  if (
+    !lock ||
+    lock.uid !== claim.uid ||
+    lock.uid !== (role === "caller" ? call.callerUid : call.calleeUid) ||
+    lock.callId !== call.id ||
+    lock.fencingToken !== claim.fencingToken ||
+    !isValidFencingToken(lock.fencingToken) ||
+    lock.state !== expectedState ||
+    !isValidTimestampValue(lock.expiresAt)
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.lockRecoveryRequired,
+      "The reporting participant lock does not match its private claim.",
+    );
+  }
+  if (
+    ["ringing", "accepted"].includes(call.lifecycleState) &&
+    toMillis(lock.expiresAt) <= nowDate.getTime()
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.lockRecoveryRequired,
+      "The reporting participant lock is expired.",
+    );
+  }
+}
+
+function computeMediaCallUpdate({
+  call,
+  callOps,
+  claims,
+  lockSnapshots,
+  resultingMediaStates,
+  previousMediaState,
+  nextMediaState,
+  mediaChanged,
+  nowDate,
+}) {
+  if (
+    call.lifecycleState === "accepted" &&
+    resultingMediaStates.caller === "joined" &&
+    resultingMediaStates.callee === "joined"
+  ) {
+    requireOpenAcceptedJoinWindow(call, nowDate);
+    requirePromotionLocks(lockSnapshots, claims, call, nowDate);
+    const callVersion = nextMonotonicVersion(call.version);
+    return {
+      lifecycleState: "active",
+      callVersion,
+      promotedToActive: true,
+      activeAt: nowDate,
+      reconnectDeadlineAt: null,
+      callFields: {
+        lifecycleState: "active",
+        version: callVersion,
+        activeAt: nowDate,
+        updatedAt: nowDate,
+        lastPublicEventAt: nowDate,
+        reconnectDeadlineAt: null,
+      },
+      lockUpdates: [
+        {
+          ref: lockSnapshots.caller.ref,
+          fields: {
+            state: "active",
+            updatedAt: nowDate,
+          },
+        },
+        {
+          ref: lockSnapshots.callee.ref,
+          fields: {
+            state: "active",
+            updatedAt: nowDate,
+          },
+        },
+      ],
+    };
+  }
+
+  if (call.lifecycleState === "active") {
+    const reconnectUpdate = computeReconnectDeadlineUpdate({
+      call,
+      resultingMediaStates,
+      previousMediaState,
+      nextMediaState,
+      mediaChanged,
+      nowDate,
+    });
+    if (reconnectUpdate) {
+      const callVersion = nextMonotonicVersion(call.version);
+      return {
+        lifecycleState: "active",
+        callVersion,
+        promotedToActive: false,
+        activeAt: toDateOrNull(call.activeAt),
+        reconnectDeadlineAt: reconnectUpdate.reconnectDeadlineAt,
+        callFields: {
+          version: callVersion,
+          reconnectDeadlineAt: reconnectUpdate.reconnectDeadlineAt,
+          updatedAt: nowDate,
+          lastPublicEventAt: nowDate,
+        },
+        lockUpdates: [],
+      };
+    }
+  }
+
+  return {
+    lifecycleState: call.lifecycleState,
+    callVersion: call.version,
+    promotedToActive: false,
+    activeAt: toDateOrNull(call.activeAt),
+    reconnectDeadlineAt: toDateOrNull(call.reconnectDeadlineAt),
+    callFields: null,
+    lockUpdates: [],
+  };
+}
+
+function requirePromotionLocks(lockSnapshotsByRole, claims, call, nowDate) {
+  for (const role of ["caller", "callee"]) {
+    const lockEntry = lockSnapshotsByRole[role];
+    const claim = claims[role];
+    if (!lockEntry || !lockEntry.snapshot.exists || !claim) {
+      throw new CallV2Error(
+        ERROR_CODES.lockRecoveryRequired,
+        "A promotion lock is missing.",
+      );
+    }
+    const lock = lockEntry.snapshot.data();
+    if (
+      !lock ||
+      lock.uid !== claim.uid ||
+      lock.callId !== call.id ||
+      lock.fencingToken !== claim.fencingToken ||
+      !isValidFencingToken(lock.fencingToken) ||
+      lock.state !== "accepted" ||
+      !isValidTimestampValue(lock.expiresAt) ||
+      toMillis(lock.expiresAt) <= nowDate.getTime()
+    ) {
+      throw new CallV2Error(
+        ERROR_CODES.lockRecoveryRequired,
+        "A promotion lock does not match its private claim.",
+      );
+    }
+  }
+}
+
+function computeReconnectDeadlineUpdate({
+  call,
+  resultingMediaStates,
+  previousMediaState,
+  nextMediaState,
+  mediaChanged,
+  nowDate,
+}) {
+  if (
+    resultingMediaStates.caller === "joined" &&
+    resultingMediaStates.callee === "joined" &&
+    call.reconnectDeadlineAt !== null
+  ) {
+    return {
+      reconnectDeadlineAt: null,
+    };
+  }
+
+  const shouldStartReconnectGrace =
+    mediaChanged &&
+    ["joined", "reconnecting"].includes(previousMediaState) &&
+    ["reconnecting", "disconnected", "left", "media_failed"].includes(
+      nextMediaState,
+    ) &&
+    !isValidTimestampValue(call.reconnectDeadlineAt);
+
+  if (shouldStartReconnectGrace) {
+    return {
+      reconnectDeadlineAt: addMilliseconds(nowDate, RECONNECT_GRACE_DURATION_MS),
+    };
+  }
+
+  return null;
+}
+
+function expectedLockStateForLifecycle(lifecycleState) {
+  if (lifecycleState === "ringing") {
+    return "ringing";
+  }
+  if (lifecycleState === "accepted") {
+    return "accepted";
+  }
+  if (lifecycleState === "active") {
+    return "active";
+  }
+  return null;
 }
 
 function createCommandRecords(
@@ -1375,6 +2007,18 @@ function isValidTimestampValue(value) {
   return value !== null && value !== undefined && Number.isFinite(toMillis(value));
 }
 
+function isSupportedMediaState(value) {
+  return SUPPORTED_MEDIA_STATES.includes(value);
+}
+
+function isValidMediaVersion(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function isIncrementableMediaVersion(value) {
+  return isValidMediaVersion(value) && value < Number.MAX_SAFE_INTEGER;
+}
+
 function normalizeReplayResult(result) {
   const normalized = {
     ...result,
@@ -1385,12 +2029,21 @@ function normalizeReplayResult(result) {
     "acceptedAt",
     "acceptedJoinDeadlineAt",
     "endedAt",
+    "activeAt",
+    "reconnectDeadlineAt",
   ]) {
     if (normalized[field]) {
       normalized[field] = toDate(normalized[field]);
     }
   }
   return normalized;
+}
+
+function toDateOrNull(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return toDate(value);
 }
 
 function deriveAgoraChannel(callId) {
@@ -1506,12 +2159,14 @@ module.exports = {
   ACTION_CANCEL_CALL,
   ACTION_DECLINE_CALL,
   ACTION_END_CALL,
+  ACTION_REPORT_PARTICIPANT_MEDIA,
   CALL_SCHEMA_VERSION,
   COMMAND_TTL_MS,
   ERROR_CODES,
   LOCK_EXPIRY_SAFETY_BUFFER_MS,
   OPS_RETENTION_MS,
   PUBLIC_HISTORY_RETENTION_MS,
+  RECONNECT_GRACE_DURATION_MS,
   RINGING_DURATION_MS,
   CallV2Error,
   acceptCallV2,
@@ -1519,5 +2174,6 @@ module.exports = {
   declineCallV2,
   deriveRtcUid,
   endCallV2,
+  reportParticipantMediaV2,
   startCallV2,
 };

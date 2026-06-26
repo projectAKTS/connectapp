@@ -12,12 +12,14 @@ const {
   LOCK_EXPIRY_SAFETY_BUFFER_MS,
   OPS_RETENTION_MS,
   PUBLIC_HISTORY_RETENTION_MS,
+  RECONNECT_GRACE_DURATION_MS,
   RINGING_DURATION_MS,
   CallV2Error,
   acceptCallV2,
   cancelCallV2,
   declineCallV2,
   endCallV2,
+  reportParticipantMediaV2,
   startCallV2,
 } = require("../../call_v2/start_call_v2");
 
@@ -1387,6 +1389,636 @@ test("terminal command metadata and release results stay private", async () => {
   assert.equal(await commandCountForAction("call_1", "cancelCall"), 1);
 });
 
+test("ringing media reports allow preparation but reject joining or joined", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+
+  const result = await reportMedia({
+    mediaState: "preparing",
+    request: mediaRequest("call_1", "preparing", "ring_prepare"),
+  });
+
+  assert.equal(result.mediaState, "preparing");
+  assert.equal(result.mediaVersion, 1);
+  assert.equal(result.mediaChanged, true);
+  assert.equal(result.lifecycleState, "ringing");
+  assert.equal(result.callVersion, 1);
+  assert.equal((await requiredData("calls/call_1")).version, 1);
+
+  for (const mediaState of ["joining", "joined"]) {
+    await assertCallError(
+      ERROR_CODES.invalidState,
+      reportMedia({
+        mediaState,
+        request: mediaRequest("call_1", mediaState, `ring_${mediaState}`),
+      }),
+    );
+  }
+});
+
+test("ringing media report after deadline rejects without writes", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const before = await captureMutationState();
+
+  await assertCallError(
+    ERROR_CODES.invalidState,
+    reportMedia({
+      now: new Date(fixedMs() + RINGING_DURATION_MS),
+      mediaState: "preparing",
+      request: mediaRequest("call_1", "preparing", "ring_expired"),
+    }),
+  );
+
+  await assertMutationStateUnchanged(before);
+});
+
+test("accepted participant progresses preparing to joining to joined", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+
+  const preparing = await reportMedia({
+    mediaState: "preparing",
+    request: mediaRequest("call_1", "preparing", "media_prepare"),
+  });
+  const joining = await reportMedia({
+    mediaState: "joining",
+    request: mediaRequest("call_1", "joining", "media_joining"),
+  });
+  const joined = await reportMedia({
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "media_joined"),
+  });
+
+  assert.equal(preparing.mediaVersion, 1);
+  assert.equal(joining.mediaVersion, 2);
+  assert.equal(joined.mediaVersion, 3);
+  assert.equal(joined.lifecycleState, "accepted");
+  assert.equal(joined.callVersion, 2);
+  const participant = await requiredData("calls/call_1/participants/caller");
+  assert.equal(participant.mediaState, "joined");
+  assert.equal(participant.mediaVersion, 3);
+  assert.equal(millis(participant.localJoinStartedAt), fixedMs());
+  assert.equal(millis(participant.mediaJoinedAt), fixedMs());
+  assert.equal(millis(participant.lastMediaStateAt), fixedMs());
+});
+
+test("same-state media report succeeds without media-version increment", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+  await reportMedia({
+    mediaState: "preparing",
+    request: mediaRequest("call_1", "preparing", "prepare_once"),
+  });
+  const beforeOpsVersion = (await requiredData("callOps/call_1")).latestOpsVersion;
+
+  const result = await reportMedia({
+    mediaState: "preparing",
+    request: mediaRequest("call_1", "preparing", "prepare_noop"),
+  });
+
+  assert.equal(result.mediaChanged, false);
+  assert.equal(result.mediaVersion, 1);
+  assert.equal((await requiredData("calls/call_1/participants/caller")).mediaVersion, 1);
+  assert.equal((await requiredData("callOps/call_1")).latestOpsVersion, beforeOpsVersion + 1);
+});
+
+test("accepted media reports at or after join deadline reject without writes", async () => {
+  const cases = [
+    {
+      name: "exact deadline",
+      now: new Date(fixedMs() + ACCEPTED_JOIN_DURATION_MS),
+    },
+    {
+      name: "after deadline",
+      now: new Date(fixedMs() + ACCEPTED_JOIN_DURATION_MS + 1),
+    },
+  ];
+
+  for (const testCase of cases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await startCall();
+    await acceptCall();
+    const before = await captureMutationState();
+
+    await assertCallError(
+      ERROR_CODES.invalidState,
+      reportMedia({
+        now: testCase.now,
+        mediaState: "preparing",
+        request: mediaRequest("call_1", "preparing", testCase.name),
+      }),
+    );
+    await assertMutationStateUnchanged(before);
+  }
+});
+
+test("media report idempotency replays and conflicts by media state", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+
+  const first = await reportMedia({
+    mediaState: "preparing",
+    request: mediaRequest("call_1", "preparing", "media_same_key"),
+  });
+  const replay = await reportMedia({
+    mediaState: "preparing",
+    request: mediaRequest("call_1", "preparing", "media_same_key"),
+  });
+
+  assert.equal(replay.idempotentReplay, true);
+  assert.equal(replay.mediaVersion, first.mediaVersion);
+  await assertCallError(
+    ERROR_CODES.idempotencyConflict,
+    reportMedia({
+      mediaState: "joining",
+      request: mediaRequest("call_1", "joining", "media_same_key"),
+    }),
+  );
+  assert.equal(await commandCountForAction("call_1", "reportParticipantMedia"), 1);
+});
+
+test("non-incrementable media version rejects state changes without writes", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+  await db
+    .doc("calls/call_1/participants/caller")
+    .update({ mediaVersion: Number.MAX_SAFE_INTEGER });
+  const before = await captureMutationState();
+
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    reportMedia({
+      mediaState: "preparing",
+      request: mediaRequest("call_1", "preparing", "max_media_version"),
+    }),
+  );
+  await assertMutationStateUnchanged(before);
+});
+
+test("unsupported media states and unknown fields reject", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+
+  await assertCallError(
+    ERROR_CODES.invalidArgument,
+    () => reportParticipantMediaV2({
+      db,
+      authUid: "caller",
+      request: mediaRequest("call_1", "unsupported", "bad_state"),
+      now: FIXED_NOW,
+    }),
+  );
+  await assertCallError(
+    ERROR_CODES.invalidArgument,
+    () => reportParticipantMediaV2({
+      db,
+      authUid: "caller",
+      request: {
+        ...mediaRequest("call_1", "preparing", "unknown_field"),
+        mediaVersion: 1,
+      },
+      now: FIXED_NOW,
+    }),
+  );
+});
+
+test("media transition graph prevents delayed regressions and leaving recovery", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+  await reportMedia({
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "joined_once"),
+  });
+
+  await assertCallError(
+    ERROR_CODES.invalidState,
+    reportMedia({
+      mediaState: "joining",
+      request: mediaRequest("call_1", "joining", "delayed_joining"),
+    }),
+  );
+
+  await reportMedia({
+    mediaState: "left",
+    request: mediaRequest("call_1", "left", "left_once"),
+  });
+  await assertCallError(
+    ERROR_CODES.invalidState,
+    reportMedia({
+      mediaState: "preparing",
+      request: mediaRequest("call_1", "preparing", "left_recovery"),
+    }),
+  );
+});
+
+test("malformed media participant documents and nonparticipants reject", async () => {
+  await seedUsers("caller", "callee", "intruder");
+  await startCall();
+  await acceptCall();
+
+  await db.doc("calls/call_1/participants/callee").delete();
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    reportMedia({
+      mediaState: "preparing",
+      request: mediaRequest("call_1", "preparing", "missing_participant"),
+    }),
+  );
+
+  await clearFirestore();
+  await seedUsers("caller", "callee", "intruder");
+  await startCall();
+  await acceptCall();
+  await db.doc("calls/call_1/participants/caller").update({ uid: "other" });
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    reportMedia({
+      mediaState: "preparing",
+      request: mediaRequest("call_1", "preparing", "wrong_uid"),
+    }),
+  );
+
+  await clearFirestore();
+  await seedUsers("caller", "callee", "intruder");
+  await startCall();
+  await acceptCall();
+  await db.doc("calls/call_1/participants/caller").update({ role: "callee" });
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    reportMedia({
+      mediaState: "preparing",
+      request: mediaRequest("call_1", "preparing", "wrong_role"),
+    }),
+  );
+
+  await clearFirestore();
+  await seedUsers("caller", "callee", "intruder");
+  await startCall();
+  await acceptCall();
+  await assertCallError(
+    ERROR_CODES.forbidden,
+    reportMedia({
+      authUid: "intruder",
+      mediaState: "preparing",
+      request: mediaRequest("call_1", "preparing", "intruder"),
+    }),
+  );
+});
+
+test("media report validates the reporting participant lock", async () => {
+  const fieldDelete = admin.firestore.FieldValue.delete();
+  const cases = [
+    {
+      name: "missing lock",
+      mutate: () => db.doc("activeCallLocks/caller").delete(),
+    },
+    {
+      name: "mismatched call",
+      mutate: () => db.doc("activeCallLocks/caller").update({ callId: "other" }),
+    },
+    {
+      name: "wrong state",
+      mutate: () => db.doc("activeCallLocks/caller").update({ state: "ringing" }),
+    },
+    {
+      name: "mismatched fencing",
+      mutate: () => db.doc("activeCallLocks/caller").update({ fencingToken: 999 }),
+    },
+    {
+      name: "missing expiry",
+      mutate: () =>
+        db.doc("activeCallLocks/caller").update({ expiresAt: fieldDelete }),
+    },
+    {
+      name: "malformed expiry",
+      mutate: () => db.doc("activeCallLocks/caller").update({ expiresAt: "bad" }),
+    },
+    {
+      name: "expired accepted lock",
+      mutate: () =>
+        db
+          .doc("activeCallLocks/caller")
+          .update({ expiresAt: new Date(fixedMs() - 1) }),
+    },
+    {
+      name: "exact expiry boundary",
+      mutate: () =>
+        db.doc("activeCallLocks/caller").update({ expiresAt: FIXED_NOW }),
+    },
+  ];
+
+  for (const testCase of cases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await startCall();
+    await acceptCall();
+    await testCase.mutate();
+    const before = await captureMutationState();
+
+    await assertCallError(
+      ERROR_CODES.lockRecoveryRequired,
+      reportMedia({
+        mediaState: "preparing",
+        request: mediaRequest("call_1", "preparing", testCase.name),
+      }),
+    );
+    await assertMutationStateUnchanged(before);
+  }
+});
+
+test("active report may proceed with elapsed safety expiry", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  await db.doc("activeCallLocks/caller").update({
+    expiresAt: new Date(fixedMs() - 1),
+  });
+
+  const result = await reportMedia({
+    mediaState: "reconnecting",
+    request: mediaRequest("call_1", "reconnecting", "active_elapsed_lock"),
+  });
+
+  assert.equal(result.mediaState, "reconnecting");
+  assert.equal(result.lifecycleState, "active");
+  assert.equal(millis(result.reconnectDeadlineAt), fixedMs() + RECONNECT_GRACE_DURATION_MS);
+});
+
+test("accepted call promotes to active only after both participants joined", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+  const callerLockBefore = await requiredData("activeCallLocks/caller");
+  const calleeLockBefore = await requiredData("activeCallLocks/callee");
+
+  const first = await reportMedia({
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "caller_joined"),
+  });
+  assert.equal(first.promotedToActive, false);
+  assert.equal(first.callVersion, 2);
+  assert.equal((await requiredData("calls/call_1")).lifecycleState, "accepted");
+
+  const second = await reportMedia({
+    authUid: "callee",
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "callee_joined"),
+  });
+
+  assert.equal(second.promotedToActive, true);
+  assert.equal(second.lifecycleState, "active");
+  assert.equal(second.callVersion, 3);
+  assert.equal(millis(second.activeAt), fixedMs());
+  const call = await requiredData("calls/call_1");
+  assert.equal(call.lifecycleState, "active");
+  assert.equal(call.version, 3);
+  assert.equal(millis(call.activeAt), fixedMs());
+  assert.equal((await requiredData("activeCallLocks/caller")).state, "active");
+  assert.equal((await requiredData("activeCallLocks/callee")).state, "active");
+  assert.equal(
+    (await requiredData("activeCallLocks/caller")).fencingToken,
+    callerLockBefore.fencingToken,
+  );
+  assert.equal(
+    (await requiredData("activeCallLocks/callee")).fencingToken,
+    calleeLockBefore.fencingToken,
+  );
+});
+
+test("same-state joined report still evaluates active promotion", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+  await db.doc("calls/call_1/participants/caller").update({
+    mediaState: "joined",
+    mediaVersion: 1,
+    mediaJoinedAt: FIXED_NOW,
+    lastMediaStateAt: FIXED_NOW,
+  });
+  await db.doc("calls/call_1/participants/callee").update({
+    mediaState: "joined",
+    mediaVersion: 1,
+    mediaJoinedAt: FIXED_NOW,
+    lastMediaStateAt: FIXED_NOW,
+  });
+
+  const result = await reportMedia({
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "noop_promotes"),
+  });
+
+  assert.equal(result.mediaChanged, false);
+  assert.equal(result.promotedToActive, true);
+  assert.equal(result.lifecycleState, "active");
+  assert.equal((await requiredData("calls/call_1")).lifecycleState, "active");
+  assert.equal(
+    (await requiredData("calls/call_1/participants/caller")).mediaVersion,
+    1,
+  );
+});
+
+test("promotion failure rolls back the triggering participant update", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+  await reportMedia({
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "caller_ready"),
+  });
+  await db.doc("activeCallLocks/callee").update({ fencingToken: 999 });
+  const before = await captureMutationState();
+
+  await assertCallError(
+    ERROR_CODES.lockRecoveryRequired,
+    reportMedia({
+      authUid: "callee",
+      mediaState: "joined",
+      request: mediaRequest("call_1", "joined", "callee_bad_lock"),
+    }),
+  );
+
+  await assertMutationStateUnchanged(before);
+});
+
+test("concurrent joined reports promote exactly once", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+
+  const results = await Promise.all([
+    reportMedia({
+      mediaState: "joined",
+      request: mediaRequest("call_1", "joined", "caller_concurrent_join"),
+    }),
+    reportMedia({
+      authUid: "callee",
+      mediaState: "joined",
+      request: mediaRequest("call_1", "joined", "callee_concurrent_join"),
+    }),
+  ]);
+
+  assert.equal(results.filter((result) => result.promotedToActive).length, 1);
+  const call = await requiredData("calls/call_1");
+  assert.equal(call.lifecycleState, "active");
+  assert.equal(call.version, 3);
+});
+
+test("concurrent duplicate media report creates one transition and one replay", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+
+  const results = await Promise.all([
+    reportMedia({
+      mediaState: "preparing",
+      request: mediaRequest("call_1", "preparing", "dup_media"),
+    }),
+    reportMedia({
+      mediaState: "preparing",
+      request: mediaRequest("call_1", "preparing", "dup_media"),
+    }),
+  ]);
+
+  assert.equal(results.filter((result) => result.idempotentReplay).length, 1);
+  assert.equal(
+    results.filter(
+      (result) => !result.idempotentReplay && result.mediaChanged,
+    ).length,
+    1,
+  );
+  assert.equal((await requiredData("calls/call_1/participants/caller")).mediaVersion, 1);
+  assert.equal(await commandCountForAction("call_1", "reportParticipantMedia"), 1);
+});
+
+test("active reconnect deadline set, preserved, and cleared with versions", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+
+  const reconnecting = await reportMedia({
+    mediaState: "reconnecting",
+    request: mediaRequest("call_1", "reconnecting", "caller_reconnecting"),
+  });
+  assert.equal(reconnecting.callVersion, 4);
+  assert.equal(
+    millis(reconnecting.reconnectDeadlineAt),
+    fixedMs() + RECONNECT_GRACE_DURATION_MS,
+  );
+
+  await reportMedia({
+    mediaState: "reconnecting",
+    request: mediaRequest("call_1", "reconnecting", "caller_reconnecting_noop"),
+  });
+  assert.equal((await requiredData("calls/call_1")).version, 4);
+  assert.equal(
+    millis((await requiredData("calls/call_1")).reconnectDeadlineAt),
+    fixedMs() + RECONNECT_GRACE_DURATION_MS,
+  );
+
+  await reportMedia({
+    authUid: "callee",
+    mediaState: "disconnected",
+    request: mediaRequest("call_1", "disconnected", "callee_disconnect"),
+  });
+  assert.equal((await requiredData("calls/call_1")).version, 4);
+  assert.equal(
+    millis((await requiredData("calls/call_1")).reconnectDeadlineAt),
+    fixedMs() + RECONNECT_GRACE_DURATION_MS,
+  );
+
+  await reportMedia({
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "caller_rejoined"),
+  });
+  assert.equal((await requiredData("calls/call_1")).version, 4);
+  const cleared = await reportMedia({
+    authUid: "callee",
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "callee_rejoined"),
+  });
+  assert.equal(cleared.callVersion, 5);
+  assert.equal(cleared.reconnectDeadlineAt, null);
+  assert.equal((await requiredData("calls/call_1")).reconnectDeadlineAt, null);
+});
+
+test("media failure uses controlled code and recovery clears it", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+
+  await reportMedia({
+    mediaState: "media_failed",
+    request: mediaRequest("call_1", "media_failed", "media_failed"),
+  });
+  assert.equal(
+    (await requiredData("calls/call_1/participants/caller")).failureCode,
+    "client_reported_media_failure",
+  );
+
+  await reportMedia({
+    mediaState: "preparing",
+    request: mediaRequest("call_1", "preparing", "media_recovered"),
+  });
+  assert.equal(
+    (await requiredData("calls/call_1/participants/caller")).failureCode,
+    null,
+  );
+});
+
+test("terminal call rejects new media report but replays prior report", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+  const first = await reportMedia({
+    mediaState: "preparing",
+    request: mediaRequest("call_1", "preparing", "before_terminal"),
+  });
+  await endCall();
+
+  await assertCallError(
+    ERROR_CODES.invalidState,
+    reportMedia({
+      mediaState: "joining",
+      request: mediaRequest("call_1", "joining", "after_terminal"),
+    }),
+  );
+  const replay = await reportMedia({
+    mediaState: "preparing",
+    request: mediaRequest("call_1", "preparing", "before_terminal"),
+  });
+  assert.equal(replay.idempotentReplay, true);
+  assert.equal(replay.mediaVersion, first.mediaVersion);
+});
+
+test("media command records stay private and callOps increments once per command", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  await acceptCall();
+  const beforeOpsVersion = (await requiredData("callOps/call_1")).latestOpsVersion;
+
+  await reportMedia({
+    mediaState: "preparing",
+    request: mediaRequest("call_1", "preparing", "private_media_command"),
+  });
+
+  const call = await requiredData("calls/call_1");
+  const participant = await requiredData("calls/call_1/participants/caller");
+  const ops = await requiredData("callOps/call_1");
+  assert.equal(ops.latestOpsVersion, beforeOpsVersion + 1);
+  assert.equal(await commandCountForAction("call_1", "reportParticipantMedia"), 1);
+  for (const publicDoc of [call, participant]) {
+    assert.equal(publicDoc.commandId, undefined);
+    assert.equal(publicDoc.idempotencyKey, undefined);
+    assert.equal(publicDoc.lockClaims, undefined);
+    assert.equal(publicDoc.diagnostics, undefined);
+  }
+});
+
 test("exports the expected stable error code vocabulary", () => {
   assert.deepEqual(Object.values(ERROR_CODES).sort(), [
     "call_id_conflict",
@@ -1439,9 +2071,27 @@ function endCall(overrides = {}) {
   });
 }
 
+function reportMedia(overrides = {}) {
+  const mediaState = overrides.mediaState || "preparing";
+  return reportParticipantMediaV2({
+    db,
+    authUid: overrides.authUid || "caller",
+    request: overrides.request || mediaRequest("call_1", mediaState, "media_1"),
+    now: overrides.now || FIXED_NOW,
+  });
+}
+
 function lifecycleRequest(callId, idempotencyKey) {
   return {
     callId,
+    idempotencyKey,
+  };
+}
+
+function mediaRequest(callId, mediaState, idempotencyKey) {
+  return {
+    callId,
+    mediaState,
     idempotencyKey,
   };
 }
@@ -1463,6 +2113,20 @@ function request(overrides = {}) {
     idempotencyKey: "idem_1",
     ...overrides,
   };
+}
+
+async function promoteCallToActive() {
+  await startCall();
+  await acceptCall();
+  await reportMedia({
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "promote_caller_joined"),
+  });
+  return reportMedia({
+    authUid: "callee",
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "promote_callee_joined"),
+  });
 }
 
 function assertTerminalResult(result, expected) {
