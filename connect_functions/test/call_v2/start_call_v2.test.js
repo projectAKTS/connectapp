@@ -650,6 +650,51 @@ test("overflow expired-lock fencing token requires recovery without writes", asy
   await assertNoCallArtifacts();
 });
 
+test("max-minus-one expired fencing token can be replaced, accepted, and released", async () => {
+  await seedUsers("caller", "callee");
+  await writeLock("caller", {
+    callId: "missing_caller_call",
+    expiresAt: new Date(fixedMs() - 1000),
+    fencingToken: Number.MAX_SAFE_INTEGER - 1,
+  });
+  await writeLock("callee", {
+    callId: "missing_callee_call",
+    expiresAt: new Date(fixedMs() - 1000),
+    fencingToken: Number.MAX_SAFE_INTEGER - 1,
+  });
+
+  await startCall();
+
+  assert.equal(
+    (await requiredData("activeCallLocks/caller")).fencingToken,
+    Number.MAX_SAFE_INTEGER,
+  );
+  assert.equal(
+    (await requiredData("activeCallLocks/callee")).fencingToken,
+    Number.MAX_SAFE_INTEGER,
+  );
+  assert.deepEqual((await requiredData("callOps/call_1")).lockClaims, {
+    caller: {
+      uid: "caller",
+      fencingToken: Number.MAX_SAFE_INTEGER,
+    },
+    callee: {
+      uid: "callee",
+      fencingToken: Number.MAX_SAFE_INTEGER,
+    },
+  });
+
+  await acceptCall();
+  const endResult = await endCall();
+
+  assert.deepEqual(endResult.lockReleaseResults, {
+    caller: "released",
+    callee: "released",
+  });
+  assert.equal((await db.doc("activeCallLocks/caller").get()).exists, false);
+  assert.equal((await db.doc("activeCallLocks/callee").get()).exists, false);
+});
+
 test("public call and participant documents do not contain private operational fields", async () => {
   await seedUsers("caller", "callee");
   await startCall();
@@ -830,6 +875,51 @@ test("missing or mismatched accept lock returns lock_recovery_required without w
   assert.equal(await commandCountForAction("call_1", "acceptCall"), 0);
 });
 
+test("structurally invalid accept locks reject without mutation", async () => {
+  const fieldDelete = admin.firestore.FieldValue.delete();
+  const cases = [
+    {
+      name: "wrong lock state",
+      mutate: () => db.doc("activeCallLocks/caller").update({ state: "accepted" }),
+    },
+    {
+      name: "missing expiry",
+      mutate: () =>
+        db.doc("activeCallLocks/caller").update({ expiresAt: fieldDelete }),
+    },
+    {
+      name: "malformed expiry",
+      mutate: () => db.doc("activeCallLocks/caller").update({ expiresAt: "bad" }),
+    },
+    {
+      name: "already expired matching lock",
+      mutate: () =>
+        db
+          .doc("activeCallLocks/caller")
+          .update({ expiresAt: new Date(fixedMs() - 1) }),
+    },
+    {
+      name: "exact expiry boundary",
+      mutate: () =>
+        db.doc("activeCallLocks/caller").update({ expiresAt: FIXED_NOW }),
+    },
+  ];
+
+  for (const testCase of cases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await startCall();
+    await testCase.mutate();
+    const before = await captureMutationState();
+
+    await assertCallError(
+      ERROR_CODES.lockRecoveryRequired,
+      acceptCall({ request: lifecycleRequest("call_1", testCase.name) }),
+    );
+    await assertMutationStateUnchanged(before);
+  }
+});
+
 test("matching accept idempotency replay returns the same result", async () => {
   await seedUsers("caller", "callee");
   await startCall();
@@ -842,6 +932,80 @@ test("matching accept idempotency replay returns the same result", async () => {
   assert.equal(replay.idempotentReplay, true);
   assert.equal(millis(replay.acceptedAt), millis(first.acceptedAt));
   assert.equal(await commandCountForAction("call_1", "acceptCall"), 1);
+});
+
+test("accept one millisecond before ringing deadline succeeds", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const beforeDeadline = new Date(fixedMs() + RINGING_DURATION_MS - 1);
+
+  const result = await acceptCall({
+    now: beforeDeadline,
+    request: lifecycleRequest("call_1", "accept_before_deadline"),
+  });
+
+  assert.equal(result.lifecycleState, "accepted");
+  assert.equal(millis(result.acceptedAt), beforeDeadline.getTime());
+});
+
+test("ringing commands at or after deadline fail without mutation", async () => {
+  const cases = [
+    {
+      name: "accept exact deadline",
+      run: () =>
+        acceptCall({
+          now: new Date(fixedMs() + RINGING_DURATION_MS),
+          request: lifecycleRequest("call_1", "accept_exact_deadline"),
+        }),
+    },
+    {
+      name: "decline after deadline",
+      run: () =>
+        declineCall({
+          now: new Date(fixedMs() + RINGING_DURATION_MS + 1),
+          request: lifecycleRequest("call_1", "decline_after_deadline"),
+        }),
+    },
+    {
+      name: "cancel after deadline",
+      run: () =>
+        cancelCall({
+          now: new Date(fixedMs() + RINGING_DURATION_MS + 1),
+          request: lifecycleRequest("call_1", "cancel_after_deadline"),
+        }),
+    },
+  ];
+
+  for (const testCase of cases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await startCall();
+    const before = await captureMutationState();
+
+    await assertCallError(ERROR_CODES.invalidState, testCase.run());
+    await assertMutationStateUnchanged(before);
+  }
+});
+
+test("accept replay completed before deadline still replays after deadline", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const beforeDeadline = new Date(fixedMs() + RINGING_DURATION_MS - 1);
+  const afterDeadline = new Date(fixedMs() + RINGING_DURATION_MS + 1);
+
+  const first = await acceptCall({
+    now: beforeDeadline,
+    request: lifecycleRequest("call_1", "accept_deadline_replay"),
+  });
+  const replay = await acceptCall({
+    now: afterDeadline,
+    request: lifecycleRequest("call_1", "accept_deadline_replay"),
+  });
+
+  assert.equal(replay.idempotentReplay, true);
+  assert.equal(replay.callId, first.callId);
+  assert.equal(millis(replay.acceptedAt), millis(first.acceptedAt));
+  assert.equal(replay.version, first.version);
 });
 
 test("concurrent identical accepts create one transition and one replay", async () => {
@@ -1105,6 +1269,82 @@ test("nonexistent and legacy calls cannot be mutated", async () => {
   assert.equal((await db.collection("callCommandKeys").get()).size, 0);
 });
 
+test("malformed authoritative V2 call schema is rejected without writes", async () => {
+  const fieldDelete = admin.firestore.FieldValue.delete();
+  const cases = [
+    {
+      name: "missing schemaVersion",
+      mutate: () => db.doc("calls/call_1").update({ schemaVersion: fieldDelete }),
+    },
+    {
+      name: "wrong schemaVersion",
+      mutate: () => db.doc("calls/call_1").update({ schemaVersion: 3 }),
+    },
+    {
+      name: "duplicate participant UIDs",
+      mutate: () =>
+        db.doc("calls/call_1").update({ participantUids: ["caller", "caller"] }),
+    },
+    {
+      name: "extra participant UID",
+      mutate: () =>
+        db
+          .doc("calls/call_1")
+          .update({ participantUids: ["caller", "callee", "extra"] }),
+    },
+    {
+      name: "malformed participant UID",
+      mutate: () =>
+        db
+          .doc("calls/call_1")
+          .update({ participantUids: ["caller", "bad/uid"] }),
+    },
+  ];
+
+  for (const testCase of cases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await startCall();
+    await testCase.mutate();
+    const before = await captureMutationState();
+
+    await assertCallError(
+      ERROR_CODES.transactionFailed,
+      cancelCall({ request: lifecycleRequest("call_1", testCase.name) }),
+    );
+    await assertMutationStateUnchanged(before);
+  }
+});
+
+test("malformed actor participant document is rejected without writes", async () => {
+  const cases = [
+    {
+      name: "malformed participant uid",
+      mutate: () =>
+        db.doc("calls/call_1/participants/callee").update({ uid: "other" }),
+    },
+    {
+      name: "incorrect participant role",
+      mutate: () =>
+        db.doc("calls/call_1/participants/callee").update({ role: "caller" }),
+    },
+  ];
+
+  for (const testCase of cases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await startCall();
+    await testCase.mutate();
+    const before = await captureMutationState();
+
+    await assertCallError(
+      ERROR_CODES.transactionFailed,
+      acceptCall({ request: lifecycleRequest("call_1", testCase.name) }),
+    );
+    await assertMutationStateUnchanged(before);
+  }
+});
+
 test("malformed version is rejected without lifecycle writes", async () => {
   await seedUsers("caller", "callee");
   await startCall();
@@ -1300,6 +1540,41 @@ async function assertNoCollisionPartials(callId) {
 async function commandCountForAction(callId, action) {
   const snapshot = await db.collection(`callOps/${callId}/commands`).get();
   return snapshot.docs.filter((doc) => doc.data().action === action).length;
+}
+
+async function captureMutationState(callId = "call_1") {
+  return {
+    call: await docState(`calls/${callId}`),
+    callOps: await docState(`callOps/${callId}`),
+    callerParticipant: await docState(`calls/${callId}/participants/caller`),
+    calleeParticipant: await docState(`calls/${callId}/participants/callee`),
+    callerLock: await docState("activeCallLocks/caller"),
+    calleeLock: await docState("activeCallLocks/callee"),
+    commands: await collectionState(`callOps/${callId}/commands`),
+    idempotency: await collectionState("callCommandKeys"),
+  };
+}
+
+async function assertMutationStateUnchanged(before, callId = "call_1") {
+  assert.deepEqual(await captureMutationState(callId), before);
+}
+
+async function docState(path) {
+  const snapshot = await db.doc(path).get();
+  return {
+    exists: snapshot.exists,
+    data: snapshot.exists ? normalizeFirestoreData(snapshot.data()) : null,
+  };
+}
+
+async function collectionState(path) {
+  const snapshot = await db.collection(path).get();
+  return snapshot.docs
+    .map((doc) => ({
+      id: doc.id,
+      data: normalizeFirestoreData(doc.data()),
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function assertExactKeys(value, expectedKeys) {

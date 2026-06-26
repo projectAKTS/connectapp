@@ -371,9 +371,15 @@ function acceptCallV2({ db, authUid, request, now }) {
           "Only a ringing call can be accepted.",
         );
       }
+      requireOpenRingingWindow(call, nowDate);
 
       const claims = requireLockClaims(callOps, call);
-      requireMatchingLocksForAccept(lockSnapshots.byRole, claims, call.id);
+      requireMatchingLocksForAccept(
+        lockSnapshots.byRole,
+        claims,
+        call.id,
+        nowDate,
+      );
 
       const nextCallVersion = nextMonotonicVersion(call.version);
       const nextOpsVersion = nextMonotonicVersion(callOps.latestOpsVersion);
@@ -552,6 +558,9 @@ function runTerminalLifecycleCommand({
           ERROR_CODES.invalidState,
           "The call is not in a valid state for this command.",
         );
+      }
+      if (call.lifecycleState === "ringing") {
+        requireOpenRingingWindow(call, nowDate);
       }
 
       const nextCallVersion = nextMonotonicVersion(call.version);
@@ -741,13 +750,22 @@ function requireMutableV2Call(snapshot, callId) {
 }
 
 function validateAuthoritativeCallData(call) {
+  const participantUidSet = new Set(
+    Array.isArray(call.participantUids) ? call.participantUids : [],
+  );
   if (
+    call.schemaVersion !== CALL_SCHEMA_VERSION ||
     !isValidIdentifier(call.callerUid, MAX_UID_LENGTH) ||
     !isValidIdentifier(call.calleeUid, MAX_UID_LENGTH) ||
     call.callerUid === call.calleeUid ||
     !Array.isArray(call.participantUids) ||
-    !call.participantUids.includes(call.callerUid) ||
-    !call.participantUids.includes(call.calleeUid) ||
+    call.participantUids.length !== 2 ||
+    participantUidSet.size !== 2 ||
+    !call.participantUids.every((uid) =>
+      isValidIdentifier(uid, MAX_UID_LENGTH),
+    ) ||
+    !participantUidSet.has(call.callerUid) ||
+    !participantUidSet.has(call.calleeUid) ||
     !isIncrementablePositiveInteger(call.version) ||
     typeof call.terminal !== "boolean"
   ) {
@@ -824,22 +842,44 @@ async function readParticipantLockSnapshots(transaction, db, call) {
 }
 
 function requireParticipantAuthorization(participantSnapshot, call, authUid) {
-  if (!call.participantUids.includes(authUid) || !participantSnapshot.exists) {
+  if (!call.participantUids.includes(authUid)) {
     throw new CallV2Error(
       ERROR_CODES.forbidden,
       "The actor is not a participant in this call.",
     );
   }
   if (authUid === call.callerUid) {
+    validateActorParticipantDocument(participantSnapshot, authUid, "caller");
     return "caller";
   }
   if (authUid === call.calleeUid) {
+    validateActorParticipantDocument(participantSnapshot, authUid, "callee");
     return "callee";
   }
   throw new CallV2Error(
     ERROR_CODES.forbidden,
     "The actor is not a participant in this call.",
   );
+}
+
+function validateActorParticipantDocument(participantSnapshot, authUid, role) {
+  if (!participantSnapshot.exists) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The actor participant document is missing.",
+    );
+  }
+  const participant = participantSnapshot.data();
+  if (
+    !participant ||
+    participant.uid !== authUid ||
+    participant.role !== role
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The actor participant document is malformed.",
+    );
+  }
 }
 
 function requireLockClaims(callOps, call) {
@@ -862,14 +902,19 @@ function lockClaimForRole(callOps, role, expectedUid) {
   if (
     !claim ||
     claim.uid !== expectedUid ||
-    !isIncrementableFencingToken(claim.fencingToken)
+    !isValidFencingToken(claim.fencingToken)
   ) {
     return null;
   }
   return claim;
 }
 
-function requireMatchingLocksForAccept(lockSnapshotsByRole, claims, callId) {
+function requireMatchingLocksForAccept(
+  lockSnapshotsByRole,
+  claims,
+  callId,
+  nowDate,
+) {
   for (const role of ["caller", "callee"]) {
     const lockEntry = lockSnapshotsByRole[role];
     const claim = claims[role];
@@ -884,13 +929,32 @@ function requireMatchingLocksForAccept(lockSnapshotsByRole, claims, callId) {
       !lock ||
       lock.uid !== claim.uid ||
       lock.callId !== callId ||
-      lock.fencingToken !== claim.fencingToken
+      lock.fencingToken !== claim.fencingToken ||
+      !isValidFencingToken(lock.fencingToken) ||
+      lock.state !== "ringing" ||
+      !isValidTimestampValue(lock.expiresAt) ||
+      toMillis(lock.expiresAt) <= nowDate.getTime()
     ) {
       throw new CallV2Error(
         ERROR_CODES.lockRecoveryRequired,
         "A required active call lock does not match its private claim.",
       );
     }
+  }
+}
+
+function requireOpenRingingWindow(call, nowDate) {
+  if (!isValidTimestampValue(call.ringingDeadlineAt)) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The ringing deadline is malformed.",
+    );
+  }
+  if (nowDate.getTime() >= toMillis(call.ringingDeadlineAt)) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidState,
+      "The ringing window has expired.",
+    );
   }
 }
 
@@ -1296,12 +1360,19 @@ function isExpiredLock(lock, nowDate) {
   return toMillis(lock.expiresAt) <= nowDate.getTime();
 }
 
-function isIncrementableFencingToken(value) {
+function isValidFencingToken(value) {
   return (
     Number.isSafeInteger(value) &&
-    value > 0 &&
-    value < Number.MAX_SAFE_INTEGER
+    value > 0
   );
+}
+
+function isIncrementableFencingToken(value) {
+  return isValidFencingToken(value) && value < Number.MAX_SAFE_INTEGER;
+}
+
+function isValidTimestampValue(value) {
+  return value !== null && value !== undefined && Number.isFinite(toMillis(value));
 }
 
 function normalizeReplayResult(result) {
