@@ -4513,6 +4513,55 @@ test("success finalization is idempotent and stale-safe", async () => {
   assert.equal(stored.status, "dispatching");
 });
 
+test("already-dispatched success replay validates external task identity", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const task = await singleTaskForKind("ringing_timeout");
+  const claim = await claimTask({
+    task,
+    generateClaimToken: () => "replay_success_claim",
+  });
+  const externalTaskName = externalTaskNameForId(
+    claim.deterministicExternalTaskId,
+  );
+  await finalizeSuccess({
+    request: {
+      callId: task.callId,
+      taskId: task.taskId,
+      claimToken: claim.claimToken,
+      externalTaskName,
+      publisherOutcome: "created",
+    },
+  });
+
+  const before = await captureMutationState();
+  const replay = await finalizeSuccess({
+    request: {
+      callId: task.callId,
+      taskId: task.taskId,
+      claimToken: claim.claimToken,
+      externalTaskName,
+      publisherOutcome: "already_exists",
+    },
+  });
+  assert.equal(replay.status, "already_dispatched");
+  await assertMutationStateUnchanged(before);
+
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    finalizeSuccess({
+      request: {
+        callId: task.callId,
+        taskId: task.taskId,
+        claimToken: claim.claimToken,
+        externalTaskName: externalTaskNameForId("helperly-call-v2-conflict"),
+        publisherOutcome: "already_exists",
+      },
+    }),
+  );
+  await assertMutationStateUnchanged(before);
+});
+
 test("failure finalization handles retryable, permanent, exhausted, and stale callbacks", async () => {
   await seedUsers("caller", "callee");
   await startCall();
@@ -4639,6 +4688,138 @@ test("orchestrator publishes once and finalizes created or already-exists outcom
   assert.equal(result.status, "dispatched");
   assert.equal(result.publishOutcome, "already_exists");
   assert.equal(calls.length, 1);
+});
+
+test("orchestrator isolates success-finalization failures after created publish", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const task = await singleTaskForKind("ringing_timeout");
+  const calls = [];
+  let failureFinalizerCalls = 0;
+
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    dispatchTask({
+      task,
+      generateClaimToken: () => "created_finalize_failure_claim",
+      publisher: publisherReturning("created", calls),
+      internalFinalizers: {
+        async finalizeSuccess() {
+          throw new CallV2Error(
+            ERROR_CODES.transactionFailed,
+            "Injected success finalization failure.",
+          );
+        },
+        async finalizeFailure() {
+          failureFinalizerCalls += 1;
+          throw new Error("failure finalizer must not run");
+        },
+      },
+    }),
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(failureFinalizerCalls, 0);
+  const stored = await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`);
+  assert.equal(stored.status, "dispatching");
+  assert.equal(stored.claimToken, "created_finalize_failure_claim");
+  assert.equal(
+    millis(stored.claimExpiresAt),
+    fixedMs() + TASK_DISPATCH_CLAIM_DURATION_MS,
+  );
+  assert.equal(stored.dispatchAttempts, 1);
+  assert.equal(stored.lastDispatchErrorCode, null);
+  const firstExternalTaskId = calls[0].externalTaskId;
+
+  const recoveryCalls = [];
+  const recovered = await dispatchTask({
+    task,
+    now: new Date(fixedMs() + TASK_DISPATCH_CLAIM_DURATION_MS),
+    generateClaimToken: () => "created_finalize_recovery_claim",
+    publisher: publisherReturning("already_exists", recoveryCalls),
+  });
+  assert.equal(recovered.status, "dispatched");
+  assert.equal(recovered.publishOutcome, "already_exists");
+  assert.equal(recoveryCalls.length, 1);
+  assert.equal(recoveryCalls[0].externalTaskId, firstExternalTaskId);
+  assert.equal(
+    (await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`))
+      .status,
+    "dispatched",
+  );
+});
+
+test("orchestrator isolates success-finalization failures after already-exists publish", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const task = await singleTaskForKind("ringing_timeout");
+  const calls = [];
+  let failureFinalizerCalls = 0;
+
+  await assertCallError(
+    ERROR_CODES.transactionFailed,
+    dispatchTask({
+      task,
+      generateClaimToken: () => "exists_finalize_failure_claim",
+      publisher: publisherReturning("already_exists", calls),
+      internalFinalizers: {
+        async finalizeSuccess() {
+          throw new CallV2Error(
+            ERROR_CODES.transactionFailed,
+            "Injected success finalization failure.",
+          );
+        },
+        async finalizeFailure() {
+          failureFinalizerCalls += 1;
+          throw new Error("failure finalizer must not run");
+        },
+      },
+    }),
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(failureFinalizerCalls, 0);
+  const stored = await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`);
+  assert.equal(stored.status, "dispatching");
+  assert.equal(stored.claimToken, "exists_finalize_failure_claim");
+  assert.equal(stored.dispatchAttempts, 1);
+  assert.equal(stored.lastDispatchErrorCode, null);
+});
+
+test("stale success finalization from orchestrator does not run failure finalization", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+  const task = await singleTaskForKind("ringing_timeout");
+  const calls = [];
+  let failureFinalizerCalls = 0;
+
+  const result = await dispatchTask({
+    task,
+    generateClaimToken: () => "stale_success_claim",
+    publisher: publisherReturning("created", calls),
+    internalFinalizers: {
+      async finalizeSuccess({ request }) {
+        return {
+          callId: request.callId,
+          taskId: request.taskId,
+          status: "stale",
+        };
+      },
+      async finalizeFailure() {
+        failureFinalizerCalls += 1;
+        throw new Error("failure finalizer must not run");
+      },
+    },
+  });
+
+  assert.equal(result.status, "stale");
+  assert.equal(result.publishOutcome, "created");
+  assert.equal(calls.length, 1);
+  assert.equal(failureFinalizerCalls, 0);
+  const stored = await requiredData(`callOps/${task.callId}/taskOutbox/${task.taskId}`);
+  assert.equal(stored.status, "dispatching");
+  assert.equal(stored.claimToken, "stale_success_claim");
+  assert.equal(stored.lastDispatchErrorCode, null);
 });
 
 test("orchestrator handles no-publish states and controlled publisher failures", async () => {
@@ -5265,6 +5446,7 @@ function dispatchTask(overrides = {}) {
     now: overrides.now || FIXED_NOW,
     generateClaimToken: overrides.generateClaimToken || claimTokenGenerator(),
     publisher: overrides.publisher || publisherReturning("created"),
+    internalFinalizers: overrides.internalFinalizers,
   });
 }
 

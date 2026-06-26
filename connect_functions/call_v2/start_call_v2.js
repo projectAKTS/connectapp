@@ -2216,8 +2216,21 @@ function finalizeTaskOutboxDispatchSuccessV2({ db, request, now }) {
   return db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(ref);
     const task = requireValidTaskOutboxDocument(snapshot, validatedRequest);
+    const expectedExternalTaskId = deterministicExternalTaskId(task);
 
     if (task.status === "dispatched") {
+      if (
+        task.externalTaskName !== validatedRequest.externalTaskName ||
+        !externalTaskNameMatchesId(
+          validatedRequest.externalTaskName,
+          expectedExternalTaskId,
+        )
+      ) {
+        throw new CallV2Error(
+          ERROR_CODES.transactionFailed,
+          "The dispatched task external identity is conflicting.",
+        );
+      }
       return Object.freeze({
         callId: task.callId,
         taskId: task.taskId,
@@ -2237,7 +2250,6 @@ function finalizeTaskOutboxDispatchSuccessV2({ db, request, now }) {
       });
     }
 
-    const expectedExternalTaskId = deterministicExternalTaskId(task);
     if (
       !externalTaskNameMatchesId(
         validatedRequest.externalTaskName,
@@ -2340,6 +2352,7 @@ async function dispatchTaskOutboxV2({
   now,
   generateClaimToken,
   publisher,
+  internalFinalizers = {},
 }) {
   if (!publisher || typeof publisher.publishTimeoutTask !== "function") {
     throw new CallV2Error(
@@ -2347,6 +2360,10 @@ async function dispatchTaskOutboxV2({
       "A timeout task publisher dependency is required.",
     );
   }
+  const finalizeSuccess =
+    internalFinalizers.finalizeSuccess || finalizeTaskOutboxDispatchSuccessV2;
+  const finalizeFailure =
+    internalFinalizers.finalizeFailure || finalizeTaskOutboxDispatchFailureV2;
 
   const claim = await claimTaskOutboxDispatchV2({
     db,
@@ -2358,8 +2375,9 @@ async function dispatchTaskOutboxV2({
     return claim;
   }
 
+  let publishResult;
   try {
-    const publishResult = normalizePublishResult(
+    publishResult = normalizePublishResult(
       await publisher.publishTimeoutTask({
         externalTaskId: claim.deterministicExternalTaskId,
         taskKind: claim.taskKind,
@@ -2367,21 +2385,6 @@ async function dispatchTaskOutboxV2({
         payload: claim.payload,
       }),
     );
-    const success = await finalizeTaskOutboxDispatchSuccessV2({
-      db,
-      request: {
-        callId: claim.callId,
-        taskId: claim.taskId,
-        claimToken: claim.claimToken,
-        externalTaskName: publishResult.externalTaskName,
-        publisherOutcome: publishResult.outcome,
-      },
-      now,
-    });
-    return Object.freeze({
-      ...success,
-      publishOutcome: publishResult.outcome,
-    });
   } catch (error) {
     const controlledError =
       error instanceof TaskPublisherError
@@ -2390,7 +2393,7 @@ async function dispatchTaskOutboxV2({
           code: "publisher_unexpected_error",
           retryable: true,
         });
-    const failure = await finalizeTaskOutboxDispatchFailureV2({
+    const failure = await finalizeFailure({
       db,
       request: {
         callId: claim.callId,
@@ -2407,6 +2410,22 @@ async function dispatchTaskOutboxV2({
       retryable: controlledError.retryable,
     });
   }
+
+  const success = await finalizeSuccess({
+    db,
+    request: {
+      callId: claim.callId,
+      taskId: claim.taskId,
+      claimToken: claim.claimToken,
+      externalTaskName: publishResult.externalTaskName,
+      publisherOutcome: publishResult.outcome,
+    },
+    now,
+  });
+  return Object.freeze({
+    ...success,
+    publishOutcome: publishResult.outcome,
+  });
 }
 
 function requireMutableV2Call(snapshot, callId) {
