@@ -26,7 +26,26 @@ void main() {
       expect(reopened.effects, isEmpty);
     });
 
-    test('version is monotonic', () {
+    test('authoritative version is controlled by snapshots only', () {
+      final versionThree = reducer.reduce(
+        _stateWith(CallLifecycle.ringing),
+        _snapshotEvent(version: 3, lifecycle: CallLifecycle.accepted),
+      );
+      final command = reducer.reduce(
+        versionThree.state,
+        const LocalUserEnded(callId: 'call_a', commandId: 'end-1'),
+      );
+      final media = reducer.reduce(
+        command.state,
+        const LocalMediaJoined(callId: 'call_a', eventId: 'media-joined-1'),
+      );
+
+      expect(versionThree.state.latestAuthoritativeVersion, 3);
+      expect(command.state.latestAuthoritativeVersion, 3);
+      expect(media.state.latestAuthoritativeVersion, 3);
+    });
+
+    test('older snapshot cannot reduce authoritative version', () {
       final versionThree = reducer.reduce(
         _stateWith(CallLifecycle.ringing),
         _snapshotEvent(version: 3, lifecycle: CallLifecycle.accepted),
@@ -36,8 +55,7 @@ void main() {
         _snapshotEvent(version: 2, lifecycle: CallLifecycle.ringing),
       );
 
-      expect(versionThree.state.latestVersion, 3);
-      expect(versionTwo.state.latestVersion, 3);
+      expect(versionTwo.state.latestAuthoritativeVersion, 3);
       expect(versionTwo.state.lifecycle, CallLifecycle.accepted);
     });
 
@@ -45,15 +63,10 @@ void main() {
       final state = _stateWith(CallLifecycle.ringing);
       final unrelated = reducer.reduce(
         state,
-        CallSnapshotReceived(
-          snapshot: _snapshot(
-            callId: 'other_call',
-            version: 2,
-            lifecycle: CallLifecycle.accepted,
-            callerMediaState: ParticipantMediaState.notJoined,
-            calleeMediaState: ParticipantMediaState.notJoined,
-          ),
-          localParticipantRole: CallParticipantRole.callee,
+        _snapshotEvent(
+          callId: 'other_call',
+          version: 2,
+          lifecycle: CallLifecycle.accepted,
         ),
       );
 
@@ -66,29 +79,18 @@ void main() {
       final accepted = _stateWith(CallLifecycle.accepted);
       const event = LocalMediaJoined(
         callId: 'call_a',
-        version: 2,
-        dedupeKey: 'media-joined-1',
+        eventId: 'media-joined-1',
       );
 
       final first = reducer.reduce(accepted, event);
       final second = reducer.reduce(first.state, event);
 
-      expect(
-        first.effects.where(_isReportMediaJoinedCommand),
-        hasLength(1),
-      );
+      expect(first.effects.where(_isReportMediaJoinedCommand), hasLength(1));
       expect(second.effects.where(_isReportMediaJoinedCommand), isEmpty);
     });
 
-    test('active promotion requires both participant media states joined', () {
-      final oneJoined = reducer.reduce(
-        CallSessionState.initial(),
-        _snapshotEvent(
-          lifecycle: CallLifecycle.accepted,
-          callerMediaState: ParticipantMediaState.joined,
-        ),
-      );
-      final bothJoined = reducer.reduce(
+    test('active promotion is authoritative snapshot only', () {
+      final bothJoinedAccepted = reducer.reduce(
         CallSessionState.initial(),
         _snapshotEvent(
           lifecycle: CallLifecycle.accepted,
@@ -96,27 +98,18 @@ void main() {
           calleeMediaState: ParticipantMediaState.joined,
         ),
       );
-
-      expect(oneJoined.state.lifecycle, CallLifecycle.accepted);
-      expect(bothJoined.state.lifecycle, CallLifecycle.active);
-    });
-
-    test('remote detection is diagnostic and not an active promotion input',
-        () {
-      final accepted = _stateWith(CallLifecycle.accepted);
-      final remoteDetected = reducer.reduce(
-        accepted,
-        const RemoteDetected(callId: 'call_a', version: 2),
-      );
-
-      expect(remoteDetected.state.lifecycle, CallLifecycle.accepted);
-      expect(
-        remoteDetected.effects.single,
-        const CallEffect.recordDiagnosticEvent(
-          callId: 'call_a',
-          code: 'agora.remote_detected',
+      final active = reducer.reduce(
+        bothJoinedAccepted.state,
+        _snapshotEvent(
+          version: 2,
+          lifecycle: CallLifecycle.active,
+          callerMediaState: ParticipantMediaState.joined,
+          calleeMediaState: ParticipantMediaState.joined,
         ),
       );
+
+      expect(bothJoinedAccepted.state.lifecycle, CallLifecycle.accepted);
+      expect(active.state.lifecycle, CallLifecycle.active);
     });
 
     test('effect deduplication prevents repeated route presentation', () {
@@ -131,6 +124,38 @@ void main() {
 
       expect(first.effects.where(_isPresentIncoming), hasLength(1));
       expect(second.effects.where(_isPresentIncoming), isEmpty);
+    });
+
+    test('processed event IDs are bounded during a long session', () {
+      var state = _stateWith(CallLifecycle.active);
+      for (var i = 0; i < CallSessionState.maxProcessedEventIds + 10; i++) {
+        state = reducer
+            .reduce(
+              state,
+              MediaReconnecting(callId: 'call_a', eventId: 'reconnect-$i'),
+            )
+            .state;
+      }
+
+      expect(
+        state.processedEventIds.length,
+        CallSessionState.maxProcessedEventIds,
+      );
+    });
+
+    test('dedupe state is removed when the session clears', () {
+      final terminal = reducer.reduce(
+        _stateWith(CallLifecycle.ringing),
+        _snapshotEvent(version: 2, lifecycle: CallLifecycle.completed),
+      );
+      final idle = reducer.reduce(
+        terminal.state,
+        const CleanupCompleted(callId: 'call_a', eventId: 'cleanup-done-1'),
+      );
+
+      expect(terminal.state.processedEventIds, isNotEmpty);
+      expect(idle.state.isIdle, isTrue);
+      expect(idle.state.processedEventIds, isEmpty);
     });
   });
 }
@@ -153,32 +178,16 @@ CallSnapshotReceived _snapshotEvent({
   ParticipantMediaState calleeMediaState = ParticipantMediaState.notJoined,
 }) {
   return CallSnapshotReceived(
-    snapshot: _snapshot(
+    snapshot: CallSnapshot(
       callId: callId,
       version: version,
       lifecycle: lifecycle,
+      callerUid: 'caller',
+      calleeUid: 'callee',
       callerMediaState: callerMediaState,
       calleeMediaState: calleeMediaState,
     ),
     localParticipantRole: CallParticipantRole.callee,
-  );
-}
-
-CallSnapshot _snapshot({
-  required String callId,
-  required int version,
-  required CallLifecycle lifecycle,
-  required ParticipantMediaState callerMediaState,
-  required ParticipantMediaState calleeMediaState,
-}) {
-  return CallSnapshot(
-    callId: callId,
-    version: version,
-    lifecycle: lifecycle,
-    callerUid: 'caller',
-    calleeUid: 'callee',
-    callerMediaState: callerMediaState,
-    calleeMediaState: calleeMediaState,
   );
 }
 

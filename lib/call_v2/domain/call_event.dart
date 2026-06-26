@@ -3,194 +3,193 @@ import 'call_snapshot.dart';
 sealed class CallEvent {
   const CallEvent({
     required this.callId,
-    this.version,
-    this.dedupeKey,
-  });
+    required this.eventId,
+  })  : assert(callId.length > 0, 'callId must not be empty'),
+        assert(eventId.length > 0, 'eventId must not be empty');
 
   final String callId;
-  final int? version;
-  final String? dedupeKey;
-
-  String get eventId => dedupeKey ?? '$runtimeType:$callId:${version ?? -1}';
+  final String eventId;
 }
 
 base class CallSnapshotReceived extends CallEvent {
   CallSnapshotReceived({
     required this.snapshot,
     required this.localParticipantRole,
-    String? dedupeKey,
   }) : super(
           callId: snapshot.callId,
-          version: snapshot.version,
-          dedupeKey: dedupeKey,
+          eventId: 'snapshot:${snapshot.callId}:${snapshot.version}',
         );
 
   final CallSnapshot snapshot;
   final CallParticipantRole localParticipantRole;
-
-  @override
-  String get eventId {
-    return dedupeKey ??
-        '$runtimeType:$callId:$version:${snapshot.lifecycle}:'
-            '${snapshot.callerMediaState}:${snapshot.calleeMediaState}';
-  }
 }
 
-final class TerminalSnapshotReceived extends CallSnapshotReceived {
-  TerminalSnapshotReceived({
-    required super.snapshot,
-    required super.localParticipantRole,
-    super.dedupeKey,
-  });
+sealed class UserCommandEvent extends CallEvent {
+  const UserCommandEvent({
+    required super.callId,
+    required this.commandId,
+  })  : assert(commandId.length > 0, 'commandId must not be empty'),
+        super(eventId: 'command:$commandId');
+
+  final String commandId;
 }
 
-final class LocalUserAccepted extends CallEvent {
+final class LocalUserAccepted extends UserCommandEvent {
   const LocalUserAccepted({
     required super.callId,
-    super.version,
-    super.dedupeKey,
+    required super.commandId,
   });
 }
 
-final class LocalUserDeclined extends CallEvent {
+final class LocalUserDeclined extends UserCommandEvent {
   const LocalUserDeclined({
     required super.callId,
-    super.version,
-    super.dedupeKey,
+    required super.commandId,
   });
 }
 
-final class LocalUserCancelled extends CallEvent {
+final class LocalUserCancelled extends UserCommandEvent {
   const LocalUserCancelled({
     required super.callId,
-    super.version,
-    super.dedupeKey,
+    required super.commandId,
   });
 }
 
-final class LocalUserEnded extends CallEvent {
+final class LocalUserEnded extends UserCommandEvent {
   const LocalUserEnded({
     required super.callId,
-    super.version,
-    super.dedupeKey,
+    required super.commandId,
+  });
+}
+
+final class PrepareMediaRequested extends CallEvent {
+  const PrepareMediaRequested({
+    required super.callId,
+    required super.eventId,
+  });
+}
+
+final class JoinMediaRequested extends CallEvent {
+  const JoinMediaRequested({
+    required super.callId,
+    required super.eventId,
   });
 }
 
 final class LocalMediaPreparing extends CallEvent {
   const LocalMediaPreparing({
     required super.callId,
-    super.version,
-    super.dedupeKey,
+    required super.eventId,
   });
 }
 
 final class LocalMediaJoining extends CallEvent {
   const LocalMediaJoining({
     required super.callId,
-    super.version,
-    super.dedupeKey,
+    required super.eventId,
   });
 }
 
 final class LocalMediaJoined extends CallEvent {
   const LocalMediaJoined({
     required super.callId,
-    super.version,
-    super.dedupeKey,
+    required super.eventId,
   });
 }
 
 final class PeerMediaJoined extends CallEvent {
   const PeerMediaJoined({
     required super.callId,
-    super.version,
-    super.dedupeKey,
+    required super.eventId,
   });
 }
 
 final class RemoteDetected extends CallEvent {
   const RemoteDetected({
     required super.callId,
-    super.version,
-    super.dedupeKey,
+    required super.eventId,
   });
 }
 
 final class MediaReconnecting extends CallEvent {
   const MediaReconnecting({
     required super.callId,
-    super.version,
-    super.dedupeKey,
+    required super.eventId,
   });
 }
 
 final class MediaReconnected extends CallEvent {
   const MediaReconnected({
     required super.callId,
-    super.version,
-    super.dedupeKey,
+    required super.eventId,
   });
 }
 
 final class MediaFailed extends CallEvent {
   const MediaFailed({
     required super.callId,
-    super.version,
+    required super.eventId,
     this.failureCode,
-    super.dedupeKey,
   });
 
   final String? failureCode;
-
-  @override
-  String get eventId =>
-      dedupeKey ?? '$runtimeType:$callId:${version ?? -1}:${failureCode ?? ''}';
 }
 
 final class NativeIncomingPresented extends CallEvent {
   const NativeIncomingPresented({
     required super.callId,
-    super.version,
-    super.dedupeKey,
+    required super.eventId,
   });
 }
 
-final class NativeAccepted extends CallEvent {
+final class NativeAccepted extends UserCommandEvent {
   const NativeAccepted({
     required super.callId,
-    super.version,
-    super.dedupeKey,
+    required super.commandId,
   });
 }
 
-final class NativeDeclined extends CallEvent {
+final class NativeDeclined extends UserCommandEvent {
   const NativeDeclined({
     required super.callId,
-    super.version,
-    super.dedupeKey,
+    required super.commandId,
   });
 }
 
 final class RouteOpened extends CallEvent {
   const RouteOpened({
     required super.callId,
-    super.version,
-    super.dedupeKey,
+    required super.eventId,
   });
+}
+
+final class RouteOpenFailed extends CallEvent {
+  const RouteOpenFailed({
+    required super.callId,
+    required super.eventId,
+    this.reason,
+  });
+
+  final String? reason;
 }
 
 final class RouteClosed extends CallEvent {
   const RouteClosed({
     required super.callId,
-    super.version,
-    super.dedupeKey,
+    required super.eventId,
   });
 }
 
 final class AppResumed extends CallEvent {
   const AppResumed({
     required super.callId,
-    super.version,
-    super.dedupeKey,
+    required super.eventId,
+  });
+}
+
+final class CleanupCompleted extends CallEvent {
+  const CleanupCompleted({
+    required super.callId,
+    required super.eventId,
   });
 }

@@ -11,10 +11,23 @@ enum NativePresentationState {
   endedNatively;
 }
 
+enum CallRouteState {
+  notRequested,
+  opening,
+  open,
+  closed;
+}
+
+enum CleanupStatus {
+  notRequested,
+  requested,
+  completed;
+}
+
 class CallSessionState {
   CallSessionState({
     required this.callId,
-    required this.latestVersion,
+    required this.latestAuthoritativeVersion,
     required this.lifecycle,
     required this.localParticipantRole,
     required this.localMediaState,
@@ -22,24 +35,15 @@ class CallSessionState {
     required this.localPhase,
     required this.nativePresentationState,
     required this.incomingRoutePresented,
-    required this.callRouteOpening,
-    required this.callRouteOpen,
-    required this.terminalCleanupCompleted,
-    Set<String> processedEventIds = const <String>{},
-    Set<String> presentedRouteCallIds = const <String>{},
-    Set<String> openedRouteCallIds = const <String>{},
-    Set<String> closedRouteCallIds = const <String>{},
-    Set<String> cleanupCallIds = const <String>{},
-  })  : processedEventIds = Set.unmodifiable(processedEventIds),
-        presentedRouteCallIds = Set.unmodifiable(presentedRouteCallIds),
-        openedRouteCallIds = Set.unmodifiable(openedRouteCallIds),
-        closedRouteCallIds = Set.unmodifiable(closedRouteCallIds),
-        cleanupCallIds = Set.unmodifiable(cleanupCallIds);
+    required this.callRouteState,
+    required this.cleanupStatus,
+    List<String> processedEventIds = const <String>[],
+  }) : processedEventIds = List.unmodifiable(processedEventIds);
 
   factory CallSessionState.initial() {
     return CallSessionState(
       callId: null,
-      latestVersion: 0,
+      latestAuthoritativeVersion: 0,
       lifecycle: null,
       localParticipantRole: null,
       localMediaState: ParticipantMediaState.notJoined,
@@ -47,14 +51,15 @@ class CallSessionState {
       localPhase: CallLocalPhase.idle,
       nativePresentationState: NativePresentationState.notPresented,
       incomingRoutePresented: false,
-      callRouteOpening: false,
-      callRouteOpen: false,
-      terminalCleanupCompleted: false,
+      callRouteState: CallRouteState.notRequested,
+      cleanupStatus: CleanupStatus.notRequested,
     );
   }
 
+  static const int maxProcessedEventIds = 64;
+
   final String? callId;
-  final int latestVersion;
+  final int latestAuthoritativeVersion;
   final CallLifecycle? lifecycle;
   final CallParticipantRole? localParticipantRole;
   final ParticipantMediaState localMediaState;
@@ -62,42 +67,38 @@ class CallSessionState {
   final CallLocalPhase localPhase;
   final NativePresentationState nativePresentationState;
   final bool incomingRoutePresented;
-  final bool callRouteOpening;
-  final bool callRouteOpen;
-  final bool terminalCleanupCompleted;
-  final Set<String> processedEventIds;
-  final Set<String> presentedRouteCallIds;
-  final Set<String> openedRouteCallIds;
-  final Set<String> closedRouteCallIds;
-  final Set<String> cleanupCallIds;
+  final CallRouteState callRouteState;
+  final CleanupStatus cleanupStatus;
+  final List<String> processedEventIds;
 
   bool get isIdle => callId == null;
   bool get isTerminal => lifecycle?.isTerminal ?? false;
+  bool get hasProcessedEvents => processedEventIds.isNotEmpty;
 
   CallSessionState copyWith({
-    String? callId,
-    int? latestVersion,
-    CallLifecycle? lifecycle,
-    CallParticipantRole? localParticipantRole,
+    Object? callId = _notSet,
+    int? latestAuthoritativeVersion,
+    Object? lifecycle = _notSet,
+    Object? localParticipantRole = _notSet,
     ParticipantMediaState? localMediaState,
     ParticipantMediaState? peerMediaState,
     CallLocalPhase? localPhase,
     NativePresentationState? nativePresentationState,
     bool? incomingRoutePresented,
-    bool? callRouteOpening,
-    bool? callRouteOpen,
-    bool? terminalCleanupCompleted,
-    Set<String>? processedEventIds,
-    Set<String>? presentedRouteCallIds,
-    Set<String>? openedRouteCallIds,
-    Set<String>? closedRouteCallIds,
-    Set<String>? cleanupCallIds,
+    CallRouteState? callRouteState,
+    CleanupStatus? cleanupStatus,
+    List<String>? processedEventIds,
   }) {
     return CallSessionState(
-      callId: callId ?? this.callId,
-      latestVersion: latestVersion ?? this.latestVersion,
-      lifecycle: lifecycle ?? this.lifecycle,
-      localParticipantRole: localParticipantRole ?? this.localParticipantRole,
+      callId: identical(callId, _notSet) ? this.callId : callId as String?,
+      latestAuthoritativeVersion:
+          latestAuthoritativeVersion ?? this.latestAuthoritativeVersion,
+      lifecycle: identical(lifecycle, _notSet)
+          ? this.lifecycle
+          : lifecycle as CallLifecycle?,
+      localParticipantRole: identical(localParticipantRole, _notSet)
+          ? this.localParticipantRole
+          : localParticipantRole as CallParticipantRole?,
       localMediaState: localMediaState ?? this.localMediaState,
       peerMediaState: peerMediaState ?? this.peerMediaState,
       localPhase: localPhase ?? this.localPhase,
@@ -105,22 +106,23 @@ class CallSessionState {
           nativePresentationState ?? this.nativePresentationState,
       incomingRoutePresented:
           incomingRoutePresented ?? this.incomingRoutePresented,
-      callRouteOpening: callRouteOpening ?? this.callRouteOpening,
-      callRouteOpen: callRouteOpen ?? this.callRouteOpen,
-      terminalCleanupCompleted:
-          terminalCleanupCompleted ?? this.terminalCleanupCompleted,
+      callRouteState: callRouteState ?? this.callRouteState,
+      cleanupStatus: cleanupStatus ?? this.cleanupStatus,
       processedEventIds: processedEventIds ?? this.processedEventIds,
-      presentedRouteCallIds:
-          presentedRouteCallIds ?? this.presentedRouteCallIds,
-      openedRouteCallIds: openedRouteCallIds ?? this.openedRouteCallIds,
-      closedRouteCallIds: closedRouteCallIds ?? this.closedRouteCallIds,
-      cleanupCallIds: cleanupCallIds ?? this.cleanupCallIds,
     );
   }
 
   CallSessionState markProcessed(String eventId) {
-    return copyWith(
-      processedEventIds: <String>{...processedEventIds, eventId},
-    );
+    final nextIds = <String>[...processedEventIds, eventId];
+    final boundedIds = nextIds.length <= maxProcessedEventIds
+        ? nextIds
+        : nextIds.sublist(nextIds.length - maxProcessedEventIds);
+    return copyWith(processedEventIds: boundedIds);
   }
 }
+
+class _NotSet {
+  const _NotSet();
+}
+
+const _notSet = _NotSet();

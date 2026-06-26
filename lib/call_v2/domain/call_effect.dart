@@ -20,8 +20,7 @@ enum BackendCommandType {
   reportMediaJoining,
   reportMediaJoined,
   reportMediaConnection,
-  reportCallFailure,
-  promoteActive;
+  reportCallFailure;
 }
 
 class CallEffect {
