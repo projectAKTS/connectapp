@@ -1304,6 +1304,7 @@ function validateMediaLifecycleAllowsReport({
 
   if (call.lifecycleState === "active") {
     requireActiveTemporalFields(call);
+    requireOpenReconnectWindowIfPresent(call, nowDate);
     requireAllowedMediaTransition(currentMediaState, requestedMediaState);
     return;
   }
@@ -1397,6 +1398,18 @@ function requireActiveTemporalFields(call) {
     throw new CallV2Error(
       ERROR_CODES.transactionFailed,
       "The reconnect deadline is malformed.",
+    );
+  }
+}
+
+function requireOpenReconnectWindowIfPresent(call, nowDate) {
+  if (
+    call.reconnectDeadlineAt !== null &&
+    nowDate.getTime() >= strictTimestampMillis(call.reconnectDeadlineAt)
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidState,
+      "The reconnect window has expired.",
     );
   }
 }

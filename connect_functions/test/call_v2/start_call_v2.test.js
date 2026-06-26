@@ -2131,6 +2131,183 @@ test("valid existing reconnect deadline clears when both participants join", asy
   assert.equal(call.version, beforeVersion + 1);
 });
 
+test("active media recovery one millisecond before reconnect deadline succeeds", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const deadline = new Date(fixedMs() + RECONNECT_GRACE_DURATION_MS);
+  await setActiveReconnectScenario({
+    reconnectDeadlineAt: deadline,
+    callerMediaState: "reconnecting",
+    calleeMediaState: "joined",
+  });
+  const beforeVersion = (await requiredData("calls/call_1")).version;
+
+  const result = await reportMedia({
+    now: new Date(deadline.getTime() - 1),
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "recover_before_deadline"),
+  });
+
+  const call = await requiredData("calls/call_1");
+  assert.equal(result.lifecycleState, "active");
+  assert.equal(result.mediaState, "joined");
+  assert.equal(result.reconnectDeadlineAt, null);
+  assert.equal(result.callVersion, beforeVersion + 1);
+  assert.equal(call.reconnectDeadlineAt, null);
+  assert.equal(call.version, beforeVersion + 1);
+});
+
+test("active media recovery at or after reconnect deadline rejects without writes", async () => {
+  const cases = [
+    {
+      name: "exact deadline",
+      nowOffsetMs: 0,
+    },
+    {
+      name: "after deadline",
+      nowOffsetMs: 1,
+    },
+  ];
+
+  for (const testCase of cases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await promoteCallToActive();
+    const deadline = new Date(fixedMs() + RECONNECT_GRACE_DURATION_MS);
+    await setActiveReconnectScenario({
+      reconnectDeadlineAt: deadline,
+      callerMediaState: "reconnecting",
+      calleeMediaState: "joined",
+    });
+    const before = await captureMutationState();
+
+    await assertCallError(
+      ERROR_CODES.invalidState,
+      reportMedia({
+        now: new Date(deadline.getTime() + testCase.nowOffsetMs),
+        mediaState: "joined",
+        request: mediaRequest("call_1", "joined", testCase.name),
+      }),
+    );
+    await assertMutationStateUnchanged(before);
+  }
+});
+
+test("late joined reports cannot clear an expired reconnect deadline", async () => {
+  const cases = [
+    {
+      name: "caller late join",
+      authUid: "caller",
+      callerMediaState: "reconnecting",
+      calleeMediaState: "joined",
+    },
+    {
+      name: "callee late join",
+      authUid: "callee",
+      callerMediaState: "joined",
+      calleeMediaState: "reconnecting",
+    },
+  ];
+
+  for (const testCase of cases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await promoteCallToActive();
+    const deadline = new Date(fixedMs() + RECONNECT_GRACE_DURATION_MS);
+    await setActiveReconnectScenario({
+      reconnectDeadlineAt: deadline,
+      callerMediaState: testCase.callerMediaState,
+      calleeMediaState: testCase.calleeMediaState,
+    });
+    const before = await captureMutationState();
+
+    await assertCallError(
+      ERROR_CODES.invalidState,
+      reportMedia({
+        authUid: testCase.authUid,
+        now: deadline,
+        mediaState: "joined",
+        request: mediaRequest("call_1", "joined", testCase.name),
+      }),
+    );
+    await assertMutationStateUnchanged(before);
+  }
+});
+
+test("disconnected participant cannot change media state after reconnect deadline", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const deadline = new Date(fixedMs() + RECONNECT_GRACE_DURATION_MS);
+  await setActiveReconnectScenario({
+    reconnectDeadlineAt: deadline,
+    callerMediaState: "disconnected",
+    calleeMediaState: "joined",
+  });
+  const before = await captureMutationState();
+
+  await assertCallError(
+    ERROR_CODES.invalidState,
+    reportMedia({
+      now: new Date(deadline.getTime() + 1),
+      mediaState: "reconnecting",
+      request: mediaRequest(
+        "call_1",
+        "reconnecting",
+        "reconnect_after_deadline",
+      ),
+    }),
+  );
+  await assertMutationStateUnchanged(before);
+});
+
+test("media command completed before reconnect deadline replays after deadline", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const deadline = new Date(fixedMs() + RECONNECT_GRACE_DURATION_MS);
+  await setActiveReconnectScenario({
+    reconnectDeadlineAt: deadline,
+    callerMediaState: "reconnecting",
+    calleeMediaState: "joined",
+  });
+
+  const first = await reportMedia({
+    now: new Date(deadline.getTime() - 1),
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "replay_recover_before_deadline"),
+  });
+  const replay = await reportMedia({
+    now: new Date(deadline.getTime() + 1),
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "replay_recover_before_deadline"),
+  });
+
+  assert.equal(replay.idempotentReplay, true);
+  assert.equal(replay.mediaVersion, first.mediaVersion);
+  assert.equal(replay.callVersion, first.callVersion);
+  assert.equal(replay.reconnectDeadlineAt, null);
+  assert.equal(await commandCountForAction("call_1", "reportParticipantMedia"), 3);
+});
+
+test("participant can end active call after reconnect deadline", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const deadline = new Date(fixedMs() + RECONNECT_GRACE_DURATION_MS);
+  await setActiveReconnectScenario({
+    reconnectDeadlineAt: deadline,
+    callerMediaState: "reconnecting",
+    calleeMediaState: "joined",
+  });
+
+  const result = await endCall({
+    now: new Date(deadline.getTime() + 1),
+    request: lifecycleRequest("call_1", "end_after_reconnect_deadline"),
+  });
+
+  assert.equal(result.lifecycleState, "completed");
+  assert.equal(result.version, 4);
+  assert.equal((await requiredData("calls/call_1")).lifecycleState, "completed");
+});
+
 test("accepted call promotes to active only after both participants joined", async () => {
   await seedUsers("caller", "callee");
   await startCall();
@@ -2507,6 +2684,24 @@ async function promoteCallToActive() {
     authUid: "callee",
     mediaState: "joined",
     request: mediaRequest("call_1", "joined", "promote_callee_joined"),
+  });
+}
+
+async function setActiveReconnectScenario({
+  reconnectDeadlineAt,
+  callerMediaState,
+  calleeMediaState,
+}) {
+  await db.doc("calls/call_1").update({
+    reconnectDeadlineAt,
+  });
+  await db.doc("calls/call_1/participants/caller").update({
+    mediaState: callerMediaState,
+    mediaVersion: callerMediaState === "joined" ? 1 : 2,
+  });
+  await db.doc("calls/call_1/participants/callee").update({
+    mediaState: calleeMediaState,
+    mediaVersion: calleeMediaState === "joined" ? 1 : 2,
   });
 }
 
