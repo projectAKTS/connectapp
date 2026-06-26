@@ -573,12 +573,16 @@ function reportParticipantMediaV2({ db, authUid, request, now }) {
         );
       }
 
-      validateMediaLifecycleAllowsReport(
+      validateMediaLifecycleAllowsReport({
         call,
         nowDate,
-        participants.byRole[actorRole].data.mediaState,
-        validatedRequest.mediaState,
-      );
+        participantMediaStates: {
+          caller: participants.byRole.caller.data.mediaState,
+          callee: participants.byRole.callee.data.mediaState,
+        },
+        currentMediaState: participants.byRole[actorRole].data.mediaState,
+        requestedMediaState: validatedRequest.mediaState,
+      });
       const claims = requireLockClaims(callOps, call);
       requireReportingParticipantLock({
         lockEntry: lockSnapshots.byRole[actorRole],
@@ -1277,34 +1281,29 @@ function requireOpenRingingWindow(call, nowDate) {
   }
 }
 
-function validateMediaLifecycleAllowsReport(
+function validateMediaLifecycleAllowsReport({
   call,
   nowDate,
+  participantMediaStates,
   currentMediaState,
   requestedMediaState,
-) {
+}) {
   if (call.lifecycleState === "ringing") {
     requireOpenRingingWindow(call, nowDate);
-    if (
-      currentMediaState === requestedMediaState ||
-      requestedMediaState === "preparing" ||
-      requestedMediaState === "media_failed"
-    ) {
-      return;
-    }
-    throw new CallV2Error(
-      ERROR_CODES.invalidState,
-      "The requested media state is not allowed while ringing.",
-    );
+    requireValidRingingParticipantMediaStates(participantMediaStates);
+    requireAllowedRingingMediaTransition(currentMediaState, requestedMediaState);
+    return;
   }
 
   if (call.lifecycleState === "accepted") {
+    requireAcceptedTemporalFields(call);
     requireOpenAcceptedJoinWindow(call, nowDate);
     requireAllowedMediaTransition(currentMediaState, requestedMediaState);
     return;
   }
 
   if (call.lifecycleState === "active") {
+    requireActiveTemporalFields(call);
     requireAllowedMediaTransition(currentMediaState, requestedMediaState);
     return;
   }
@@ -1313,6 +1312,54 @@ function validateMediaLifecycleAllowsReport(
     ERROR_CODES.invalidState,
     "The call is not in a valid state for media reports.",
   );
+}
+
+function requireValidRingingParticipantMediaStates(participantMediaStates) {
+  const validRingingStates = new Set([
+    "not_joined",
+    "preparing",
+    "media_failed",
+  ]);
+  if (
+    !validRingingStates.has(participantMediaStates.caller) ||
+    !validRingingStates.has(participantMediaStates.callee)
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The ringing participant media state is malformed.",
+    );
+  }
+}
+
+function requireAllowedRingingMediaTransition(
+  currentMediaState,
+  requestedMediaState,
+) {
+  if (currentMediaState === requestedMediaState) {
+    return;
+  }
+  const allowedNextStates = {
+    not_joined: ["preparing", "media_failed"],
+    preparing: ["media_failed"],
+    media_failed: ["preparing"],
+  };
+  if (
+    !(allowedNextStates[currentMediaState] || []).includes(requestedMediaState)
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.invalidState,
+      "The requested media state is not allowed while ringing.",
+    );
+  }
+}
+
+function requireAcceptedTemporalFields(call) {
+  if (!isValidTimestampValue(call.acceptedAt)) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The accepted timestamp is malformed.",
+    );
+  }
 }
 
 function requireOpenAcceptedJoinWindow(call, nowDate) {
@@ -1326,6 +1373,30 @@ function requireOpenAcceptedJoinWindow(call, nowDate) {
     throw new CallV2Error(
       ERROR_CODES.invalidState,
       "The accepted join window has expired.",
+    );
+  }
+}
+
+function requireActiveTemporalFields(call) {
+  if (!isValidTimestampValue(call.activeAt)) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The active timestamp is malformed.",
+    );
+  }
+  if (!Object.prototype.hasOwnProperty.call(call, "reconnectDeadlineAt")) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The reconnect deadline is missing.",
+    );
+  }
+  if (
+    call.reconnectDeadlineAt !== null &&
+    !isValidTimestampValue(call.reconnectDeadlineAt)
+  ) {
+    throw new CallV2Error(
+      ERROR_CODES.transactionFailed,
+      "The reconnect deadline is malformed.",
     );
   }
 }
@@ -1605,7 +1676,7 @@ function computeReconnectDeadlineUpdate({
     ["reconnecting", "disconnected", "left", "media_failed"].includes(
       nextMediaState,
     ) &&
-    !isValidTimestampValue(call.reconnectDeadlineAt);
+    call.reconnectDeadlineAt === null;
 
   if (shouldStartReconnectGrace) {
     return {
@@ -1986,8 +2057,11 @@ function nextFencingToken(lockSnapshots, uid) {
 }
 
 function isExpiredLock(lock, nowDate) {
-  if (!lock || !lock.expiresAt) {
-    return false;
+  if (!lock || !isValidTimestampValue(lock.expiresAt)) {
+    throw new CallV2Error(
+      ERROR_CODES.lockRecoveryRequired,
+      "An existing lock has a malformed expiry.",
+    );
   }
   return toMillis(lock.expiresAt) <= nowDate.getTime();
 }
@@ -2004,7 +2078,23 @@ function isIncrementableFencingToken(value) {
 }
 
 function isValidTimestampValue(value) {
-  return value !== null && value !== undefined && Number.isFinite(toMillis(value));
+  return strictTimestampMillis(value) !== null;
+}
+
+function strictTimestampMillis(value) {
+  if (value instanceof Date) {
+    const millis = value.getTime();
+    return Number.isFinite(millis) ? millis : null;
+  }
+  if (!value || typeof value.toMillis !== "function") {
+    return null;
+  }
+  try {
+    const millis = value.toMillis();
+    return Number.isFinite(millis) ? millis : null;
+  } catch {
+    return null;
+  }
 }
 
 function isSupportedMediaState(value) {

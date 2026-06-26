@@ -652,6 +652,106 @@ test("overflow expired-lock fencing token requires recovery without writes", asy
   await assertNoCallArtifacts();
 });
 
+test("malformed existing lock expiry requires recovery without writes", async () => {
+  const cases = [
+    {
+      name: "iso string expiry",
+      expiresAt: new Date(fixedMs() - 1000).toISOString(),
+    },
+    {
+      name: "numeric expiry",
+      expiresAt: fixedMs() - 1000,
+    },
+    {
+      name: "plain object expiry",
+      expiresAt: { timestampMillis: fixedMs() - 1000 },
+    },
+  ];
+
+  for (const testCase of cases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await writeLock("caller", {
+      callId: "missing_call",
+      expiresAt: testCase.expiresAt,
+      fencingToken: 1,
+    });
+    const beforeLock = normalizeFirestoreData(
+      await requiredData("activeCallLocks/caller"),
+    );
+
+    await assertCallError(
+      ERROR_CODES.lockRecoveryRequired,
+      startCall({
+        request: request({ idempotencyKey: testCase.name }),
+      }),
+    );
+    assert.deepEqual(
+      normalizeFirestoreData(await requiredData("activeCallLocks/caller")),
+      beforeLock,
+    );
+    assert.equal((await db.collection("activeCallLocks").get()).size, 1);
+    await assertNoCallArtifacts();
+    assert.equal(
+      (await db.collection("calls/call_1/participants").get()).size,
+      0,
+    );
+    assert.equal(
+      (await db.collection("callOps/call_1/commands").get()).size,
+      0,
+    );
+  }
+});
+
+test("nonpersistable malformed existing lock expiry requires recovery without writes", async () => {
+  const cases = [
+    {
+      name: "invalid Date expiry",
+      expiresAt: new Date(Number.NaN),
+    },
+    {
+      name: "invalid toMillis expiry",
+      expiresAt: { toMillis: () => Number.NaN },
+    },
+    {
+      name: "throwing toMillis expiry",
+      expiresAt: {
+        toMillis: () => {
+          throw new Error("bad timestamp");
+        },
+      },
+    },
+  ];
+
+  for (const testCase of cases) {
+    const fake = fakeDbWithData({
+      "activeCallLocks/caller": {
+        uid: "caller",
+        callId: "missing_call",
+        peerUids: ["callee"],
+        state: "ringing",
+        acquiredAt: FIXED_NOW,
+        updatedAt: FIXED_NOW,
+        expiresAt: testCase.expiresAt,
+        fencingToken: 1,
+        acquiredByCommandId: "existing_command",
+      },
+    });
+
+    await assertCallError(
+      ERROR_CODES.lockRecoveryRequired,
+      () => startCallV2({
+        db: fake.db,
+        authUid: "caller",
+        request: request({ idempotencyKey: testCase.name }),
+        now: FIXED_NOW,
+        generateCallId: () => "call_1",
+      }),
+    );
+    assert.deepEqual(fake.writes, []);
+  }
+});
+
 test("max-minus-one expired fencing token can be replaced, accepted, and released", async () => {
   await seedUsers("caller", "callee");
   await writeLock("caller", {
@@ -1433,6 +1533,103 @@ test("ringing media report after deadline rejects without writes", async () => {
   await assertMutationStateUnchanged(before);
 });
 
+test("ringing media reports reject malformed temporal fields without writes", async () => {
+  const cases = [
+    {
+      name: "ringingDeadlineAt ISO string",
+      mutate: () =>
+        db.doc("calls/call_1").update({
+          ringingDeadlineAt: new Date(
+            fixedMs() + RINGING_DURATION_MS,
+          ).toISOString(),
+        }),
+    },
+    {
+      name: "ringingDeadlineAt number",
+      mutate: () =>
+        db
+          .doc("calls/call_1")
+          .update({ ringingDeadlineAt: fixedMs() + RINGING_DURATION_MS }),
+    },
+  ];
+
+  for (const testCase of cases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await startCall();
+    await testCase.mutate();
+    const before = await captureMutationState();
+
+    await assertCallError(
+      ERROR_CODES.transactionFailed,
+      reportMedia({
+        mediaState: "preparing",
+        request: mediaRequest("call_1", "preparing", testCase.name),
+      }),
+    );
+    await assertMutationStateUnchanged(before);
+  }
+});
+
+test("ringing media reports reject malformed participant media state", async () => {
+  for (const mediaState of [
+    "joining",
+    "joined",
+    "reconnecting",
+    "disconnected",
+    "left",
+  ]) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await startCall();
+    await db
+      .doc("calls/call_1/participants/caller")
+      .update({ mediaState });
+    const before = await captureMutationState();
+
+    await assertCallError(
+      ERROR_CODES.transactionFailed,
+      reportMedia({
+        mediaState,
+        request: mediaRequest("call_1", mediaState, `ringing_${mediaState}`),
+      }),
+    );
+    await assertMutationStateUnchanged(before);
+  }
+});
+
+test("ringing media reports preserve the restricted transition graph", async () => {
+  await seedUsers("caller", "callee");
+  await startCall();
+
+  await reportMedia({
+    mediaState: "media_failed",
+    request: mediaRequest("call_1", "media_failed", "ring_fail"),
+  });
+  assert.equal(
+    (await requiredData("calls/call_1/participants/caller")).mediaState,
+    "media_failed",
+  );
+
+  await reportMedia({
+    mediaState: "preparing",
+    request: mediaRequest("call_1", "preparing", "ring_recover"),
+  });
+  assert.equal(
+    (await requiredData("calls/call_1/participants/caller")).mediaState,
+    "preparing",
+  );
+
+  await reportMedia({
+    mediaState: "media_failed",
+    request: mediaRequest("call_1", "media_failed", "ring_fail_again"),
+  });
+  assert.equal(
+    (await requiredData("calls/call_1/participants/caller")).mediaState,
+    "media_failed",
+  );
+});
+
 test("accepted participant progresses preparing to joining to joined", async () => {
   await seedUsers("caller", "callee");
   await startCall();
@@ -1508,6 +1705,38 @@ test("accepted media reports at or after join deadline reject without writes", a
       ERROR_CODES.invalidState,
       reportMedia({
         now: testCase.now,
+        mediaState: "preparing",
+        request: mediaRequest("call_1", "preparing", testCase.name),
+      }),
+    );
+    await assertMutationStateUnchanged(before);
+  }
+});
+
+test("accepted media reports reject malformed temporal fields without writes", async () => {
+  const cases = [
+    {
+      name: "acceptedAt malformed",
+      mutate: () => db.doc("calls/call_1").update({ acceptedAt: "bad" }),
+    },
+    {
+      name: "acceptedJoinDeadlineAt malformed",
+      mutate: () =>
+        db.doc("calls/call_1").update({ acceptedJoinDeadlineAt: 12345 }),
+    },
+  ];
+
+  for (const testCase of cases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await startCall();
+    await acceptCall();
+    await testCase.mutate();
+    const before = await captureMutationState();
+
+    await assertCallError(
+      ERROR_CODES.transactionFailed,
+      reportMedia({
         mediaState: "preparing",
         request: mediaRequest("call_1", "preparing", testCase.name),
       }),
@@ -1748,6 +1977,158 @@ test("active report may proceed with elapsed safety expiry", async () => {
   assert.equal(result.mediaState, "reconnecting");
   assert.equal(result.lifecycleState, "active");
   assert.equal(millis(result.reconnectDeadlineAt), fixedMs() + RECONNECT_GRACE_DURATION_MS);
+});
+
+test("active media reports reject malformed temporal fields without writes", async () => {
+  const fieldDelete = admin.firestore.FieldValue.delete();
+  const cases = [
+    {
+      name: "activeAt malformed",
+      mutate: () => db.doc("calls/call_1").update({ activeAt: "bad" }),
+    },
+    {
+      name: "reconnectDeadlineAt ISO string",
+      mutate: () =>
+        db.doc("calls/call_1").update({
+          reconnectDeadlineAt: new Date(
+            fixedMs() + RECONNECT_GRACE_DURATION_MS,
+          ).toISOString(),
+        }),
+    },
+    {
+      name: "reconnectDeadlineAt number",
+      mutate: () =>
+        db
+          .doc("calls/call_1")
+          .update({ reconnectDeadlineAt: fixedMs() + RECONNECT_GRACE_DURATION_MS }),
+    },
+    {
+      name: "reconnectDeadlineAt missing",
+      mutate: () =>
+        db
+          .doc("calls/call_1")
+          .update({ reconnectDeadlineAt: fieldDelete }),
+    },
+    {
+      name: "reconnectDeadlineAt plain object",
+      mutate: () =>
+        db
+          .doc("calls/call_1")
+          .update({ reconnectDeadlineAt: { timestampMillis: fixedMs() } }),
+    },
+  ];
+
+  for (const testCase of cases) {
+    await clearFirestore();
+    await seedUsers("caller", "callee");
+    await promoteCallToActive();
+    await testCase.mutate();
+    const before = await captureMutationState();
+
+    await assertCallError(
+      ERROR_CODES.transactionFailed,
+      reportMedia({
+        mediaState: "reconnecting",
+        request: mediaRequest("call_1", "reconnecting", testCase.name),
+      }),
+    );
+    await assertMutationStateUnchanged(before);
+  }
+});
+
+test("nonpersistable malformed active timestamps reject without writes", async () => {
+  const cases = [
+    {
+      name: "invalid activeAt Date",
+      call: { activeAt: new Date(Number.NaN), reconnectDeadlineAt: null },
+    },
+    {
+      name: "invalid reconnect Date",
+      call: {
+        activeAt: FIXED_NOW,
+        reconnectDeadlineAt: new Date(Number.NaN),
+      },
+    },
+    {
+      name: "invalid reconnect toMillis",
+      call: {
+        activeAt: FIXED_NOW,
+        reconnectDeadlineAt: { toMillis: () => Number.NaN },
+      },
+    },
+    {
+      name: "throwing reconnect toMillis",
+      call: {
+        activeAt: FIXED_NOW,
+        reconnectDeadlineAt: {
+          toMillis: () => {
+            throw new Error("bad timestamp");
+          },
+        },
+      },
+    },
+  ];
+
+  for (const testCase of cases) {
+    const fake = fakeDbWithData(fakeActiveMediaReportData(testCase.call));
+
+    await assertCallError(
+      ERROR_CODES.transactionFailed,
+      () => reportParticipantMediaV2({
+        db: fake.db,
+        authUid: "caller",
+        request: mediaRequest("call_1", "reconnecting", testCase.name),
+        now: FIXED_NOW,
+      }),
+    );
+    assert.deepEqual(fake.writes, []);
+  }
+});
+
+test("valid existing reconnect deadline is preserved until both participants join", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const existingDeadline = new Date(fixedMs() + RECONNECT_GRACE_DURATION_MS);
+  await db
+    .doc("calls/call_1")
+    .update({ reconnectDeadlineAt: existingDeadline });
+  const beforeVersion = (await requiredData("calls/call_1")).version;
+
+  const result = await reportMedia({
+    mediaState: "reconnecting",
+    request: mediaRequest("call_1", "reconnecting", "preserve_deadline"),
+  });
+
+  const call = await requiredData("calls/call_1");
+  assert.equal(result.callVersion, beforeVersion);
+  assert.equal(millis(result.reconnectDeadlineAt), existingDeadline.getTime());
+  assert.equal(millis(call.reconnectDeadlineAt), existingDeadline.getTime());
+  assert.equal(call.version, beforeVersion);
+});
+
+test("valid existing reconnect deadline clears when both participants join", async () => {
+  await seedUsers("caller", "callee");
+  await promoteCallToActive();
+  const existingDeadline = new Date(fixedMs() + RECONNECT_GRACE_DURATION_MS);
+  await db.doc("calls/call_1").update({
+    reconnectDeadlineAt: existingDeadline,
+  });
+  await db.doc("calls/call_1/participants/caller").update({
+    mediaState: "reconnecting",
+    mediaVersion: 2,
+  });
+  const beforeVersion = (await requiredData("calls/call_1")).version;
+
+  const result = await reportMedia({
+    mediaState: "joined",
+    request: mediaRequest("call_1", "joined", "clear_deadline"),
+  });
+
+  const call = await requiredData("calls/call_1");
+  assert.equal(result.callVersion, beforeVersion + 1);
+  assert.equal(result.reconnectDeadlineAt, null);
+  assert.equal(call.reconnectDeadlineAt, null);
+  assert.equal(call.version, beforeVersion + 1);
 });
 
 test("accepted call promotes to active only after both participants joined", async () => {
@@ -2307,6 +2688,118 @@ function assertNoPrivatePublicFields(value) {
 function sequencedCallIds(prefix) {
   let count = 0;
   return () => `${prefix}_${++count}`;
+}
+
+function fakeActiveMediaReportData(callOverrides = {}) {
+  return {
+    "calls/call_1": {
+      schemaVersion: 2,
+      callSystem: "v2",
+      lifecycleState: "active",
+      terminal: false,
+      version: 3,
+      callerUid: "caller",
+      calleeUid: "callee",
+      participantUids: ["caller", "callee"],
+      activeAt: FIXED_NOW,
+      reconnectDeadlineAt: null,
+      ...callOverrides,
+    },
+    "callOps/call_1": {
+      callId: "call_1",
+      latestOpsVersion: 3,
+      lockClaims: {
+        caller: {
+          uid: "caller",
+          fencingToken: 1,
+        },
+        callee: {
+          uid: "callee",
+          fencingToken: 1,
+        },
+      },
+    },
+    "calls/call_1/participants/caller": {
+      uid: "caller",
+      role: "caller",
+      mediaState: "joined",
+      mediaVersion: 1,
+    },
+    "calls/call_1/participants/callee": {
+      uid: "callee",
+      role: "callee",
+      mediaState: "joined",
+      mediaVersion: 1,
+    },
+    "activeCallLocks/caller": {
+      uid: "caller",
+      callId: "call_1",
+      state: "active",
+      expiresAt: FIXED_NOW,
+      fencingToken: 1,
+    },
+    "activeCallLocks/callee": {
+      uid: "callee",
+      callId: "call_1",
+      state: "active",
+      expiresAt: FIXED_NOW,
+      fencingToken: 1,
+    },
+  };
+}
+
+function fakeDbWithData(dataByPath) {
+  const writes = [];
+  const transaction = {
+    async get(ref) {
+      const exists = Object.prototype.hasOwnProperty.call(dataByPath, ref.path);
+      return {
+        id: ref.id,
+        exists,
+        data: () => dataByPath[ref.path],
+      };
+    },
+    create(ref, data) {
+      writes.push({ type: "create", path: ref.path, data });
+    },
+    set(ref, data) {
+      writes.push({ type: "set", path: ref.path, data });
+    },
+    update(ref, data) {
+      writes.push({ type: "update", path: ref.path, data });
+    },
+    delete(ref) {
+      writes.push({ type: "delete", path: ref.path });
+    },
+  };
+
+  function docRef(path) {
+    const segments = path.split("/");
+    return {
+      path,
+      id: segments[segments.length - 1],
+      collection(collectionId) {
+        return collectionRef(`${path}/${collectionId}`);
+      },
+    };
+  }
+
+  function collectionRef(path) {
+    return {
+      path,
+      doc(id) {
+        return docRef(`${path}/${id}`);
+      },
+    };
+  }
+
+  return {
+    writes,
+    db: {
+      collection: collectionRef,
+      runTransaction: (callback) => callback(transaction),
+    },
+  };
 }
 
 function normalizeFirestoreData(value) {
