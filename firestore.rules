@@ -18,6 +18,38 @@ service cloud.firestore {
           data.connectedUserId == request.auth.uid)
       );
     }
+
+    function isV2Call(data) {
+      return data.keys().hasAny(['callSystem']) &&
+        data.callSystem == "v2";
+    }
+
+    function hasExactV2Participants(data) {
+      return data.keys().hasAll(['callerUid', 'calleeUid', 'participantUids']) &&
+        data.callerUid is string &&
+        data.calleeUid is string &&
+        data.participantUids is list &&
+        data.participantUids.size() == 2 &&
+        data.participantUids.hasAll([data.callerUid, data.calleeUid]);
+    }
+
+    function isV2CallParticipant(data, uid) {
+      return isV2Call(data) &&
+        hasExactV2Participants(data) &&
+        data.participantUids.hasAny([uid]);
+    }
+
+    function canReadV2Call(data) {
+      return isSignedIn() &&
+        isV2CallParticipant(data, request.auth.uid);
+    }
+
+    function canReadV2Participant(callId, participantUid) {
+      let call = get(/databases/$(database)/documents/calls/$(callId)).data;
+      return isSignedIn() &&
+        isV2CallParticipant(call, request.auth.uid) &&
+        isV2CallParticipant(call, participantUid);
+    }
     
     // ✅ Users Collection
     match /users/{userId} {
@@ -129,6 +161,37 @@ service cloud.firestore {
       allow update, delete: if request.auth != null
         && (resource.data.fromUid == request.auth.uid
           || resource.data.toUid == request.auth.uid);
+    }
+
+    // Helperly Call System V2 public read boundary.
+    // V2 writes are Admin SDK only; media and heartbeat changes must go
+    // through guarded callable functions.
+    match /calls/{callId} {
+      allow read: if canReadV2Call(resource.data);
+      allow create, update, delete: if false;
+
+      match /participants/{participantUid} {
+        allow read: if canReadV2Participant(callId, participantUid);
+        allow create, update, delete: if false;
+      }
+    }
+
+    // Helperly Call System V2 private operational data. These documents
+    // contain lock claims, fencing tokens, commands, idempotency records,
+    // dispatch state, execution state, and diagnostics.
+    match /callOps/{callId} {
+      allow read, write: if false;
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    match /activeCallLocks/{uid} {
+      allow read, write: if false;
+    }
+
+    match /callCommandKeys/{key} {
+      allow read, write: if false;
     }
 
     // ✅ Chats

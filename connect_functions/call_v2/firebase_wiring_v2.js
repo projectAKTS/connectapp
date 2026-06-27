@@ -19,6 +19,10 @@ const {
 const {
   createCloudTasksPublisherV2,
 } = require("./cloud_tasks_adapter_v2");
+const {
+  TASK_OUTBOX_RECOVERY_DEFAULT_LIMIT,
+  recoverPendingTaskOutboxV2,
+} = require("./deployment_readiness_v2");
 
 const CALLABLE_SERVICE_NAMES = Object.freeze([
   "startCallV2",
@@ -88,6 +92,8 @@ function createCallV2FirebaseWiring({
   const taskPublisherFactory =
     services.createCloudTasksPublisher || createConfiguredCloudTasksPublisherV2;
   const dispatchService = services.dispatchTaskOutboxV2 || dispatchTaskOutboxV2;
+  const recoveryService =
+    services.recoverPendingTaskOutboxV2 || recoverPendingTaskOutboxV2;
   const timeoutHandlerFactory =
     services.createTimeoutTaskHttpHandlerV2 || createTimeoutTaskHttpHandlerV2;
 
@@ -138,6 +144,37 @@ function createCallV2FirebaseWiring({
         ERROR_CODES.transactionFailed,
         `Call V2 outbox dispatch requires retry: ${result.status}.`,
       );
+    },
+    async handleScheduledOutboxRecovery() {
+      if (!resolveBooleanConfig(config, "callV2InternalTasksEnabled")) {
+        return Object.freeze({
+          status: "disabled",
+          examined: 0,
+          dispatched: 0,
+          alreadyDispatched: 0,
+          deadLetter: 0,
+          busy: 0,
+          retryable: 0,
+          stale: 0,
+          failed: 0,
+        });
+      }
+      const publisher = taskPublisherFactory({
+        cloudTasksClient,
+        config,
+      });
+      const result = await recoveryService({
+        db,
+        now: nowProvider,
+        limit: TASK_OUTBOX_RECOVERY_DEFAULT_LIMIT,
+        dispatchTask: dispatchService,
+        generateClaimToken: claimTokenGenerator,
+        publisher,
+      });
+      return Object.freeze({
+        status: "completed",
+        ...result,
+      });
     },
     createTimeoutHttpHandler() {
       const normalizedHandler = timeoutHandlerFactory({

@@ -341,6 +341,96 @@ test("dispatcher trigger success and retry classifications are stable", async ()
   }
 });
 
+test("scheduled recovery does nothing when disabled", async () => {
+  let recoveryCalls = 0;
+  let publisherCalls = 0;
+  const wiring = createCallV2FirebaseWiring({
+    db: {},
+    config: config({ callV2InternalTasksEnabled: false }),
+    now: () => FIXED_NOW,
+    services: {
+      createCloudTasksPublisher() {
+        publisherCalls += 1;
+        return {};
+      },
+      async recoverPendingTaskOutboxV2() {
+        recoveryCalls += 1;
+      },
+    },
+  });
+
+  const result = await wiring.handleScheduledOutboxRecovery();
+  assert.deepEqual(result, {
+    status: "disabled",
+    examined: 0,
+    dispatched: 0,
+    alreadyDispatched: 0,
+    deadLetter: 0,
+    busy: 0,
+    retryable: 0,
+    stale: 0,
+    failed: 0,
+  });
+  assert.equal(recoveryCalls, 0);
+  assert.equal(publisherCalls, 0);
+});
+
+test("scheduled recovery uses controlled publisher and never calls timeout processors", async () => {
+  const calls = [];
+  const wiring = createCallV2FirebaseWiring({
+    db: { marker: "db" },
+    config: config(),
+    now: () => FIXED_NOW,
+    services: {
+      createCloudTasksPublisher({ config: suppliedConfig }) {
+        calls.push(["publisher", suppliedConfig.tasksQueueId]);
+        return { marker: "publisher" };
+      },
+      async dispatchTaskOutboxV2() {
+        calls.push(["dispatch"]);
+      },
+      async recoverPendingTaskOutboxV2(request) {
+        calls.push([
+          "recovery",
+          request.db.marker,
+          request.publisher.marker,
+          typeof request.generateClaimToken(),
+        ]);
+        return {
+          examined: 1,
+          dispatched: 1,
+          alreadyDispatched: 0,
+          deadLetter: 0,
+          busy: 0,
+          retryable: 0,
+          stale: 0,
+          failed: 0,
+        };
+      },
+      async processCallTimeoutV2() {
+        throw new Error("timeout processor must not run");
+      },
+    },
+  });
+
+  const result = await wiring.handleScheduledOutboxRecovery();
+  assert.deepEqual(result, {
+    status: "completed",
+    examined: 1,
+    dispatched: 1,
+    alreadyDispatched: 0,
+    deadLetter: 0,
+    busy: 0,
+    retryable: 0,
+    stale: 0,
+    failed: 0,
+  });
+  assert.deepEqual(calls, [
+    ["publisher", "call-v2-timeouts"],
+    ["recovery", "db", "publisher", "string"],
+  ]);
+});
+
 test("Cloud Tasks production factory forwards controlled configuration", async () => {
   const calls = [];
   const publisher = createConfiguredCloudTasksPublisherV2({
@@ -486,6 +576,7 @@ test("index exports preserve legacy functions and expose no internal V2 services
     "onChatMessageCreated",
     "onAuthUserCreated",
     "healthCheck",
+    "recoverCallV2TaskOutbox",
     "getAgoraRtcToken",
   ]) {
     assert.notEqual(exported[legacy], undefined, legacy);

@@ -1556,6 +1556,17 @@ exports.executeCallTimeoutTaskV2 = onRequest(
   (req, res) => getCallV2TimeoutHttpHandler()(req, res)
 );
 
+exports.recoverCallV2TaskOutbox = onSchedule(
+  {
+    schedule: "every 5 minutes",
+    region: CALL_V2_REGION,
+    retryConfig: {
+      retryCount: 3,
+    },
+  },
+  () => getCallV2Wiring().handleScheduledOutboxRecovery()
+);
+
 /* ============================================================
    📞 AGORA CALL TOKEN
    ============================================================ */

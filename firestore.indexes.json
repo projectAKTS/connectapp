@@ -1,0 +1,45 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "taskOutbox",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "callCommandKeys",
+      "fieldPath": "ttlAt",
+      "ttl": true
+    },
+    {
+      "collectionGroup": "commands",
+      "fieldPath": "ttlAt",
+      "ttl": true
+    },
+    {
+      "collectionGroup": "taskOutbox",
+      "fieldPath": "ttlAt",
+      "ttl": true
+    },
+    {
+      "collectionGroup": "calls",
+      "fieldPath": "historyExpiresAt",
+      "ttl": true
+    },
+    {
+      "collectionGroup": "callOps",
+      "fieldPath": "opsRetentionExpiresAt",
+      "ttl": true
+    }
+  ]
+}
