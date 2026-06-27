@@ -28,6 +28,7 @@ service cloud.firestore {
       return data.keys().hasAll(['callerUid', 'calleeUid', 'participantUids']) &&
         data.callerUid is string &&
         data.calleeUid is string &&
+        data.callerUid != data.calleeUid &&
         data.participantUids is list &&
         data.participantUids.size() == 2 &&
         data.participantUids.hasAll([data.callerUid, data.calleeUid]);

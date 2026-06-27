@@ -17,6 +17,7 @@ function main() {
       targetUrl: readString("CALL_V2_TASKS_TARGET_URL"),
       serviceAccountEmail: readString("CALL_V2_TASKS_SERVICE_ACCOUNT_EMAIL"),
       audience: readString("CALL_V2_TASKS_AUDIENCE"),
+      allowDistinctAudience: readBoolean("CALL_V2_ALLOW_DISTINCT_AUDIENCE"),
     });
     process.stdout.write(`${JSON.stringify({
       ok: true,

@@ -35,47 +35,166 @@ async function recoverPendingTaskOutboxV2({
   }
   const boundedLimit = validateRecoveryLimit(limit);
   const counts = emptyRecoveryCounts();
+  const candidates = await selectRecoveryCandidates({ db, limit: boundedLimit });
 
-  for (const status of RECOVERABLE_OUTBOX_STATUSES) {
-    const remaining = boundedLimit - counts.examined;
-    if (remaining <= 0) {
-      break;
-    }
-    const snapshot = await db
-      .collectionGroup("taskOutbox")
-      .where("status", "==", status)
-      .orderBy("updatedAt", "asc")
-      .limit(remaining)
-      .get();
-    for (const doc of snapshot.docs) {
-      counts.examined += 1;
-      try {
-        const taskRef = doc.ref;
-        const callRef = taskRef.parent && taskRef.parent.parent;
-        const callId = callRef && callRef.id;
-        const taskId = taskRef.id;
-        if (!callId || !taskId) {
-          counts.failed += 1;
-          continue;
-        }
-        const result = await dispatchTask({
-          db,
-          request: {
-            callId,
-            taskId,
-          },
-          now,
-          generateClaimToken,
-          publisher,
-        });
-        incrementRecoveryCount(counts, result && result.status);
-      } catch {
+  for (const doc of candidates) {
+    counts.examined += 1;
+    try {
+      const taskRef = doc.ref;
+      const callRef = taskRef.parent && taskRef.parent.parent;
+      const callId = callRef && callRef.id;
+      const taskId = taskRef.id;
+      if (!callId || !taskId) {
         counts.failed += 1;
+        continue;
       }
+      const result = await dispatchTask({
+        db,
+        request: {
+          callId,
+          taskId,
+        },
+        now,
+        generateClaimToken,
+        publisher,
+      });
+      incrementRecoveryCount(counts, result && result.status);
+    } catch {
+      counts.failed += 1;
     }
   }
 
   return Object.freeze(counts);
+}
+
+async function selectRecoveryCandidates({ db, limit }) {
+  const snapshots = {};
+  for (const status of RECOVERABLE_OUTBOX_STATUSES) {
+    snapshots[status] = await queryRecoveryStatus({ db, status, limit });
+  }
+
+  if (limit === 1) {
+    return oldestCandidates(uniqueCandidateDocs([
+      ...snapshots.pending,
+      ...snapshots.dispatching,
+    ])).slice(0, 1);
+  }
+
+  const pendingBudget = Math.ceil(limit / 2);
+  const dispatchingBudget = Math.floor(limit / 2);
+  const selected = [];
+  const selectedPaths = new Set();
+
+  appendCandidateDocs({
+    target: selected,
+    selectedPaths,
+    docs: snapshots.pending,
+    count: pendingBudget,
+  });
+  appendCandidateDocs({
+    target: selected,
+    selectedPaths,
+    docs: snapshots.dispatching,
+    count: dispatchingBudget,
+  });
+
+  const remaining = limit - selected.length;
+  if (remaining > 0) {
+    appendCandidateDocs({
+      target: selected,
+      selectedPaths,
+      docs: oldestCandidates([
+        ...snapshots.pending,
+        ...snapshots.dispatching,
+      ]),
+      count: remaining,
+    });
+  }
+
+  return selected.slice(0, limit);
+}
+
+async function queryRecoveryStatus({ db, status, limit }) {
+  const snapshot = await db
+    .collectionGroup("taskOutbox")
+    .where("status", "==", status)
+    .orderBy("updatedAt", "asc")
+    .limit(limit)
+    .get();
+  return oldestCandidates(snapshot.docs || []);
+}
+
+function appendCandidateDocs({ target, selectedPaths, docs, count }) {
+  let added = 0;
+  for (const doc of docs) {
+    if (added >= count) {
+      break;
+    }
+    const path = taskDocumentPath(doc);
+    if (selectedPaths.has(path)) {
+      continue;
+    }
+    selectedPaths.add(path);
+    target.push(doc);
+    added += 1;
+  }
+}
+
+function uniqueCandidateDocs(docs) {
+  const selectedPaths = new Set();
+  const unique = [];
+  for (const doc of docs) {
+    const path = taskDocumentPath(doc);
+    if (selectedPaths.has(path)) {
+      continue;
+    }
+    selectedPaths.add(path);
+    unique.push(doc);
+  }
+  return unique;
+}
+
+function oldestCandidates(docs) {
+  return [...docs].sort((left, right) => {
+    const timeComparison =
+      candidateUpdatedAtMillis(left) - candidateUpdatedAtMillis(right);
+    if (timeComparison !== 0) {
+      return timeComparison;
+    }
+    return taskDocumentPath(left).localeCompare(taskDocumentPath(right));
+  });
+}
+
+function candidateUpdatedAtMillis(doc) {
+  const data = typeof doc.data === "function" ? doc.data() : {};
+  const updatedAt = data && data.updatedAt;
+  if (updatedAt && typeof updatedAt.toMillis === "function") {
+    return updatedAt.toMillis();
+  }
+  if (updatedAt instanceof Date) {
+    return updatedAt.getTime();
+  }
+  if (updatedAt && Number.isSafeInteger(updatedAt.seconds)) {
+    const nanos = Number.isSafeInteger(updatedAt.nanoseconds)
+      ? updatedAt.nanoseconds
+      : 0;
+    return (updatedAt.seconds * 1000) + Math.floor(nanos / 1000000);
+  }
+  if (typeof updatedAt === "number" && Number.isFinite(updatedAt)) {
+    return updatedAt;
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
+function taskDocumentPath(doc) {
+  if (doc.ref && typeof doc.ref.path === "string") {
+    return doc.ref.path;
+  }
+  const taskRef = doc.ref || {};
+  const taskId = taskRef.id || "";
+  const callRef = taskRef.parent && taskRef.parent.parent;
+  const callId = callRef && callRef.id ? callRef.id : "";
+  return `callOps/${callId}/taskOutbox/${taskId}`;
 }
 
 function validateCallV2DeploymentConfig({
@@ -88,6 +207,7 @@ function validateCallV2DeploymentConfig({
   targetUrl,
   serviceAccountEmail,
   audience,
+  allowDistinctAudience = false,
 }) {
   const client = clientEnabled === true;
   const internal = internalTasksEnabled === true;
@@ -113,6 +233,11 @@ function validateCallV2DeploymentConfig({
   requireBoundedIdentifier(queueId, "queueId");
   requireHttpsUrl(targetUrl, "targetUrl");
   requireHttpsUrl(audience, "audience");
+  requireAudienceConsistency({
+    targetUrl,
+    audience,
+    allowDistinctAudience,
+  });
   requireServiceAccountEmail(serviceAccountEmail);
 
   return Object.freeze({
@@ -128,6 +253,7 @@ function validateCallV2DeploymentConfig({
       targetUrlConfigured: true,
       serviceAccountEmailConfigured: true,
       audienceConfigured: true,
+      distinctAudienceApproved: allowDistinctAudience === true,
     }),
   });
 }
@@ -190,6 +316,18 @@ function requireHttpsUrl(value, label) {
   }
 }
 
+function requireAudienceConsistency({
+  targetUrl,
+  audience,
+  allowDistinctAudience,
+}) {
+  if (allowDistinctAudience !== true && audience !== targetUrl) {
+    throw readinessError(
+      "OIDC audience must match targetUrl unless explicitly approved.",
+    );
+  }
+}
+
 function requireServiceAccountEmail(value) {
   if (
     typeof value !== "string" ||
@@ -223,6 +361,7 @@ function emptySanitizedConfig() {
     targetUrlConfigured: false,
     serviceAccountEmailConfigured: false,
     audienceConfigured: false,
+    distinctAudienceApproved: false,
   });
 }
 

@@ -8,6 +8,8 @@ V2 public call documents live at `calls/{callId}` and participant documents live
 
 Authenticated clients may read a V2 call only when their UID is one of the exact authoritative participants in `participantUids`. Authenticated participants may read both participant documents for the same V2 call. Clients may not create, update, or delete V2 call or participant documents.
 
+The rule boundary also requires `callerUid` and `calleeUid` to be distinct strings and requires `participantUids` to contain exactly those two role UIDs. Malformed duplicate role sets, such as `callerUid == calleeUid` plus an unrelated second `participantUids` entry, are denied and do not grant access to the unrelated UID or the duplicated role UID.
+
 These private operational paths deny all client reads and writes:
 
 - `callOps/{callId}`
@@ -65,6 +67,8 @@ Recovery queries only:
 - `pending`
 - `dispatching`
 
+Recovery fairly examines both statuses in every bounded batch. For limits greater than one, pending receives `ceil(limit / 2)` first-pass capacity and dispatching receives `floor(limit / 2)` first-pass capacity. Unused capacity from either status is reassigned by oldest candidate age. For limit one, recovery queries one candidate from each status and selects the oldest by `updatedAt`, with document path as a stable tie-breaker. This prevents old expired dispatch claims from being permanently starved by a sustained pending backlog.
+
 It does not recover:
 
 - `dispatched`
@@ -113,9 +117,13 @@ Rules:
 - `CALL_V2_ENABLED=true` while `CALL_V2_INTERNAL_TASKS_ENABLED=false` is invalid.
 - Internal tasks enabled requires explicit region, project ID, location, queue ID, target URL, service account email, and audience.
 - Target URL and audience must be absolute HTTPS URLs.
+- By default, OIDC audience must exactly equal the target URL.
+- A distinct HTTPS audience requires the explicit `allowDistinctAudience` deployment option, exposed in the CLI as `CALL_V2_ALLOW_DISTINCT_AUDIENCE=true`.
 - Service account email must be a valid service-account address.
 - No value is invented.
 - Returned readiness output is sanitized and does not include raw URLs, service account emails, credentials, or project values.
+
+Distinct audience approval is an explicit deployment decision. The validator does not infer, derive, or invent a production audience.
 
 CLI dry run:
 
@@ -142,7 +150,7 @@ The CLI reads explicit environment variables only as a deployment utility. It pe
 - Grant only required queue-enqueue permissions to the function runtime identity.
 - Grant only required endpoint-invocation permission to the OIDC service account.
 - Configure the target URL explicitly.
-- Configure the exact OIDC audience explicitly.
+- Configure the exact OIDC audience explicitly. If it differs from the target URL, set and review the explicit distinct-audience approval flag.
 - Configure TTL policies.
 - Configure the `taskOutbox(status, updatedAt)` collection-group index.
 - Keep both kill switches false.
@@ -216,3 +224,4 @@ Measurable gates:
 - Kill-switch owner is assigned.
 - Rollback owner is assigned.
 - No deploy was performed during Phase 2J.
+- No production values were added during Phase 2J.

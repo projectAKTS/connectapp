@@ -54,10 +54,24 @@ test("V2 call reads are participant-only", async () => {
   await assertFails(getDoc(unauthDoc("calls/call_v2")));
 });
 
+test("malformed duplicate role sets do not grant V2 call access", async () => {
+  await seedMalformedDuplicateRoleCall();
+
+  await assertFails(getDoc(callDoc("other", "call_malformed_roles")));
+  await assertFails(getDoc(callDoc("caller", "call_malformed_roles")));
+  await assertFails(getDoc(
+    userDoc("other", "calls/call_malformed_roles/participants/other"),
+  ));
+});
+
 test("V2 participant reads are visible only to call participants", async () => {
   for (const uid of ["caller", "callee"]) {
-    await assertSucceeds(getDoc(userDoc(uid, "calls/call_v2/participants/caller")));
-    await assertSucceeds(getDoc(userDoc(uid, "calls/call_v2/participants/callee")));
+    await assertSucceeds(getDoc(
+      userDoc(uid, "calls/call_v2/participants/caller"),
+    ));
+    await assertSucceeds(getDoc(
+      userDoc(uid, "calls/call_v2/participants/callee"),
+    ));
   }
   await assertFails(getDoc(userDoc("other", "calls/call_v2/participants/caller")));
   await assertFails(getDoc(userDoc("other", "calls/call_v2/participants/callee")));
@@ -132,6 +146,26 @@ async function seedV2Call() {
     await setDoc(
       doc(db, "calls/call_v2/participants/callee"),
       participantData("callee", "callee"),
+    );
+  });
+}
+
+async function seedMalformedDuplicateRoleCall() {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await setDoc(doc(db, "calls/call_malformed_roles"), {
+      ...v2CallData(),
+      callerUid: "caller",
+      calleeUid: "caller",
+      participantUids: ["caller", "other"],
+    });
+    await setDoc(
+      doc(db, "calls/call_malformed_roles/participants/caller"),
+      participantData("caller", "caller"),
+    );
+    await setDoc(
+      doc(db, "calls/call_malformed_roles/participants/other"),
+      participantData("other", "callee"),
     );
   });
 }

@@ -43,8 +43,8 @@ test("Firestore index configuration contains intended V2 TTL policies and recove
 
 test("outbox recovery queries only recoverable statuses with bounded deterministic queries", async () => {
   const db = fakeRecoveryDb({
-    pendingDocs: [fakeTaskDoc("call_a", "task_pending")],
-    dispatchingDocs: [fakeTaskDoc("call_b", "task_dispatching")],
+    pendingDocs: [fakeTaskDoc("call_a", "task_pending", 20)],
+    dispatchingDocs: [fakeTaskDoc("call_b", "task_dispatching", 10)],
   });
   const dispatchRequests = [];
   const result = await recoverPendingTaskOutboxV2({
@@ -72,7 +72,7 @@ test("outbox recovery queries only recoverable statuses with bounded determinist
       collectionGroup: "taskOutbox",
       status: "dispatching",
       orderBy: ["updatedAt", "asc"],
-      limit: 1,
+      limit: 2,
     },
   ]);
   assert.deepEqual(dispatchRequests, [
@@ -93,15 +93,185 @@ test("outbox recovery queries only recoverable statuses with bounded determinist
   assert.equal(JSON.stringify(result).includes("task_pending"), false);
 });
 
+test("outbox recovery fairly reserves capacity for pending and dispatching work", async () => {
+  let db = fakeRecoveryDb({
+    pendingDocs: [
+      fakeTaskDoc("call_p1", "pending_1", 20),
+      fakeTaskDoc("call_p2", "pending_2", 21),
+      fakeTaskDoc("call_p3", "pending_3", 22),
+      fakeTaskDoc("call_p4", "pending_4", 23),
+    ],
+    dispatchingDocs: [
+      fakeTaskDoc("call_d1", "dispatching_1", 1),
+      fakeTaskDoc("call_d2", "dispatching_2", 2),
+    ],
+  });
+  let requests = [];
+  await recoverPendingTaskOutboxV2({
+    db,
+    limit: 4,
+    dispatchTask: recordRequests(requests),
+    generateClaimToken: () => "claim",
+    publisher: {},
+  });
+  assert.deepEqual(requests.map((request) => request.taskId), [
+    "pending_1",
+    "pending_2",
+    "dispatching_1",
+    "dispatching_2",
+  ]);
+
+  db = fakeRecoveryDb({
+    pendingDocs: [fakeTaskDoc("call_p1", "pending_1", 30)],
+    dispatchingDocs: [
+      fakeTaskDoc("call_d1", "dispatching_1", 1),
+      fakeTaskDoc("call_d2", "dispatching_2", 2),
+      fakeTaskDoc("call_d3", "dispatching_3", 3),
+      fakeTaskDoc("call_d4", "dispatching_4", 4),
+    ],
+  });
+  requests = [];
+  await recoverPendingTaskOutboxV2({
+    db,
+    limit: 4,
+    dispatchTask: recordRequests(requests),
+    generateClaimToken: () => "claim",
+    publisher: {},
+  });
+  assert.deepEqual(requests.map((request) => request.taskId), [
+    "pending_1",
+    "dispatching_1",
+    "dispatching_2",
+    "dispatching_3",
+  ]);
+});
+
+test("outbox recovery limit one selects oldest recoverable candidate", async () => {
+  const db = fakeRecoveryDb({
+    pendingDocs: [fakeTaskDoc("call_p", "pending_newer", 20)],
+    dispatchingDocs: [fakeTaskDoc("call_d", "dispatching_older", 10)],
+  });
+  const requests = [];
+
+  const result = await recoverPendingTaskOutboxV2({
+    db,
+    limit: 1,
+    dispatchTask: recordRequests(requests),
+    generateClaimToken: () => "claim",
+    publisher: {},
+  });
+
+  assert.equal(result.examined, 1);
+  assert.deepEqual(requests.map((request) => request.taskId), [
+    "dispatching_older",
+  ]);
+});
+
+test("outbox recovery reassigns empty capacity without exceeding limit", async () => {
+  const db = fakeRecoveryDb({
+    pendingDocs: [
+      fakeTaskDoc("call_p1", "pending_1", 1),
+      fakeTaskDoc("call_p2", "pending_2", 2),
+      fakeTaskDoc("call_p3", "pending_3", 3),
+    ],
+  });
+  const requests = [];
+
+  const result = await recoverPendingTaskOutboxV2({
+    db,
+    limit: 4,
+    dispatchTask: recordRequests(requests),
+    generateClaimToken: () => "claim",
+    publisher: {},
+  });
+
+  assert.equal(result.examined, 3);
+  assert.deepEqual(requests.map((request) => request.taskId), [
+    "pending_1",
+    "pending_2",
+    "pending_3",
+  ]);
+});
+
+test("outbox recovery suppresses duplicate candidates and orders stable ties", async () => {
+  const duplicate = fakeTaskDoc("call_dup", "task_dup", 1);
+  const db = fakeRecoveryDb({
+    pendingDocs: [
+      duplicate,
+      duplicate,
+      fakeTaskDoc("call_z", "task_z", 5),
+      fakeTaskDoc("call_a", "task_a", 5),
+    ],
+  });
+  const requests = [];
+
+  const result = await recoverPendingTaskOutboxV2({
+    db,
+    limit: 4,
+    dispatchTask: recordRequests(requests),
+    generateClaimToken: () => "claim",
+    publisher: {},
+  });
+
+  assert.equal(result.examined, 3);
+  assert.deepEqual(requests.map((request) => request.taskId), [
+    "task_dup",
+    "task_a",
+    "task_z",
+  ]);
+});
+
+test("outbox recovery counts dispatcher outcomes and excludes terminal outbox statuses", async () => {
+  const db = fakeRecoveryDb({
+    pendingDocs: [fakeTaskDoc("call_p", "pending_retry", 1)],
+    dispatchingDocs: [
+      fakeTaskDoc("call_d1", "dispatching_busy", 1),
+      fakeTaskDoc("call_d2", "dispatching_recovered", 2),
+    ],
+    dispatchedDocs: [fakeTaskDoc("call_done", "dispatched_ignored", 1)],
+    deadLetterDocs: [fakeTaskDoc("call_dead", "dead_ignored", 1)],
+  });
+  const result = await recoverPendingTaskOutboxV2({
+    db,
+    limit: 4,
+    dispatchTask: async ({ request }) => {
+      if (request.taskId === "dispatching_busy") {
+        return { status: "busy" };
+      }
+      if (request.taskId === "dispatching_recovered") {
+        return { status: "dispatched" };
+      }
+      return { status: "retryable" };
+    },
+    generateClaimToken: () => "claim",
+    publisher: {},
+  });
+
+  assert.deepEqual(db.queryLog.map((query) => query.status), [
+    "pending",
+    "dispatching",
+  ]);
+  assert.deepEqual(result, {
+    examined: 3,
+    dispatched: 1,
+    alreadyDispatched: 0,
+    deadLetter: 0,
+    busy: 1,
+    retryable: 1,
+    stale: 0,
+    failed: 0,
+  });
+});
+
 test("outbox recovery isolates failures and aggregates dispatcher outcomes only", async () => {
   const db = fakeRecoveryDb({
     pendingDocs: [
-      fakeTaskDoc("call_a", "dispatch"),
-      fakeTaskDoc("call_b", "already"),
-      fakeTaskDoc("call_c", "dead"),
-      fakeTaskDoc("call_d", "retry"),
-      fakeTaskDoc("call_e", "stale"),
-      fakeTaskDoc("call_f", "throw"),
+      fakeTaskDoc("call_a", "dispatch", 1),
+      fakeTaskDoc("call_b", "already", 2),
+      fakeTaskDoc("call_c", "dead", 3),
+      fakeTaskDoc("call_d", "retry", 4),
+      fakeTaskDoc("call_e", "stale", 5),
+      fakeTaskDoc("call_f", "throw", 6),
       { ref: { id: "malformed", parent: {} } },
     ],
   });
@@ -128,6 +298,7 @@ test("outbox recovery isolates failures and aggregates dispatcher outcomes only"
   });
 
   assert.equal(db.queryLog[0].limit, TASK_OUTBOX_RECOVERY_MAX_LIMIT);
+  assert.equal(db.queryLog[1].limit, TASK_OUTBOX_RECOVERY_MAX_LIMIT);
   assert.deepEqual(result, {
     examined: 7,
     dispatched: 1,
@@ -183,9 +354,27 @@ test("deployment validation requires complete explicit internal task configurati
     targetUrlConfigured: true,
     serviceAccountEmailConfigured: true,
     audienceConfigured: true,
+    distinctAudienceApproved: false,
   });
   assert.equal(JSON.stringify(result).includes("https://"), false);
   assert.equal(JSON.stringify(result).includes("@"), false);
+});
+
+test("deployment validation requires explicit approval for distinct audience", () => {
+  assert.throws(
+    () => validateCallV2DeploymentConfig(completeConfig({
+      audience: "https://tasks.example.com/call-v2",
+    })),
+    /audience/,
+  );
+
+  const result = validateCallV2DeploymentConfig(completeConfig({
+    audience: "https://tasks.example.com/call-v2",
+    allowDistinctAudience: true,
+  }));
+  assert.equal(result.sanitizedConfig.distinctAudienceApproved, true);
+  assert.equal(JSON.stringify(result).includes("example.com"), false);
+  assert.equal(JSON.stringify(result).includes("tasks.example.com"), false);
 });
 
 test("deployment validation script is network-free and prints sanitized output", () => {
@@ -214,6 +403,27 @@ test("deployment validation script is network-free and prints sanitized output",
   const parsed = JSON.parse(result.stdout);
   assert.equal(parsed.ok, false);
   assert.equal(JSON.stringify(parsed).includes("https://"), false);
+
+  result = spawnSync(process.execPath, [script], {
+    encoding: "utf8",
+    env: {
+      PATH: process.env.PATH,
+      CALL_V2_INTERNAL_TASKS_ENABLED: "true",
+      CALL_V2_REGION: "us-central1",
+      CALL_V2_TASKS_PROJECT_ID: "project-id",
+      CALL_V2_TASKS_LOCATION: "us-central1",
+      CALL_V2_TASKS_QUEUE_ID: "queue-id",
+      CALL_V2_TASKS_TARGET_URL: "https://target.example.com/task",
+      CALL_V2_TASKS_SERVICE_ACCOUNT_EMAIL:
+        "tasks@project-id.iam.gserviceaccount.com",
+      CALL_V2_TASKS_AUDIENCE: "https://audience.example.com/task",
+      CALL_V2_ALLOW_DISTINCT_AUDIENCE: "true",
+    },
+  });
+  assert.equal(result.status, 0);
+  const approved = JSON.parse(result.stdout);
+  assert.equal(approved.sanitizedConfig.distinctAudienceApproved, true);
+  assert.equal(JSON.stringify(approved).includes("example.com"), false);
 });
 
 function ttlTargets(indexes) {
@@ -223,10 +433,17 @@ function ttlTargets(indexes) {
     .sort();
 }
 
-function fakeRecoveryDb({ pendingDocs = [], dispatchingDocs = [] }) {
+function fakeRecoveryDb({
+  pendingDocs = [],
+  dispatchingDocs = [],
+  dispatchedDocs = [],
+  deadLetterDocs = [],
+}) {
   const docsByStatus = {
     pending: pendingDocs,
     dispatching: dispatchingDocs,
+    dispatched: dispatchedDocs,
+    dead_letter: deadLetterDocs,
   };
   const queryLog = [];
   return {
@@ -272,10 +489,16 @@ function fakeRecoveryDb({ pendingDocs = [], dispatchingDocs = [] }) {
   };
 }
 
-function fakeTaskDoc(callId, taskId) {
+function fakeTaskDoc(callId, taskId, updatedAt = 1) {
   return {
+    data() {
+      return {
+        updatedAt,
+      };
+    },
     ref: {
       id: taskId,
+      path: `callOps/${callId}/taskOutbox/${taskId}`,
       parent: {
         id: "taskOutbox",
         parent: {
@@ -283,6 +506,13 @@ function fakeTaskDoc(callId, taskId) {
         },
       },
     },
+  };
+}
+
+function recordRequests(requests, status = "dispatched") {
+  return async ({ request }) => {
+    requests.push(request);
+    return { status };
   };
 }
 
