@@ -1,17 +1,8 @@
 # Review Handoff
 
 Phase: 3A
-Status: pending
+Status: revision_required
 
-The automated workflow will replace this file after completing `NEXT_TASK.md`.
+Automated validation failed. Inspect:
 
-Required fields:
-- starting SHA
-- implementation SHA
-- branch-tip SHA
-- exact changed files
-- implementation summary
-- backend and Flutter validation results
-- safety confirmations
-- remaining risks
-- next-phase recommendation
+https://github.com/projectAKTS/connectapp/actions/runs/28330515574
