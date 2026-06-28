@@ -86,11 +86,11 @@ jobs:
           output-file: /tmp/phase3a-codex-final.md
           prompt: |
             Read AGENTS.md, docs/agent-loop/STATE.json, and docs/agent-loop/NEXT_TASK.md.
-            Reimplement only the active Phase 3A task after the previous uncommitted attempt was discarded by validation safety.
+            Reimplement only the active Phase 3A task. The previous attempt passed all 234 backend tests but was discarded only because generated Dart files needed formatting.
             Modify only lib/call_v2/**, test/call_v2/**, docs/call-v2/**, and pubspec files when genuinely required.
             Do not modify legacy call code, backend code, native code, Firebase configuration, workflows, AGENTS.md, or docs/agent-loop/**.
             Do not deploy, contact production services, enable live settings, commit, or push.
-            Run focused Flutter formatting, analysis, and tests before finishing.
+            Before finishing, run dart format on lib/call_v2 and test/call_v2, then focused Flutter analysis and tests.
             Leave implementation changes uncommitted. Never print secrets.
 
       - name: Remove Codex runtime metadata
@@ -121,6 +121,19 @@ jobs:
             esac
           done
           printf '%s\n' "${files[@]}"
+
+      - name: Auto-format generated Dart
+        shell: bash
+        run: |
+          dart format lib/call_v2 test/call_v2
+          dart format --output=none --set-exit-if-changed lib/call_v2 test/call_v2
+
+      - name: Re-pin Node 20 after Codex
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: connect_functions/package-lock.json
 
       - name: Run backend and Flutter validation
         id: validation
