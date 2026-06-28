@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "branch": "call-v2",
+  "phase": "2K",
+  "status": "task_ready",
+  "accepted_checkpoint_sha": "dd738000c0dfbcdd321860af7d590fb64be85044",
+  "starting_sha": "dd738000c0dfbcdd321860af7d590fb64be85044",
+  "task_file": "docs/agent-loop/NEXT_TASK.md",
+  "handoff_file": "docs/agent-loop/HANDOFF.md",
+  "code_commit_sha": null,
+  "ending_sha": null,
+  "changed_files": [],
+  "validation": {
+    "node_version": null,
+    "check": null,
+    "deployment_readiness": null,
+    "rules_tests": null,
+    "emulator_runs": [],
+    "total_tests": null,
+    "index_syntax_check": null
+  },
+  "safety": {
+    "deployed": false,
+    "production_services_contacted": false,
+    "kill_switches_enabled": false,
+    "production_values_invented": false
+  },
+  "review": {
+    "decision": null,
+    "notes": null
+  }
+}
