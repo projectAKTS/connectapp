@@ -1,38 +1,23 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "2L",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "adc42c96b75dbf64bb41ee5eb52ce6e4dcd1c3c8",
-  "starting_sha": "2c900daa013dad50ad2ae0fbcf18944dea329c11",
+  "phase": "2M",
+  "status": "task_ready",
+  "accepted_checkpoint_sha": "060c3b2dd8f1a47e053d98d2ab1962598126cd3e",
+  "starting_sha": "65d29d79117ef8f92cafe2480458948e1f2761c2",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "060c3b2dd8f1a47e053d98d2ab1962598126cd3e",
-  "ending_sha": "SELF",
-  "changed_files": [
-    ".agent-codex-final.md",
-    "connect_functions/call_v2/deployment_readiness_v2.js",
-    "connect_functions/call_v2/firebase_wiring_v2.js",
-    "connect_functions/call_v2/observability_v2.js",
-    "connect_functions/call_v2/validate_deployment_v2.js",
-    "connect_functions/index.js",
-    "connect_functions/test/call_v2/deployment_readiness_v2.test.js",
-    "connect_functions/test/call_v2/firebase_wiring_v2.test.js",
-    "connect_functions/test/call_v2/observability_v2.test.js",
-    "docs/call-v2/PHASE_2L_CANARY_OBSERVABILITY.md"
-  ],
+  "code_commit_sha": null,
+  "ending_sha": null,
+  "changed_files": [],
   "validation": {
-    "node_version": "20",
-    "check": "passed",
-    "deployment_readiness": "passed",
-    "rules_tests": "passed",
-    "emulator_runs": [
-      "passed",
-      "passed",
-      "passed"
-    ],
+    "node_version": null,
+    "check": null,
+    "deployment_readiness": null,
+    "rules_tests": null,
+    "emulator_runs": [],
     "total_tests": null,
-    "index_syntax_check": "passed"
+    "index_syntax_check": null
   },
   "safety": {
     "deployed": false,
@@ -42,6 +27,6 @@
   },
   "review": {
     "decision": null,
-    "notes": null
+    "notes": "Phase 2L accepted."
   }
 }
