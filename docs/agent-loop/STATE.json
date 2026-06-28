@@ -2,22 +2,32 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "2M",
-  "status": "revision_required",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "060c3b2dd8f1a47e053d98d2ab1962598126cd3e",
   "starting_sha": "65d29d79117ef8f92cafe2480458948e1f2761c2",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
+  "code_commit_sha": "817b3c543866dada00f7b1c1ae6a60c89d50c4c0",
   "ending_sha": "SELF",
-  "changed_files": [],
+  "changed_files": [
+    "connect_functions/call_v2/deployment_preflight_v2.js",
+    "connect_functions/call_v2/preflight_call_v2.js",
+    "connect_functions/package.json",
+    "connect_functions/test/call_v2/deployment_preflight_v2.test.js",
+    "docs/call-v2/PHASE_2M_FINAL_PREFLIGHT.md"
+  ],
   "validation": {
-    "node_version": null,
-    "check": "failed",
-    "deployment_readiness": null,
-    "rules_tests": null,
-    "emulator_runs": [],
+    "node_version": "20",
+    "check": "passed",
+    "deployment_readiness": "passed",
+    "rules_tests": "passed",
+    "emulator_runs": [
+      "passed",
+      "passed",
+      "passed"
+    ],
     "total_tests": null,
-    "index_syntax_check": null
+    "index_syntax_check": "passed"
   },
   "safety": {
     "deployed": false,
@@ -26,7 +36,7 @@
     "production_values_invented": false
   },
   "review": {
-    "decision": "revision_required",
-    "notes": "Automated validation failed. Inspect https://github.com/projectAKTS/connectapp/actions/runs/28313346614"
+    "decision": null,
+    "notes": null
   }
 }
