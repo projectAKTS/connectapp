@@ -2,9 +2,9 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "2M",
-  "status": "ready_for_review",
+  "status": "revision_required",
   "accepted_checkpoint_sha": "060c3b2dd8f1a47e053d98d2ab1962598126cd3e",
-  "starting_sha": "65d29d79117ef8f92cafe2480458948e1f2761c2",
+  "starting_sha": "817b3c543866dada00f7b1c1ae6a60c89d50c4c0",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
   "code_commit_sha": "817b3c543866dada00f7b1c1ae6a60c89d50c4c0",
@@ -36,7 +36,7 @@
     "production_values_invented": false
   },
   "review": {
-    "decision": null,
-    "notes": null
+    "decision": "revision_required",
+    "notes": "External review found that rolloutMode is an arbitrary string and can echo unsafe raw values into helper reports and CLI output. Harden rollout metadata allowlisting and numeric bounds before acceptance."
   }
 }
