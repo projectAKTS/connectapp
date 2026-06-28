@@ -11,7 +11,8 @@
     "test:call-v2:rules": "firebase --project demo-helperly-call-v2-rules --config ../firebase.json emulators:exec --only firestore \"node --test test/call_v2/firestore_rules_v2.test.js\"",
     "test:call-v2:emulator": "firebase --project demo-helperly-call-v2 --config ../firebase.json emulators:exec --only firestore \"npm run test:call-v2\"",
     "check:call-v2": "node --check call_v2/*.js && node --check test/call_v2/*.js",
-    "validate:call-v2:deployment": "node call_v2/validate_deployment_v2.js"
+    "validate:call-v2:deployment": "node call_v2/validate_deployment_v2.js",
+    "preflight:call-v2": "node call_v2/preflight_call_v2.js"
   },
   "dependencies": {
     "@google-cloud/tasks": "^6.2.3",
