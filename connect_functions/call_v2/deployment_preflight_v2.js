@@ -26,6 +26,9 @@ const BLOCKER_CODES = Object.freeze({
   operational_owner_missing: "operational_owner_missing",
   rollback_owner_missing: "rollback_owner_missing",
   rollout_mode_incomplete: "rollout_mode_incomplete",
+  rollout_mode_invalid: "rollout_mode_invalid",
+  rollout_percentage_invalid: "rollout_percentage_invalid",
+  rollout_allowlist_count_invalid: "rollout_allowlist_count_invalid",
   staff_claims_missing: "staff_claims_missing",
   emulator_runs_missing: "emulator_runs_missing",
   rules_tests_missing: "rules_tests_missing",
@@ -138,6 +141,18 @@ function evaluatePreflight(input) {
   if (!checks.rolloutModeApproved) {
     blockerCodes.push(BLOCKER_CODES.rollout_mode_incomplete);
   }
+  const rolloutMode = sanitizeRolloutMode(input.rolloutMode);
+  const rolloutPercentage = sanitizeBoundedInteger(input.rolloutPercentage, 0, 100);
+  const rolloutAllowlistCount = sanitizeBoundedInteger(input.rolloutAllowlistCount, 0, 1000);
+  if (rolloutMode === undefined && input.rolloutMode !== undefined) {
+    blockerCodes.push(BLOCKER_CODES.rollout_mode_invalid);
+  }
+  if (rolloutPercentage === undefined && input.rolloutPercentage !== undefined) {
+    blockerCodes.push(BLOCKER_CODES.rollout_percentage_invalid);
+  }
+  if (rolloutAllowlistCount === undefined && input.rolloutAllowlistCount !== undefined) {
+    blockerCodes.push(BLOCKER_CODES.rollout_allowlist_count_invalid);
+  }
   if (checks.staffClaimsRequired && !checks.staffClaimsManaged) {
     blockerCodes.push(BLOCKER_CODES.staff_claims_missing);
   }
@@ -157,9 +172,9 @@ function evaluatePreflight(input) {
     stageNames: STAGE_NAMES,
     checks,
     blockerCodes: Object.freeze(blockerCodes),
-    rolloutMode: sanitizeString(input.rolloutMode),
-    rolloutPercentage: sanitizeOptionalInteger(input.rolloutPercentage),
-    rolloutAllowlistCount: sanitizeOptionalInteger(input.rolloutAllowlistCount),
+    rolloutMode,
+    rolloutPercentage,
+    rolloutAllowlistCount,
   };
 }
 
@@ -186,12 +201,26 @@ function isPlainObject(value) {
   return value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype;
 }
 
-function sanitizeString(value) {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+const CONTROLLED_ROLLOUT_MODES = Object.freeze([
+  "internal_only",
+  "staff_only",
+  "percentage",
+  "disabled",
+]);
+
+function sanitizeRolloutMode(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  return CONTROLLED_ROLLOUT_MODES.includes(normalized) ? normalized : undefined;
 }
 
-function sanitizeOptionalInteger(value) {
-  return Number.isSafeInteger(value) ? value : undefined;
+function sanitizeBoundedInteger(value, min, max) {
+  if (!Number.isSafeInteger(value) || value < min || value > max) {
+    return undefined;
+  }
+  return value;
 }
 
 module.exports = {

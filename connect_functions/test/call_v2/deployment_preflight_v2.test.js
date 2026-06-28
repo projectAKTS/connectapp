@@ -58,7 +58,7 @@ test("complete sanitized input is ready for human approval", () => {
     operationalOwnerAssigned: true,
     rollbackOwnerAssigned: true,
     rolloutModeApproved: true,
-    rolloutMode: "staff",
+    rolloutMode: "staff_only",
     rolloutPercentage: 0,
     rolloutAllowlistCount: 0,
     staffClaimsRequired: true,
@@ -69,9 +69,67 @@ test("complete sanitized input is ready for human approval", () => {
   });
   assert.equal(report.status, "ready_for_human_approval");
   assert.deepEqual(report.blockerCodes, []);
-  assert.equal(report.rolloutMode, "staff");
+  assert.equal(report.rolloutMode, "staff_only");
   assert.equal(report.rolloutPercentage, 0);
   assert.equal(report.rolloutAllowlistCount, 0);
+});
+
+test("controlled rollout metadata is allowlisted and normalized", () => {
+  const report = createDeploymentPreflightReportV2({
+    codeOnlyValidationPassed: true,
+    productionKillSwitchesFalse: true,
+    deploymentValidatorPassed: true,
+    firestoreIndexReady: true,
+    ttlPoliciesReady: true,
+    cloudTasksReady: true,
+    oidcReady: true,
+    observabilityReady: true,
+    operationalOwnerAssigned: true,
+    rollbackOwnerAssigned: true,
+    rolloutModeApproved: true,
+    rolloutMode: "  INTERNAL_ONLY  ",
+    rolloutPercentage: 100,
+    rolloutAllowlistCount: 12,
+    staffClaimsRequired: false,
+    emulatorRunsPassed: true,
+    rulesTestsPassed: true,
+    privateDataFindingResolved: true,
+  });
+  assert.equal(report.status, "ready_for_human_approval");
+  assert.equal(report.rolloutMode, "internal_only");
+  assert.equal(report.rolloutPercentage, 100);
+  assert.equal(report.rolloutAllowlistCount, 12);
+});
+
+test("invalid rollout metadata is not echoed and blocks readiness", () => {
+  const report = createDeploymentPreflightReportV2({
+    codeOnlyValidationPassed: true,
+    productionKillSwitchesFalse: true,
+    deploymentValidatorPassed: true,
+    firestoreIndexReady: true,
+    ttlPoliciesReady: true,
+    cloudTasksReady: true,
+    oidcReady: true,
+    observabilityReady: true,
+    operationalOwnerAssigned: true,
+    rollbackOwnerAssigned: true,
+    rolloutModeApproved: true,
+    rolloutMode: "https://example.test/rollout?token=secret@example.com",
+    rolloutPercentage: 101,
+    rolloutAllowlistCount: -1,
+    staffClaimsRequired: false,
+    emulatorRunsPassed: true,
+    rulesTestsPassed: true,
+    privateDataFindingResolved: true,
+  });
+  assert.equal(report.status, "blocked");
+  assert.equal(report.rolloutMode, undefined);
+  assert.equal(report.rolloutPercentage, undefined);
+  assert.equal(report.rolloutAllowlistCount, undefined);
+  assert.ok(report.blockerCodes.includes(BLOCKER_CODES.rollout_mode_invalid));
+  assert.ok(report.blockerCodes.includes(BLOCKER_CODES.rollout_percentage_invalid));
+  assert.ok(report.blockerCodes.includes(BLOCKER_CODES.rollout_allowlist_count_invalid));
+  assert.equal(JSON.stringify(report).includes("secret@example.com"), false);
 });
 
 test("staff claim requirements apply only when relevant", () => {
@@ -127,6 +185,37 @@ test("CLI default invocation is blocked and sanitized without initialization", (
   assert.notEqual(result.status, 0);
   assert.equal(result.output.includes("ready_for_human_approval"), false);
   assert.equal(result.output.includes("firebase"), false);
+  assert.equal(result.output.includes("internal_only"), false);
+  assert.equal(result.output.includes("staff_only"), false);
+  assert.equal(result.output.includes("https://"), false);
+});
+
+test("CLI ready output accepts explicit sanitized rollout metadata only", () => {
+  const result = runPreflightCli({
+    CALL_V2_CODE_ONLY_VALIDATION_PASSED: "true",
+    CALL_V2_PRODUCTION_KILL_SWITCHES_FALSE: "true",
+    CALL_V2_DEPLOYMENT_VALIDATOR_PASSED: "true",
+    CALL_V2_FIRESTORE_INDEX_READY: "true",
+    CALL_V2_TTL_POLICIES_READY: "true",
+    CALL_V2_CLOUD_TASKS_READY: "true",
+    CALL_V2_OIDC_READY: "true",
+    CALL_V2_OBSERVABILITY_READY: "true",
+    CALL_V2_OPERATIONAL_OWNER_ASSIGNED: "true",
+    CALL_V2_ROLLBACK_OWNER_ASSIGNED: "true",
+    CALL_V2_ROLLOUT_MODE_APPROVED: "true",
+    CALL_V2_ROLLOUT_MODE: "percentage",
+    CALL_V2_ROLLOUT_PERCENTAGE: "25",
+    CALL_V2_ROLLOUT_ALLOWLIST_COUNT: "0",
+    CALL_V2_STAFF_CLAIMS_REQUIRED: "false",
+    CALL_V2_EMULATOR_RUNS_PASSED: "true",
+    CALL_V2_RULES_TESTS_PASSED: "true",
+    CALL_V2_PRIVATE_DATA_FINDING_RESOLVED: "true",
+  });
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout.includes('"ok": true'), true);
+  assert.equal(result.stdout.includes('"rolloutMode": "percentage"'), true);
+  assert.equal(result.stdout.includes('"rolloutPercentage": 25'), true);
+  assert.equal(result.stdout.includes('"rolloutAllowlistCount": 0'), true);
 });
 
 function runPreflightCli(env) {

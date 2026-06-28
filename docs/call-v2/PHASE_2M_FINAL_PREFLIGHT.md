@@ -22,6 +22,10 @@ Use explicit operational values only when they are already approved. Do not inve
 - Observability readiness.
 - Operational owner assignment.
 - Rollback owner assignment.
+- Controlled rollout metadata only:
+  - `rolloutMode` must be one of `internal_only`, `staff_only`, `percentage`, or `disabled`.
+  - `rolloutPercentage` must be an integer from `0` to `100`.
+  - `rolloutAllowlistCount` must be a non-negative integer in a bounded safe range.
 
 ## Internal-Task Canary Order
 
