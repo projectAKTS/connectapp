@@ -1,4 +1,5 @@
-retry=3
-reason=focused parser retry: enforce distinct caller/callee and exact participant UID role set
+retry=4
+reason=focused parser retry: enforce distinct caller/callee, exact participant UID set, and matching roles
 workflow=call-v2-phase3a-retry.yml
-baseline_state=a1e80b84da1671b73dd41ee0ccfa812dd6f356dd
+baseline_state=2a87255513579ed543c4059ece73bce70fb35a91
+prompt_fix=40f24fcba105d281c90925bc80f0884af39fb31f
