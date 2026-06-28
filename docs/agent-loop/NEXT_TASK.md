@@ -2,90 +2,54 @@
 
 Branch: `call-v2`
 Accepted checkpoint: `060c3b2dd8f1a47e053d98d2ab1962598126cd3e`
-Implementation commit message: `feat(call-v2): add final deployment preflight package`
+Implementation baseline: `817b3c543866dada00f7b1c1ae6a60c89d50c4c0`
+Implementation commit message: `fix(call-v2): harden preflight sanitized rollout inputs`
 
 ## Context
 
-The prior Phase 2M automated attempt reached Codex and changed-file scope, but automated validation failed and the workflow reset all implementation changes before committing. Rebuild the Phase 2M package from scratch. Treat this as a focused validation correction: do not finish until the required validation commands pass in the workflow environment.
+External review found one focused Phase 2M defect: `deployment_preflight_v2.js` accepts and returns arbitrary `rolloutMode` strings. This violates the Phase 2M requirement that reports never accept or return raw secrets, salts, UIDs, emails, URLs, project IDs, service accounts, queue names, tokens, claims, payloads, call/task IDs, or credentials. It also leaves `preflight_call_v2.js` able to echo an unsafe `CALL_V2_ROLLOUT_MODE` value in CLI output.
 
 Do not deploy, enable kill switches, contact production services, connect Flutter, change lifecycle/Cloud Tasks/outbox behavior, or change legacy V1 behavior.
 
 ## Allowed files
 
-- `connect_functions/call_v2/**`
-- `connect_functions/test/call_v2/**`
-- `connect_functions/package.json`
-- `connect_functions/package-lock.json`
-- `docs/call-v2/**`
+- `connect_functions/call_v2/deployment_preflight_v2.js`
+- `connect_functions/call_v2/preflight_call_v2.js`
+- `connect_functions/test/call_v2/deployment_preflight_v2.test.js`
+- `docs/call-v2/PHASE_2M_FINAL_PREFLIGHT.md`
 
 Do not modify `connect_functions/index.js`, Firestore rules/indexes, Firebase config, Flutter, native code, `.github/**`, `AGENTS.md`, or `docs/agent-loop/**`.
 
-## Required implementation
+## Required fix
 
-1. Add a pure, dependency-free preflight helper such as:
+1. Make rollout metadata strictly allowlisted and sanitized before it can appear in a report or CLI output.
 
-`connect_functions/call_v2/deployment_preflight_v2.js`
+Suggested safe rollout modes are controlled low-cardinality values only, for example:
+- `internal_only`
+- `staff_only`
+- `percentage`
+- `disabled`
 
-It must accept an explicit sanitized input object and return an immutable report containing only:
-- overall status: `blocked` or `ready_for_human_approval`
-- ordered stage names
-- boolean checks
-- controlled machine-readable blocker codes
-- rollout mode, percentage, and allowlist count only when already sanitized
+Use names that fit the existing codebase, but do not allow arbitrary strings.
 
-It must never accept or return raw secrets, salt, UIDs, emails, URLs, project IDs, service accounts, queue names, tokens, claims, payloads, call/task IDs, or credentials.
+2. If `rolloutMode` is unknown, unsafe, oversized, URL-like, email-like, secret-like, or otherwise not a controlled value, do not echo it. Either omit it and add a controlled blocker code, or normalize it to a safe controlled value with a blocker. Keep behavior deterministic.
 
-2. The report must cover these exact gates:
-- both production kill switches still false for code-only validation
-- deployment validator passed with explicit production configuration
-- required Firestore index ready
-- required TTL policies ready
-- Cloud Tasks queue/API/IAM acknowledged
-- exact OIDC target/audience acknowledged
-- observability configured
-- operational owner assigned
-- rollback owner assigned
-- rollout mode approval complete
-- staff claim administration acknowledged when relevant
-- three emulator runs passed
-- rules tests passed
-- no unresolved private-data/logging finding
+3. Bound numeric rollout metadata:
+- `rolloutPercentage` must be an integer in an expected safe range, such as 0 through 100.
+- `rolloutAllowlistCount` must be a non-negative integer within a reasonable bounded range.
+- Invalid numeric values must not be echoed as-is and must not allow a ready report.
 
-3. Add a CLI-safe dry-run script or package command:
+4. Keep the helper pure and dependency-free. No network calls, Firebase initialization, secret reads, production values, or environment reads inside `deployment_preflight_v2.js`.
 
-`npm run preflight:call-v2`
+5. Strengthen tests proving:
+- arbitrary rollout mode strings are not returned
+- URL/email/secret-like rollout mode values are not returned in helper reports or CLI output
+- invalid rollout percentages/counts do not allow `ready_for_human_approval`
+- valid controlled rollout modes and bounded numbers still allow readiness when all gates pass
+- default blocked CLI output remains sanitized and nonzero
+- complete explicit sanitized CLI input exits zero only when all gates and rollout metadata are valid
 
-The default no-environment invocation must perform no network call, no Firebase initialization, no secret read, and produce a sanitized `blocked` report with controlled blocker codes. It must exit nonzero when blocked and zero only for an explicitly complete sanitized input.
-
-4. Create:
-
-`docs/call-v2/PHASE_2M_FINAL_PREFLIGHT.md`
-
-Document:
-- exact Stage 0 code-only checks
-- infrastructure preparation placeholders without invented values
-- internal-task canary order
-- staff-only client canary order
-- required evidence to record before enabling each switch
-- rollback order: disable client switch first, drain with internal processing on, then disable internal processing
-- explicit stop point requiring human approval before any deploy or live setting change
-- no deployment occurred in Phase 2M
-
-## Focused validation requirements
-
-Add or adjust tests proving:
-- default preflight is blocked and sanitized
-- every missing gate yields a controlled blocker code
-- complete explicit sanitized input yields `ready_for_human_approval`
-- no raw values can appear in report or CLI output
-- unknown fields are rejected or ignored deterministically
-- no network/Firebase initialization occurs
-- report ordering is deterministic and immutable
-- staff-only requirements apply only when relevant
-- existing deployment validator behavior remains unchanged
-- no production service is contacted
-
-The previous attempt failed validation and was discarded. Be conservative: keep the implementation small, pure, and dependency-free; avoid brittle package-script changes; and make sure the default blocked CLI behavior does not break `check:call-v2`, deployment validation, rules tests, emulator tests, or `node --check index.js`.
+6. Update `PHASE_2M_FINAL_PREFLIGHT.md` if needed to document the controlled rollout metadata values and bounded numeric fields.
 
 ## Validation
 
@@ -111,6 +75,4 @@ The default preflight command is expected to exit nonzero with a sanitized block
 
 ## Handoff
 
-Report exact files, preflight schema, blocker codes, CLI behavior, documentation, test totals, all three emulator results, Node version, and remaining risks. Confirm both kill switches remain false, no production values were invented, no production service was contacted, and nothing was deployed.
-
-After Phase 2M passes review, stop automation and request human approval before any deployment or live configuration work.
+Report exact files, the rollout sanitizer/allowlist behavior, numeric bounds, blocker codes, CLI behavior, documentation changes, test totals, all three emulator results, Node version, and remaining risks. Confirm both kill switches remain false, no production values were invented, no production service was contacted, and nothing was deployed.
