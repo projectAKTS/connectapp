@@ -85,8 +85,10 @@ jobs:
           allow-users: projectAKTS
           output-file: /tmp/phase3a-codex-final.md
           prompt: |
-            Read AGENTS.md, docs/agent-loop/STATE.json, and docs/agent-loop/NEXT_TASK.md.
-            Reimplement only the active Phase 3A task. The previous attempt passed all 234 backend tests but was discarded only because generated Dart files needed formatting.
+            Read AGENTS.md, docs/agent-loop/STATE.json, docs/agent-loop/NEXT_TASK.md, and any retained failure details referenced there.
+            Continue only the active Phase 3A revision. Do not repeat a broad rewrite.
+            The focused failure is strict public call parser validation: callerUid and calleeUid must both be present, different, and the exact participant UID set must be {callerUid, calleeUid}; caller role must belong to callerUid and callee role must belong to calleeUid. Reject missing, extra, swapped, duplicate-role, same caller/callee, placeholder, or mismatched participant identities.
+            Add or repair focused tests for same caller/callee, wrong participant IDs, missing caller/callee participant, duplicate caller/callee roles, and exact successful participant sets.
             Modify only lib/call_v2/**, test/call_v2/**, docs/call-v2/**, and pubspec files when genuinely required.
             Do not modify legacy call code, backend code, native code, Firebase configuration, workflows, AGENTS.md, or docs/agent-loop/**.
             Do not deploy, contact production services, enable live settings, commit, or push.
