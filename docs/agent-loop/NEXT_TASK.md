@@ -91,12 +91,13 @@ Use the repository Flutter SDK requirements and run:
 
 ```bash
 flutter pub get
+dart format lib/call_v2 test/call_v2
 dart format --output=none --set-exit-if-changed lib/call_v2 test/call_v2
 flutter analyze lib/call_v2 test/call_v2
 flutter test test/call_v2
 ```
 
-The existing backend validation workflow must continue passing. Do not deploy or contact production services.
+Formatting generated Dart code is part of implementation, not a reason to discard otherwise valid work. The existing backend validation workflow must continue passing. Do not deploy or contact production services.
 
 ## Handoff
 
