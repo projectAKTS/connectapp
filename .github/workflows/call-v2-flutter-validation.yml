@@ -1,0 +1,47 @@
+name: Call V2 Flutter Validation
+
+on:
+  push:
+    branches: [call-v2]
+    paths:
+      - "lib/call_v2/**"
+      - "test/call_v2/**"
+      - "pubspec.yaml"
+      - "pubspec.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: call-v2-flutter-validation
+  cancel-in-progress: true
+
+jobs:
+  flutter-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout call-v2
+        uses: actions/checkout@v5
+        with:
+          ref: call-v2
+
+      - name: Setup Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Verify focused V2 formatting
+        run: dart format --output=none --set-exit-if-changed lib/call_v2 test/call_v2
+
+      - name: Analyze focused V2 client code
+        run: flutter analyze lib/call_v2 test/call_v2
+
+      - name: Run focused V2 client tests
+        run: flutter test test/call_v2
