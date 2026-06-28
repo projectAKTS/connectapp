@@ -76,3 +76,5 @@ The default preflight command is expected to exit nonzero with a sanitized block
 ## Handoff
 
 Report exact files, the rollout sanitizer/allowlist behavior, numeric bounds, blocker codes, CLI behavior, documentation changes, test totals, all three emulator results, Node version, and remaining risks. Confirm both kill switches remain false, no production values were invented, no production service was contacted, and nothing was deployed.
+
+Revision trigger: `STATE.json` is already `revision_required`; this update intentionally retriggers the agent workflow with the focused correction task above.
