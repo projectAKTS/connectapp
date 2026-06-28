@@ -1,0 +1,282 @@
+name: Codex Agent Loop
+
+on:
+  push:
+    branches: [call-v2]
+    paths:
+      - "docs/agent-loop/NEXT_TASK.md"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: codex-agent-loop-call-v2
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout call-v2
+        uses: actions/checkout@v5
+        with:
+          ref: call-v2
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Read workflow state
+        id: state
+        shell: bash
+        run: |
+          status="$(node -p "require('./docs/agent-loop/STATE.json').status")"
+          phase="$(node -p "require('./docs/agent-loop/STATE.json').phase")"
+          starting_sha="$(node -p "require('./docs/agent-loop/STATE.json').starting_sha")"
+          if [[ "$status" == "task_ready" || "$status" == "revision_required" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "phase=$phase" >> "$GITHUB_OUTPUT"
+          echo "starting_sha=$starting_sha" >> "$GITHUB_OUTPUT"
+          echo "base_head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify baseline
+        if: steps.state.outputs.run == 'true'
+        shell: bash
+        env:
+          STARTING_SHA: ${{ steps.state.outputs.starting_sha }}
+        run: |
+          git merge-base --is-ancestor "$STARTING_SHA" HEAD
+          unexpected="$(git diff --name-only "$STARTING_SHA"..HEAD | grep -Ev '^(AGENTS\.md|docs/agent-loop/|\.github/workflows/codex-agent-loop\.yml$)' || true)"
+          if [[ -n "$unexpected" ]]; then
+            echo "Unexpected files exist above starting_sha:" >&2
+            echo "$unexpected" >&2
+            exit 1
+          fi
+
+      - name: Setup Node 20
+        if: steps.state.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: connect_functions/package-lock.json
+
+      - name: Setup Java
+        if: steps.state.outputs.run == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install validation dependencies
+        if: steps.state.outputs.run == 'true'
+        shell: bash
+        run: |
+          cd connect_functions
+          npm ci
+          npm install --global firebase-tools
+
+      - name: Run Codex builder
+        if: steps.state.outputs.run == 'true'
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          sandbox: workspace-write
+          safety-strategy: drop-sudo
+          allow-users: projectAKTS
+          output-file: .agent-codex-final.md
+          prompt: |
+            You are the implementation agent for the repository's controlled agent loop.
+
+            Read AGENTS.md, docs/agent-loop/STATE.json, and docs/agent-loop/NEXT_TASK.md completely.
+            Implement only the active task and stay inside its allowed-file list.
+            Preserve all earlier accepted architecture and legacy behavior.
+            Do not deploy, enable live settings, contact production services, or invent production values.
+
+            GitHub Actions owns git commits, pushes, STATE.json, HANDOFF.md, and NEXT_TASK.md.
+            Therefore do not run git commit or git push, and do not modify:
+            - AGENTS.md
+            - docs/agent-loop/STATE.json
+            - docs/agent-loop/HANDOFF.md
+            - docs/agent-loop/NEXT_TASK.md
+            - .github/workflows/**
+
+            Leave the completed implementation as uncommitted workspace changes.
+            Run focused tests when useful, but the workflow will run the complete validation suite afterward.
+            In your final message, summarize the implementation, files changed, remaining risks, and suggested next phase. Never print secrets or protected rollout values.
+
+      - name: Verify changed-file scope
+        if: steps.state.outputs.run == 'true'
+        shell: bash
+        run: |
+          forbidden="$(git diff --name-only | grep -E '^(AGENTS\.md|docs/agent-loop/(STATE|HANDOFF|NEXT_TASK)\.md|docs/agent-loop/STATE\.json|\.github/workflows/)' || true)"
+          if [[ -n "$forbidden" ]]; then
+            echo "Codex modified workflow-owned files:" >&2
+            echo "$forbidden" >&2
+            exit 1
+          fi
+          if [[ -z "$(git status --porcelain)" ]]; then
+            echo "Codex produced no repository changes." >&2
+            exit 1
+          fi
+
+      - name: Run complete validation
+        if: steps.state.outputs.run == 'true'
+        id: validation
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            cd connect_functions
+            node --version
+            npm run check:call-v2
+            npm run validate:call-v2:deployment
+            npm run test:call-v2:rules
+            npm run test:call-v2:emulator
+            npm run test:call-v2:emulator
+            npm run test:call-v2:emulator
+            node --check index.js
+            cd ..
+            git diff --check
+          } 2>&1 | tee .agent-validation.log
+
+      - name: Record validation failure
+        if: steps.state.outputs.run == 'true' && steps.validation.outcome == 'failure'
+        shell: bash
+        env:
+          BASE_HEAD: ${{ steps.state.outputs.base_head }}
+          PHASE: ${{ steps.state.outputs.phase }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          git reset --hard "$BASE_HEAD"
+          git clean -fd
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          state_path = Path('docs/agent-loop/STATE.json')
+          state = json.loads(state_path.read_text())
+          state['status'] = 'revision_required'
+          state['code_commit_sha'] = None
+          state['ending_sha'] = 'SELF'
+          state['changed_files'] = []
+          state['validation']['check'] = 'failed'
+          state['review']['decision'] = 'revision_required'
+          state['review']['notes'] = f"Automated validation failed. Inspect {os.environ['RUN_URL']}"
+          state_path.write_text(json.dumps(state, indent=2) + '\n')
+          Path('docs/agent-loop/HANDOFF.md').write_text(
+              f"# Review Handoff\n\nPhase: {os.environ['PHASE']}\nStatus: revision_required\n\n"
+              f"Automated validation failed. Inspect the GitHub Actions run:\n\n{os.environ['RUN_URL']}\n"
+          )
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/agent-loop/STATE.json docs/agent-loop/HANDOFF.md
+          git commit -m "chore(agent-loop): record ${PHASE} validation failure"
+          git push "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:call-v2
+          exit 1
+
+      - name: Commit implementation
+        if: steps.state.outputs.run == 'true' && steps.validation.outcome == 'success'
+        id: commit_code
+        shell: bash
+        env:
+          PHASE: ${{ steps.state.outputs.phase }}
+        run: |
+          message="$(awk -F'`' '/Implementation commit message:/ {print $2; exit}' docs/agent-loop/NEXT_TASK.md)"
+          if [[ -z "$message" ]]; then
+            message="feat(agent-loop): complete phase ${PHASE}"
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git reset AGENTS.md docs/agent-loop/STATE.json docs/agent-loop/HANDOFF.md docs/agent-loop/NEXT_TASK.md .github/workflows || true
+          git commit -m "$message"
+          echo "code_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Write handoff and state
+        if: steps.state.outputs.run == 'true' && steps.validation.outcome == 'success'
+        shell: bash
+        env:
+          PHASE: ${{ steps.state.outputs.phase }}
+          STARTING_SHA: ${{ steps.state.outputs.starting_sha }}
+          CODE_SHA: ${{ steps.commit_code.outputs.code_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+
+          phase = os.environ['PHASE']
+          start = os.environ['STARTING_SHA']
+          code = os.environ['CODE_SHA']
+          run_url = os.environ['RUN_URL']
+          files = [x for x in subprocess.check_output(
+              ['git', 'show', '--pretty=', '--name-only', code], text=True
+          ).splitlines() if x]
+          summary_path = Path('.agent-codex-final.md')
+          summary = summary_path.read_text().strip() if summary_path.exists() else 'Implementation completed by Codex.'
+
+          handoff = [
+              '# External Review Handoff', '',
+              f'Phase: {phase}',
+              'Status: ready_for_review',
+              f'Starting SHA: {start}',
+              f'Implementation SHA: {code}',
+              'Pushed branch-tip SHA: SELF', '',
+              '## Files changed', ''
+          ]
+          handoff += [f'- `{p}`' for p in files]
+          handoff += ['', '## Codex summary', '', summary, '', '## Validation', '',
+              '- Node 20 workflow environment',
+              '- `npm ci`: passed',
+              '- `npm run check:call-v2`: passed',
+              '- `npm run validate:call-v2:deployment`: passed',
+              '- Firestore rules tests: passed',
+              '- Full emulator run 1: passed',
+              '- Full emulator run 2: passed',
+              '- Full emulator run 3: passed',
+              '- `node --check index.js`: passed',
+              '- `git diff --check`: passed',
+              f'- Workflow run: {run_url}', '',
+              '## Safety confirmations', '',
+              '- Nothing was deployed.',
+              '- No production service was intentionally contacted.',
+              '- Production kill switches were not enabled.',
+              '- No production values were invented.', ''
+          ]
+          Path('docs/agent-loop/HANDOFF.md').write_text('\n'.join(handoff) + '\n')
+
+          state_path = Path('docs/agent-loop/STATE.json')
+          state = json.loads(state_path.read_text())
+          state['status'] = 'ready_for_review'
+          state['code_commit_sha'] = code
+          state['ending_sha'] = 'SELF'
+          state['changed_files'] = files
+          state['validation'].update({
+              'node_version': '20',
+              'check': 'passed',
+              'deployment_readiness': 'passed',
+              'rules_tests': 'passed',
+              'emulator_runs': ['passed', 'passed', 'passed'],
+              'index_syntax_check': 'passed'
+          })
+          state['review'] = {'decision': None, 'notes': None}
+          state_path.write_text(json.dumps(state, indent=2) + '\n')
+          PY
+          rm -f .agent-codex-final.md .agent-validation.log
+          git add docs/agent-loop/HANDOFF.md docs/agent-loop/STATE.json
+          git commit -m "chore(agent-loop): record ${PHASE} review handoff"
+
+      - name: Push completed phase
+        if: steps.state.outputs.run == 'true' && steps.validation.outcome == 'success'
+        shell: bash
+        run: |
+          git push "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:call-v2
