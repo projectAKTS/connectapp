@@ -1,3 +1,4 @@
-retry=2
-reason=previous attempt passed 234 backend tests and failed only strict Dart formatting
+retry=3
+reason=focused parser retry: enforce distinct caller/callee and exact participant UID role set
 workflow=call-v2-phase3a-retry.yml
+baseline_state=a1e80b84da1671b73dd41ee0ccfa812dd6f356dd
