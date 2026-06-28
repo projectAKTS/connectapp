@@ -2,8 +2,8 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "2M",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "060c3b2dd8f1a47e053d98d2ab1962598126cd3e",
+  "status": "human_approval_required",
+  "accepted_checkpoint_sha": "83933165d7741f06c6e47dcd94e8dbd2d92a6462",
   "starting_sha": "817b3c543866dada00f7b1c1ae6a60c89d50c4c0",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
@@ -34,7 +34,7 @@
     "production_values_invented": false
   },
   "review": {
-    "decision": null,
-    "notes": null
+    "decision": "accepted",
+    "notes": "Phase 2M accepted after external review. Final backend preflight reached the human approval boundary; do not deploy or change live configuration without explicit approval."
   }
 }
