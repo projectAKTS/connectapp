@@ -1,12 +1,14 @@
-# Active Task — Phase 2M
+# Active Task — Phase 2M Revision
 
 Branch: `call-v2`
 Accepted checkpoint: `060c3b2dd8f1a47e053d98d2ab1962598126cd3e`
 Implementation commit message: `feat(call-v2): add final deployment preflight package`
 
-## Goal
+## Context
 
-Create the final non-deployment preflight package for Helperly Call System V2. This phase must end at a human approval boundary. Do not deploy, enable kill switches, contact production services, connect Flutter, or change lifecycle/Cloud Tasks/outbox/legacy behavior.
+The prior Phase 2M automated attempt reached Codex and changed-file scope, but automated validation failed and the workflow reset all implementation changes before committing. Rebuild the Phase 2M package from scratch. Treat this as a focused validation correction: do not finish until the required validation commands pass in the workflow environment.
+
+Do not deploy, enable kill switches, contact production services, connect Flutter, change lifecycle/Cloud Tasks/outbox behavior, or change legacy V1 behavior.
 
 ## Allowed files
 
@@ -16,9 +18,9 @@ Create the final non-deployment preflight package for Helperly Call System V2. T
 - `connect_functions/package-lock.json`
 - `docs/call-v2/**`
 
-Do not modify `connect_functions/index.js`, Firestore rules/indexes, Firebase config, Flutter, native code, or `.github/**`.
+Do not modify `connect_functions/index.js`, Firestore rules/indexes, Firebase config, Flutter, native code, `.github/**`, `AGENTS.md`, or `docs/agent-loop/**`.
 
-## Deliverables
+## Required implementation
 
 1. Add a pure, dependency-free preflight helper such as:
 
@@ -69,11 +71,11 @@ Document:
 - explicit stop point requiring human approval before any deploy or live setting change
 - no deployment occurred in Phase 2M
 
-## Tests
+## Focused validation requirements
 
-Keep all existing tests passing and add focused tests proving:
+Add or adjust tests proving:
 - default preflight is blocked and sanitized
-- each missing gate yields a controlled blocker code
+- every missing gate yields a controlled blocker code
 - complete explicit sanitized input yields `ready_for_human_approval`
 - no raw values can appear in report or CLI output
 - unknown fields are rejected or ignored deterministically
@@ -82,6 +84,8 @@ Keep all existing tests passing and add focused tests proving:
 - staff-only requirements apply only when relevant
 - existing deployment validator behavior remains unchanged
 - no production service is contacted
+
+The previous attempt failed validation and was discarded. Be conservative: keep the implementation small, pure, and dependency-free; avoid brittle package-script changes; and make sure the default blocked CLI behavior does not break `check:call-v2`, deployment validation, rules tests, emulator tests, or `node --check index.js`.
 
 ## Validation
 
