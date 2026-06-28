@@ -3,6 +3,6 @@
 Phase: 3A
 Status: revision_required
 
-Automated validation failed. Inspect:
+Validation failed. Download the retained validation artifact from:
 
-https://github.com/projectAKTS/connectapp/actions/runs/28330515574
+https://github.com/projectAKTS/connectapp/actions/runs/28331206363
