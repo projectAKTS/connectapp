@@ -1,43 +1,103 @@
-# Active Task — Human Approval Required
+# Active Task — Phase 3A
 
 Branch: `call-v2`
-Accepted checkpoint: `83933165d7741f06c6e47dcd94e8dbd2d92a6462`
+Accepted backend checkpoint: `83933165d7741f06c6e47dcd94e8dbd2d92a6462`
+Implementation commit message: `feat(call-v2): add Flutter V2 client groundwork`
 
-## Status
+## Goal
 
-Phase 2M final backend preflight has been externally reviewed and accepted.
+Create the isolated Flutter client foundation for Helperly Call System V2 beside the legacy call system. Keep it unused and disabled by default. Do not connect routes, UI, Agora, CallKit, FCM, Firestore listeners, or production Firebase yet.
 
-Automation must stop here. Do not queue another implementation task until a human explicitly approves the next step.
+## Allowed files
 
-## Human approval boundary
+- `lib/call_v2/**`
+- `test/call_v2/**`
+- `docs/call-v2/**`
+- `pubspec.yaml` and `pubspec.lock` only when genuinely required
 
-Before any deployment, live Firebase configuration change, production kill-switch change, production secret binding, Cloud Tasks/IAM/OIDC setup, Flutter connection, or traffic canary, a human must review and approve the final preflight package and provide the real production infrastructure values outside this automation loop.
+Do not modify existing legacy call files, app startup, routes, native iOS/Android code, backend functions, Firebase config, rules, indexes, or workflows.
 
-## Safety reminders
+## Required architecture
 
-- Do not deploy.
-- Do not enable either production kill switch.
-- Do not invent project IDs, URLs, service accounts, queue names, IAM values, secrets, salts, owners, dashboards, alerts, or production rollout values.
-- Do not contact production services from the automation loop.
-- Keep legacy behavior unchanged.
+Add a small, testable V2 client package containing:
 
-## Last accepted implementation
+1. **Domain enums and immutable models** matching the accepted backend contract:
+   - lifecycle: `ringing`, `accepted`, `active`, `completed`, `declined`, `cancelled`, `missed`, `failed`
+   - participant media: `notJoined`, `preparing`, `joining`, `joined`, `reconnecting`, `disconnected`, `left`, `mediaFailed`
+   - role: caller/callee
+   - local phase: `idle`, `presentingIncoming`, `outgoingRinging`, `openingCallRoute`, `inCall`, `closing`
 
-Implementation SHA: `83933165d7741f06c6e47dcd94e8dbd2d92a6462`
+2. **Strict public snapshot parsing** for `calls/{callId}` and participant documents:
+   - require `callSystem == "v2"`
+   - require a valid call ID, version, caller UID, callee UID, and exact two distinct participant UIDs
+   - reject unknown lifecycle/media values
+   - parse optional Firestore timestamps without exposing private operational data
+   - ignore/reject private keys such as fencing tokens, lock claims, commands, callOps, outbox task IDs, and dispatch diagnostics
+   - never infer durable state from local media events
 
-Accepted files:
-- `connect_functions/call_v2/deployment_preflight_v2.js`
-- `connect_functions/test/call_v2/deployment_preflight_v2.test.js`
-- `docs/call-v2/PHASE_2M_FINAL_PREFLIGHT.md`
+3. **Callable API boundary**:
+   - exact callable names: `startCallV2`, `acceptCallV2`, `declineCallV2`, `cancelCallV2`, `endCallV2`, `reportParticipantMediaV2`, `renewActiveCallLeaseV2`
+   - do not include authenticated UID, staff status, rollout mode, percentage, salt, allowlist, or cohort data in requests
+   - expose a transport interface for tests
+   - production Firebase Functions transport may be implemented but must not execute during import or tests
+   - normalize callable errors into controlled client error codes without exposing raw server/provider details
 
-Validation reported by workflow run `28317342210`:
-- Node 20
-- `npm ci`: passed
-- `npm run check:call-v2`: passed
-- `npm run validate:call-v2:deployment`: passed
-- Firestore rules tests: passed
-- full emulator suite passed three times
-- `node --check index.js`: passed
-- `git diff --check`: passed
+4. **Single local owner skeleton** named clearly as `CallSessionManagerV2`:
+   - at most one active nonterminal call locally
+   - accept public call and participant snapshots through injected methods; no direct Firestore dependency yet
+   - dedupe stale snapshots by call ID/version
+   - derive local phase from server-authoritative lifecycle plus current user role
+   - terminal snapshot clears local ownership through a deterministic closing/idle sequence
+   - serialize command intents so duplicate taps do not issue parallel commands
+   - command failure must not invent a lifecycle transition
+   - expose immutable state/listenable behavior using existing Flutter patterns; no global singleton
 
-No deployment occurred, no production service was contacted, no production values were invented, and production kill switches remained disabled.
+5. **Navigation ownership boundary**:
+   - define a `CallNavigationCoordinatorV2` interface/value contract that emits normalized route intents only
+   - do not call `Navigator`, open a route, or touch existing navigation
+   - ensure one route-open intent per call/version and deterministic close intent on terminal state
+
+6. **Feature gate**:
+   - constructor-injected or compile-time-safe gate defaulting to false
+   - no client-visible production rollout configuration
+   - disabled state performs no Firebase call and creates no session ownership
+
+## Tests
+
+Add focused pure/unit tests proving at minimum:
+
+- every accepted lifecycle/media value parses and unknown values fail closed
+- malformed participant sets and non-V2 documents are rejected
+- private operational fields never appear in public models or API results
+- callable names and request shapes are exact
+- auth UID and rollout/staff data cannot be sent by the client boundary
+- disabled gate makes no transport call
+- only one local active call is owned
+- stale/lower-version snapshots are ignored
+- accepted/active/terminal snapshots derive deterministic local phases
+- terminal cleanup is idempotent
+- duplicate command taps produce one in-flight transport request
+- failed commands do not change durable lifecycle locally
+- navigation intents are deduped and contain no private identifiers
+- no production Firebase, Agora, CallKit, FCM, or network service is contacted
+
+## Documentation
+
+Create `docs/call-v2/PHASE_3A_FLUTTER_CLIENT_GROUNDWORK.md` describing isolation from V1, public-data-only parsing, command boundary, manager ownership, navigation intent boundary, disabled-by-default behavior, and explicit exclusions for later phases.
+
+## Validation
+
+Use the repository Flutter SDK requirements and run:
+
+```bash
+flutter pub get
+dart format --output=none --set-exit-if-changed lib/call_v2 test/call_v2
+flutter analyze lib/call_v2 test/call_v2
+flutter test test/call_v2
+```
+
+The existing backend validation workflow must continue passing. Do not deploy or contact production services.
+
+## Handoff
+
+Report exact files, domain models, parser behavior, callable transport contract, session-manager behavior, navigation-intent behavior, focused Flutter test count/results, backend regression results, and remaining risks. Confirm V1 was untouched, feature gate defaults false, no production service was contacted, no live setting changed, and nothing was deployed.
