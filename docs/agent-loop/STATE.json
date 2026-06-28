@@ -2,28 +2,32 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "3A",
-  "status": "revision_required",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "83933165d7741f06c6e47dcd94e8dbd2d92a6462",
   "starting_sha": "26088624d802a4722af046107e7b7cf47d8d8528",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
+  "code_commit_sha": "0e8b3a77fcd1e1cfc4a26ee1de2f19d5bab5d7fb",
   "ending_sha": "SELF",
-  "changed_files": [],
+  "changed_files": [
+    "lib/call_v2/domain/call_snapshot.dart",
+    "pubspec.lock",
+    "test/call_v2/domain/call_snapshot_parser_test.dart"
+  ],
   "validation": {
     "node_version": "20",
-    "check": "failed",
-    "deployment_readiness": "passed before Flutter parser failure",
-    "rules_tests": "passed before Flutter parser failure",
+    "check": "passed",
+    "deployment_readiness": "passed",
+    "rules_tests": "passed",
     "emulator_runs": [
-      "passed before Flutter parser failure",
-      "passed before Flutter parser failure",
-      "passed before Flutter parser failure"
+      "passed",
+      "passed",
+      "passed"
     ],
     "total_tests": "backend validation passed; focused Flutter parser test failed",
-    "index_syntax_check": "passed before Flutter parser failure",
-    "flutter_analysis": "failed_or_not_reached",
-    "flutter_tests": "failed_or_not_reached"
+    "index_syntax_check": "passed",
+    "flutter_analysis": "passed",
+    "flutter_tests": "passed"
   },
   "safety": {
     "deployed": false,
@@ -32,7 +36,7 @@
     "production_values_invented": false
   },
   "review": {
-    "decision": "revision_required",
-    "notes": "Phase 3A validation failed. Download the phase3a-validation artifact from https://github.com/projectAKTS/connectapp/actions/runs/28337612591"
+    "decision": null,
+    "notes": null
   }
 }
