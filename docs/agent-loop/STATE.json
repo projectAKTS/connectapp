@@ -1,10 +1,10 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "2K",
+  "phase": "2L",
   "status": "task_ready",
-  "accepted_checkpoint_sha": "dd738000c0dfbcdd321860af7d590fb64be85044",
-  "starting_sha": "dd738000c0dfbcdd321860af7d590fb64be85044",
+  "accepted_checkpoint_sha": "adc42c96b75dbf64bb41ee5eb52ce6e4dcd1c3c8",
+  "starting_sha": "2c900daa013dad50ad2ae0fbcf18944dea329c11",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
   "code_commit_sha": null,
@@ -27,6 +27,6 @@
   },
   "review": {
     "decision": null,
-    "notes": null
+    "notes": "Phase 2K accepted; Phase 2L queued for automated execution."
   }
 }
