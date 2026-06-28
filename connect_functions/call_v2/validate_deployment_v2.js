@@ -25,6 +25,12 @@ function main() {
       staffClaimsManaged: readBoolean("CALL_V2_STAFF_CLAIMS_MANAGED"),
       allowGlobalClientRollout:
         readBoolean("CALL_V2_ALLOW_GLOBAL_CLIENT_ROLLOUT"),
+      safeObservabilityConfigured:
+        readBoolean("CALL_V2_SAFE_OBSERVABILITY_CONFIGURED"),
+      operationalOwnerAssigned:
+        readBoolean("CALL_V2_OPERATIONAL_OWNER_ASSIGNED"),
+      rollbackOwnerAssigned:
+        readBoolean("CALL_V2_ROLLBACK_OWNER_ASSIGNED"),
     });
     process.stdout.write(`${JSON.stringify({
       ok: true,

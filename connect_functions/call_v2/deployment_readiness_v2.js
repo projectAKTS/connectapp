@@ -217,6 +217,9 @@ function validateCallV2DeploymentConfig({
   rolloutAllowlist,
   staffClaimsManaged = false,
   allowGlobalClientRollout = false,
+  safeObservabilityConfigured = false,
+  operationalOwnerAssigned = false,
+  rollbackOwnerAssigned = false,
 }) {
   const client = clientEnabled === true;
   const internal = internalTasksEnabled === true;
@@ -234,6 +237,7 @@ function validateCallV2DeploymentConfig({
       taskConfigRequired: false,
       sanitizedConfig: emptySanitizedConfig(),
       rolloutReadiness: emptyRolloutReadiness(),
+      canaryReadiness: emptyCanaryReadiness(),
     });
   }
 
@@ -258,6 +262,14 @@ function validateCallV2DeploymentConfig({
     staffClaimsManaged,
     allowGlobalClientRollout,
   });
+  const canaryReadiness = requireCanaryReadiness({
+    clientEnabled: client,
+    safeObservabilityConfigured,
+    operationalOwnerAssigned,
+    rollbackOwnerAssigned,
+    staffClaimsManaged,
+    rolloutMode: rolloutReadiness.rolloutMode,
+  });
 
   return Object.freeze({
     status: client ? "client_and_internal_ready" : "internal_only_ready",
@@ -275,6 +287,7 @@ function validateCallV2DeploymentConfig({
       distinctAudienceApproved: allowDistinctAudience === true,
     }),
     rolloutReadiness,
+    canaryReadiness,
   });
 }
 
@@ -382,6 +395,46 @@ function requireRolloutReadiness(request) {
   }
 }
 
+function requireCanaryReadiness({
+  clientEnabled,
+  safeObservabilityConfigured,
+  operationalOwnerAssigned,
+  rollbackOwnerAssigned,
+  staffClaimsManaged,
+  rolloutMode,
+}) {
+  if (clientEnabled !== true) {
+    return emptyCanaryReadiness();
+  }
+  if (safeObservabilityConfigured !== true) {
+    throw readinessError(
+      "Safe Call V2 observability acknowledgement is required for client rollout.",
+    );
+  }
+  if (operationalOwnerAssigned !== true) {
+    throw readinessError(
+      "An operational owner acknowledgement is required for client rollout.",
+    );
+  }
+  if (rollbackOwnerAssigned !== true) {
+    throw readinessError(
+      "A rollback owner acknowledgement is required for client rollout.",
+    );
+  }
+  if (rolloutMode === "staff" && staffClaimsManaged !== true) {
+    throw readinessError(
+      "Staff custom-claim management acknowledgement is required.",
+    );
+  }
+  return Object.freeze({
+    canaryConfigRequired: true,
+    safeObservabilityConfigured: true,
+    operationalOwnerAssigned: true,
+    rollbackOwnerAssigned: true,
+    staffClaimsManaged: staffClaimsManaged === true,
+  });
+}
+
 function emptySanitizedConfig() {
   return Object.freeze({
     regionConfigured: false,
@@ -403,6 +456,16 @@ function emptyRolloutReadiness() {
     rolloutAllowlistCount: 0,
     staffClaimsManaged: false,
     globalClientRolloutApproved: false,
+  });
+}
+
+function emptyCanaryReadiness() {
+  return Object.freeze({
+    canaryConfigRequired: false,
+    safeObservabilityConfigured: false,
+    operationalOwnerAssigned: false,
+    rollbackOwnerAssigned: false,
+    staffClaimsManaged: false,
   });
 }
 

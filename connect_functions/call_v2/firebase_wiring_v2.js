@@ -27,6 +27,12 @@ const {
   evaluateCallV2ClientEligibility,
   resolveTargetEligibilityV2,
 } = require("./rollout_gate_v2");
+const {
+  OPERATIONAL_EVENT_NAMES,
+  createCallV2OperationalRecorder,
+  httpStatusClass,
+  timeoutOutcomeForStatus,
+} = require("./observability_v2");
 
 const CALLABLE_SERVICE_NAMES = Object.freeze([
   "startCallV2",
@@ -105,6 +111,10 @@ function createCallV2FirebaseWiring({
     services.resolveTargetEligibilityV2 || resolveTargetEligibilityV2;
   const timeoutHandlerFactory =
     services.createTimeoutTaskHttpHandlerV2 || createTimeoutTaskHttpHandlerV2;
+  const operationalRecorder = createCallV2OperationalRecorder({
+    enabled: () => resolveBooleanConfig(config, "callV2ObservabilityEnabled"),
+    sink: services.operationalEventSink,
+  });
 
   const callableHandlers = Object.fromEntries(
     CALLABLE_SERVICE_NAMES.map((name) => [
@@ -118,6 +128,7 @@ function createCallV2FirebaseWiring({
         clientEligibilityService,
         targetEligibilityService,
         targetUserAuth,
+        operationalRecorder,
       }),
     ]),
   );
@@ -125,41 +136,109 @@ function createCallV2FirebaseWiring({
   return Object.freeze({
     callableHandlers: Object.freeze(callableHandlers),
     async handleTaskOutboxCreated(event) {
-      if (!resolveBooleanConfig(config, "callV2InternalTasksEnabled")) {
+      try {
+        if (!resolveBooleanConfig(config, "callV2InternalTasksEnabled")) {
+          recordOperationalEvent(operationalRecorder, () => ({
+            eventName: OPERATIONAL_EVENT_NAMES.outboxDispatchOutcome,
+            outcome: "disabled",
+            fields: { retryable: false },
+          }));
+          throw new CallV2Error(
+            ERROR_CODES.transactionFailed,
+            "Call V2 internal task dispatch is disabled.",
+          );
+        }
+        const callId = event && event.params ? event.params.callId : undefined;
+        const taskId = event && event.params ? event.params.taskId : undefined;
+        const publisher = taskPublisherFactory({
+          cloudTasksClient,
+          config,
+        });
+        const result = await dispatchService({
+          db,
+          request: {
+            callId,
+            taskId,
+          },
+          now: nowProvider,
+          generateClaimToken: claimTokenGenerator,
+          publisher,
+        });
+        if (["dispatched", "already_dispatched", "dead_letter"].includes(
+          result.status,
+        )) {
+          recordOperationalEvent(operationalRecorder, () => ({
+            eventName: OPERATIONAL_EVENT_NAMES.outboxDispatchOutcome,
+            outcome: result.status,
+            fields: { retryable: false },
+          }));
+          return result;
+        }
+        recordOperationalEvent(operationalRecorder, () => ({
+          eventName: OPERATIONAL_EVENT_NAMES.outboxDispatchOutcome,
+          outcome: "retry_required",
+          fields: { retryable: true },
+        }));
         throw new CallV2Error(
           ERROR_CODES.transactionFailed,
-          "Call V2 internal task dispatch is disabled.",
+          `Call V2 outbox dispatch requires retry: ${result.status}.`,
         );
+      } catch (error) {
+        if (!isExpectedOutboxBoundaryError(error)) {
+          recordOperationalEvent(operationalRecorder, () => ({
+            eventName: OPERATIONAL_EVENT_NAMES.outboxDispatchOutcome,
+            outcome: "failed",
+            fields: { retryable: true },
+          }));
+        }
+        throw error;
       }
-      const callId = event && event.params ? event.params.callId : undefined;
-      const taskId = event && event.params ? event.params.taskId : undefined;
-      const publisher = taskPublisherFactory({
-        cloudTasksClient,
-        config,
-      });
-      const result = await dispatchService({
-        db,
-        request: {
-          callId,
-          taskId,
-        },
-        now: nowProvider,
-        generateClaimToken: claimTokenGenerator,
-        publisher,
-      });
-      if (["dispatched", "already_dispatched", "dead_letter"].includes(
-        result.status,
-      )) {
-        return result;
-      }
-      throw new CallV2Error(
-        ERROR_CODES.transactionFailed,
-        `Call V2 outbox dispatch requires retry: ${result.status}.`,
-      );
     },
     async handleScheduledOutboxRecovery() {
-      if (!resolveBooleanConfig(config, "callV2InternalTasksEnabled")) {
-        return Object.freeze({
+      try {
+        if (!resolveBooleanConfig(config, "callV2InternalTasksEnabled")) {
+          const disabledResult = Object.freeze({
+            status: "disabled",
+            examined: 0,
+            dispatched: 0,
+            alreadyDispatched: 0,
+            deadLetter: 0,
+            busy: 0,
+            retryable: 0,
+            stale: 0,
+            failed: 0,
+          });
+          recordScheduledRecoveryOutcome(
+            operationalRecorder,
+            "disabled",
+            disabledResult,
+          );
+          return disabledResult;
+        }
+        const publisher = taskPublisherFactory({
+          cloudTasksClient,
+          config,
+        });
+        const result = await recoveryService({
+          db,
+          now: nowProvider,
+          limit: TASK_OUTBOX_RECOVERY_DEFAULT_LIMIT,
+          dispatchTask: dispatchService,
+          generateClaimToken: claimTokenGenerator,
+          publisher,
+        });
+        const completedResult = Object.freeze({
+          status: "completed",
+          ...result,
+        });
+        recordScheduledRecoveryOutcome(
+          operationalRecorder,
+          "completed",
+          completedResult,
+        );
+        return completedResult;
+      } catch (error) {
+        recordScheduledRecoveryOutcome(operationalRecorder, "failed", {
           status: "disabled",
           examined: 0,
           dispatched: 0,
@@ -170,42 +249,53 @@ function createCallV2FirebaseWiring({
           stale: 0,
           failed: 0,
         });
+        throw error;
       }
-      const publisher = taskPublisherFactory({
-        cloudTasksClient,
-        config,
-      });
-      const result = await recoveryService({
-        db,
-        now: nowProvider,
-        limit: TASK_OUTBOX_RECOVERY_DEFAULT_LIMIT,
-        dispatchTask: dispatchService,
-        generateClaimToken: claimTokenGenerator,
-        publisher,
-      });
-      return Object.freeze({
-        status: "completed",
-        ...result,
-      });
     },
     createTimeoutHttpHandler() {
-      const normalizedHandler = timeoutHandlerFactory({
-        db,
-        verifyRequest: (request) =>
-          verifyCloudTasksOidcRequestV2({
-            request,
-            tokenVerifier,
-            config,
-          }),
-        now: nowProvider,
-      });
       return async function callV2TimeoutHttpHandler(req, res) {
-        const response = await normalizedHandler({
-          method: req && req.method,
-          body: req && req.body,
-          headers: req && req.headers ? req.headers : {},
+        let verificationResult = "not_checked";
+        const normalizedHandler = timeoutHandlerFactory({
+          db,
+          verifyRequest: async (request) => {
+            const verified = await verifyCloudTasksOidcRequestV2({
+              request,
+              tokenVerifier,
+              config,
+            });
+            verificationResult = verified ? "authorized" : "unauthorized";
+            return verified;
+          },
+          now: nowProvider,
         });
-        return res.status(response.statusCode).json(response.body);
+        try {
+          const response = await normalizedHandler({
+            method: req && req.method,
+            body: req && req.body,
+            headers: req && req.headers ? req.headers : {},
+          });
+          recordOperationalEvent(operationalRecorder, () => ({
+            eventName: OPERATIONAL_EVENT_NAMES.timeoutHttpOutcome,
+            outcome: timeoutOutcomeForStatus(response.statusCode),
+            fields: {
+              httpStatusClass: httpStatusClass(response.statusCode),
+              verificationResult,
+              retryable: response.statusCode >= 500,
+            },
+          }));
+          return res.status(response.statusCode).json(response.body);
+        } catch (error) {
+          recordOperationalEvent(operationalRecorder, () => ({
+            eventName: OPERATIONAL_EVENT_NAMES.timeoutHttpOutcome,
+            outcome: "failed",
+            fields: {
+              httpStatusClass: "unknown",
+              verificationResult,
+              retryable: true,
+            },
+          }));
+          throw error;
+        }
       };
     },
   });
@@ -236,24 +326,25 @@ function createCallableHandler({
   clientEligibilityService,
   targetEligibilityService,
   targetUserAuth,
+  operationalRecorder,
 }) {
   return async function guardedCallV2Callable(request) {
-    if (!request || !request.auth || !request.auth.uid) {
-      throw mapCallV2ErrorToHttps(
-        new CallV2Error(
-          ERROR_CODES.unauthenticated,
-          "Authentication is required.",
-        ),
-      );
-    }
-    if (!resolveBooleanConfig(config, "callV2Enabled")) {
-      throw new HttpsError(
-        "failed-precondition",
-        "Call V2 is disabled.",
-        { callV2Code: "call_v2_disabled" },
-      );
-    }
     try {
+      if (!request || !request.auth || !request.auth.uid) {
+        throw mapCallV2ErrorToHttps(
+          new CallV2Error(
+            ERROR_CODES.unauthenticated,
+            "Authentication is required.",
+          ),
+        );
+      }
+      if (!resolveBooleanConfig(config, "callV2Enabled")) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Call V2 is disabled.",
+          { callV2Code: "call_v2_disabled" },
+        );
+      }
       if (serviceName === "startCallV2") {
         await requireStartCallRolloutEligibility({
           authUid: request.auth.uid,
@@ -263,6 +354,7 @@ function createCallableHandler({
           clientEligibilityService,
           targetEligibilityService,
           targetUserAuth,
+          operationalRecorder,
         });
       }
       const result = await service({
@@ -271,9 +363,20 @@ function createCallableHandler({
         request: request.data || {},
         now: nowProvider(),
       });
+      recordCallableOutcome(operationalRecorder, {
+        serviceName,
+        outcome: "success",
+        config,
+      });
       return sanitizeClientResult(result);
     } catch (error) {
-      throw mapCallV2ErrorToHttps(error, serviceName);
+      const httpsError = mapCallV2ErrorToHttps(error, serviceName);
+      recordCallableOutcome(operationalRecorder, {
+        serviceName,
+        outcome: callableOutcomeForHttpsError(httpsError),
+        config,
+      });
+      throw httpsError;
     }
   };
 }
@@ -286,6 +389,7 @@ async function requireStartCallRolloutEligibility({
   clientEligibilityService,
   targetEligibilityService,
   targetUserAuth,
+  operationalRecorder,
 }) {
   const rolloutPolicy = resolveRolloutPolicy(config);
   const callerEligibility = clientEligibilityService({
@@ -294,6 +398,10 @@ async function requireStartCallRolloutEligibility({
     ...rolloutPolicy,
   });
   if (!callerEligibility || callerEligibility.eligible !== true) {
+    recordStartRolloutDecision(operationalRecorder, {
+      outcome: "denied",
+      rolloutMode: rolloutPolicy.mode,
+    });
     throw callV2NotEnabledForUserError();
   }
   const calleeUid = requestData && requestData.calleeUid;
@@ -305,8 +413,16 @@ async function requireStartCallRolloutEligibility({
       : undefined,
   });
   if (!targetEligibility || targetEligibility.eligible !== true) {
+    recordStartRolloutDecision(operationalRecorder, {
+      outcome: "denied",
+      rolloutMode: rolloutPolicy.mode,
+    });
     throw callV2NotEnabledForUserError();
   }
+  recordStartRolloutDecision(operationalRecorder, {
+    outcome: "eligible",
+    rolloutMode: rolloutPolicy.mode,
+  });
 }
 
 function callV2NotEnabledForUserError() {
@@ -454,6 +570,95 @@ function resolveRolloutPolicy(config) {
     salt: optionalConfigString(config, "callV2RolloutSalt"),
     allowlist: optionalConfigString(config, "callV2RolloutAllowlist"),
   });
+}
+
+function recordCallableOutcome(operationalRecorder, {
+  serviceName,
+  outcome,
+  config,
+}) {
+  recordOperationalEvent(operationalRecorder, () => ({
+    eventName: OPERATIONAL_EVENT_NAMES.clientCallableOutcome,
+    outcome,
+    fields: {
+      callableName: serviceName,
+      rolloutMode: serviceName === "startCallV2"
+        ? optionalConfigString(config, "callV2RolloutMode") || "off"
+        : undefined,
+    },
+  }));
+}
+
+function recordStartRolloutDecision(operationalRecorder, {
+  outcome,
+  rolloutMode,
+}) {
+  recordOperationalEvent(operationalRecorder, () => ({
+    eventName: OPERATIONAL_EVENT_NAMES.startRolloutDecision,
+    outcome,
+    fields: {
+      rolloutMode,
+    },
+  }));
+}
+
+function recordScheduledRecoveryOutcome(operationalRecorder, outcome, result) {
+  recordOperationalEvent(operationalRecorder, () => ({
+    eventName: OPERATIONAL_EVENT_NAMES.scheduledRecoveryOutcome,
+    outcome,
+    fields: {
+      examined: result.examined,
+      dispatched: result.dispatched,
+      alreadyDispatched: result.alreadyDispatched,
+      deadLetter: result.deadLetter,
+      busy: result.busy,
+      retryable: result.retryable,
+      stale: result.stale,
+      failed: result.failed,
+    },
+  }));
+}
+
+function recordOperationalEvent(operationalRecorder, event) {
+  if (
+    !operationalRecorder ||
+    typeof operationalRecorder.recordOperationalEvent !== "function"
+  ) {
+    return;
+  }
+  if (
+    typeof operationalRecorder.isEnabled === "function" &&
+    !operationalRecorder.isEnabled()
+  ) {
+    return;
+  }
+  const resolvedEvent = typeof event === "function" ? event() : event;
+  operationalRecorder.recordOperationalEvent(resolvedEvent);
+}
+
+function callableOutcomeForHttpsError(error) {
+  const callV2Code = error && error.details && error.details.callV2Code;
+  if (error && error.code === "unauthenticated") {
+    return "unauthenticated";
+  }
+  if (callV2Code === "call_v2_disabled") {
+    return "disabled";
+  }
+  if (callV2Code === "call_v2_not_enabled_for_user") {
+    return "rollout_denied";
+  }
+  return "failed";
+}
+
+function isExpectedOutboxBoundaryError(error) {
+  return (
+    error instanceof CallV2Error &&
+    error.code === ERROR_CODES.transactionFailed &&
+    (
+      error.message === "Call V2 internal task dispatch is disabled." ||
+      error.message.startsWith("Call V2 outbox dispatch requires retry:")
+    )
+  );
 }
 
 function requireConfigString(config, key) {

@@ -1,7 +1,6 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const { test } = require("node:test");
@@ -364,6 +363,13 @@ test("deployment validation requires complete explicit internal task configurati
     staffClaimsManaged: true,
     globalClientRolloutApproved: false,
   });
+  assert.deepEqual(result.canaryReadiness, {
+    canaryConfigRequired: true,
+    safeObservabilityConfigured: true,
+    operationalOwnerAssigned: true,
+    rollbackOwnerAssigned: true,
+    staffClaimsManaged: true,
+  });
   assert.equal(JSON.stringify(result).includes("https://"), false);
   assert.equal(JSON.stringify(result).includes("@"), false);
 });
@@ -479,80 +485,123 @@ test("deployment validation enforces client rollout configuration", () => {
   );
 });
 
-test("deployment validation script is network-free and prints sanitized output", () => {
-  const script = path.resolve(
-    __dirname,
-    "../../call_v2/validate_deployment_v2.js",
-  );
-  let result = spawnSync(process.execPath, [script], {
-    encoding: "utf8",
-    env: {
-      PATH: process.env.PATH,
-    },
+test("deployment validation requires safe client canary acknowledgements", () => {
+  for (const [field, expected] of [
+    ["safeObservabilityConfigured", /observability/],
+    ["operationalOwnerAssigned", /operational owner/],
+    ["rollbackOwnerAssigned", /rollback owner/],
+  ]) {
+    assert.throws(
+      () => validateCallV2DeploymentConfig(completeConfig({
+        clientEnabled: true,
+        [field]: false,
+      })),
+      expected,
+    );
+  }
+
+  const internalOnly = validateCallV2DeploymentConfig(completeConfig({
+    clientEnabled: false,
+    internalTasksEnabled: true,
+    safeObservabilityConfigured: false,
+    operationalOwnerAssigned: false,
+    rollbackOwnerAssigned: false,
+  }));
+  assert.equal(internalOnly.status, "internal_only_ready");
+  assert.deepEqual(internalOnly.canaryReadiness, {
+    canaryConfigRequired: false,
+    safeObservabilityConfigured: false,
+    operationalOwnerAssigned: false,
+    rollbackOwnerAssigned: false,
+    staffClaimsManaged: false,
   });
+});
+
+test("deployment validation script is network-free and prints sanitized output", () => {
+  let result = runDeploymentValidationCli({});
   assert.equal(result.status, 0);
   assert.equal(JSON.parse(result.stdout).status, "code_only_ready");
 
-  result = spawnSync(process.execPath, [script], {
-    encoding: "utf8",
-    env: {
-      PATH: process.env.PATH,
-      CALL_V2_INTERNAL_TASKS_ENABLED: "true",
-      CALL_V2_REGION: "us-central1",
-    },
+  result = runDeploymentValidationCli({
+    CALL_V2_INTERNAL_TASKS_ENABLED: "true",
+    CALL_V2_REGION: "us-central1",
   });
   assert.notEqual(result.status, 0);
   const parsed = JSON.parse(result.stdout);
   assert.equal(parsed.ok, false);
   assert.equal(JSON.stringify(parsed).includes("https://"), false);
 
-  result = spawnSync(process.execPath, [script], {
-    encoding: "utf8",
-    env: {
-      PATH: process.env.PATH,
-      CALL_V2_INTERNAL_TASKS_ENABLED: "true",
-      CALL_V2_REGION: "us-central1",
-      CALL_V2_TASKS_PROJECT_ID: "project-id",
-      CALL_V2_TASKS_LOCATION: "us-central1",
-      CALL_V2_TASKS_QUEUE_ID: "queue-id",
-      CALL_V2_TASKS_TARGET_URL: "https://target.example.com/task",
-      CALL_V2_TASKS_SERVICE_ACCOUNT_EMAIL:
-        "tasks@project-id.iam.gserviceaccount.com",
-      CALL_V2_TASKS_AUDIENCE: "https://audience.example.com/task",
-      CALL_V2_ALLOW_DISTINCT_AUDIENCE: "true",
-    },
+  result = runDeploymentValidationCli({
+    CALL_V2_INTERNAL_TASKS_ENABLED: "true",
+    CALL_V2_REGION: "us-central1",
+    CALL_V2_TASKS_PROJECT_ID: "project-id",
+    CALL_V2_TASKS_LOCATION: "us-central1",
+    CALL_V2_TASKS_QUEUE_ID: "queue-id",
+    CALL_V2_TASKS_TARGET_URL: "https://target.example.com/task",
+    CALL_V2_TASKS_SERVICE_ACCOUNT_EMAIL:
+      "tasks@project-id.iam.gserviceaccount.com",
+    CALL_V2_TASKS_AUDIENCE: "https://audience.example.com/task",
+    CALL_V2_ALLOW_DISTINCT_AUDIENCE: "true",
   });
   assert.equal(result.status, 0);
   const approved = JSON.parse(result.stdout);
   assert.equal(approved.sanitizedConfig.distinctAudienceApproved, true);
   assert.equal(JSON.stringify(approved).includes("example.com"), false);
 
-  result = spawnSync(process.execPath, [script], {
-    encoding: "utf8",
-    env: {
-      PATH: process.env.PATH,
-      CALL_V2_ENABLED: "true",
-      CALL_V2_INTERNAL_TASKS_ENABLED: "true",
-      CALL_V2_REGION: "us-central1",
-      CALL_V2_TASKS_PROJECT_ID: "project-id",
-      CALL_V2_TASKS_LOCATION: "us-central1",
-      CALL_V2_TASKS_QUEUE_ID: "queue-id",
-      CALL_V2_TASKS_TARGET_URL: "https://target.example.com/task",
-      CALL_V2_TASKS_SERVICE_ACCOUNT_EMAIL:
-        "tasks@project-id.iam.gserviceaccount.com",
-      CALL_V2_TASKS_AUDIENCE: "https://target.example.com/task",
-      CALL_V2_ROLLOUT_MODE: "percentage",
-      CALL_V2_ROLLOUT_PERCENTAGE: "10",
-      CALL_V2_ROLLOUT_SALT: "secret_salt",
-    },
+  result = runDeploymentValidationCli({
+    CALL_V2_ENABLED: "true",
+    CALL_V2_INTERNAL_TASKS_ENABLED: "true",
+    CALL_V2_REGION: "us-central1",
+    CALL_V2_TASKS_PROJECT_ID: "project-id",
+    CALL_V2_TASKS_LOCATION: "us-central1",
+    CALL_V2_TASKS_QUEUE_ID: "queue-id",
+    CALL_V2_TASKS_TARGET_URL: "https://target.example.com/task",
+    CALL_V2_TASKS_SERVICE_ACCOUNT_EMAIL:
+      "tasks@project-id.iam.gserviceaccount.com",
+    CALL_V2_TASKS_AUDIENCE: "https://target.example.com/task",
+    CALL_V2_ROLLOUT_MODE: "percentage",
+    CALL_V2_ROLLOUT_PERCENTAGE: "10",
+    CALL_V2_ROLLOUT_SALT: "secret_salt",
+    CALL_V2_SAFE_OBSERVABILITY_CONFIGURED: "true",
+    CALL_V2_OPERATIONAL_OWNER_ASSIGNED: "true",
+    CALL_V2_ROLLBACK_OWNER_ASSIGNED: "true",
   });
   assert.equal(result.status, 0);
   const rollout = JSON.parse(result.stdout);
   assert.equal(rollout.rolloutReadiness.rolloutMode, "percentage");
   assert.equal(rollout.rolloutReadiness.rolloutPercentage, 10);
+  assert.equal(rollout.canaryReadiness.safeObservabilityConfigured, true);
   assert.equal(JSON.stringify(rollout).includes("secret_salt"), false);
   assert.equal(JSON.stringify(rollout).includes("target.example.com"), false);
 });
+
+function runDeploymentValidationCli(env) {
+  const { main } = require("../../call_v2/validate_deployment_v2");
+  const originalEnv = process.env;
+  const originalWrite = process.stdout.write;
+  const originalExitCode = process.exitCode;
+  let stdout = "";
+  process.env = {
+    PATH: originalEnv.PATH,
+    ...env,
+  };
+  process.exitCode = 0;
+  process.stdout.write = (chunk) => {
+    stdout += chunk;
+    return true;
+  };
+  try {
+    main();
+    return {
+      status: process.exitCode || 0,
+      stdout,
+    };
+  } finally {
+    process.env = originalEnv;
+    process.stdout.write = originalWrite;
+    process.exitCode = originalExitCode;
+  }
+}
 
 function ttlTargets(indexes) {
   return indexes.fieldOverrides
@@ -661,6 +710,9 @@ function completeConfig(overrides = {}) {
     rolloutAllowlist: "",
     staffClaimsManaged: true,
     allowGlobalClientRollout: false,
+    safeObservabilityConfigured: true,
+    operationalOwnerAssigned: true,
+    rollbackOwnerAssigned: true,
     ...overrides,
   };
 }

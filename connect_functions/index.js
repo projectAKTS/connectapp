@@ -55,12 +55,14 @@ const CALL_V2_ROLLOUT_PERCENTAGE = defineString(
   "CALL_V2_ROLLOUT_PERCENTAGE",
   { default: "0" }
 );
-const CALL_V2_ROLLOUT_SALT = defineString("CALL_V2_ROLLOUT_SALT", {
-  default: "",
-});
+const CALL_V2_ROLLOUT_SALT = defineSecret("CALL_V2_ROLLOUT_SALT");
 const CALL_V2_ROLLOUT_ALLOWLIST = defineString(
   "CALL_V2_ROLLOUT_ALLOWLIST",
   { default: "" }
+);
+const CALL_V2_OBSERVABILITY_ENABLED = defineBoolean(
+  "CALL_V2_OBSERVABILITY_ENABLED",
+  { default: false }
 );
 
 const callV2Config = Object.freeze({
@@ -76,6 +78,12 @@ const callV2Config = Object.freeze({
   callV2RolloutPercentage: () => CALL_V2_ROLLOUT_PERCENTAGE.value(),
   callV2RolloutSalt: () => CALL_V2_ROLLOUT_SALT.value(),
   callV2RolloutAllowlist: () => CALL_V2_ROLLOUT_ALLOWLIST.value(),
+  callV2ObservabilityEnabled: () => CALL_V2_OBSERVABILITY_ENABLED.value(),
+});
+const callV2CallableOptions = Object.freeze({
+  region: CALL_V2_REGION,
+  invoker: "public",
+  secrets: [CALL_V2_ROLLOUT_SALT],
 });
 let callV2CloudTasksClient = null;
 let callV2TokenVerifier = null;
@@ -1527,38 +1535,38 @@ exports.healthCheck = onRequest(
    ============================================================ */
 
 exports.startCallV2 = onCall(
-  { region: CALL_V2_REGION, invoker: "public" },
+  callV2CallableOptions,
   (request) => getCallV2Wiring().callableHandlers.startCallV2(request)
 );
 
 exports.acceptCallV2 = onCall(
-  { region: CALL_V2_REGION, invoker: "public" },
+  callV2CallableOptions,
   (request) => getCallV2Wiring().callableHandlers.acceptCallV2(request)
 );
 
 exports.declineCallV2 = onCall(
-  { region: CALL_V2_REGION, invoker: "public" },
+  callV2CallableOptions,
   (request) => getCallV2Wiring().callableHandlers.declineCallV2(request)
 );
 
 exports.cancelCallV2 = onCall(
-  { region: CALL_V2_REGION, invoker: "public" },
+  callV2CallableOptions,
   (request) => getCallV2Wiring().callableHandlers.cancelCallV2(request)
 );
 
 exports.endCallV2 = onCall(
-  { region: CALL_V2_REGION, invoker: "public" },
+  callV2CallableOptions,
   (request) => getCallV2Wiring().callableHandlers.endCallV2(request)
 );
 
 exports.reportParticipantMediaV2 = onCall(
-  { region: CALL_V2_REGION, invoker: "public" },
+  callV2CallableOptions,
   (request) =>
     getCallV2Wiring().callableHandlers.reportParticipantMediaV2(request)
 );
 
 exports.renewActiveCallLeaseV2 = onCall(
-  { region: CALL_V2_REGION, invoker: "public" },
+  callV2CallableOptions,
   (request) =>
     getCallV2Wiring().callableHandlers.renewActiveCallLeaseV2(request)
 );

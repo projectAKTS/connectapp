@@ -16,6 +16,9 @@ const {
   createConfiguredCloudTasksPublisherV2,
   verifyCloudTasksOidcRequestV2,
 } = require("../../call_v2/firebase_wiring_v2");
+const {
+  OPERATIONAL_EVENT_NAMES,
+} = require("../../call_v2/observability_v2");
 
 const FIXED_NOW = new Date("2026-06-25T12:00:00.000Z");
 
@@ -803,6 +806,313 @@ test("HTTP adapter unauthorized path verifies before execution", async () => {
   }]);
 });
 
+test("disabled observability emits nothing and does not read rollout salt", async () => {
+  const events = [];
+  let saltReads = 0;
+  const wiring = createCallV2FirebaseWiring({
+    db: {},
+    config: config({
+      callV2ObservabilityEnabled: false,
+      callV2RolloutMode: "off",
+      callV2RolloutSalt: () => {
+        saltReads += 1;
+        return "secret_salt";
+      },
+    }),
+    now: () => FIXED_NOW,
+    services: {
+      operationalEventSink: {
+        recordOperationalEvent(event) {
+          events.push(event);
+        },
+      },
+      async acceptCallV2() {
+        return { accepted: true };
+      },
+      createCloudTasksPublisher() {
+        return { marker: "publisher" };
+      },
+      async dispatchTaskOutboxV2() {
+        return { status: "dispatched" };
+      },
+      async recoverPendingTaskOutboxV2() {
+        return {
+          examined: 0,
+          dispatched: 0,
+          alreadyDispatched: 0,
+          deadLetter: 0,
+          busy: 0,
+          retryable: 0,
+          stale: 0,
+          failed: 0,
+        };
+      },
+    },
+  });
+
+  assert.equal(saltReads, 0);
+  await wiring.callableHandlers.acceptCallV2({
+    auth: { uid: "participant" },
+    data: {},
+  });
+  await wiring.handleTaskOutboxCreated(eventParams());
+  await wiring.handleScheduledOutboxRecovery();
+  assert.equal(saltReads, 0);
+  assert.deepEqual(events, []);
+});
+
+test("observability records one normalized callable outcome and ignores sink failure", async () => {
+  const events = [];
+  const wiring = createCallV2FirebaseWiring({
+    db: {},
+    config: config({ callV2ObservabilityEnabled: true }),
+    now: () => FIXED_NOW,
+    services: {
+      operationalEventSink: {
+        recordOperationalEvent(event) {
+          events.push(event);
+          throw new Error("logger unavailable");
+        },
+      },
+      async acceptCallV2() {
+        return { accepted: true };
+      },
+    },
+  });
+
+  const result = await wiring.callableHandlers.acceptCallV2({
+    auth: { uid: "participant" },
+    data: {},
+  });
+
+  assert.deepEqual(result, { accepted: true });
+  assert.deepEqual(events, [{
+    schemaVersion: 1,
+    eventName: OPERATIONAL_EVENT_NAMES.clientCallableOutcome,
+    outcome: "success",
+    fields: { callableName: "acceptCallV2" },
+  }]);
+});
+
+test("start rollout denial observability stays generic", async () => {
+  const events = [];
+  const wiring = createCallV2FirebaseWiring({
+    db: {},
+    config: config({
+      callV2ObservabilityEnabled: true,
+      callV2RolloutMode: "percentage",
+      callV2RolloutPercentage: "1",
+      callV2RolloutSalt: "secret_salt",
+    }),
+    now: () => FIXED_NOW,
+    services: {
+      operationalEventSink: {
+        recordOperationalEvent(event) {
+          events.push(event);
+        },
+      },
+      evaluateCallV2ClientEligibility() {
+        return {
+          eligible: false,
+          reason: "percentage_not_selected",
+          mode: "percentage",
+          bucket: 9876,
+        };
+      },
+      async startCallV2() {
+        throw new Error("domain must not run");
+      },
+    },
+  });
+
+  await assertHttpsError(
+    "failed-precondition",
+    "call_v2_not_enabled_for_user",
+    () => wiring.callableHandlers.startCallV2({
+      auth: { uid: "caller", token: { callV2Staff: true } },
+      data: { calleeUid: "callee" },
+    }),
+  );
+  assert.deepEqual(events, [
+    {
+      schemaVersion: 1,
+      eventName: OPERATIONAL_EVENT_NAMES.startRolloutDecision,
+      outcome: "denied",
+      fields: { rolloutMode: "percentage" },
+    },
+    {
+      schemaVersion: 1,
+      eventName: OPERATIONAL_EVENT_NAMES.clientCallableOutcome,
+      outcome: "rollout_denied",
+      fields: {
+        callableName: "startCallV2",
+        rolloutMode: "percentage",
+      },
+    },
+  ]);
+  const serialized = JSON.stringify(events);
+  assert.equal(serialized.includes("percentage_not_selected"), false);
+  assert.equal(serialized.includes("9876"), false);
+  assert.equal(serialized.includes("secret_salt"), false);
+  assert.equal(serialized.includes("caller"), false);
+});
+
+test("outbox, recovery, and timeout observability records only safe categories", async () => {
+  const events = [];
+  const wiring = createCallV2FirebaseWiring({
+    db: {},
+    config: config({ callV2ObservabilityEnabled: true }),
+    now: () => FIXED_NOW,
+    tokenVerifier: verifierFor(payload()),
+    services: {
+      operationalEventSink: {
+        recordOperationalEvent(event) {
+          events.push(event);
+        },
+      },
+      createCloudTasksPublisher() {
+        return { marker: "publisher" };
+      },
+      async dispatchTaskOutboxV2() {
+        return { status: "retryable", taskId: "private_task" };
+      },
+      async recoverPendingTaskOutboxV2() {
+        return {
+          examined: 3,
+          dispatched: 1,
+          alreadyDispatched: 1,
+          deadLetter: 0,
+          busy: 0,
+          retryable: 1,
+          stale: 0,
+          failed: 0,
+          callId: "private_call",
+        };
+      },
+      createTimeoutTaskHttpHandlerV2({ verifyRequest }) {
+        return async (request) => {
+          assert.equal(await verifyRequest(request), true);
+          return {
+            statusCode: 503,
+            body: { errorCode: "timeout_not_due", callId: "private_call" },
+          };
+        };
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => wiring.handleTaskOutboxCreated(eventParams()),
+    (error) => error instanceof CallV2Error,
+  );
+  await wiring.handleScheduledOutboxRecovery();
+  const response = fakeResponse();
+  await wiring.createTimeoutHttpHandler()(
+    {
+      method: "POST",
+      body: { callId: "private_call" },
+      headers: { authorization: "Bearer token" },
+    },
+    response,
+  );
+
+  assert.deepEqual(events, [
+    {
+      schemaVersion: 1,
+      eventName: OPERATIONAL_EVENT_NAMES.outboxDispatchOutcome,
+      outcome: "retry_required",
+      fields: { retryable: true },
+    },
+    {
+      schemaVersion: 1,
+      eventName: OPERATIONAL_EVENT_NAMES.scheduledRecoveryOutcome,
+      outcome: "completed",
+      fields: {
+        examined: 3,
+        dispatched: 1,
+        alreadyDispatched: 1,
+        deadLetter: 0,
+        busy: 0,
+        retryable: 1,
+        stale: 0,
+        failed: 0,
+      },
+    },
+    {
+      schemaVersion: 1,
+      eventName: OPERATIONAL_EVENT_NAMES.timeoutHttpOutcome,
+      outcome: "retryable",
+      fields: {
+        httpStatusClass: "5xx",
+        verificationResult: "authorized",
+        retryable: true,
+      },
+    },
+  ]);
+  assert.equal(JSON.stringify(events).includes("private_"), false);
+  assert.deepEqual(response.writes, [{
+    statusCode: 503,
+    body: { errorCode: "timeout_not_due", callId: "private_call" },
+  }]);
+});
+
+test("internal boundaries do not resolve rollout salt secret", async () => {
+  let saltReads = 0;
+  const wiring = createCallV2FirebaseWiring({
+    db: {},
+    config: config({
+      callV2ObservabilityEnabled: true,
+      callV2RolloutMode: "percentage",
+      callV2RolloutPercentage: "50",
+      callV2RolloutSalt: () => {
+        saltReads += 1;
+        throw new Error("salt must not be read by internal handlers");
+      },
+    }),
+    now: () => FIXED_NOW,
+    tokenVerifier: verifierFor(payload()),
+    services: {
+      operationalEventSink: { recordOperationalEvent() {} },
+      createCloudTasksPublisher() {
+        return { marker: "publisher" };
+      },
+      async dispatchTaskOutboxV2() {
+        return { status: "dispatched" };
+      },
+      async recoverPendingTaskOutboxV2() {
+        return {
+          examined: 0,
+          dispatched: 0,
+          alreadyDispatched: 0,
+          deadLetter: 0,
+          busy: 0,
+          retryable: 0,
+          stale: 0,
+          failed: 0,
+        };
+      },
+      createTimeoutTaskHttpHandlerV2({ verifyRequest }) {
+        return async (request) => {
+          assert.equal(await verifyRequest(request), true);
+          return { statusCode: 200, body: { status: "acknowledged" } };
+        };
+      },
+    },
+  });
+
+  await wiring.handleTaskOutboxCreated(eventParams());
+  await wiring.handleScheduledOutboxRecovery();
+  await wiring.createTimeoutHttpHandler()(
+    {
+      method: "POST",
+      body: {},
+      headers: { authorization: "Bearer token" },
+    },
+    fakeResponse(),
+  );
+  assert.equal(saltReads, 0);
+});
+
 test("index exports preserve legacy functions and expose no internal V2 services", () => {
   const exported = require("../../index");
   for (const legacy of [
@@ -846,10 +1156,63 @@ test("index exports preserve legacy functions and expose no internal V2 services
   }
 });
 
+test("index binds rollout salt secret only to the seven callable V2 exports", () => {
+  const exported = require("../../index");
+  for (const name of CALLABLE_SERVICE_NAMES) {
+    const serialized = JSON.stringify(exported[name].__endpoint || {});
+    assert.match(serialized, /CALL_V2_ROLLOUT_SALT/, name);
+  }
+  for (const name of [
+    "onCallV2TaskOutboxCreated",
+    "executeCallTimeoutTaskV2",
+    "recoverCallV2TaskOutbox",
+  ]) {
+    const serialized = JSON.stringify(exported[name].__endpoint || {});
+    assert.equal(serialized.includes("CALL_V2_ROLLOUT_SALT"), false, name);
+  }
+});
+
+test("rollout salt is resolved lazily only when start-call percentage rollout runs", async () => {
+  let saltReads = 0;
+  const wiring = createCallV2FirebaseWiring({
+    db: {},
+    config: config({
+      callV2RolloutMode: "percentage",
+      callV2RolloutPercentage: "100",
+      callV2RolloutSalt: () => {
+        saltReads += 1;
+        return "secret_salt";
+      },
+    }),
+    now: () => FIXED_NOW,
+    services: {
+      async acceptCallV2() {
+        return { accepted: true };
+      },
+      async startCallV2() {
+        return { callId: "call_1" };
+      },
+    },
+  });
+
+  assert.equal(saltReads, 0);
+  await wiring.callableHandlers.acceptCallV2({
+    auth: { uid: "participant" },
+    data: {},
+  });
+  assert.equal(saltReads, 0);
+  await wiring.callableHandlers.startCallV2({
+    auth: { uid: "caller" },
+    data: { calleeUid: "callee" },
+  });
+  assert.equal(saltReads, 1);
+});
+
 function config(overrides = {}) {
   return {
     callV2Enabled: true,
     callV2InternalTasksEnabled: true,
+    callV2ObservabilityEnabled: false,
     callV2RolloutMode: "all",
     callV2RolloutPercentage: "0",
     callV2RolloutSalt: "",
