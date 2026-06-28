@@ -2,63 +2,53 @@
 
 Phase: 2M
 Status: ready_for_review
-Starting SHA: 65d29d79117ef8f92cafe2480458948e1f2761c2
-Implementation SHA: 817b3c543866dada00f7b1c1ae6a60c89d50c4c0
+Starting SHA: 817b3c543866dada00f7b1c1ae6a60c89d50c4c0
+Implementation SHA: 83933165d7741f06c6e47dcd94e8dbd2d92a6462
 Pushed branch-tip SHA: SELF
 
 ## Files changed
 
 - `connect_functions/call_v2/deployment_preflight_v2.js`
-- `connect_functions/call_v2/preflight_call_v2.js`
-- `connect_functions/package.json`
 - `connect_functions/test/call_v2/deployment_preflight_v2.test.js`
 - `docs/call-v2/PHASE_2M_FINAL_PREFLIGHT.md`
 
 ## Codex summary
 
-Implemented the Phase 2M preflight package in the allowed scope.
+Implemented the Phase 2M rollout-input hardening in the allowed files, left the changes uncommitted.
 
 Changed files:
-- [`connect_functions/call_v2/deployment_preflight_v2.js`](/home/runner/work/connectapp/connectapp/connect_functions/call_v2/deployment_preflight_v2.js)
-- [`connect_functions/call_v2/preflight_call_v2.js`](/home/runner/work/connectapp/connectapp/connect_functions/call_v2/preflight_call_v2.js)
-- [`connect_functions/package.json`](/home/runner/work/connectapp/connectapp/connect_functions/package.json)
-- [`connect_functions/test/call_v2/deployment_preflight_v2.test.js`](/home/runner/work/connectapp/connectapp/connect_functions/test/call_v2/deployment_preflight_v2.test.js)
-- [`docs/call-v2/PHASE_2M_FINAL_PREFLIGHT.md`](/home/runner/work/connectapp/connectapp/docs/call-v2/PHASE_2M_FINAL_PREFLIGHT.md)
+- [connect_functions/call_v2/deployment_preflight_v2.js](/home/runner/work/connectapp/connectapp/connect_functions/call_v2/deployment_preflight_v2.js)
+- [connect_functions/call_v2/preflight_call_v2.js](/home/runner/work/connectapp/connectapp/connect_functions/call_v2/preflight_call_v2.js)
+- [connect_functions/test/call_v2/deployment_preflight_v2.test.js](/home/runner/work/connectapp/connectapp/connect_functions/test/call_v2/deployment_preflight_v2.test.js)
+- [docs/call-v2/PHASE_2M_FINAL_PREFLIGHT.md](/home/runner/work/connectapp/connectapp/docs/call-v2/PHASE_2M_FINAL_PREFLIGHT.md)
 
 What changed:
-- Added a pure, dependency-free preflight helper that returns a frozen, sanitized report.
-- Added controlled blocker codes for each required gate.
-- Added a CLI-safe `npm run preflight:call-v2` path that defaults to blocked output and does not initialize Firebase.
-- Added tests for:
-  - default blocked/sanitized behavior
-  - controlled blocker codes
-  - complete ready-for-human-approval input
-  - staff-only gating behavior
-  - unknown-field rejection
-  - CLI output sanitization
-  - immutability/determinism
-- Added the Phase 2M preflight doc with the requested staged rollout and rollback guidance.
+- `rolloutMode` is now allowlisted to `internal_only`, `staff_only`, `percentage`, or `disabled`.
+- Invalid or unsafe `rolloutMode` values are not echoed and now add controlled blocker codes.
+- `rolloutPercentage` is bounded to safe integers `0..100`.
+- `rolloutAllowlistCount` is bounded to safe non-negative integers up to `1000`.
+- Invalid numeric rollout metadata is sanitized out and blocks readiness.
+- Tests now cover:
+  - arbitrary rollout strings not being returned
+  - URL/email/secret-like rollout values not being echoed in helper or CLI output
+  - invalid percentages/counts blocking readiness
+  - valid controlled rollout metadata still allowing readiness
+  - default CLI output remaining blocked and sanitized
+  - explicit sanitized CLI input reaching readiness only when all gates pass
 
 Validation:
-- Passed:
-  - `cd connect_functions && node --version`
-  - `cd connect_functions && node --check call_v2/*.js && node --check test/call_v2/*.js`
-  - `cd connect_functions && node --test test/call_v2/deployment_preflight_v2.test.js`
-  - `cd connect_functions && npm run validate:call-v2:deployment`
-  - `cd connect_functions && node --check index.js`
-  - `git diff --check`
-- Blocked by sandbox/environment:
-  - `npm run test:call-v2:rules`
-  - `npm run test:call-v2:emulator` x3
-  - `npm run test:call-v2` also failed because existing Firestore/emulator-dependent tests require `FIRESTORE_EMULATOR_HOST` and emulator ports that are unavailable here
+- `node --check` passed on the touched JS files.
+- Focused test file passed: `cd connect_functions && node --test test/call_v2/deployment_preflight_v2.test.js`
+- I did not run the full repo validation matrix because the repo scripts pull in emulator-dependent tests and the environment does not have the required emulator state.
 
 Remaining risks:
-- Emulator-backed tests were not runnable in this environment, so the new preflight code is validated locally but not under the Firebase emulator harness here.
-- The preflight helper uses explicit sanitized inputs only; any future expansion of the gate list should preserve the same allowlist/sanitization model.
+- I only validated the focused preflight test file, not the full call-v2 suite.
+- The broader validation scripts include emulator-backed tests that were not runnable in this environment.
+- The Node version available here was `v24.17.0`, not the task’s preferred Node 20.
 
 Next-phase recommendation:
-1. Run the emulator/rules validation in the workflow environment where Firebase emulators can bind ports.
-2. If that passes, keep the phase locked at human approval before any live deploy or switch change.
+1. Run the repo’s full `call-v2` validation in an environment with the required emulator setup and Node 20.
+2. If that passes, proceed with the agent-loop handoff/commit flow from the workflow.
 
 ## Validation
 
@@ -72,7 +62,7 @@ Next-phase recommendation:
 - Full emulator run 3: passed
 - `node --check index.js`: passed
 - `git diff --check`: passed
-- Workflow run: https://github.com/projectAKTS/connectapp/actions/runs/28314659317
+- Workflow run: https://github.com/projectAKTS/connectapp/actions/runs/28317342210
 
 ## Safety confirmations
 
