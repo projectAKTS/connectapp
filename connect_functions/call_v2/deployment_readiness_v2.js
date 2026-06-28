@@ -5,6 +5,9 @@ const {
   ERROR_CODES,
   dispatchTaskOutboxV2,
 } = require("./start_call_v2");
+const {
+  validateRolloutReadinessV2,
+} = require("./rollout_gate_v2");
 
 const RECOVERABLE_OUTBOX_STATUSES = Object.freeze([
   "pending",
@@ -208,6 +211,12 @@ function validateCallV2DeploymentConfig({
   serviceAccountEmail,
   audience,
   allowDistinctAudience = false,
+  rolloutMode,
+  rolloutPercentage,
+  rolloutSalt,
+  rolloutAllowlist,
+  staffClaimsManaged = false,
+  allowGlobalClientRollout = false,
 }) {
   const client = clientEnabled === true;
   const internal = internalTasksEnabled === true;
@@ -224,6 +233,7 @@ function validateCallV2DeploymentConfig({
       internalTasksEnabled: false,
       taskConfigRequired: false,
       sanitizedConfig: emptySanitizedConfig(),
+      rolloutReadiness: emptyRolloutReadiness(),
     });
   }
 
@@ -239,6 +249,15 @@ function validateCallV2DeploymentConfig({
     allowDistinctAudience,
   });
   requireServiceAccountEmail(serviceAccountEmail);
+  const rolloutReadiness = requireRolloutReadiness({
+    clientEnabled: client,
+    mode: rolloutMode,
+    percentage: rolloutPercentage,
+    salt: rolloutSalt,
+    allowlist: rolloutAllowlist,
+    staffClaimsManaged,
+    allowGlobalClientRollout,
+  });
 
   return Object.freeze({
     status: client ? "client_and_internal_ready" : "internal_only_ready",
@@ -255,6 +274,7 @@ function validateCallV2DeploymentConfig({
       audienceConfigured: true,
       distinctAudienceApproved: allowDistinctAudience === true,
     }),
+    rolloutReadiness,
   });
 }
 
@@ -352,6 +372,16 @@ function readinessError(message) {
   return new CallV2Error(ERROR_CODES.invalidArgument, message);
 }
 
+function requireRolloutReadiness(request) {
+  try {
+    return validateRolloutReadinessV2(request);
+  } catch (error) {
+    throw readinessError(error && error.message
+      ? error.message
+      : "Call V2 rollout configuration is not ready.");
+  }
+}
+
 function emptySanitizedConfig() {
   return Object.freeze({
     regionConfigured: false,
@@ -362,6 +392,17 @@ function emptySanitizedConfig() {
     serviceAccountEmailConfigured: false,
     audienceConfigured: false,
     distinctAudienceApproved: false,
+  });
+}
+
+function emptyRolloutReadiness() {
+  return Object.freeze({
+    rolloutConfigRequired: false,
+    rolloutMode: "off",
+    rolloutPercentage: 0,
+    rolloutAllowlistCount: 0,
+    staffClaimsManaged: false,
+    globalClientRolloutApproved: false,
   });
 }
 

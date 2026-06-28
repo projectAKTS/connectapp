@@ -43,6 +43,30 @@ test("callable kill switch rejects before domain invocation", async () => {
   assert.equal(invoked, false);
 });
 
+test("callables require auth before rollout or kill-switch disclosure", async () => {
+  const wiring = createCallV2FirebaseWiring({
+    db: {},
+    config: config({
+      callV2Enabled: false,
+      callV2RolloutMode: "off",
+    }),
+    now: () => FIXED_NOW,
+    services: {
+      async startCallV2() {
+        throw new Error("domain must not run");
+      },
+    },
+  });
+
+  await assertHttpsError(
+    "unauthenticated",
+    ERROR_CODES.unauthenticated,
+    () => wiring.callableHandlers.startCallV2({
+      data: { calleeUid: "callee", callV2Staff: true },
+    }),
+  );
+});
+
 test("callables require auth and use context UID instead of request UID", async () => {
   const calls = [];
   const wiring = createCallV2FirebaseWiring({
@@ -70,7 +94,11 @@ test("callables require auth and use context UID instead of request UID", async 
 
   const result = await wiring.callableHandlers.startCallV2({
     auth: { uid: "auth_uid" },
-    data: { callerUid: "request_uid", idempotencyKey: "idem" },
+    data: {
+      callerUid: "request_uid",
+      calleeUid: "callee",
+      idempotencyKey: "idem",
+    },
   });
 
   assert.equal(calls.length, 1);
@@ -87,6 +115,165 @@ test("callables require auth and use context UID instead of request UID", async 
   assert.equal(result.callerUid, "auth_uid");
   assert.equal(result.taskId, undefined);
   assert.equal(result.lockReleaseResults, undefined);
+});
+
+test("start callable requires generic caller rollout eligibility", async () => {
+  let invoked = false;
+  const wiring = createCallV2FirebaseWiring({
+    db: {},
+    config: config({ callV2RolloutMode: "staff" }),
+    now: () => FIXED_NOW,
+    services: {
+      async startCallV2() {
+        invoked = true;
+      },
+    },
+  });
+
+  await assertHttpsError(
+    "failed-precondition",
+    "call_v2_not_enabled_for_user",
+    () => wiring.callableHandlers.startCallV2({
+      auth: {
+        uid: "caller",
+        token: { callV2Staff: "true" },
+      },
+      data: {
+        calleeUid: "callee",
+        callV2Staff: true,
+        callV2RolloutMode: "all",
+        callV2RolloutPercentage: 100,
+      },
+    }),
+  );
+  assert.equal(invoked, false);
+});
+
+test("start callable requires eligible caller and callee before domain service", async () => {
+  const calls = [];
+  const wiring = createCallV2FirebaseWiring({
+    db: {},
+    config: config({
+      callV2RolloutMode: "allowlist",
+      callV2RolloutAllowlist: "caller,callee",
+    }),
+    now: () => FIXED_NOW,
+    services: {
+      async startCallV2(args) {
+        calls.push(args);
+        return { callId: "call_1" };
+      },
+    },
+  });
+
+  const result = await wiring.callableHandlers.startCallV2({
+    auth: { uid: "caller", token: {} },
+    data: { calleeUid: "callee", idempotencyKey: "idem" },
+  });
+
+  assert.equal(result.callId, "call_1");
+  assert.equal(calls.length, 1);
+});
+
+test("start callable blocks ineligible callee and lookup failures without invoking domain", async () => {
+  let invoked = false;
+  let wiring = createCallV2FirebaseWiring({
+    db: {},
+    config: config({
+      callV2RolloutMode: "allowlist",
+      callV2RolloutAllowlist: "caller",
+    }),
+    now: () => FIXED_NOW,
+    services: {
+      async startCallV2() {
+        invoked = true;
+      },
+    },
+  });
+
+  await assertHttpsError(
+    "failed-precondition",
+    "call_v2_not_enabled_for_user",
+    () => wiring.callableHandlers.startCallV2({
+      auth: { uid: "caller", token: {} },
+      data: { calleeUid: "callee" },
+    }),
+  );
+  assert.equal(invoked, false);
+
+  wiring = createCallV2FirebaseWiring({
+    db: {},
+    config: config({ callV2RolloutMode: "staff" }),
+    now: () => FIXED_NOW,
+    targetUserAuth: {
+      async getUser() {
+        throw new Error("lookup failed");
+      },
+    },
+    services: {
+      async startCallV2() {
+        invoked = true;
+      },
+    },
+  });
+  await assertHttpsError(
+    "failed-precondition",
+    "call_v2_not_enabled_for_user",
+    () => wiring.callableHandlers.startCallV2({
+      auth: { uid: "caller", token: { callV2Staff: true } },
+      data: { calleeUid: "callee" },
+    }),
+  );
+  assert.equal(invoked, false);
+});
+
+test("existing-call commands require global enabled but do not re-check cohort", async () => {
+  const routed = [];
+  const services = Object.fromEntries(
+    CALLABLE_SERVICE_NAMES
+      .filter((name) => name !== "startCallV2")
+      .map((name) => [
+        name,
+        async () => {
+          routed.push(name);
+          return { route: name };
+        },
+      ]),
+  );
+  const wiring = createCallV2FirebaseWiring({
+    db: {},
+    config: config({ callV2RolloutMode: "off" }),
+    now: () => FIXED_NOW,
+    services,
+  });
+
+  for (const name of Object.keys(services)) {
+    const result = await wiring.callableHandlers[name]({
+      auth: { uid: "participant", token: {} },
+      data: { callV2Staff: true },
+    });
+    assert.deepEqual(result, { route: name });
+  }
+  assert.deepEqual(routed.sort(), Object.keys(services).sort());
+
+  const disabled = createCallV2FirebaseWiring({
+    db: {},
+    config: config({ callV2Enabled: false, callV2RolloutMode: "all" }),
+    now: () => FIXED_NOW,
+    services: {
+      async acceptCallV2() {
+        throw new Error("domain must not run");
+      },
+    },
+  });
+  await assertHttpsError(
+    "failed-precondition",
+    "call_v2_disabled",
+    () => disabled.callableHandlers.acceptCallV2({
+      auth: { uid: "participant", token: {} },
+      data: {},
+    }),
+  );
 });
 
 test("all seven callables route to the matching service", async () => {
@@ -110,7 +297,7 @@ test("all seven callables route to the matching service", async () => {
   for (const name of CALLABLE_SERVICE_NAMES) {
     const result = await wiring.callableHandlers[name]({
       auth: { uid: "actor" },
-      data: { marker: name },
+      data: { marker: name, calleeUid: "callee" },
     });
     assert.deepEqual(result, { route: name });
   }
@@ -141,7 +328,7 @@ test("callable error mapping is stable and hides raw errors", async () => {
       callV2Code,
       () => wiring.callableHandlers.startCallV2({
         auth: { uid: "caller" },
-        data: {},
+        data: { calleeUid: "callee" },
       }),
     );
   }
@@ -161,7 +348,7 @@ test("callable error mapping is stable and hides raw errors", async () => {
     ERROR_CODES.transactionFailed,
     () => wiring.callableHandlers.startCallV2({
       auth: { uid: "caller" },
-      data: {},
+      data: { calleeUid: "callee" },
     }),
   );
 });
@@ -431,6 +618,64 @@ test("scheduled recovery uses controlled publisher and never calls timeout proce
   ]);
 });
 
+test("internal dispatcher, timeout HTTP, and recovery ignore client rollout mode", async () => {
+  const calls = [];
+  const wiring = createCallV2FirebaseWiring({
+    db: { marker: "db" },
+    config: config({ callV2RolloutMode: "off" }),
+    now: () => FIXED_NOW,
+    tokenVerifier: verifierFor(payload()),
+    services: {
+      createCloudTasksPublisher() {
+        return { marker: "publisher" };
+      },
+      async dispatchTaskOutboxV2() {
+        calls.push("dispatch");
+        return { status: "dispatched" };
+      },
+      async recoverPendingTaskOutboxV2() {
+        calls.push("recovery");
+        return {
+          examined: 0,
+          dispatched: 0,
+          alreadyDispatched: 0,
+          deadLetter: 0,
+          busy: 0,
+          retryable: 0,
+          stale: 0,
+          failed: 0,
+        };
+      },
+      createTimeoutTaskHttpHandlerV2({ verifyRequest }) {
+        return async (request) => {
+          calls.push("timeout");
+          assert.equal(await verifyRequest(request), true);
+          return { statusCode: 200, body: { status: "acknowledged" } };
+        };
+      },
+    },
+  });
+
+  assert.equal(
+    (await wiring.handleTaskOutboxCreated(eventParams())).status,
+    "dispatched",
+  );
+  assert.equal(
+    (await wiring.handleScheduledOutboxRecovery()).status,
+    "completed",
+  );
+  const response = fakeResponse();
+  await wiring.createTimeoutHttpHandler()(
+    {
+      method: "POST",
+      body: { schemaVersion: 1 },
+      headers: { authorization: "Bearer token" },
+    },
+    response,
+  );
+  assert.deepEqual(calls, ["dispatch", "recovery", "timeout"]);
+});
+
 test("Cloud Tasks production factory forwards controlled configuration", async () => {
   const calls = [];
   const publisher = createConfiguredCloudTasksPublisherV2({
@@ -605,6 +850,10 @@ function config(overrides = {}) {
   return {
     callV2Enabled: true,
     callV2InternalTasksEnabled: true,
+    callV2RolloutMode: "all",
+    callV2RolloutPercentage: "0",
+    callV2RolloutSalt: "",
+    callV2RolloutAllowlist: "",
     tasksProjectId: "demo-helperly",
     tasksLocation: "us-central1",
     tasksQueueId: "call-v2-timeouts",

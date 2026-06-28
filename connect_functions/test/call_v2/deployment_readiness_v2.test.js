@@ -356,6 +356,14 @@ test("deployment validation requires complete explicit internal task configurati
     audienceConfigured: true,
     distinctAudienceApproved: false,
   });
+  assert.deepEqual(result.rolloutReadiness, {
+    rolloutConfigRequired: true,
+    rolloutMode: "staff",
+    rolloutPercentage: 0,
+    rolloutAllowlistCount: 0,
+    staffClaimsManaged: true,
+    globalClientRolloutApproved: false,
+  });
   assert.equal(JSON.stringify(result).includes("https://"), false);
   assert.equal(JSON.stringify(result).includes("@"), false);
 });
@@ -375,6 +383,100 @@ test("deployment validation requires explicit approval for distinct audience", (
   assert.equal(result.sanitizedConfig.distinctAudienceApproved, true);
   assert.equal(JSON.stringify(result).includes("example.com"), false);
   assert.equal(JSON.stringify(result).includes("tasks.example.com"), false);
+});
+
+test("deployment validation allows internal-only deployment without rollout config", () => {
+  const result = validateCallV2DeploymentConfig(completeConfig({
+    clientEnabled: false,
+    internalTasksEnabled: true,
+    rolloutMode: undefined,
+    staffClaimsManaged: undefined,
+  }));
+  assert.equal(result.status, "internal_only_ready");
+  assert.equal(result.rolloutReadiness.rolloutConfigRequired, false);
+});
+
+test("deployment validation enforces client rollout configuration", () => {
+  assert.throws(
+    () => validateCallV2DeploymentConfig(completeConfig({
+      clientEnabled: true,
+      rolloutMode: "off",
+    })),
+    /rollout mode/,
+  );
+  assert.throws(
+    () => validateCallV2DeploymentConfig(completeConfig({
+      clientEnabled: true,
+      rolloutMode: "staff",
+      staffClaimsManaged: false,
+    })),
+    /Staff/,
+  );
+  assert.equal(
+    validateCallV2DeploymentConfig(completeConfig({
+      clientEnabled: true,
+      rolloutMode: "staff",
+      staffClaimsManaged: true,
+    })).rolloutReadiness.rolloutMode,
+    "staff",
+  );
+  assert.throws(
+    () => validateCallV2DeploymentConfig(completeConfig({
+      clientEnabled: true,
+      rolloutMode: "allowlist",
+      rolloutAllowlist: "",
+    })),
+    /allowlist/,
+  );
+  const allowlist = validateCallV2DeploymentConfig(completeConfig({
+    clientEnabled: true,
+    rolloutMode: "allowlist",
+    rolloutAllowlist: "user_a,user_b,user_b",
+  })).rolloutReadiness;
+  assert.equal(allowlist.rolloutAllowlistCount, 2);
+  assert.equal(JSON.stringify(allowlist).includes("user_a"), false);
+  assert.throws(
+    () => validateCallV2DeploymentConfig(completeConfig({
+      clientEnabled: true,
+      rolloutMode: "percentage",
+      rolloutPercentage: 25,
+      rolloutSalt: "",
+    })),
+    /salt/,
+  );
+  assert.throws(
+    () => validateCallV2DeploymentConfig(completeConfig({
+      clientEnabled: true,
+      rolloutMode: "percentage",
+      rolloutPercentage: 101,
+      rolloutSalt: "salt",
+    })),
+    /percentage/,
+  );
+  const percentage = validateCallV2DeploymentConfig(completeConfig({
+    clientEnabled: true,
+    rolloutMode: "percentage",
+    rolloutPercentage: 25,
+    rolloutSalt: "secret_salt",
+  })).rolloutReadiness;
+  assert.equal(percentage.rolloutPercentage, 25);
+  assert.equal(JSON.stringify(percentage).includes("secret_salt"), false);
+  assert.throws(
+    () => validateCallV2DeploymentConfig(completeConfig({
+      clientEnabled: true,
+      rolloutMode: "all",
+      allowGlobalClientRollout: false,
+    })),
+    /Global/,
+  );
+  assert.equal(
+    validateCallV2DeploymentConfig(completeConfig({
+      clientEnabled: true,
+      rolloutMode: "all",
+      allowGlobalClientRollout: true,
+    })).rolloutReadiness.globalClientRolloutApproved,
+    true,
+  );
 });
 
 test("deployment validation script is network-free and prints sanitized output", () => {
@@ -424,6 +526,32 @@ test("deployment validation script is network-free and prints sanitized output",
   const approved = JSON.parse(result.stdout);
   assert.equal(approved.sanitizedConfig.distinctAudienceApproved, true);
   assert.equal(JSON.stringify(approved).includes("example.com"), false);
+
+  result = spawnSync(process.execPath, [script], {
+    encoding: "utf8",
+    env: {
+      PATH: process.env.PATH,
+      CALL_V2_ENABLED: "true",
+      CALL_V2_INTERNAL_TASKS_ENABLED: "true",
+      CALL_V2_REGION: "us-central1",
+      CALL_V2_TASKS_PROJECT_ID: "project-id",
+      CALL_V2_TASKS_LOCATION: "us-central1",
+      CALL_V2_TASKS_QUEUE_ID: "queue-id",
+      CALL_V2_TASKS_TARGET_URL: "https://target.example.com/task",
+      CALL_V2_TASKS_SERVICE_ACCOUNT_EMAIL:
+        "tasks@project-id.iam.gserviceaccount.com",
+      CALL_V2_TASKS_AUDIENCE: "https://target.example.com/task",
+      CALL_V2_ROLLOUT_MODE: "percentage",
+      CALL_V2_ROLLOUT_PERCENTAGE: "10",
+      CALL_V2_ROLLOUT_SALT: "secret_salt",
+    },
+  });
+  assert.equal(result.status, 0);
+  const rollout = JSON.parse(result.stdout);
+  assert.equal(rollout.rolloutReadiness.rolloutMode, "percentage");
+  assert.equal(rollout.rolloutReadiness.rolloutPercentage, 10);
+  assert.equal(JSON.stringify(rollout).includes("secret_salt"), false);
+  assert.equal(JSON.stringify(rollout).includes("target.example.com"), false);
 });
 
 function ttlTargets(indexes) {
@@ -527,6 +655,12 @@ function completeConfig(overrides = {}) {
     targetUrl: "https://example.com/executeCallTimeoutTaskV2",
     serviceAccountEmail: "tasks@project-id.iam.gserviceaccount.com",
     audience: "https://example.com/executeCallTimeoutTaskV2",
+    rolloutMode: "staff",
+    rolloutPercentage: 0,
+    rolloutSalt: "",
+    rolloutAllowlist: "",
+    staffClaimsManaged: true,
+    allowGlobalClientRollout: false,
     ...overrides,
   };
 }

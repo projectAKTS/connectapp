@@ -48,6 +48,20 @@ const CALL_V2_TASKS_SERVICE_ACCOUNT_EMAIL = defineString(
 const CALL_V2_TASKS_AUDIENCE = defineString("CALL_V2_TASKS_AUDIENCE", {
   default: "",
 });
+const CALL_V2_ROLLOUT_MODE = defineString("CALL_V2_ROLLOUT_MODE", {
+  default: "off",
+});
+const CALL_V2_ROLLOUT_PERCENTAGE = defineString(
+  "CALL_V2_ROLLOUT_PERCENTAGE",
+  { default: "0" }
+);
+const CALL_V2_ROLLOUT_SALT = defineString("CALL_V2_ROLLOUT_SALT", {
+  default: "",
+});
+const CALL_V2_ROLLOUT_ALLOWLIST = defineString(
+  "CALL_V2_ROLLOUT_ALLOWLIST",
+  { default: "" }
+);
 
 const callV2Config = Object.freeze({
   callV2Enabled: () => CALL_V2_ENABLED.value(),
@@ -58,6 +72,10 @@ const callV2Config = Object.freeze({
   tasksTargetUrl: () => CALL_V2_TASKS_TARGET_URL.value(),
   tasksServiceAccountEmail: () => CALL_V2_TASKS_SERVICE_ACCOUNT_EMAIL.value(),
   tasksAudience: () => CALL_V2_TASKS_AUDIENCE.value(),
+  callV2RolloutMode: () => CALL_V2_ROLLOUT_MODE.value(),
+  callV2RolloutPercentage: () => CALL_V2_ROLLOUT_PERCENTAGE.value(),
+  callV2RolloutSalt: () => CALL_V2_ROLLOUT_SALT.value(),
+  callV2RolloutAllowlist: () => CALL_V2_ROLLOUT_ALLOWLIST.value(),
 });
 let callV2CloudTasksClient = null;
 let callV2TokenVerifier = null;
@@ -90,6 +108,9 @@ function getCallV2Wiring() {
           getCallV2TokenVerifier().verifyIdToken(request),
       },
       config: callV2Config,
+      targetUserAuth: {
+        getUser: (uid) => admin.auth().getUser(uid),
+      },
       now: () => new Date(),
     });
   }

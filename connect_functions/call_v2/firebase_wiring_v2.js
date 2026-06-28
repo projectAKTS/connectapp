@@ -23,6 +23,10 @@ const {
   TASK_OUTBOX_RECOVERY_DEFAULT_LIMIT,
   recoverPendingTaskOutboxV2,
 } = require("./deployment_readiness_v2");
+const {
+  evaluateCallV2ClientEligibility,
+  resolveTargetEligibilityV2,
+} = require("./rollout_gate_v2");
 
 const CALLABLE_SERVICE_NAMES = Object.freeze([
   "startCallV2",
@@ -69,6 +73,7 @@ function createCallV2FirebaseWiring({
   db,
   cloudTasksClient,
   tokenVerifier,
+  targetUserAuth,
   config,
   generateClaimToken,
   generateCallId,
@@ -94,6 +99,10 @@ function createCallV2FirebaseWiring({
   const dispatchService = services.dispatchTaskOutboxV2 || dispatchTaskOutboxV2;
   const recoveryService =
     services.recoverPendingTaskOutboxV2 || recoverPendingTaskOutboxV2;
+  const clientEligibilityService =
+    services.evaluateCallV2ClientEligibility || evaluateCallV2ClientEligibility;
+  const targetEligibilityService =
+    services.resolveTargetEligibilityV2 || resolveTargetEligibilityV2;
   const timeoutHandlerFactory =
     services.createTimeoutTaskHttpHandlerV2 || createTimeoutTaskHttpHandlerV2;
 
@@ -106,6 +115,9 @@ function createCallV2FirebaseWiring({
         db,
         config,
         nowProvider,
+        clientEligibilityService,
+        targetEligibilityService,
+        targetUserAuth,
       }),
     ]),
   );
@@ -215,15 +227,17 @@ function buildCallableServices({ services, generateCallId }) {
   };
 }
 
-function createCallableHandler({ serviceName, service, db, config, nowProvider }) {
+function createCallableHandler({
+  serviceName,
+  service,
+  db,
+  config,
+  nowProvider,
+  clientEligibilityService,
+  targetEligibilityService,
+  targetUserAuth,
+}) {
   return async function guardedCallV2Callable(request) {
-    if (!resolveBooleanConfig(config, "callV2Enabled")) {
-      throw new HttpsError(
-        "failed-precondition",
-        "Call V2 is disabled.",
-        { callV2Code: "call_v2_disabled" },
-      );
-    }
     if (!request || !request.auth || !request.auth.uid) {
       throw mapCallV2ErrorToHttps(
         new CallV2Error(
@@ -232,7 +246,25 @@ function createCallableHandler({ serviceName, service, db, config, nowProvider }
         ),
       );
     }
+    if (!resolveBooleanConfig(config, "callV2Enabled")) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Call V2 is disabled.",
+        { callV2Code: "call_v2_disabled" },
+      );
+    }
     try {
+      if (serviceName === "startCallV2") {
+        await requireStartCallRolloutEligibility({
+          authUid: request.auth.uid,
+          authToken: request.auth.token || {},
+          requestData: request.data || {},
+          config,
+          clientEligibilityService,
+          targetEligibilityService,
+          targetUserAuth,
+        });
+      }
       const result = await service({
         db,
         authUid: request.auth.uid,
@@ -244,6 +276,45 @@ function createCallableHandler({ serviceName, service, db, config, nowProvider }
       throw mapCallV2ErrorToHttps(error, serviceName);
     }
   };
+}
+
+async function requireStartCallRolloutEligibility({
+  authUid,
+  authToken,
+  requestData,
+  config,
+  clientEligibilityService,
+  targetEligibilityService,
+  targetUserAuth,
+}) {
+  const rolloutPolicy = resolveRolloutPolicy(config);
+  const callerEligibility = clientEligibilityService({
+    uid: authUid,
+    authToken,
+    ...rolloutPolicy,
+  });
+  if (!callerEligibility || callerEligibility.eligible !== true) {
+    throw callV2NotEnabledForUserError();
+  }
+  const calleeUid = requestData && requestData.calleeUid;
+  const targetEligibility = await targetEligibilityService({
+    uid: calleeUid,
+    rolloutPolicy,
+    getUser: targetUserAuth && typeof targetUserAuth.getUser === "function"
+      ? (uid) => targetUserAuth.getUser(uid)
+      : undefined,
+  });
+  if (!targetEligibility || targetEligibility.eligible !== true) {
+    throw callV2NotEnabledForUserError();
+  }
+}
+
+function callV2NotEnabledForUserError() {
+  return new HttpsError(
+    "failed-precondition",
+    "Call V2 is not enabled for this user.",
+    { callV2Code: "call_v2_not_enabled_for_user" },
+  );
 }
 
 function mapCallV2ErrorToHttps(error) {
@@ -375,6 +446,16 @@ function resolveBooleanConfig(config, key) {
   return value === true || value === "true";
 }
 
+function resolveRolloutPolicy(config) {
+  return Object.freeze({
+    globalEnabled: resolveBooleanConfig(config, "callV2Enabled"),
+    mode: optionalConfigString(config, "callV2RolloutMode") || "off",
+    percentage: optionalConfigString(config, "callV2RolloutPercentage") || "0",
+    salt: optionalConfigString(config, "callV2RolloutSalt"),
+    allowlist: optionalConfigString(config, "callV2RolloutAllowlist"),
+  });
+}
+
 function requireConfigString(config, key) {
   const value = optionalConfigString(config, key);
   if (!value) {
@@ -423,6 +504,7 @@ module.exports = {
   createConfiguredCloudTasksPublisherV2,
   generateStrongDispatchClaimToken,
   mapCallV2ErrorToHttps,
+  resolveRolloutPolicy,
   sanitizeClientResult,
   verifyCloudTasksOidcRequestV2,
 };

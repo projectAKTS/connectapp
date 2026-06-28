@@ -18,6 +18,13 @@ function main() {
       serviceAccountEmail: readString("CALL_V2_TASKS_SERVICE_ACCOUNT_EMAIL"),
       audience: readString("CALL_V2_TASKS_AUDIENCE"),
       allowDistinctAudience: readBoolean("CALL_V2_ALLOW_DISTINCT_AUDIENCE"),
+      rolloutMode: readString("CALL_V2_ROLLOUT_MODE"),
+      rolloutPercentage: readString("CALL_V2_ROLLOUT_PERCENTAGE"),
+      rolloutSalt: readString("CALL_V2_ROLLOUT_SALT"),
+      rolloutAllowlist: readString("CALL_V2_ROLLOUT_ALLOWLIST"),
+      staffClaimsManaged: readBoolean("CALL_V2_STAFF_CLAIMS_MANAGED"),
+      allowGlobalClientRollout:
+        readBoolean("CALL_V2_ALLOW_GLOBAL_CLIENT_ROLLOUT"),
     });
     process.stdout.write(`${JSON.stringify({
       ok: true,
