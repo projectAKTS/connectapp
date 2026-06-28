@@ -12,7 +12,7 @@
   "changed_files": [],
   "validation": {
     "node_version": "20",
-    "check": "passed before Flutter parser failure",
+    "check": "failed",
     "deployment_readiness": "passed before Flutter parser failure",
     "rules_tests": "passed before Flutter parser failure",
     "emulator_runs": [
@@ -22,8 +22,8 @@
     ],
     "total_tests": "backend validation passed; focused Flutter parser test failed",
     "index_syntax_check": "passed before Flutter parser failure",
-    "flutter_analysis": "passed before Flutter parser failure",
-    "flutter_tests": "failed: public call parser participant identity mismatch coverage"
+    "flutter_analysis": "failed_or_not_reached",
+    "flutter_tests": "failed_or_not_reached"
   },
   "safety": {
     "deployed": false,
@@ -33,6 +33,6 @@
   },
   "review": {
     "decision": "revision_required",
-    "notes": "Focused retry required. Correct strict public call parser validation so callerUid and calleeUid are distinct and the exact participant UID set matches those role IDs. See retained validation artifact from run 28336086589."
+    "notes": "Phase 3A validation failed. Download the phase3a-validation artifact from https://github.com/projectAKTS/connectapp/actions/runs/28337612591"
   }
 }
