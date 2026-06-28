@@ -1,150 +1,91 @@
-# Active Task — Phase 2L
+# Active Task — Phase 2M
 
 Branch: `call-v2`
-Accepted checkpoint: `adc42c96b75dbf64bb41ee5eb52ce6e4dcd1c3c8`
-Implementation commit message: `feat(call-v2): add canary observability and secret hardening`
+Accepted checkpoint: `060c3b2dd8f1a47e053d98d2ab1962598126cd3e`
+Implementation commit message: `feat(call-v2): add final deployment preflight package`
 
 ## Goal
 
-Prepare Call System V2 for a controlled backend canary by adding privacy-safe structured operational observability, hardening rollout-salt handling, and documenting exact canary/rollback checks.
-
-Do not deploy, enable any kill switch, connect Flutter, contact production services, change durable lifecycle semantics, change Cloud Tasks payloads, or alter legacy V1 behavior.
+Create the final non-deployment preflight package for Helperly Call System V2. This phase must end at a human approval boundary. Do not deploy, enable kill switches, contact production services, connect Flutter, or change lifecycle/Cloud Tasks/outbox/legacy behavior.
 
 ## Allowed files
 
 - `connect_functions/call_v2/**`
 - `connect_functions/test/call_v2/**`
-- `connect_functions/index.js`
-- `connect_functions/package*.json`
+- `connect_functions/package.json`
+- `connect_functions/package-lock.json`
 - `docs/call-v2/**`
 
-## Rollout-salt hardening
+Do not modify `connect_functions/index.js`, Firestore rules/indexes, Firebase config, Flutter, native code, or `.github/**`.
 
-The percentage-rollout salt is currently a normal string parameter. Move production wiring to a protected Firebase secret parameter where supported.
+## Deliverables
 
-Requirements:
-- declare the salt as a secret, not a public/string runtime parameter
-- bind the secret only to the seven V2 callable exports that need start-call rollout evaluation
-- internal task trigger, timeout endpoint, and scheduled recovery must not receive or depend on the rollout salt
-- resolve the secret lazily at invocation time
-- no secret read during module import
-- existing-call commands may share the same callable wiring object but must not expose or log the salt
-- deployment-validation CLI may continue reading an explicit environment value only for offline validation
-- no secret value in responses, logs, Firestore, handoff, or tests
-- both existing kill switches remain default false
+1. Add a pure, dependency-free preflight helper such as:
 
-## Privacy-safe observability
+`connect_functions/call_v2/deployment_preflight_v2.js`
 
-Create a dependency-injected module such as:
+It must accept an explicit sanitized input object and return an immutable report containing only:
+- overall status: `blocked` or `ready_for_human_approval`
+- ordered stage names
+- boolean checks
+- controlled machine-readable blocker codes
+- rollout mode, percentage, and allowlist count only when already sanitized
 
-`connect_functions/call_v2/observability_v2.js`
+It must never accept or return raw secrets, salt, UIDs, emails, URLs, project IDs, service accounts, queue names, tokens, claims, payloads, call/task IDs, or credentials.
 
-Provide a narrow sink contract, for example:
+2. The report must cover these exact gates:
+- both production kill switches still false for code-only validation
+- deployment validator passed with explicit production configuration
+- required Firestore index ready
+- required TTL policies ready
+- Cloud Tasks queue/API/IAM acknowledged
+- exact OIDC target/audience acknowledged
+- observability configured
+- operational owner assigned
+- rollback owner assigned
+- rollout mode approval complete
+- staff claim administration acknowledged when relevant
+- three emulator runs passed
+- rules tests passed
+- no unresolved private-data/logging finding
 
-```js
-recordOperationalEvent({ eventName, outcome, fields })
-```
+3. Add a CLI-safe dry-run script or package command:
 
-Production wiring may use structured `console.info`/`console.warn`, but domain modules must remain independent of console/global logging.
+`npm run preflight:call-v2`
 
-Supported event names must be allowlisted and versioned. Cover at least:
-- client callable outcome
-- start-call rollout decision category
-- outbox dispatch outcome
-- scheduled recovery aggregate outcome
-- timeout HTTP authentication/result category
+The default no-environment invocation must perform no network call, no Firebase initialization, no secret read, and produce a sanitized `blocked` report with controlled blocker codes. It must exit nonzero when blocked and zero only for an explicitly complete sanitized input.
 
-Allowed fields must be bounded low-cardinality operational values only, such as:
-- schemaVersion
-- eventName
-- outcome
-- callableName
-- rolloutMode
-- taskKind
-- HTTP status category
-- aggregate counters from scheduled recovery
-- retryable boolean
+4. Create:
 
-Never record:
-- raw UID, call ID, task ID, command ID, channel name, chat ID
-- payloads or request bodies
-- allowlist entries
-- rollout salt or bucket
-- custom claims
-- bearer tokens or OIDC claims
-- service-account email
-- target URL/audience
-- fencing tokens, lock claims, provider messages, stack traces, or credentials
-
-Unknown event names, fields, outcomes, oversized strings, negative counters, or non-plain values must be rejected or dropped deterministically. Logging failure must never change lifecycle behavior or client responses.
-
-## Wiring behavior
-
-Instrument only the Firebase wiring boundary, not durable lifecycle reducers.
-
-Requirements:
-- callable success/failure emits a safe event after authentication/policy processing
-- start-call rollout denial uses a generic category and must not expose exact reason, staff status, allowlist membership, or bucket
-- outbox-created trigger records only normalized dispatcher outcome/retry category
-- scheduled recovery records aggregate counts only
-- timeout HTTP wrapper records only verification/result category and status class
-- no duplicate event for one boundary outcome
-- internal task processing remains independent from client rollout eligibility
-- event recording is best-effort and non-authoritative
-
-Add a separate observability switch if useful, default false. A disabled observability path must have effectively zero behavior beyond a cheap boolean check.
-
-## Deployment readiness
-
-Extend the deployment validator with a sanitized canary-readiness section.
-
-When client rollout is enabled, require explicit acknowledgement that:
-- safe observability is configured
-- an operational owner is assigned
-- a rollback owner is assigned
-- staff custom claims are managed when staff mode is used
-
-Internal-only mode may remain valid without client-canary acknowledgements.
-Both switches false must remain valid for code-only deployment.
-
-Sanitized output may expose booleans and rollout mode/percentage/count, but never names, emails, identifiers, URLs, salts, allowlists, or secrets.
-
-## Documentation
-
-Create:
-
-`docs/call-v2/PHASE_2L_CANARY_OBSERVABILITY.md`
+`docs/call-v2/PHASE_2M_FINAL_PREFLIGHT.md`
 
 Document:
-- protected rollout-salt handling
-- safe event schema and prohibited data
-- exact canary enablement order
-- required dashboards/alerts as placeholders without invented project values
-- metrics to watch: callable failures, rollout denials, pending age, dispatch retry/dead-letter, timeout retries, unauthorized endpoint requests, lock recovery, terminalization correctness
-- rollback order: disable client switch first, keep internal processing on to drain, then disable internal processing after drain
-- no deployment performed and both switches remained false
+- exact Stage 0 code-only checks
+- infrastructure preparation placeholders without invented values
+- internal-task canary order
+- staff-only client canary order
+- required evidence to record before enabling each switch
+- rollback order: disable client switch first, drain with internal processing on, then disable internal processing
+- explicit stop point requiring human approval before any deploy or live setting change
+- no deployment occurred in Phase 2M
 
-## Required tests
+## Tests
 
-Keep all existing 212 tests passing and add focused coverage proving:
-- salt is declared/bound as a secret and not read at import
-- internal exports do not receive the rollout salt secret
-- event allowlist/schema validation
-- prohibited identifiers, payloads, tokens, claims, URLs, emails, salt, bucket, and stack fields cannot be recorded
-- oversized/high-cardinality fields are rejected or normalized
-- logger failure does not alter callable/trigger/HTTP outcomes
-- one normalized event per boundary outcome
-- start rollout denial stays generic
-- scheduled recovery logs aggregate counts only
-- disabled observability emits nothing
-- validator safe/unsafe canary acknowledgement combinations
-- sanitized CLI output contains no protected values
-- legacy exports and behavior remain unchanged
+Keep all existing tests passing and add focused tests proving:
+- default preflight is blocked and sanitized
+- each missing gate yields a controlled blocker code
+- complete explicit sanitized input yields `ready_for_human_approval`
+- no raw values can appear in report or CLI output
+- unknown fields are rejected or ignored deterministically
+- no network/Firebase initialization occurs
+- report ordering is deterministic and immutable
+- staff-only requirements apply only when relevant
+- existing deployment validator behavior remains unchanged
 - no production service is contacted
 
 ## Validation
 
-Use Node 20 and run:
+Use Node 20:
 
 ```bash
 cd connect_functions
@@ -152,6 +93,7 @@ node --version
 npm install
 npm run check:call-v2
 npm run validate:call-v2:deployment
+npm run preflight:call-v2 || true
 npm run test:call-v2:rules
 npm run test:call-v2:emulator
 npm run test:call-v2:emulator
@@ -161,8 +103,10 @@ cd ..
 git diff --check
 ```
 
-Do not run `firebase deploy`.
+The default preflight command is expected to exit nonzero with a sanitized blocked report. Do not deploy.
 
 ## Handoff
 
-Summarize exact files, secret binding behavior, safe event schema, instrumentation boundaries, validator changes, test totals and three emulator runs, Node version, remaining risks, and Phase 2M recommendation. Confirm no production values were invented, no production service was contacted, nothing was deployed, and both kill switches remain false.
+Report exact files, preflight schema, blocker codes, CLI behavior, documentation, test totals, all three emulator results, Node version, and remaining risks. Confirm both kill switches remain false, no production values were invented, no production service was contacted, and nothing was deployed.
+
+After Phase 2M passes review, stop automation and request human approval before any deployment or live configuration work.
