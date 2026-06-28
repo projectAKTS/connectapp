@@ -1,133 +1,150 @@
-# Active Task — Phase 2K
+# Active Task — Phase 2L
 
 Branch: `call-v2`
-Accepted checkpoint: `dd738000c0dfbcdd321860af7d590fb64be85044`
-Implementation commit message: `feat(call-v2): add server-side rollout gating`
+Accepted checkpoint: `adc42c96b75dbf64bb41ee5eb52ce6e4dcd1c3c8`
+Implementation commit message: `feat(call-v2): add canary observability and secret hardening`
 
 ## Goal
 
-Add server-controlled rollout gating for new V2 calls. Do not deploy, enable kill switches, connect Flutter, change timeout/Cloud Tasks/outbox contracts, or alter legacy V1 behavior.
+Prepare Call System V2 for a controlled backend canary by adding privacy-safe structured operational observability, hardening rollout-salt handling, and documenting exact canary/rollback checks.
 
-Allowed files:
+Do not deploy, enable any kill switch, connect Flutter, contact production services, change durable lifecycle semantics, change Cloud Tasks payloads, or alter legacy V1 behavior.
+
+## Allowed files
+
 - `connect_functions/call_v2/**`
 - `connect_functions/test/call_v2/**`
 - `connect_functions/index.js`
 - `connect_functions/package*.json`
 - `docs/call-v2/**`
-- `docs/agent-loop/HANDOFF.md`
-- `docs/agent-loop/STATE.json`
 
-## Rollout policy
+## Rollout-salt hardening
 
-Support exact modes: `off`, `staff`, `allowlist`, `percentage`, `all`.
+The percentage-rollout salt is currently a normal string parameter. Move production wiring to a protected Firebase secret parameter where supported.
 
-Add server configuration:
-- `CALL_V2_ROLLOUT_MODE` default `off`
-- `CALL_V2_ROLLOUT_PERCENTAGE` default `0`
-- protected `CALL_V2_ROLLOUT_SALT`
-- `CALL_V2_ROLLOUT_ALLOWLIST`
+Requirements:
+- declare the salt as a secret, not a public/string runtime parameter
+- bind the secret only to the seven V2 callable exports that need start-call rollout evaluation
+- internal task trigger, timeout endpoint, and scheduled recovery must not receive or depend on the rollout salt
+- resolve the secret lazily at invocation time
+- no secret read during module import
+- existing-call commands may share the same callable wiring object but must not expose or log the salt
+- deployment-validation CLI may continue reading an explicit environment value only for offline validation
+- no secret value in responses, logs, Firestore, handoff, or tests
+- both existing kill switches remain default false
 
-Rules:
-- global `CALL_V2_ENABLED=false` overrides every mode
-- percentage is integer 0–100
-- percentage mode requires explicit non-empty salt
-- allowlist mode requires a strict non-empty UID list
-- no rollout configuration is exposed or logged
+## Privacy-safe observability
 
-Trusted staff signal for caller:
-`request.auth.token.callV2Staff === true`
+Create a dependency-injected module such as:
 
-For a staff-mode callee, use an injected Admin Auth lookup and require:
-`customClaims.callV2Staff === true`
+`connect_functions/call_v2/observability_v2.js`
 
-Never trust request data or a public user-profile field for rollout eligibility.
+Provide a narrow sink contract, for example:
 
-## Allowlist
+```js
+recordOperationalEvent({ eventName, outcome, fields })
+```
 
-Strictly parse a comma-separated server value:
-- trim
-- deduplicate exact UIDs
-- reject malformed empty entries
-- maximum 500 UIDs
-- enforce existing UID format/length
-- no wildcard, prefix, regex, email, or domain matching
-- fail closed when invalid
+Production wiring may use structured `console.info`/`console.warn`, but domain modules must remain independent of console/global logging.
 
-## Percentage allocation
+Supported event names must be allowlisted and versioned. Cover at least:
+- client callable outcome
+- start-call rollout decision category
+- outbox dispatch outcome
+- scheduled recovery aggregate outcome
+- timeout HTTP authentication/result category
 
-Create a pure helper, preferably `call_v2/rollout_gate_v2.js`.
+Allowed fields must be bounded low-cardinality operational values only, such as:
+- schemaVersion
+- eventName
+- outcome
+- callableName
+- rolloutMode
+- taskKind
+- HTTP status category
+- aggregate counters from scheduled recovery
+- retryable boolean
 
-Use SHA-256 over a canonical namespace/version + UID + salt. Map deterministically to `0..9999`. Eligibility is `bucket < percentage * 100`.
+Never record:
+- raw UID, call ID, task ID, command ID, channel name, chat ID
+- payloads or request bodies
+- allowlist entries
+- rollout salt or bucket
+- custom claims
+- bearer tokens or OIDC claims
+- service-account email
+- target URL/audience
+- fencing tokens, lock claims, provider messages, stack traces, or credentials
 
-No `Math.random`, process-local state, unsafe conversion, or client-visible bucket/salt.
+Unknown event names, fields, outcomes, oversized strings, negative counters, or non-plain values must be rejected or dropped deterministically. Logging failure must never change lifecycle behavior or client responses.
 
-## Callable behavior
+## Wiring behavior
 
-Authentication must be checked first.
+Instrument only the Firebase wiring boundary, not durable lifecycle reducers.
 
-`startCallV2` requires:
-- global client switch enabled
-- caller eligible
-- callee eligible
+Requirements:
+- callable success/failure emits a safe event after authentication/policy processing
+- start-call rollout denial uses a generic category and must not expose exact reason, staff status, allowlist membership, or bucket
+- outbox-created trigger records only normalized dispatcher outcome/retry category
+- scheduled recovery records aggregate counts only
+- timeout HTTP wrapper records only verification/result category and status class
+- no duplicate event for one boundary outcome
+- internal task processing remains independent from client rollout eligibility
+- event recording is best-effort and non-authoritative
 
-Resolve callee eligibility before invoking the domain start service. Callee failure/ineligibility must produce no call, lock, command, idempotency, or outbox write.
+Add a separate observability switch if useful, default false. A disabled observability path must have effectively zero behavior beyond a cheap boolean check.
 
-Mode target resolution:
-- `all`, `off`, `allowlist`, `percentage`: no Auth lookup
-- `staff`: trusted Admin Auth lookup
+## Deployment readiness
 
-Authenticated but ineligible start returns only:
-- Firebase code `failed-precondition`
-- details `{ callV2Code: "call_v2_not_enabled_for_user" }`
+Extend the deployment validator with a sanitized canary-readiness section.
 
-Do not reveal mode, reason, percentage, membership, claim, bucket, or salt.
+When client rollout is enabled, require explicit acknowledgement that:
+- safe observability is configured
+- an operational owner is assigned
+- a rollback owner is assigned
+- staff custom claims are managed when staff mode is used
 
-For existing-call commands (`accept`, `decline`, `cancel`, `end`, media report, heartbeat): require authentication and global enabled, but do not re-check cohort. Existing calls must not be stranded by later rollout-policy changes.
+Internal-only mode may remain valid without client-canary acknowledgements.
+Both switches false must remain valid for code-only deployment.
 
-Internal dispatcher, timeout endpoint, and scheduled recovery must not use the client rollout gate.
-
-## Deployment validator
-
-Extend readiness validation:
-- both switches false remains valid without rollout values
-- internal-only remains valid without rollout values
-- client enabled with mode `off` is invalid
-- staff mode requires explicit acknowledgement that staff claims are managed
-- allowlist mode requires valid non-empty allowlist
-- percentage mode requires 1–100 and explicit salt
-- all mode requires explicit `allowGlobalClientRollout: true`
-
-CLI may read rollout utility variables, but sanitized output may show only mode, percentage, and allowlist count—never UIDs or salt.
+Sanitized output may expose booleans and rollout mode/percentage/count, but never names, emails, identifiers, URLs, salts, allowlists, or secrets.
 
 ## Documentation
 
-Create `docs/call-v2/PHASE_2K_ROLLOUT_GATING.md` covering:
-- global switch vs rollout mode
-- dual-party eligibility for new calls
-- why existing calls are not re-gated
-- staff custom claim
-- deterministic buckets and salt rotation
-- allowlist limits
-- staged rollout and rollback
-- no deployment and both switches still false
+Create:
 
-## Required validation
+`docs/call-v2/PHASE_2L_CANARY_OBSERVABILITY.md`
 
-Keep all existing 197 tests passing and add focused tests for:
-- all five modes
-- exact staff boolean behavior
-- strict allowlist parsing and max count
-- deterministic buckets, 0/100 behavior, salt reshuffle
-- auth-before-policy behavior
-- generic ineligible error
-- caller+callee eligibility before start service
-- no target Auth lookup outside staff mode
-- existing-call commands not re-gated
-- validator safe/unsafe combinations and sanitized output
-- internal task paths isolated from client rollout gating
-- no production services contacted
+Document:
+- protected rollout-salt handling
+- safe event schema and prohibited data
+- exact canary enablement order
+- required dashboards/alerts as placeholders without invented project values
+- metrics to watch: callable failures, rollout denials, pending age, dispatch retry/dead-letter, timeout retries, unauthorized endpoint requests, lock recovery, terminalization correctness
+- rollback order: disable client switch first, keep internal processing on to drain, then disable internal processing after drain
+- no deployment performed and both switches remained false
 
-Run with Node 20:
+## Required tests
+
+Keep all existing 212 tests passing and add focused coverage proving:
+- salt is declared/bound as a secret and not read at import
+- internal exports do not receive the rollout salt secret
+- event allowlist/schema validation
+- prohibited identifiers, payloads, tokens, claims, URLs, emails, salt, bucket, and stack fields cannot be recorded
+- oversized/high-cardinality fields are rejected or normalized
+- logger failure does not alter callable/trigger/HTTP outcomes
+- one normalized event per boundary outcome
+- start rollout denial stays generic
+- scheduled recovery logs aggregate counts only
+- disabled observability emits nothing
+- validator safe/unsafe canary acknowledgement combinations
+- sanitized CLI output contains no protected values
+- legacy exports and behavior remain unchanged
+- no production service is contacted
+
+## Validation
+
+Use Node 20 and run:
 
 ```bash
 cd connect_functions
@@ -135,16 +152,17 @@ node --version
 npm install
 npm run check:call-v2
 npm run validate:call-v2:deployment
+npm run test:call-v2:rules
 npm run test:call-v2:emulator
 npm run test:call-v2:emulator
 npm run test:call-v2:emulator
 node --check index.js
+cd ..
+git diff --check
 ```
 
-Run the explicit Firestore rules test script too. Do not run `firebase deploy`.
+Do not run `firebase deploy`.
 
 ## Handoff
 
-Write `docs/agent-loop/HANDOFF.md` with starting SHA, code commit SHA, branch-tip SHA when known, exact changed files, rollout behavior, validator changes, test totals and three run results, Node version, confirmations that switches remain false/no values invented/no production service contacted/nothing deployed, remaining risks, and Phase 2L recommendation.
-
-Update `STATE.json` to `ready_for_review`, push `origin/call-v2`, and stop. Do not begin Phase 2L.
+Summarize exact files, secret binding behavior, safe event schema, instrumentation boundaries, validator changes, test totals and three emulator runs, Node version, remaining risks, and Phase 2M recommendation. Confirm no production values were invented, no production service was contacted, nothing was deployed, and both kill switches remain false.
