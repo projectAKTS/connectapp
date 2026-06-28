@@ -4,6 +4,20 @@ Branch: `call-v2`
 Accepted backend checkpoint: `83933165d7741f06c6e47dcd94e8dbd2d92a6462`
 Implementation commit message: `feat(call-v2): add Flutter V2 client groundwork`
 
+## Revision focus for the next retry
+
+The retained validation artifact from workflow run `28336086589` shows the prior implementation passed backend validation and failed in the focused Flutter parser tests. Do not repeat a broad rewrite. Make the smallest correction needed in the Phase 3A Flutter client groundwork.
+
+Required parser correction:
+
+- A public call snapshot is valid only when `callerUid` and `calleeUid` are both present and different.
+- The public participant map/list must contain exactly two participant UIDs.
+- The exact participant UID set must be `{callerUid, calleeUid}`. No extra UID, missing UID, duplicate role, placeholder ID, or swapped role mismatch is acceptable.
+- The caller participant must have role `caller`; the callee participant must have role `callee`.
+- Add or fix focused parser tests proving same caller/callee, wrong participant IDs, missing caller/callee participant, and duplicate caller/callee roles all fail closed.
+
+Keep all existing Phase 3A requirements below in force.
+
 ## Goal
 
 Create the isolated Flutter client foundation for Helperly Call System V2 beside the legacy call system. Keep it unused and disabled by default. Do not connect routes, UI, Agora, CallKit, FCM, Firestore listeners, or production Firebase yet.
@@ -31,8 +45,8 @@ Add a small, testable V2 client package containing:
    - require `callSystem == "v2"`
    - require a valid call ID, version, caller UID, callee UID, and exact two distinct participant UIDs
    - reject unknown lifecycle/media values
-   - parse optional Firestore timestamps without exposing private operational data
-   - ignore/reject private keys such as fencing tokens, lock claims, commands, callOps, outbox task IDs, and dispatch diagnostics
+   - parse optional Firestore timestamps without exposing server-only operational data
+   - ignore or reject server-only operational fields such as lease claims, commands, callOps, outbox task IDs, and dispatch diagnostics
    - never infer durable state from local media events
 
 3. **Callable API boundary**:
