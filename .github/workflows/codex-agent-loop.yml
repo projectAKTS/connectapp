@@ -88,35 +88,26 @@ jobs:
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: gpt-5.4-mini
+          effort: low
           sandbox: workspace-write
           safety-strategy: drop-sudo
           allow-users: projectAKTS
-          output-file: .agent-codex-final.md
+          output-file: /tmp/agent-codex-final.md
           prompt: |
-            You are the implementation agent for the repository's controlled agent loop.
-
-            Read AGENTS.md, docs/agent-loop/STATE.json, and docs/agent-loop/NEXT_TASK.md completely.
-            Implement only the active task and stay inside its allowed-file list.
-            Preserve all earlier accepted architecture and legacy behavior.
+            Read AGENTS.md, docs/agent-loop/STATE.json, and docs/agent-loop/NEXT_TASK.md.
+            Implement only the active task and only within its allowed files.
+            Preserve accepted architecture and legacy behavior.
             Do not deploy, enable live settings, contact production services, or invent production values.
-
-            GitHub Actions owns git commits, pushes, STATE.json, HANDOFF.md, and NEXT_TASK.md.
-            Therefore do not run git commit or git push, and do not modify:
-            - AGENTS.md
-            - docs/agent-loop/STATE.json
-            - docs/agent-loop/HANDOFF.md
-            - docs/agent-loop/NEXT_TASK.md
-            - .github/workflows/**
-
-            Leave the completed implementation as uncommitted workspace changes.
-            Run focused tests when useful, but the workflow will run the complete validation suite afterward.
-            In your final message, summarize the implementation, files changed, remaining risks, and suggested next phase. Never print secrets or protected rollout values.
+            Do not commit, push, or edit AGENTS.md, docs/agent-loop/**, or .github/workflows/**.
+            Leave implementation changes uncommitted. Run focused tests when useful.
+            Final response: concise implementation summary, changed files, remaining risks, and next-phase recommendation. Never print secrets.
 
       - name: Verify changed-file scope
         if: steps.state.outputs.run == 'true'
         shell: bash
         run: |
-          forbidden="$(git diff --name-only | grep -E '^(AGENTS\.md|docs/agent-loop/(STATE|HANDOFF|NEXT_TASK)\.md|docs/agent-loop/STATE\.json|\.github/workflows/)' || true)"
+          forbidden="$(git diff --name-only | grep -E '^(AGENTS\.md|docs/agent-loop/|\.github/workflows/)' || true)"
           if [[ -n "$forbidden" ]]; then
             echo "Codex modified workflow-owned files:" >&2
             echo "$forbidden" >&2
@@ -146,7 +137,7 @@ jobs:
             node --check index.js
             cd ..
             git diff --check
-          } 2>&1 | tee .agent-validation.log
+          } 2>&1 | tee /tmp/agent-validation.log
 
       - name: Record validation failure
         if: steps.state.outputs.run == 'true' && steps.validation.outcome == 'failure'
@@ -173,7 +164,7 @@ jobs:
           state_path.write_text(json.dumps(state, indent=2) + '\n')
           Path('docs/agent-loop/HANDOFF.md').write_text(
               f"# Review Handoff\n\nPhase: {os.environ['PHASE']}\nStatus: revision_required\n\n"
-              f"Automated validation failed. Inspect the GitHub Actions run:\n\n{os.environ['RUN_URL']}\n"
+              f"Automated validation failed. Inspect:\n\n{os.environ['RUN_URL']}\n"
           )
           PY
           git config user.name "github-actions[bot]"
@@ -221,7 +212,7 @@ jobs:
           files = [x for x in subprocess.check_output(
               ['git', 'show', '--pretty=', '--name-only', code], text=True
           ).splitlines() if x]
-          summary_path = Path('.agent-codex-final.md')
+          summary_path = Path('/tmp/agent-codex-final.md')
           summary = summary_path.read_text().strip() if summary_path.exists() else 'Implementation completed by Codex.'
 
           handoff = [
@@ -271,7 +262,6 @@ jobs:
           state['review'] = {'decision': None, 'notes': None}
           state_path.write_text(json.dumps(state, indent=2) + '\n')
           PY
-          rm -f .agent-codex-final.md .agent-validation.log
           git add docs/agent-loop/HANDOFF.md docs/agent-loop/STATE.json
           git commit -m "chore(agent-loop): record ${PHASE} review handoff"
 
