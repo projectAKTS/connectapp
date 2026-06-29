@@ -5,6 +5,27 @@ Accepted Phase 3B checkpoint: `05a5407ab2d77a5f8772ae05bdf3b6a3cffa7a8e`
 Accepted Phase 3B workflow: `28386385870`
 Phase 3B implementation commit message: `feat(call-v2): implement phase 3B task`
 
+## Latest focused failure
+
+Workflow run `28394453498` passed the transition preflight, unchanged backend baseline, backend checks, deployment-readiness validation, Firestore rules tests, three emulator runs, formatting, and Flutter analysis. It failed only at:
+
+```bash
+flutter test test/call_v2
+```
+
+Exact failing test:
+
+`presenter derives display-safe state and actions by lifecycle`
+
+Exact mismatch at `test/call_v2/call_v2_behavior_test.dart:365`:
+
+- expected: `CallLocalPhase.inCall`
+- actual: `CallLocalPhase.presentingIncoming`
+
+The workflow discarded the generated Phase 3C implementation after failure. Rebuild the complete Phase 3C task from the accepted Phase 3B checkpoint.
+
+The accepted manager intentionally ignores equal or lower durable snapshot versions. Therefore, lifecycle-transition tests and fixtures must use monotonically increasing call versions when moving from ringing to accepted, active, or terminal. Do not weaken snapshot monotonicity, ownership, or terminal protections to make the test pass. Ensure the presenter derives state from the manager's accepted authoritative snapshot after each increasing-version injection.
+
 ## Review decision
 
 Phase 3B is accepted. Exact review confirmed the implementation stayed bounded to disabled, non-production Call V2 client harness groundwork.
@@ -53,6 +74,7 @@ The result must remain non-production and unreachable from the existing app.
    - Feature gate disabled: derived state remains idle/inert and actions do not call transport.
    - Feature gate enabled: public snapshots derive expected local phase and display-safe state.
    - Allowed-action derivation matches ringing/accepted/active/terminal phases for caller and callee roles.
+   - Lifecycle-transition fixtures must increment durable snapshot versions; equal/lower versions must continue to be tested as ignored.
    - Duplicate command taps through the presenter still produce one safe transport request.
    - Terminal snapshot through the presenter produces one close intent, cleanup clears ownership, and repeated cleanup/close does not emit duplicates.
    - Tests must use fake transports only; no real network, Firebase, native, Agora, CallKit, PushKit, FCM, widgets, routes, or platform access.
@@ -89,4 +111,4 @@ V1 must remain untouched. The V2 feature gate must default false. Do not wire ap
 
 ## Handoff
 
-Report exact changed files and behavioral test results. Explicitly confirm disabled default, V1 isolation, no client-supplied authenticated UID, safe request shapes, duplicate-command suppression, terminal cleanup, navigation dedupe, fake-only tests, and no deployment/live contact.
+Report exact changed files and behavioral test results. Explicitly confirm disabled default, V1 isolation, no client-supplied authenticated UID, safe request shapes, duplicate-command suppression, terminal cleanup, navigation dedupe, fake-only tests, monotonically increasing lifecycle-test versions, and no deployment/live contact.
