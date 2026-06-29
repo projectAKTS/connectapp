@@ -26,11 +26,11 @@
     ],
     "index_syntax_check": "passed",
     "flutter_format": "passed",
-    "flutter_analysis": "failed",
-    "flutter_tests": "failed_or_not_reached",
+    "flutter_analysis": "failed_or_not_reached",
+    "flutter_tests": "failed",
     "diff_check": "passed",
     "emulator_transient_retries": 0,
-    "failed_stage": "flutter-analysis"
+    "failed_stage": "flutter-tests"
   },
   "safety": {
     "deployed": false,
@@ -40,6 +40,6 @@
   },
   "review": {
     "decision": "revision_required",
-    "notes": "Phase 3C validation failed at flutter-analysis. Evidence: https://github.com/projectAKTS/connectapp/actions/runs/28387774326"
+    "notes": "Phase 3C validation failed at flutter-tests. Evidence: https://github.com/projectAKTS/connectapp/actions/runs/28394453498"
   }
 }
