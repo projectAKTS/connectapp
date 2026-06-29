@@ -2,13 +2,13 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "3A",
-  "status": "ready_for_review",
+  "status": "revision_required",
   "accepted_checkpoint_sha": "83933165d7741f06c6e47dcd94e8dbd2d92a6462",
   "starting_sha": "26088624d802a4722af046107e7b7cf47d8d8528",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
   "code_commit_sha": "0e8b3a77fcd1e1cfc4a26ee1de2f19d5bab5d7fb",
-  "ending_sha": "SELF",
+  "ending_sha": "call-v2",
   "changed_files": [
     "lib/call_v2/domain/call_snapshot.dart",
     "pubspec.lock",
@@ -24,7 +24,7 @@
       "passed",
       "passed"
     ],
-    "total_tests": "backend validation passed; focused Flutter parser test failed",
+    "total_tests": "backend validation passed; focused Flutter parser tests passed in workflow run 28339163243",
     "index_syntax_check": "passed",
     "flutter_analysis": "passed",
     "flutter_tests": "passed"
@@ -36,7 +36,7 @@
     "production_values_invented": false
   },
   "review": {
-    "decision": null,
-    "notes": null
+    "decision": "revision_required",
+    "notes": "External review did not accept Phase 3A as complete. The retry fixed the parser failure, but the branch does not include the required docs/call-v2/PHASE_3A_FLUTTER_CLIENT_GROUNDWORK.md file and no visible CallSessionManagerV2, CallNavigationCoordinatorV2, callable transport boundary, or disabled-by-default feature gate implementation was found. Keep the parser hardening and complete the remaining Phase 3A client-groundwork scope without touching V1 or production configuration."
   }
 }
