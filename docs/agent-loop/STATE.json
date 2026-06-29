@@ -2,9 +2,9 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "3A",
-  "status": "ready_for_review",
+  "status": "revision_required",
   "accepted_checkpoint_sha": "83933165d7741f06c6e47dcd94e8dbd2d92a6462",
-  "starting_sha": "cc8cd6f8a6303d7dd0cf260352f8af88abe56503",
+  "starting_sha": "fa78400db9790d20f4cc936a684db441c8841979",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
   "code_commit_sha": "ca57d4ad6c6878f0424783f8d94b8493390a1146",
@@ -28,10 +28,10 @@
       "passed",
       "passed"
     ],
-    "total_tests": "backend validation passed in workflow run 28348336472; Flutter analysis failed before Flutter tests",
+    "total_tests": "workflow run 28348917545 passed, but external code review rejected behavioral contract coverage",
     "index_syntax_check": "passed",
     "flutter_analysis": "passed",
-    "flutter_tests": "passed"
+    "flutter_tests": "passed_but_insufficient"
   },
   "safety": {
     "deployed": false,
@@ -40,7 +40,7 @@
     "production_values_invented": false
   },
   "review": {
-    "decision": null,
-    "notes": null
+    "decision": "revision_required",
+    "notes": "Exact review rejected ca57d4ad6c6878f0424783f8d94b8493390a1146: request payload sends actorUid; duplicate parallel domain model/parser changes accepted local-phase names; manager does not dedupe duplicate commands, derive phases by role, or clear terminal ownership; navigation coordinator does not dedupe; tests assert two duplicate calls and do not test navigation dedupe."
   }
 }
