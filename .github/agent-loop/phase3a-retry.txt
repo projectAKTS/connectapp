@@ -1,5 +1,6 @@
-retry=4
-reason=focused parser retry: enforce distinct caller/callee, exact participant UID set, and matching roles
+retry=5
+reason=complete remaining phase 3a client groundwork after external review: docs, callable boundary, manager, navigation coordinator, disabled gate, tests
 workflow=call-v2-phase3a-retry.yml
-baseline_state=2a87255513579ed543c4059ece73bce70fb35a91
-prompt_fix=40f24fcba105d281c90925bc80f0884af39fb31f
+baseline_state=066621a1c3107bde2fec6b5716481c2ccd8f37fd
+prompt_fix=7594709f624145b92892eb505349acf6868209b3
+handoff=4e0575a9f3b941f57c9a0bd4bbbbf8d76cb7cfd9
