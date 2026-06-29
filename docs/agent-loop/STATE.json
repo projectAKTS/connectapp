@@ -4,7 +4,7 @@
   "phase": "3C",
   "status": "revision_required",
   "accepted_checkpoint_sha": "05a5407ab2d77a5f8772ae05bdf3b6a3cffa7a8e",
-  "starting_sha": "cd4280a6d72c9d05de333935e29dcac441cd75f5",
+  "starting_sha": "301cd1eb7fa8b6022818d3fd59ddbf7593e351e2",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
   "code_commit_sha": null,
@@ -14,6 +14,8 @@
     "accepted_phase3b_workflow_run": "28386385870",
     "accepted_phase3b_job": "84101997464",
     "accepted_phase3b_code_commit": "05a5407ab2d77a5f8772ae05bdf3b6a3cffa7a8e",
+    "latest_phase3c_workflow_run": "28394453498",
+    "latest_phase3c_job": "84129480172",
     "baseline_preflight": "passed",
     "node_version": "20",
     "check": "failed",
@@ -26,11 +28,13 @@
     ],
     "index_syntax_check": "passed",
     "flutter_format": "passed",
-    "flutter_analysis": "failed_or_not_reached",
-    "flutter_tests": "failed",
-    "diff_check": "passed",
+    "flutter_analysis": "passed",
+    "flutter_tests": "failed: 73 passed, 1 failed",
+    "diff_check": "not_reached_after_flutter_failure",
     "emulator_transient_retries": 0,
-    "failed_stage": "flutter-tests"
+    "failed_stage": "flutter-tests",
+    "failed_test": "presenter derives display-safe state and actions by lifecycle",
+    "failure_mismatch": "expected CallLocalPhase.inCall, actual CallLocalPhase.presentingIncoming"
   },
   "safety": {
     "deployed": false,
@@ -40,6 +44,6 @@
   },
   "review": {
     "decision": "revision_required",
-    "notes": "Phase 3C validation failed at flutter-tests. Evidence: https://github.com/projectAKTS/connectapp/actions/runs/28394453498"
+    "notes": "Focused correction: lifecycle-transition test fixtures must increment durable snapshot versions. Do not weaken accepted equal/lower snapshot rejection. Rebuild the discarded Phase 3C implementation and rerun."
   }
 }
