@@ -1,11 +1,8 @@
-run=13
+run=14
 phase=3B
-reason=start accepted Phase 3B client harness groundwork using the generalized guarded agent-loop workflow
+reason=retry Phase 3B after workflow preflight and baseline hardening
 workflow=call-v2-phase3a-retry.yml
-workflow_mode=phase-agnostic
-baseline_head=e99524029e2d3a7722b43a05b809f061f9629d83
+baseline_head=ef138f739a2c7792adee5dd7706aed107bdb7c34
 prompt_task=docs/agent-loop/NEXT_TASK.md
 task_blob=1882b3f64ccfe7206edc74c8b559a2b6701afe30
-contract_guard=phase-match-task-sha-starting-sha-ancestor
 accepted_checkpoint=009a1f372fabe26fe10394519ff47739788d982a
-safety=non-production-v1-untouched-disabled-default
