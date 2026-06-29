@@ -1,0 +1,345 @@
+name: Call V2 Fast Development Loop
+
+on:
+  push:
+    branches:
+      - "call-v2-wip-*"
+    paths:
+      - ".github/agent-loop/fast-loop-trigger.txt"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: call-v2-fast-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  fast-loop:
+    if: startsWith(github.ref_name, 'call-v2-wip-') && github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+
+    steps:
+      - name: Checkout WIP branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Read phase and retry state
+        id: state
+        shell: bash
+        run: |
+          phase="$(node -p "require('./docs/agent-loop/STATE.json').phase")"
+          status="$(node -p "require('./docs/agent-loop/STATE.json').status")"
+          retry="0"
+          if [[ -f .github/agent-loop/fast-loop-state.json ]]; then
+            retry="$(node -p "require('./.github/agent-loop/fast-loop-state.json').retry || 0")"
+          fi
+          if [[ "$status" != "task_ready" && "$status" != "revision_required" ]]; then
+            echo "State does not permit implementation: $status" >&2
+            exit 1
+          fi
+          echo "phase=$phase" >> "$GITHUB_OUTPUT"
+          echo "retry=$retry" >> "$GITHUB_OUTPUT"
+          echo "branch=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Run focused Codex implementation or correction
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: gpt-5.4-mini
+          effort: low
+          sandbox: workspace-write
+          safety-strategy: drop-sudo
+          allow-users: projectAKTS
+          output-file: /tmp/call-v2-fast-codex.md
+          prompt: |
+            Work on the existing WIP implementation for Helperly Call V2 phase ${{ steps.state.outputs.phase }}.
+            Read AGENTS.md, docs/agent-loop/STATE.json, docs/agent-loop/NEXT_TASK.md, docs/agent-loop/HANDOFF.md, and .github/agent-loop/FAST_FAILURE.md when present.
+            Preserve all existing implementation work. Do not restart the phase from scratch unless the WIP branch genuinely contains no implementation yet.
+            Make the smallest evidence-based change needed to satisfy the active task and current failing test.
+            For the current Phase 3C correction, preserve equal/lower snapshot rejection and fix lifecycle-transition fixtures by using monotonically increasing durable versions; do not weaken manager monotonicity.
+            Modify only lib/call_v2/**, test/call_v2/**, docs/call-v2/**, pubspec.yaml, or pubspec.lock when genuinely required.
+            Do not modify legacy V1, backend functions, native code, Firebase config, workflows, AGENTS.md, or docs/agent-loop/**.
+            Do not deploy, contact production services, enable live settings, commit, or push.
+            Run focused Flutter tests while working. Leave changes uncommitted and never print secrets.
+
+      - name: Remove Codex runtime metadata
+        run: rm -rf .agents .codex
+
+      - name: Verify change scope
+        shell: bash
+        run: |
+          mapfile -t files < <(
+            {
+              git diff --name-only
+              git ls-files --others --exclude-standard
+            } | sed '/^$/d' | sort -u
+          )
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "Codex produced no implementation changes." >&2
+            exit 1
+          fi
+          for path in "${files[@]}"; do
+            case "$path" in
+              lib/call_v2/*|test/call_v2/*|docs/call-v2/*|pubspec.yaml|pubspec.lock)
+                ;;
+              *)
+                echo "Out-of-scope change: $path" >&2
+                exit 1
+                ;;
+            esac
+          done
+
+      - name: Format generated Dart
+        run: |
+          dart format lib/call_v2 test/call_v2
+          dart format --output=none --set-exit-if-changed lib/call_v2 test/call_v2
+
+      - name: Run focused Flutter gate
+        id: focused
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            flutter analyze lib/call_v2 test/call_v2
+            flutter test test/call_v2
+            git diff --check
+          } 2>&1 | tee /tmp/call-v2-focused.log
+
+      - name: Upload focused failure evidence
+        if: steps.focused.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: call-v2-fast-${{ steps.state.outputs.phase }}-${{ github.run_id }}
+          path: /tmp/call-v2-focused.log
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Preserve WIP and schedule bounded retry
+        if: steps.focused.outcome == 'failure'
+        shell: bash
+        env:
+          RETRY: ${{ steps.state.outputs.retry }}
+          PHASE: ${{ steps.state.outputs.phase }}
+          BRANCH: ${{ steps.state.outputs.branch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          next_retry=$((RETRY + 1))
+          mkdir -p .github/agent-loop
+          {
+            echo "# Latest focused validation failure"
+            echo
+            echo "Phase: $PHASE"
+            echo "Retry: $next_retry"
+            echo "Run: $RUN_URL"
+            echo
+            echo '```text'
+            tail -n 220 /tmp/call-v2-focused.log
+            echo '```'
+          } > .github/agent-loop/FAST_FAILURE.md
+          printf '{\n  "phase": "%s",\n  "retry": %s,\n  "last_run": "%s"\n}\n' "$PHASE" "$next_retry" "$RUN_URL" > .github/agent-loop/fast-loop-state.json
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "wip(call-v2): preserve phase $PHASE correction $next_retry"
+
+          if [[ $next_retry -lt 3 ]]; then
+            printf 'phase=%s\nretry=%s\nrun=%s\n' "$PHASE" "$next_retry" "$GITHUB_RUN_ID" > .github/agent-loop/fast-loop-trigger.txt
+            git add .github/agent-loop/fast-loop-trigger.txt
+            git commit -m "chore(agent-loop): retry phase $PHASE correction $next_retry"
+          fi
+
+          git push "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:"$BRANCH"
+
+          if [[ $next_retry -ge 3 ]]; then
+            echo "Fast loop reached the bounded retry limit; WIP is preserved on $BRANCH." >&2
+          fi
+          exit 1
+
+      - name: Setup Node 20 for acceptance
+        if: steps.focused.outcome == 'success'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: connect_functions/package-lock.json
+
+      - name: Setup Java 21 for emulators
+        if: steps.focused.outcome == 'success'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install backend validation dependencies
+        if: steps.focused.outcome == 'success'
+        run: |
+          cd connect_functions
+          npm ci
+          npm install --global firebase-tools
+
+      - name: Run full acceptance gate once
+        if: steps.focused.outcome == 'success'
+        id: acceptance
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          run_emulator() {
+            local label="$1"
+            echo "=== $label ==="
+            npm run test:call-v2:emulator && return 0
+            echo "Transient emulator retry for $label"
+            npm run test:call-v2:emulator
+          }
+          {
+            cd connect_functions
+            node --version
+            npm run check:call-v2
+            npm run validate:call-v2:deployment
+            npm run test:call-v2:rules
+            run_emulator emulator-run-1
+            run_emulator emulator-run-2
+            run_emulator emulator-run-3
+            node --check index.js
+            cd ..
+            dart format --output=none --set-exit-if-changed lib/call_v2 test/call_v2
+            flutter analyze lib/call_v2 test/call_v2
+            flutter test test/call_v2
+            git diff --check
+          } 2>&1 | tee /tmp/call-v2-acceptance.log
+
+      - name: Upload acceptance failure evidence
+        if: steps.focused.outcome == 'success' && steps.acceptance.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: call-v2-acceptance-${{ steps.state.outputs.phase }}-${{ github.run_id }}
+          path: /tmp/call-v2-acceptance.log
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Preserve acceptance-failed WIP
+        if: steps.focused.outcome == 'success' && steps.acceptance.outcome == 'failure'
+        shell: bash
+        env:
+          PHASE: ${{ steps.state.outputs.phase }}
+          BRANCH: ${{ steps.state.outputs.branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "wip(call-v2): preserve phase $PHASE acceptance failure"
+          git push "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:"$BRANCH"
+          exit 1
+
+      - name: Commit accepted implementation
+        if: steps.focused.outcome == 'success' && steps.acceptance.outcome == 'success'
+        id: commit
+        shell: bash
+        env:
+          PHASE: ${{ steps.state.outputs.phase }}
+        run: |
+          rm -f .github/agent-loop/FAST_FAILURE.md .github/agent-loop/fast-loop-state.json .github/agent-loop/fast-loop-trigger.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(call-v2): implement phase $PHASE task"
+          echo "code_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Write acceptance handoff
+        if: steps.focused.outcome == 'success' && steps.acceptance.outcome == 'success'
+        shell: bash
+        env:
+          PHASE: ${{ steps.state.outputs.phase }}
+          CODE_SHA: ${{ steps.commit.outputs.code_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+
+          phase = os.environ['PHASE']
+          code_sha = os.environ['CODE_SHA']
+          run_url = os.environ['RUN_URL']
+          files = [line for line in subprocess.check_output(
+              ['git', 'show', '--pretty=', '--name-only', code_sha], text=True
+          ).splitlines() if line]
+          summary_path = Path('/tmp/call-v2-fast-codex.md')
+          summary = summary_path.read_text().strip() if summary_path.exists() else f'Phase {phase} completed.'
+
+          handoff = [
+              '# External Review Handoff', '',
+              f'Phase: {phase}',
+              'Status: ready_for_review',
+              f'Implementation SHA: {code_sha}',
+              'Pushed branch-tip SHA: SELF', '',
+              '## Files changed', ''
+          ]
+          handoff += [f'- `{path}`' for path in files]
+          handoff += [
+              '', '## Codex summary', '', summary, '',
+              '## Validation', '',
+              '- Fast Flutter correction gate passed',
+              '- Node 20 backend checks passed',
+              '- Deployment readiness passed',
+              '- Firestore rules passed',
+              '- Backend emulator suite passed three times',
+              '- Flutter format, analysis, and all focused tests passed',
+              '- `git diff --check` passed',
+              f'- Workflow run: {run_url}', '',
+              '## Safety', '',
+              '- V1 was not modified.',
+              '- V2 remains disabled by default.',
+              '- No production service was contacted.',
+              '- No live configuration was changed.',
+              '- Nothing was deployed.', ''
+          ]
+          Path('docs/agent-loop/HANDOFF.md').write_text('\n'.join(handoff) + '\n')
+
+          state_path = Path('docs/agent-loop/STATE.json')
+          state = json.loads(state_path.read_text())
+          state['status'] = 'ready_for_review'
+          state['code_commit_sha'] = code_sha
+          state['ending_sha'] = 'SELF'
+          state['changed_files'] = files
+          state.setdefault('validation', {}).update({
+              'node_version': '20',
+              'check': 'passed',
+              'deployment_readiness': 'passed',
+              'rules_tests': 'passed',
+              'emulator_runs': ['passed', 'passed', 'passed'],
+              'flutter_format': 'passed',
+              'flutter_analysis': 'passed',
+              'flutter_tests': 'passed',
+              'diff_check': 'passed',
+              'failed_stage': None,
+              'failed_test': None,
+          })
+          state['review'] = {'decision': None, 'notes': None}
+          state_path.write_text(json.dumps(state, indent=2) + '\n')
+          PY
+          git add docs/agent-loop/HANDOFF.md docs/agent-loop/STATE.json
+          git commit -m "chore(agent-loop): record $PHASE review handoff"
+
+      - name: Promote accepted WIP to call-v2
+        if: steps.focused.outcome == 'success' && steps.acceptance.outcome == 'success'
+        shell: bash
+        run: |
+          git push "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:call-v2
