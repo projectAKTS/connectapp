@@ -1,9 +1,10 @@
-retry=8
-reason=rebuild full Phase 3A groundwork and eliminate the three analyzer issues from workflow run 28348336472
+retry=9
+reason=correct rejected Phase 3A client contracts after exact review of ca57d4ad6c6878f0424783f8d94b8493390a1146
 workflow=call-v2-phase3a-retry.yml
-baseline_head=ee374d9ba07817e89f0cfb6df5c6531915eb6d44
+baseline_head=adb869045f8a59e60523ae86ecbf5195233cb484
 prompt_task=docs/agent-loop/NEXT_TASK.md
-task_blob=52b1770f219f9be4a1900fe84e2ab0b87328f43e
+task_blob=e8f4b0f3a7d091dcded8f609975d2ddc59788fe3
 contract_guard=phase-match-and-task-sha
-failure_run=28348336472
-exact_failure=flutter analyze lib/call_v2 test/call_v2
+review_run=28348917545
+review_decision=revision_required
+focus=no-client-uid-single-owner-command-dedupe-navigation-dedupe
