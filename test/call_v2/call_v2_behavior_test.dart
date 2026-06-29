@@ -5,9 +5,11 @@ import 'package:connect_app/call_v2/call_navigation_coordinator_v2.dart';
 import 'package:connect_app/call_v2/call_session_manager_v2.dart';
 import 'package:connect_app/call_v2/call_v2_api.dart';
 import 'package:connect_app/call_v2/call_v2_feature_gate.dart';
+import 'package:connect_app/call_v2/call_v2_presenter.dart';
 import 'package:connect_app/call_v2/domain/call_lifecycle.dart';
 import 'package:connect_app/call_v2/domain/call_local_phase.dart';
 import 'package:connect_app/call_v2/domain/call_snapshot.dart';
+import 'package:connect_app/call_v2/domain/participant_media_state.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _FakeApi implements CallableCallV2Api {
@@ -355,6 +357,340 @@ void main() {
     expect(harness.closeNavigationIntentFor(terminal), isNull);
     expect(fake.calls, isEmpty);
   });
+
+  test('disabled presenter remains idle and does not call transport', () async {
+    final fake = _FakeApi();
+    final harness = _harness(
+      fake: fake,
+      enabled: false,
+      role: CallParticipantRole.callee,
+    );
+    final presenter = CallV2Presenter(harness: harness);
+
+    presenter.injectPublicSnapshot(CallSnapshot.fromPublicData(
+        _snapshotData(lifecycle: CallLifecycle.active)));
+    await presenter.acceptCall();
+    await presenter.declineCall();
+    await presenter.cancelCall();
+    await presenter.endCall();
+    await presenter.reportMedia(
+      mediaState: ParticipantMediaState.joined,
+      mediaVersion: 1,
+    );
+
+    expect(presenter.state.localPhase, CallLocalPhase.idle);
+    _expectActionsDisabled(presenter.state);
+    expect(presenter.state.openNavigationIntentPending, isFalse);
+    expect(presenter.state.closeNavigationIntentPending, isFalse);
+    expect(harness.snapshot, isNull);
+    expect(fake.calls, isEmpty);
+  });
+
+  test('presenter derives display-safe state and actions by lifecycle', () {
+    final harness = _harness(role: CallParticipantRole.callee);
+    final presenter = CallV2Presenter(harness: harness);
+    final ringing = CallSnapshot.fromPublicData(_snapshotData(
+      version: 1,
+      lifecycle: CallLifecycle.ringing,
+    ));
+    final accepted = CallSnapshot.fromPublicData(_snapshotData(
+      version: 2,
+      lifecycle: CallLifecycle.accepted,
+    ));
+    final active = CallSnapshot.fromPublicData(_snapshotData(
+      version: 3,
+      lifecycle: CallLifecycle.active,
+    ));
+
+    presenter.injectPublicSnapshot(ringing);
+
+    expect(harness.snapshot, same(ringing));
+    expect(presenter.state.localPhase, CallLocalPhase.presentingIncoming);
+    expect(presenter.state.titleKey, 'call_v2.title.incoming');
+    expect(presenter.state.statusKey, 'call_v2.status.incoming_ringing');
+    _expectActions(
+      presenter.state,
+      accept: true,
+      decline: true,
+    );
+
+    presenter.injectPublicSnapshot(accepted);
+
+    expect(harness.snapshot, same(accepted));
+    expect(presenter.state.localPhase, CallLocalPhase.openingCallRoute);
+    expect(presenter.state.titleKey, 'call_v2.title.connected');
+    expect(presenter.state.statusKey, 'call_v2.status.accepted');
+    expect(presenter.state.openNavigationIntentPending, isTrue);
+    _expectActions(
+      presenter.state,
+      end: true,
+      reportMedia: true,
+    );
+
+    presenter.injectPublicSnapshot(active);
+
+    expect(harness.snapshot, same(active));
+    expect(presenter.state.localPhase, CallLocalPhase.inCall);
+    expect(presenter.state.titleKey, 'call_v2.title.connected');
+    expect(presenter.state.statusKey, 'call_v2.status.active');
+    expect(presenter.state.openNavigationIntentPending, isTrue);
+    _expectActions(
+      presenter.state,
+      end: true,
+      reportMedia: true,
+    );
+  });
+
+  test('presenter ringing action matrix is role specific', () {
+    final callerPresenter =
+        CallV2Presenter(harness: _harness(role: CallParticipantRole.caller));
+    final calleePresenter =
+        CallV2Presenter(harness: _harness(role: CallParticipantRole.callee));
+    final ringing = CallSnapshot.fromPublicData(_snapshotData(
+      version: 1,
+      lifecycle: CallLifecycle.ringing,
+    ));
+
+    callerPresenter.injectPublicSnapshot(ringing);
+    calleePresenter.injectPublicSnapshot(ringing);
+
+    expect(callerPresenter.state.localPhase, CallLocalPhase.outgoingRinging);
+    _expectActions(callerPresenter.state, cancel: true);
+    expect(calleePresenter.state.localPhase, CallLocalPhase.presentingIncoming);
+    _expectActions(calleePresenter.state, accept: true, decline: true);
+  });
+
+  test('presenter accepted and active action matrices allow call controls', () {
+    final presenter =
+        CallV2Presenter(harness: _harness(role: CallParticipantRole.callee));
+
+    presenter.injectPublicSnapshot(CallSnapshot.fromPublicData(_snapshotData(
+      version: 2,
+      lifecycle: CallLifecycle.accepted,
+    )));
+
+    expect(presenter.state.localPhase, CallLocalPhase.openingCallRoute);
+    _expectActions(presenter.state, end: true, reportMedia: true);
+
+    presenter.injectPublicSnapshot(CallSnapshot.fromPublicData(_snapshotData(
+      version: 3,
+      lifecycle: CallLifecycle.active,
+    )));
+
+    expect(presenter.state.localPhase, CallLocalPhase.inCall);
+    _expectActions(presenter.state, end: true, reportMedia: true);
+  });
+
+  test('presenter terminal action matrix disables all command actions', () {
+    final presenter =
+        CallV2Presenter(harness: _harness(role: CallParticipantRole.callee));
+
+    presenter.injectPublicSnapshot(CallSnapshot.fromPublicData(_snapshotData(
+      version: 4,
+      lifecycle: CallLifecycle.completed,
+    )));
+
+    expect(presenter.state.localPhase, CallLocalPhase.closing);
+    expect(presenter.state.titleKey, 'call_v2.title.ended');
+    expect(presenter.state.statusKey, 'call_v2.status.completed');
+    expect(presenter.state.closeNavigationIntentPending, isTrue);
+    _expectActionsDisabled(presenter.state);
+  });
+
+  test('presenter ignores equal and lower lifecycle snapshots', () {
+    final harness = _harness(role: CallParticipantRole.callee);
+    final presenter = CallV2Presenter(harness: harness);
+    final ringing = CallSnapshot.fromPublicData(_snapshotData(
+      version: 3,
+      lifecycle: CallLifecycle.ringing,
+    ));
+
+    presenter.injectPublicSnapshot(ringing);
+    presenter.injectPublicSnapshot(CallSnapshot.fromPublicData(_snapshotData(
+      version: 3,
+      lifecycle: CallLifecycle.accepted,
+    )));
+    presenter.injectPublicSnapshot(CallSnapshot.fromPublicData(_snapshotData(
+      version: 2,
+      lifecycle: CallLifecycle.active,
+    )));
+
+    expect(harness.snapshot, same(ringing));
+    expect(harness.snapshot!.lifecycle, CallLifecycle.ringing);
+    expect(presenter.state.localPhase, CallLocalPhase.presentingIncoming);
+    _expectActions(presenter.state, accept: true, decline: true);
+  });
+
+  test('presenter derives from harness snapshot after rejected incoming data',
+      () {
+    final harness = _harness(role: CallParticipantRole.callee);
+    final presenter = CallV2Presenter(harness: harness);
+    final ringing = CallSnapshot.fromPublicData(_snapshotData(
+      version: 2,
+      lifecycle: CallLifecycle.ringing,
+    ));
+    final rejectedActive = CallSnapshot.fromPublicData(_snapshotData(
+      version: 2,
+      lifecycle: CallLifecycle.active,
+    ));
+
+    presenter.injectPublicSnapshot(ringing);
+    presenter.injectPublicSnapshot(rejectedActive);
+
+    expect(harness.snapshot, same(ringing));
+    expect(presenter.state.localPhase, CallLocalPhase.presentingIncoming);
+    expect(presenter.state.statusKey, 'call_v2.status.incoming_ringing');
+    _expectActions(presenter.state, accept: true, decline: true);
+  });
+
+  test('duplicate presenter command taps create one safe transport request',
+      () async {
+    final fake = _FakeApi();
+    final presenter = CallV2Presenter(
+      harness: _harness(
+        fake: fake,
+        role: CallParticipantRole.callee,
+      ),
+    );
+
+    presenter.injectPublicSnapshot(CallSnapshot.fromPublicData(_snapshotData(
+      version: 1,
+      lifecycle: CallLifecycle.ringing,
+    )));
+    final first = presenter.acceptCall();
+    final second = presenter.acceptCall();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(fake.acceptCount, 1);
+    expect(fake.calls['accept'], hasLength(1));
+    expect(fake.calls['accept']!.single, <String, Object?>{
+      'callId': 'call_a',
+      'version': 1,
+    });
+
+    fake.acceptGate!.complete();
+    await Future.wait(<Future<void>>[first, second]);
+  });
+
+  test('presenter forwards only enabled actions through the harness', () async {
+    final fake = _FakeApi();
+    final presenter = CallV2Presenter(
+      harness: _harness(
+        fake: fake,
+        role: CallParticipantRole.callee,
+      ),
+    );
+
+    presenter.injectPublicSnapshot(CallSnapshot.fromPublicData(_snapshotData(
+      version: 3,
+      lifecycle: CallLifecycle.active,
+    )));
+    await presenter.acceptCall();
+    await presenter.declineCall();
+    await presenter.cancelCall();
+    await presenter.endCall();
+    await presenter.reportMedia(
+      mediaState: ParticipantMediaState.joined,
+      mediaVersion: 7,
+    );
+
+    expect(fake.calls.keys.toSet(), <String>{'end', 'media'});
+    expect(fake.calls['end']!.single, <String, Object?>{
+      'callId': 'call_a',
+      'version': 3,
+    });
+    expect(fake.calls['media']!.single, <String, Object?>{
+      'callId': 'call_a',
+      'version': 3,
+      'mediaState': 'joined',
+      'mediaVersion': 7,
+    });
+  });
+
+  test('presenter close navigation is emitted once and cleanup is idempotent',
+      () async {
+    final harness = _harness(role: CallParticipantRole.callee);
+    final presenter = CallV2Presenter(harness: harness);
+
+    presenter.injectPublicSnapshot(CallSnapshot.fromPublicData(_snapshotData(
+      version: 3,
+      lifecycle: CallLifecycle.active,
+    )));
+    expect(presenter.takeOpenNavigationIntent(), isNotNull);
+    expect(presenter.takeOpenNavigationIntent(), isNull);
+
+    presenter.injectPublicSnapshot(CallSnapshot.fromPublicData(_snapshotData(
+      version: 4,
+      lifecycle: CallLifecycle.completed,
+    )));
+
+    expect(presenter.state.closeNavigationIntentPending, isTrue);
+    expect(presenter.state.closeNavigationIntentPending, isTrue);
+    final close = presenter.takeCloseNavigationIntent();
+    expect(close, isNotNull);
+    expect(close!.type, CallNavigationIntentType.close);
+    expect(close.version, 4);
+    expect(presenter.takeCloseNavigationIntent(), isNull);
+    expect(presenter.state.closeNavigationIntentPending, isFalse);
+
+    await presenter.cleanupIfTerminal();
+    await presenter.cleanupIfTerminal();
+
+    expect(harness.snapshot, isNull);
+    expect(presenter.state.localPhase, CallLocalPhase.idle);
+    expect(presenter.state.closeNavigationIntentPending, isFalse);
+  });
+
+  test('repeated presentation-state reads do not duplicate navigation intents',
+      () {
+    final presenter =
+        CallV2Presenter(harness: _harness(role: CallParticipantRole.callee));
+
+    presenter.injectPublicSnapshot(CallSnapshot.fromPublicData(_snapshotData(
+      version: 2,
+      lifecycle: CallLifecycle.accepted,
+    )));
+
+    expect(presenter.state.openNavigationIntentPending, isTrue);
+    expect(presenter.state.openNavigationIntentPending, isTrue);
+    final open = presenter.takeOpenNavigationIntent();
+    expect(open, isNotNull);
+    expect(open!.type, CallNavigationIntentType.open);
+    expect(open.version, 2);
+    expect(presenter.takeOpenNavigationIntent(), isNull);
+    expect(presenter.state.openNavigationIntentPending, isFalse);
+  });
+}
+
+CallV2Harness _harness({
+  _FakeApi? fake,
+  bool enabled = true,
+  required CallParticipantRole role,
+}) {
+  return CallV2Harness(
+    featureGate: CallV2FeatureGate(enabled: enabled),
+    api: CallV2Api(fake ?? _FakeApi()),
+    localParticipantRole: () => role,
+  );
+}
+
+void _expectActionsDisabled(CallV2PresentationState state) {
+  _expectActions(state);
+}
+
+void _expectActions(
+  CallV2PresentationState state, {
+  bool accept = false,
+  bool decline = false,
+  bool cancel = false,
+  bool end = false,
+  bool reportMedia = false,
+}) {
+  expect(state.acceptEnabled, accept);
+  expect(state.declineEnabled, decline);
+  expect(state.cancelEnabled, cancel);
+  expect(state.endEnabled, end);
+  expect(state.reportMediaEnabled, reportMedia);
 }
 
 Map<String, Object?> _snapshotData({
