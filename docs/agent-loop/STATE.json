@@ -2,7 +2,7 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "3A",
-  "status": "task_ready",
+  "status": "revision_required",
   "accepted_checkpoint_sha": "83933165d7741f06c6e47dcd94e8dbd2d92a6462",
   "starting_sha": "bb04f993b6ad58ae6e53c11bcddadb3dbe101d3d",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
@@ -12,7 +12,7 @@
   "changed_files": [],
   "validation": {
     "node_version": "20",
-    "check": "passed",
+    "check": "failed",
     "deployment_readiness": "passed",
     "rules_tests": "passed",
     "emulator_runs": [
@@ -22,8 +22,8 @@
     ],
     "total_tests": "backend validation passed; focused Flutter parser tests passed in workflow run 28340624321",
     "index_syntax_check": "passed",
-    "flutter_analysis": "passed",
-    "flutter_tests": "passed"
+    "flutter_analysis": "failed_or_not_reached",
+    "flutter_tests": "failed_or_not_reached"
   },
   "safety": {
     "deployed": false,
@@ -33,6 +33,6 @@
   },
   "review": {
     "decision": "revision_required",
-    "notes": "External review rejected Phase 3A as incomplete. Parser hardening passed validation, but the full Flutter V2 client groundwork scope is still missing: docs/call-v2/PHASE_3A_FLUTTER_CLIENT_GROUNDWORK.md, callable API boundary, test transport and error normalization, CallSessionManagerV2, CallNavigationCoordinatorV2, disabled-by-default feature gate, and focused pure/unit coverage. Continue from current branch tip without undoing parser hardening."
+    "notes": "Phase 3A validation failed. Download the phase3a-validation artifact from https://github.com/projectAKTS/connectapp/actions/runs/28342286646"
   }
 }
