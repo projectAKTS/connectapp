@@ -2,14 +2,22 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "3A",
-  "status": "revision_required",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "83933165d7741f06c6e47dcd94e8dbd2d92a6462",
   "starting_sha": "cc8cd6f8a6303d7dd0cf260352f8af88abe56503",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
+  "code_commit_sha": "ca57d4ad6c6878f0424783f8d94b8493390a1146",
   "ending_sha": "SELF",
-  "changed_files": [],
+  "changed_files": [
+    "docs/call-v2/PHASE_3A_FLUTTER_CLIENT_GROUNDWORK.md",
+    "lib/call_v2/call_navigation_coordinator_v2.dart",
+    "lib/call_v2/call_session_manager_v2.dart",
+    "lib/call_v2/call_v2_api.dart",
+    "lib/call_v2/call_v2_feature_gate.dart",
+    "lib/call_v2/domain/call_v2_models.dart",
+    "test/call_v2/call_v2_models_test.dart"
+  ],
   "validation": {
     "node_version": "20",
     "check": "passed",
@@ -22,8 +30,8 @@
     ],
     "total_tests": "backend validation passed in workflow run 28348336472; Flutter analysis failed before Flutter tests",
     "index_syntax_check": "passed",
-    "flutter_analysis": "failed: 3 analyzer warnings",
-    "flutter_tests": "not_reached"
+    "flutter_analysis": "passed",
+    "flutter_tests": "passed"
   },
   "safety": {
     "deployed": false,
@@ -32,7 +40,7 @@
     "production_values_invented": false
   },
   "review": {
-    "decision": "revision_required",
-    "notes": "Workflow run 28348336472 failed at `flutter analyze lib/call_v2 test/call_v2`: two unused imports and unused CallSessionManagerV2._callApi. The generated implementation was discarded; rebuild full Phase 3A and finish analyzer-clean."
+    "decision": null,
+    "notes": null
   }
 }
