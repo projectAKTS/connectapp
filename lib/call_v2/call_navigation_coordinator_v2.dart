@@ -1,4 +1,4 @@
-import 'domain/call_v2_models.dart';
+import 'domain/call_snapshot.dart';
 
 enum CallNavigationIntentType {
   open,
@@ -24,15 +24,24 @@ class CallNavigationIntent {
 }
 
 class CallNavigationCoordinatorV2 {
-  const CallNavigationCoordinatorV2();
+  CallNavigationCoordinatorV2();
 
-  CallNavigationIntent? openIntentFor(CallV2Snapshot snapshot) {
+  final Map<String, int> _openedVersions = <String, int>{};
+  final Set<String> _closedCalls = <String>{};
+
+  CallNavigationIntent? openIntentFor(CallSnapshot snapshot) {
     if (snapshot.lifecycle.isTerminal) return null;
+    final lastOpened = _openedVersions[snapshot.callId];
+    if (lastOpened != null && snapshot.version <= lastOpened) return null;
+    _openedVersions[snapshot.callId] = snapshot.version;
     return CallNavigationIntent.open(
         callId: snapshot.callId, version: snapshot.version);
   }
 
-  CallNavigationIntent closeIntentFor(CallV2Snapshot snapshot) {
+  CallNavigationIntent? closeIntentFor(CallSnapshot snapshot) {
+    if (!snapshot.lifecycle.isTerminal) return null;
+    if (_closedCalls.contains(snapshot.callId)) return null;
+    _closedCalls.add(snapshot.callId);
     return CallNavigationIntent.close(
         callId: snapshot.callId, version: snapshot.version);
   }

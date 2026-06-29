@@ -1,31 +1,44 @@
 import 'call_v2_api.dart';
 import 'call_v2_feature_gate.dart';
-import 'domain/call_v2_models.dart';
+import 'domain/call_lifecycle.dart';
+import 'domain/call_local_phase.dart';
+import 'domain/call_snapshot.dart';
+import 'domain/participant_media_state.dart';
 
 class CallSessionManagerV2 {
   CallSessionManagerV2({
     required CallV2FeatureGate featureGate,
     required CallV2Api api,
+    required CallParticipantRole Function() localParticipantRole,
   })  : _featureGate = featureGate,
+        _localParticipantRole = localParticipantRole,
         _api = api;
 
   final CallV2FeatureGate _featureGate;
+  final CallParticipantRole Function() _localParticipantRole;
   final CallV2Api _api;
-  CallV2Snapshot? _snapshot;
+  CallSnapshot? _snapshot;
   bool _commandInFlight = false;
+  String? _inFlightCommandKey;
   bool _cleanupCompleted = false;
   final List<_QueuedCommand> _commandQueue = <_QueuedCommand>[];
 
-  CallV2Snapshot? get snapshot => _snapshot;
+  CallSnapshot? get snapshot => _snapshot;
 
-  CallV2LocalPhase get localPhase =>
-      _snapshot == null ? CallV2LocalPhase.idle : _localPhaseFor(_snapshot!);
+  CallLocalPhase get localPhase =>
+      _snapshot == null ? CallLocalPhase.idle : _localPhaseFor(_snapshot!);
 
-  void injectSnapshot(CallV2Snapshot snapshot) {
+  void injectSnapshot(CallSnapshot snapshot) {
     if (!_featureGate.enabled) return;
     if (_snapshot != null && _snapshot!.callId != snapshot.callId) return;
+    if (_snapshot != null && _snapshot!.lifecycle.isTerminal) {
+      if (!snapshot.lifecycle.isTerminal ||
+          snapshot.version <= _snapshot!.version) {
+        return;
+      }
+    }
     if (_snapshot != null &&
-        snapshot.version < _snapshot!.version &&
+        snapshot.version <= _snapshot!.version &&
         !_snapshot!.lifecycle.isTerminal) {
       return;
     }
@@ -61,7 +74,7 @@ class CallSessionManagerV2 {
 
   Future<void> reportMedia(
     CallV2RequestContext context, {
-    required CallV2ParticipantMediaState mediaState,
+    required ParticipantMediaState mediaState,
     required int mediaVersion,
   }) async {
     await _runCommand(
@@ -87,10 +100,18 @@ class CallSessionManagerV2 {
       return;
     }
     _cleanupCompleted = true;
+    _snapshot = null;
+    _commandQueue.clear();
+    _inFlightCommandKey = null;
+    _commandInFlight = false;
   }
 
   Future<void> _runCommand(String key, Future<void> Function() action) async {
     if (!_featureGate.enabled) return;
+    if (_inFlightCommandKey == key ||
+        _commandQueue.any((item) => item.key == key)) {
+      return;
+    }
     _commandQueue.add(_QueuedCommand(key, action));
     if (_commandInFlight) {
       return;
@@ -99,27 +120,32 @@ class CallSessionManagerV2 {
     try {
       while (_commandQueue.isNotEmpty) {
         final next = _commandQueue.removeAt(0);
+        _inFlightCommandKey = next.key;
         await next.action();
       }
     } finally {
       _commandInFlight = false;
+      _inFlightCommandKey = null;
     }
   }
 
-  CallV2LocalPhase _localPhaseFor(CallV2Snapshot snapshot) {
+  CallLocalPhase _localPhaseFor(CallSnapshot snapshot) {
+    final localRole = _localParticipantRole();
     switch (snapshot.lifecycle) {
-      case CallV2Lifecycle.ringing:
-        return CallV2LocalPhase.incomingRinging;
-      case CallV2Lifecycle.accepted:
-        return CallV2LocalPhase.openingRoute;
-      case CallV2Lifecycle.active:
-        return CallV2LocalPhase.inCall;
-      case CallV2Lifecycle.completed:
-      case CallV2Lifecycle.declined:
-      case CallV2Lifecycle.cancelled:
-      case CallV2Lifecycle.missed:
-      case CallV2Lifecycle.failed:
-        return CallV2LocalPhase.closing;
+      case CallLifecycle.ringing:
+        return localRole == CallParticipantRole.caller
+            ? CallLocalPhase.outgoingRinging
+            : CallLocalPhase.presentingIncoming;
+      case CallLifecycle.accepted:
+        return CallLocalPhase.openingCallRoute;
+      case CallLifecycle.active:
+        return CallLocalPhase.inCall;
+      case CallLifecycle.completed:
+      case CallLifecycle.declined:
+      case CallLifecycle.cancelled:
+      case CallLifecycle.missed:
+      case CallLifecycle.failed:
+        return CallLocalPhase.closing;
     }
   }
 }

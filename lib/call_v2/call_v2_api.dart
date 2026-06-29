@@ -1,17 +1,13 @@
-import 'domain/call_v2_models.dart';
+import 'domain/participant_media_state.dart';
 
 class CallV2RequestContext {
   const CallV2RequestContext({
     required this.callId,
     required this.version,
-    required this.actorUid,
-    required this.participantRole,
   });
 
   final String callId;
   final int version;
-  final String actorUid;
-  final CallV2ParticipantRole participantRole;
 }
 
 abstract interface class CallableCallV2Api {
@@ -24,13 +20,20 @@ abstract interface class CallableCallV2Api {
   Future<void> renewActiveCallLeaseV2(Map<String, Object?> request);
 }
 
-class CallV2ClientError implements Exception {
-  const CallV2ClientError(this.message);
+enum CallV2ClientErrorCode {
+  unavailable,
+  rejected,
+  unauthorized,
+  invalidRequest,
+}
 
-  final String message;
+class CallV2ClientError implements Exception {
+  const CallV2ClientError(this.code);
+
+  final CallV2ClientErrorCode code;
 
   @override
-  String toString() => 'CallV2ClientError: $message';
+  String toString() => 'CallV2ClientError(code: $code)';
 }
 
 class CallV2Api {
@@ -60,7 +63,7 @@ class CallV2Api {
 
   Future<void> reportParticipantMediaV2(
     CallV2RequestContext context, {
-    required CallV2ParticipantMediaState mediaState,
+    required ParticipantMediaState mediaState,
     required int mediaVersion,
   }) {
     return _normalize(
@@ -82,8 +85,6 @@ class CallV2Api {
     return <String, Object?>{
       'callId': context.callId,
       'version': context.version,
-      'actorUid': context.actorUid,
-      'participantRole': context.participantRole.name,
     };
   }
 
@@ -91,7 +92,7 @@ class CallV2Api {
     try {
       await action();
     } catch (_) {
-      throw const CallV2ClientError('Call V2 request failed');
+      throw const CallV2ClientError(CallV2ClientErrorCode.unavailable);
     }
   }
 }

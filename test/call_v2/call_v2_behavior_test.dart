@@ -1,0 +1,295 @@
+import 'dart:async';
+
+import 'package:connect_app/call_v2/call_navigation_coordinator_v2.dart';
+import 'package:connect_app/call_v2/call_session_manager_v2.dart';
+import 'package:connect_app/call_v2/call_v2_api.dart';
+import 'package:connect_app/call_v2/call_v2_feature_gate.dart';
+import 'package:connect_app/call_v2/domain/call_lifecycle.dart';
+import 'package:connect_app/call_v2/domain/call_local_phase.dart';
+import 'package:connect_app/call_v2/domain/call_snapshot.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+class _FakeApi implements CallableCallV2Api {
+  final calls = <String, List<Map<String, Object?>>>{};
+  int acceptCount = 0;
+  Completer<void>? acceptGate;
+
+  @override
+  Future<void> acceptCallV2(Map<String, Object?> request) async {
+    acceptCount += 1;
+    calls.putIfAbsent('accept', () => <Map<String, Object?>>[]).add(request);
+    acceptGate ??= Completer<void>();
+    return acceptGate!.future;
+  }
+
+  @override
+  Future<void> cancelCallV2(Map<String, Object?> request) async {
+    calls.putIfAbsent('cancel', () => <Map<String, Object?>>[]).add(request);
+  }
+
+  @override
+  Future<void> declineCallV2(Map<String, Object?> request) async {
+    calls.putIfAbsent('decline', () => <Map<String, Object?>>[]).add(request);
+  }
+
+  @override
+  Future<void> endCallV2(Map<String, Object?> request) async {
+    calls.putIfAbsent('end', () => <Map<String, Object?>>[]).add(request);
+  }
+
+  @override
+  Future<void> renewActiveCallLeaseV2(Map<String, Object?> request) async {
+    calls.putIfAbsent('lease', () => <Map<String, Object?>>[]).add(request);
+  }
+
+  @override
+  Future<void> reportParticipantMediaV2(Map<String, Object?> request) async {
+    calls.putIfAbsent('media', () => <Map<String, Object?>>[]).add(request);
+  }
+
+  @override
+  Future<void> startCallV2(Map<String, Object?> request) async {
+    calls.putIfAbsent('start', () => <Map<String, Object?>>[]).add(request);
+  }
+}
+
+class _FailingApi implements CallableCallV2Api {
+  @override
+  Future<void> acceptCallV2(Map<String, Object?> request) =>
+      throw StateError('provider stack leak');
+  @override
+  Future<void> cancelCallV2(Map<String, Object?> request) =>
+      throw StateError('provider stack leak');
+  @override
+  Future<void> declineCallV2(Map<String, Object?> request) =>
+      throw StateError('provider stack leak');
+  @override
+  Future<void> endCallV2(Map<String, Object?> request) =>
+      throw StateError('provider stack leak');
+  @override
+  Future<void> renewActiveCallLeaseV2(Map<String, Object?> request) =>
+      throw StateError('provider stack leak');
+  @override
+  Future<void> reportParticipantMediaV2(Map<String, Object?> request) =>
+      throw StateError('provider stack leak');
+  @override
+  Future<void> startCallV2(Map<String, Object?> request) =>
+      throw StateError('provider stack leak');
+}
+
+void main() {
+  test('snapshot parser rejects private and duplicate identity fields', () {
+    expect(CallSnapshot.fromPublicData(_snapshotData()), isNotNull);
+
+    for (final key in <String>[
+      'authenticatedUid',
+      'uid',
+      'staff',
+      'rolloutMode',
+      'percentage',
+      'salt',
+      'allowlist',
+      'cohort',
+      'fencingToken',
+      'lockClaim',
+      'taskId',
+      'commandId',
+      'task',
+      'command',
+    ]) {
+      expect(
+        () => CallSnapshot.fromPublicData({..._snapshotData(), key: 'x'}),
+        throwsFormatException,
+        reason: 'rejected key $key',
+      );
+    }
+  });
+
+  test('request shapes exclude authenticated identity and private rollout data',
+      () async {
+    final fake = _FakeApi();
+    final api = CallV2Api(fake);
+    await api.startCallV2(const CallV2RequestContext(
+      callId: 'call_a',
+      version: 1,
+    ));
+    final request = fake.calls['start']!.single;
+    expect(request, containsPair('callId', 'call_a'));
+    expect(request, containsPair('version', 1));
+    for (final key in <String>[
+      'actorUid',
+      'authenticatedUid',
+      'uid',
+      'staff',
+      'rolloutMode',
+      'percentage',
+      'salt',
+      'allowlist',
+      'cohort',
+      'fencingToken',
+      'lockClaim',
+      'taskId',
+      'commandId',
+    ]) {
+      expect(request.containsKey(key), isFalse, reason: key);
+    }
+  });
+
+  test('controlled errors expose only a small code contract', () async {
+    final api = CallV2Api(_FailingApi());
+    await expectLater(
+      api.startCallV2(const CallV2RequestContext(
+        callId: 'call_a',
+        version: 1,
+      )),
+      throwsA(
+        isA<CallV2ClientError>().having(
+          (error) => error.code,
+          'code',
+          CallV2ClientErrorCode.unavailable,
+        ),
+      ),
+    );
+  });
+
+  test('session manager maps caller and callee ringing phases correctly',
+      () async {
+    final callerManager = CallSessionManagerV2(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(_FakeApi()),
+      localParticipantRole: () => CallParticipantRole.caller,
+    );
+    final calleeManager = CallSessionManagerV2(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(_FakeApi()),
+      localParticipantRole: () => CallParticipantRole.callee,
+    );
+    final ringing = CallSnapshot.fromPublicData(_snapshotData());
+
+    callerManager.injectSnapshot(ringing);
+    calleeManager.injectSnapshot(ringing);
+
+    expect(callerManager.localPhase, CallLocalPhase.outgoingRinging);
+    expect(calleeManager.localPhase, CallLocalPhase.presentingIncoming);
+  });
+
+  test('equal and lower snapshots do not regress durable terminal state', () {
+    final manager = CallSessionManagerV2(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(_FakeApi()),
+      localParticipantRole: () => CallParticipantRole.callee,
+    );
+    manager.injectSnapshot(CallSnapshot.fromPublicData(
+        _snapshotData(lifecycle: CallLifecycle.completed)));
+    manager.injectSnapshot(CallSnapshot.fromPublicData(
+        _snapshotData(version: 1, lifecycle: CallLifecycle.ringing)));
+    manager.injectSnapshot(CallSnapshot.fromPublicData(
+        _snapshotData(version: 0, lifecycle: CallLifecycle.active)));
+
+    expect(manager.snapshot!.lifecycle, CallLifecycle.completed);
+    expect(manager.localPhase, CallLocalPhase.closing);
+  });
+
+  test('different call ownership is rejected while nonterminal ownership holds',
+      () {
+    final manager = CallSessionManagerV2(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(_FakeApi()),
+      localParticipantRole: () => CallParticipantRole.callee,
+    );
+    manager.injectSnapshot(
+        CallSnapshot.fromPublicData(_snapshotData(callId: 'call_a')));
+    manager.injectSnapshot(
+        CallSnapshot.fromPublicData(_snapshotData(callId: 'call_b')));
+
+    expect(manager.snapshot!.callId, 'call_a');
+  });
+
+  test('terminal cleanup clears ownership and is idempotent', () async {
+    final manager = CallSessionManagerV2(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(_FakeApi()),
+      localParticipantRole: () => CallParticipantRole.callee,
+    );
+    manager.injectSnapshot(CallSnapshot.fromPublicData(
+        _snapshotData(lifecycle: CallLifecycle.completed)));
+    await manager.cleanupIfTerminal();
+    await manager.cleanupIfTerminal();
+
+    expect(manager.snapshot, isNull);
+    expect(manager.localPhase, CallLocalPhase.idle);
+  });
+
+  test('duplicate accept taps share the in-flight transport request', () async {
+    final fake = _FakeApi();
+    final manager = CallSessionManagerV2(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(fake),
+      localParticipantRole: () => CallParticipantRole.callee,
+    );
+    final first = manager.acceptCall(const CallV2RequestContext(
+      callId: 'call_a',
+      version: 1,
+    ));
+    final second = manager.acceptCall(const CallV2RequestContext(
+      callId: 'call_a',
+      version: 1,
+    ));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(fake.acceptCount, 1);
+    expect(fake.calls['accept'], hasLength(1));
+
+    fake.acceptGate!.complete();
+    await Future.wait(<Future<void>>[first, second]);
+  });
+
+  test('navigation coordinator dedupes intents without route access', () {
+    final coordinator = CallNavigationCoordinatorV2();
+    final ringing = CallSnapshot.fromPublicData(
+        _snapshotData(version: 1, lifecycle: CallLifecycle.ringing));
+    final terminal = CallSnapshot.fromPublicData(
+        _snapshotData(version: 2, lifecycle: CallLifecycle.completed));
+
+    expect(coordinator.openIntentFor(ringing), isNotNull);
+    expect(coordinator.openIntentFor(ringing), isNull);
+    expect(
+        coordinator.openIntentFor(
+          CallSnapshot.fromPublicData(
+              _snapshotData(version: 2, lifecycle: CallLifecycle.ringing)),
+        ),
+        isNotNull);
+    expect(coordinator.closeIntentFor(terminal), isNotNull);
+    expect(coordinator.closeIntentFor(terminal), isNull);
+  });
+}
+
+Map<String, Object?> _snapshotData({
+  String callId = 'call_a',
+  int version = 1,
+  CallLifecycle lifecycle = CallLifecycle.ringing,
+}) {
+  return <String, Object?>{
+    'callSystem': 'v2',
+    'callId': callId,
+    'version': version,
+    'lifecycle': lifecycle.name,
+    'callerUid': 'caller',
+    'calleeUid': 'callee',
+    'participantUids': <String>['caller', 'callee'],
+    'participants': <Map<String, Object?>>[
+      {
+        'uid': 'caller',
+        'role': 'caller',
+        'mediaState': 'notJoined',
+        'mediaVersion': 0,
+      },
+      {
+        'uid': 'callee',
+        'role': 'callee',
+        'mediaState': 'notJoined',
+        'mediaVersion': 0,
+      },
+    ],
+  };
+}

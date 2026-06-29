@@ -98,6 +98,7 @@ class CallSnapshot {
     if (publicParticipants.length != 2) {
       throw const FormatException('Participant set must contain two entries');
     }
+    _rejectPrivateFields(data);
 
     return CallSnapshot(
       callId: callId,
@@ -235,6 +236,31 @@ CallParticipantRole _readRole(Object? value) {
     );
   }
   throw const FormatException('Unknown participant role');
+}
+
+void _rejectPrivateFields(Map<String, Object?> data) {
+  const privateKeys = <String>{
+    'actorUid',
+    'authenticatedUid',
+    'uid',
+    'staff',
+    'rolloutMode',
+    'percentage',
+    'salt',
+    'allowlist',
+    'cohort',
+    'fencingToken',
+    'lockClaim',
+    'taskId',
+    'commandId',
+    'task',
+    'command',
+  };
+  for (final key in privateKeys) {
+    if (data.containsKey(key)) {
+      throw FormatException('Private field not allowed: $key');
+    }
+  }
 }
 
 DateTime? _readOptionalTimestamp(Object? value) {
