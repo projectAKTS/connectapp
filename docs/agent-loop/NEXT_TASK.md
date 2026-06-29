@@ -1,88 +1,79 @@
-# Active Task — Phase 3A Validation Revision
+# Active Task — Phase 3B Client Harness Groundwork
 
 Branch: `call-v2`
-Accepted backend checkpoint: `83933165d7741f06c6e47dcd94e8dbd2d92a6462`
-Rejected implementation: `ca57d4ad6c6878f0424783f8d94b8493390a1146`
-Rejected workflow: `28348917545`
-Failed retry workflows: `28350979605`, `28353584185`
-Implementation commit message: `feat(call-v2): complete Flutter V2 client groundwork`
+Accepted Phase 3A checkpoint: `009a1f372fabe26fe10394519ff47739788d982a`
+Accepted Phase 3A workflow: `28369246060`
+Phase 3A implementation commit message: `feat(call-v2): add Flutter V2 client groundwork`
 
-## Review and validation decision
+## Review decision
 
-Phase 3A is not accepted. Workflow `28348917545` passed, but exact code review found behavioral contract defects that the generated tests did not detect. Retry workflow `28350979605` failed during the combined validation step and discarded its uncommitted implementation. Retry workflow `28353584185` generated implementation changes and entered the same guarded validation block, then the workflow recorded a validation failure and discarded the implementation before commit. Rebuild the complete Phase 3A correction from the current branch.
+Phase 3A is accepted. Exact review confirmed the implementation corrected the rejected client contracts while keeping the work bounded to disabled, non-production Call V2 client groundwork.
 
-The latest workflow failure is from run `28353584185`, job `83991409108`. The job steps show `Run backend and Flutter validation` completed with the failure path active, `Upload validation failure log` succeeded, and `Record validation failure` failed the job intentionally after writing the retained artifact. The retained artifact is `phase3a-validation-28353584185` from workflow run `28353584185`.
+Accepted Phase 3A properties:
 
-The validation command block to reproduce is exactly:
+- `CallV2RequestContext` no longer contains or serializes `actorUid` or authenticated identity.
+- Callable request payloads are limited to safe client fields such as `callId`, `version`, and media reporting fields.
+- `domain/call_v2_models.dart` is now harmless exports only; the accepted domain contract remains authoritative.
+- Local phase names remain exactly `idle`, `presentingIncoming`, `outgoingRinging`, `openingCallRoute`, `inCall`, and `closing`.
+- `CallSessionManagerV2` derives caller/callee ringing phase from an injected local participant role without sending that role as authentication authority.
+- Duplicate in-flight command taps are suppressed so the same command key produces one transport request.
+- Terminal cleanup clears local ownership and returns to `idle` idempotently.
+- `CallNavigationCoordinatorV2` is stateful and dedupes open and close intents without touching `Navigator` or existing routes.
+- Errors use a controlled client error-code contract instead of raw provider messages.
+- Workflow validation passed backend checks, deployment-readiness validation, Firestore rules tests, three emulator runs, Flutter format/analyze/tests, and `git diff --check`.
 
-```bash
-cd connect_functions
-node --version
-npm run check:call-v2
-npm run validate:call-v2:deployment
-npm run test:call-v2:rules
-npm run test:call-v2:emulator
-npm run test:call-v2:emulator
-npm run test:call-v2:emulator
-node --check index.js
-cd ..
-dart format --output=none --set-exit-if-changed lib/call_v2 test/call_v2
-flutter analyze lib/call_v2 test/call_v2
-flutter test test/call_v2
-git diff --check
-```
+## Phase 3B goal
 
-Use retained artifacts only as diagnostic evidence. Do not treat any prior generated code as accepted.
+Build a small disabled-by-default Flutter Call V2 client harness around the accepted Phase 3A primitives. This phase must remain non-production and must not wire startup, existing routes, native call stacks, push, Firestore listeners, Agora, CallKit, PushKit, FCM, or live Firebase.
 
-## Required focused corrections
+The harness should make the Phase 3A primitives easier to exercise from tests and future UI work without making the feature reachable in the app.
 
-1. **Use the accepted domain contract instead of a parallel duplicate model tree.**
-   - Reuse the existing accepted files such as `domain/call_snapshot.dart`, `domain/call_lifecycle.dart`, `domain/participant_media_state.dart`, and `domain/call_local_phase.dart`.
-   - Remove `domain/call_v2_models.dart` unless it is reduced to harmless exports with no duplicate enums/models/parser.
-   - Preserve the strict existing parser based on `participantUids` and exact caller/callee participant identities. Do not replace it with a parser that accepts only an embedded participant list.
-   - The exact local phase names remain: `idle`, `presentingIncoming`, `outgoingRinging`, `openingCallRoute`, `inCall`, `closing`.
+## Required work
 
-2. **Remove authenticated identity from callable request data.**
-   - `CallV2RequestContext.actorUid` and serialized `actorUid` are forbidden.
-   - Do not serialize authenticated UID, staff/rollout/cohort data, allowlists, salts, percentages, fencing/lock data, or private task/command identities.
-   - Authentication identity must come from Firebase Auth on the server, not from the client request.
-   - Add exact request-shape tests that fail for `actorUid`, `authenticatedUid`, `uid`, `staff`, `rolloutMode`, `percentage`, `salt`, `allowlist`, `cohort`, `fencingToken`, `lockClaim`, task IDs, and command IDs.
+1. **Create a disabled client harness facade.**
+   - Add a small Call V2 client/controller/facade under `lib/call_v2/**` that composes:
+     - `CallV2FeatureGate`
+     - `CallV2Api`
+     - `CallSessionManagerV2`
+     - `CallNavigationCoordinatorV2`
+   - The harness must be inert when the feature gate is false.
+   - The harness must expose only testable methods for injecting public snapshots and invoking safe commands.
+   - It must not subscribe to Firestore, call startup code, register routes, request native permissions, or contact real services by default.
 
-3. **Make `CallSessionManagerV2` satisfy the ownership contract.**
-   - Inject the current local participant role for phase derivation, but never send it as authenticated authority.
-   - `ringing` derives `outgoingRinging` for caller and `presentingIncoming` for callee.
-   - `accepted` derives `openingCallRoute`; `active` derives `inCall`; terminal state derives `closing`, followed by deterministic cleanup to `idle`.
-   - Ignore equal or lower versions for the same call. Never allow a lower/equal nonterminal snapshot to replace a terminal snapshot.
-   - While owning a nonterminal call, ignore/reject a different call.
-   - Terminal cleanup must actually clear local ownership and be idempotent.
-   - Duplicate command taps with the same command key must share/suppress the in-flight operation and result in exactly one transport request. The existing queued-command key must not be unused.
-   - A failed command must not change the durable snapshot or invent a lifecycle transition.
+2. **Preserve authentication and request-shape safety.**
+   - Do not add `actorUid`, `authenticatedUid`, raw `uid`, staff/rollout/cohort fields, allowlists, salts, percentages, fencing/lock fields, task IDs, command IDs, or private server authority to client request payloads.
+   - Do not serialize local participant role as authenticated authority.
+   - Continue to rely on server-side Firebase Auth for identity.
 
-4. **Make `CallNavigationCoordinatorV2` truly dedupe intents.**
-   - It must retain local dedupe state or expose a stateful contract.
-   - Emit at most one open intent per call/version.
-   - Emit one deterministic close intent for terminal state and suppress repeats.
-   - Never call `Navigator` or existing routes.
+3. **Preserve ownership, monotonicity, and navigation behavior.**
+   - Equal/lower snapshots must remain ignored for the same call.
+   - A terminal snapshot must not be replaced by lower/equal nonterminal data.
+   - A different call must remain ignored while a nonterminal call is owned.
+   - Terminal cleanup must clear local ownership and remain idempotent.
+   - Navigation intents must stay deduped and must not call `Navigator` or existing routes.
 
-5. **Use controlled error codes.**
-   - Replace a generic message-only wrapper with a small controlled error-code contract.
-   - Never expose raw server/provider messages, stack traces, or private data.
+4. **Add behavioral tests for the harness.**
+   - Feature gate disabled: injected snapshots and commands do nothing and no transport call is made.
+   - Feature gate enabled: public snapshots derive expected local phase and safe commands produce exactly one safe transport request.
+   - Duplicate command taps through the harness still produce one in-flight request.
+   - Terminal snapshot through the harness produces a close intent once, cleanup clears ownership, and repeated cleanup/close does not emit duplicates.
+   - The harness must use fake transports only; no real network, Firebase, native, Agora, CallKit, PushKit, FCM, or route access.
 
-6. **Replace weak tests with behavioral tests.**
-   - The rejected test expected two transport calls for duplicate accept taps; the correct expectation is exactly one in-flight request.
-   - The rejected navigation test did not call `openIntentFor` twice and therefore did not test dedupe.
-   - Add tests for caller/callee ringing phases, equal/lower snapshot rejection, terminal monotonicity, different-call ownership rejection, actual terminal ownership clearing, failed-command durability, exact callable names, exact safe payloads, controlled error codes, and no real network/service contact.
+5. **Keep Phase 3A tests intact.**
+   - Do not weaken existing Phase 3A request-shape, parser, manager, navigation, or error-code tests.
+   - Add tests rather than deleting behavioral coverage.
 
 ## Allowed files
 
 - `lib/call_v2/**`
 - `test/call_v2/**`
 - `docs/call-v2/**`
+- `docs/agent-loop/**`
 - `pubspec.yaml` and `pubspec.lock` only when genuinely required
 
 ## Validation
 
-Run and pass all of these in the workflow:
+Run and pass all of these before marking ready for review:
 
 ```bash
 flutter pub get
@@ -92,12 +83,12 @@ flutter analyze lib/call_v2 test/call_v2
 flutter test test/call_v2
 ```
 
-The existing backend validation, deployment-readiness validation, Firestore rules tests, three emulator runs, syntax check, and `git diff --check` must remain green.
+Backend deployment-readiness, rules, emulator, syntax, and whitespace validations must remain green if the workflow includes them.
 
 ## Safety
 
-V1 must remain untouched. The V2 feature gate must default false. Do not wire startup, routes, Firestore listeners, Agora, CallKit, PushKit, FCM, native code, or production Firebase. Do not deploy, enable switches, change live configuration, contact production services, or invent production values.
+V1 must remain untouched. The V2 feature gate must default false. Do not wire app startup, production routes, Firestore listeners, Agora, CallKit, PushKit, FCM, native code, production Firebase, IAM, OIDC, queues, secrets, kill switches, rollout configuration, or live services. Do not deploy, enable switches, change live configuration, contact production services, or invent production values.
 
 ## Handoff
 
-Report exact changed files and behavioral test results. Explicitly confirm removal of client-supplied authenticated UID, exact local phase names, one-request duplicate-command behavior, terminal ownership clearing, navigation dedupe, V1 isolation, disabled default, and no deployment/live contact.
+Report exact changed files and behavioral test results. Explicitly confirm disabled default, V1 isolation, no client-supplied authenticated UID, safe request shapes, duplicate-command suppression, terminal cleanup, navigation dedupe, fake-only tests, and no deployment/live contact.
