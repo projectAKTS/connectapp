@@ -1,9 +1,11 @@
-run=15
+run=16
 phase=3C
-reason=start accepted Phase 3C client view-model groundwork after Phase 3B review acceptance
+reason=focused retry after Phase 3C flutter-analysis validation failure
 workflow=call-v2-phase3a-retry.yml
-baseline_head=325132525a987bca230222dbeb81ecab2b096bec
+baseline_head=a7c2d4669853b3f1653e53f6ea3684d555e6d07f
 prompt_task=docs/agent-loop/NEXT_TASK.md
 task_blob=b8003d6cd2a6de44fa8ccdf58531f62e66fbf06b
 accepted_checkpoint=05a5407ab2d77a5f8772ae05bdf3b6a3cffa7a8e
+prior_failure_run=28387774326
+prior_failed_stage=flutter-analysis
 safety=non-production-v1-untouched-disabled-default
