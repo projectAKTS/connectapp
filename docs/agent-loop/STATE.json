@@ -2,7 +2,7 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "3B",
-  "status": "task_ready",
+  "status": "revision_required",
   "accepted_checkpoint_sha": "009a1f372fabe26fe10394519ff47739788d982a",
   "starting_sha": "b2f6a204a71ad8622fb64dfbb7408b8e2adf71f5",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
@@ -14,7 +14,7 @@
     "phase3a_workflow_run": "28369246060",
     "phase3a_job": "84042624356",
     "node_version": "20",
-    "check": "passed",
+    "check": "failed",
     "deployment_readiness": "passed",
     "rules_tests": "passed",
     "emulator_runs": [
@@ -24,8 +24,8 @@
     ],
     "index_syntax_check": "passed",
     "flutter_format": "passed",
-    "flutter_analysis": "passed",
-    "flutter_tests": "passed",
+    "flutter_analysis": "failed_or_not_reached",
+    "flutter_tests": "failed_or_not_reached",
     "diff_check": "passed"
   },
   "safety": {
@@ -35,8 +35,7 @@
     "production_values_invented": false
   },
   "review": {
-    "decision": "accepted",
-    "accepted_implementation_sha": "009a1f372fabe26fe10394519ff47739788d982a",
-    "notes": "Exact review accepted Phase 3A: no client-supplied authenticated UID remains in request context or payloads; call_v2_models.dart is harmless exports only; accepted local phase names are preserved; duplicate in-flight commands are suppressed; terminal cleanup clears ownership; navigation intents are statefully deduped; V1, production configuration, native code, startup, routes, and live services remain untouched. Phase 3B is prepared as disabled-by-default non-production client harness groundwork."
+    "decision": "revision_required",
+    "notes": "Phase 3B validation failed. Download the retained validation artifact from https://github.com/projectAKTS/connectapp/actions/runs/28385628175"
   }
 }
