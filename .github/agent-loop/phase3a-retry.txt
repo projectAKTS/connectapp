@@ -1,7 +1,9 @@
-retry=7
-reason=run full Phase 3A client groundwork using NEXT_TASK.md as the sole authoritative task contract
+retry=8
+reason=rebuild full Phase 3A groundwork and eliminate the three analyzer issues from workflow run 28348336472
 workflow=call-v2-phase3a-retry.yml
-baseline_state=bd3c184f904bd7f767bbe533aeb050d9e84f8382
+baseline_head=ee374d9ba07817e89f0cfb6df5c6531915eb6d44
 prompt_task=docs/agent-loop/NEXT_TASK.md
+task_blob=52b1770f219f9be4a1900fe84e2ab0b87328f43e
 contract_guard=phase-match-and-task-sha
-handoff=3af3e906093d3df824e0f573e3a67804cca18531
+failure_run=28348336472
+exact_failure=flutter analyze lib/call_v2 test/call_v2
