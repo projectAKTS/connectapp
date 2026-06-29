@@ -33,6 +33,6 @@
   },
   "review": {
     "decision": "revision_required",
-    "notes": "Phase 3A validation failed. Download the phase3a-validation artifact from https://github.com/projectAKTS/connectapp/actions/runs/28342286646"
+    "notes": "Phase 3A validation failed. Download the phase3a-validation artifact from https://github.com/projectAKTS/connectapp/actions/runs/28348336472"
   }
 }
