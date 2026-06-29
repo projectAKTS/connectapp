@@ -1,6 +1,6 @@
-retry=5
-reason=complete remaining phase 3a client groundwork after external review: docs, callable boundary, manager, navigation coordinator, disabled gate, tests
+retry=6
+reason=complete remaining phase 3a client groundwork after external review rejected partial parser-only completion
 workflow=call-v2-phase3a-retry.yml
-baseline_state=066621a1c3107bde2fec6b5716481c2ccd8f37fd
-prompt_fix=7594709f624145b92892eb505349acf6868209b3
-handoff=4e0575a9f3b941f57c9a0bd4bbbbf8d76cb7cfd9
+baseline_state=bd3c184f904bd7f767bbe533aeb050d9e84f8382
+prompt_task=docs/agent-loop/NEXT_TASK.md
+handoff=3af3e906093d3df824e0f573e3a67804cca18531
