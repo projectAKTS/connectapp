@@ -1,14 +1,36 @@
-# Active Task — Phase 3A Review Revision
+# Active Task — Phase 3A Validation Revision
 
 Branch: `call-v2`
 Accepted backend checkpoint: `83933165d7741f06c6e47dcd94e8dbd2d92a6462`
 Rejected implementation: `ca57d4ad6c6878f0424783f8d94b8493390a1146`
-Review workflow: `28348917545`
+Rejected workflow: `28348917545`
+Latest failed retry workflow: `28350979605`
 Implementation commit message: `feat(call-v2): complete Flutter V2 client groundwork`
 
-## Review decision
+## Review and validation decision
 
-Phase 3A is not accepted. The workflow passed, but exact code review found contract defects that the generated tests did not detect. Correct these defects without changing V1, backend, native code, Firebase configuration, workflows, or live services.
+Phase 3A is not accepted. Workflow `28348917545` passed, but exact code review found behavioral contract defects that the generated tests did not detect. Retry workflow `28350979605` then failed during the combined validation step and discarded its uncommitted implementation, so rebuild the complete Phase 3A correction from the current branch.
+
+The latest workflow failure happened in `Run backend and Flutter validation`, whose command block is:
+
+```bash
+cd connect_functions
+node --version
+npm run check:call-v2
+npm run validate:call-v2:deployment
+npm run test:call-v2:rules
+npm run test:call-v2:emulator
+npm run test:call-v2:emulator
+npm run test:call-v2:emulator
+node --check index.js
+cd ..
+dart format --output=none --set-exit-if-changed lib/call_v2 test/call_v2
+flutter analyze lib/call_v2 test/call_v2
+flutter test test/call_v2
+git diff --check
+```
+
+The retained validation artifact is `phase3a-validation-28350979605`. Use it as diagnostic evidence if available, but do not block on artifact access. Reproduce failures by running the exact validation commands above after implementing the corrections. Do not treat any prior generated code as accepted.
 
 ## Required focused corrections
 
