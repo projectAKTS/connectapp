@@ -4,14 +4,16 @@ Branch: `call-v2`
 Accepted backend checkpoint: `83933165d7741f06c6e47dcd94e8dbd2d92a6462`
 Rejected implementation: `ca57d4ad6c6878f0424783f8d94b8493390a1146`
 Rejected workflow: `28348917545`
-Latest failed retry workflow: `28350979605`
+Failed retry workflows: `28350979605`, `28353584185`
 Implementation commit message: `feat(call-v2): complete Flutter V2 client groundwork`
 
 ## Review and validation decision
 
-Phase 3A is not accepted. Workflow `28348917545` passed, but exact code review found behavioral contract defects that the generated tests did not detect. Retry workflow `28350979605` then failed during the combined validation step and discarded its uncommitted implementation, so rebuild the complete Phase 3A correction from the current branch.
+Phase 3A is not accepted. Workflow `28348917545` passed, but exact code review found behavioral contract defects that the generated tests did not detect. Retry workflow `28350979605` failed during the combined validation step and discarded its uncommitted implementation. Retry workflow `28353584185` generated implementation changes and entered the same guarded validation block, then the workflow recorded a validation failure and discarded the implementation before commit. Rebuild the complete Phase 3A correction from the current branch.
 
-The latest workflow failure happened in `Run backend and Flutter validation`, whose command block is:
+The latest workflow failure is from run `28353584185`, job `83991409108`. The job steps show `Run backend and Flutter validation` completed with the failure path active, `Upload validation failure log` succeeded, and `Record validation failure` failed the job intentionally after writing the retained artifact. The retained artifact is `phase3a-validation-28353584185` from workflow run `28353584185`.
+
+The validation command block to reproduce is exactly:
 
 ```bash
 cd connect_functions
@@ -30,7 +32,7 @@ flutter test test/call_v2
 git diff --check
 ```
 
-The retained validation artifact is `phase3a-validation-28350979605`. Use it as diagnostic evidence if available, but do not block on artifact access. Reproduce failures by running the exact validation commands above after implementing the corrections. Do not treat any prior generated code as accepted.
+Use retained artifacts only as diagnostic evidence. Do not treat any prior generated code as accepted.
 
 ## Required focused corrections
 
