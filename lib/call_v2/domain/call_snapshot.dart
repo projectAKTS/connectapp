@@ -283,8 +283,7 @@ Set<String> _readParticipantUids(Map<String, Object?> data) {
     }
     return parsed.toSet();
   }
-  final participants = _readPublicParticipants(data);
-  return participants.keys.toSet();
+  throw const FormatException('Missing participantUids');
 }
 
 Map<String, CallParticipantSnapshot> _readPublicParticipants(

@@ -60,6 +60,15 @@ void main() {
       );
     });
 
+    test('rejects missing participantUids', () {
+      expect(
+        () => CallSnapshot.fromPublicData(
+          _baseCallData()..remove('participantUids'),
+        ),
+        throwsFormatException,
+      );
+    });
+
     test('rejects missing caller participant', () {
       expect(
         () => CallSnapshot.fromPublicData(
@@ -104,6 +113,29 @@ void main() {
               {
                 'uid': 'caller',
                 'role': 'caller',
+                'mediaState': 'joined',
+                'mediaVersion': 1,
+              },
+              {
+                'uid': 'callee',
+                'role': 'caller',
+                'mediaState': 'joined',
+                'mediaVersion': 1,
+              },
+            ],
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects swapped caller and callee roles', () {
+      expect(
+        () => CallSnapshot.fromPublicData(
+          _baseCallData()
+            ..['participants'] = <Map<String, Object?>>[
+              {
+                'uid': 'caller',
+                'role': 'callee',
                 'mediaState': 'joined',
                 'mediaVersion': 1,
               },
