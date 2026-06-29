@@ -2,9 +2,9 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "3B",
-  "status": "revision_required",
+  "status": "task_ready",
   "accepted_checkpoint_sha": "009a1f372fabe26fe10394519ff47739788d982a",
-  "starting_sha": "b2f6a204a71ad8622fb64dfbb7408b8e2adf71f5",
+  "starting_sha": "8208993c1ecb3012f74b21aa4aae364312e4474b",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
   "code_commit_sha": null,
@@ -13,20 +13,23 @@
   "validation": {
     "phase3a_workflow_run": "28369246060",
     "phase3a_job": "84042624356",
+    "latest_phase3b_run": "28385628175",
+    "latest_phase3b_job": "84099412879",
+    "baseline_preflight": "not_available_in_failed_run",
+    "failed_stage": "backend-emulator-race-test",
+    "failed_test": "timeout lifecycle races produce one authoritative outcome",
     "node_version": "20",
-    "check": "failed",
+    "check": "blocked_by_unchanged_backend_flake",
     "deployment_readiness": "passed",
     "rules_tests": "passed",
     "emulator_runs": [
-      "passed",
-      "passed",
-      "passed"
+      "failed_once_before_client_validation"
     ],
-    "index_syntax_check": "passed",
-    "flutter_format": "passed",
-    "flutter_analysis": "failed_or_not_reached",
-    "flutter_tests": "failed_or_not_reached",
-    "diff_check": "passed"
+    "index_syntax_check": "not_reached",
+    "flutter_format": "passed_before_backend_validation",
+    "flutter_analysis": "not_reached",
+    "flutter_tests": "not_reached",
+    "diff_check": "not_reached"
   },
   "safety": {
     "deployed": false,
@@ -35,7 +38,7 @@
     "production_values_invented": false
   },
   "review": {
-    "decision": "revision_required",
-    "notes": "Phase 3B validation failed. Download the retained validation artifact from https://github.com/projectAKTS/connectapp/actions/runs/28385628175"
+    "decision": "task_ready_after_workflow_hardening",
+    "notes": "Run 28385628175 was not a demonstrated Phase 3B client defect. The unchanged backend emulator race test 'timeout lifecycle races produce one authoritative outcome' failed before Flutter analysis/tests. The workflow now performs a backend baseline before Codex, retries an unchanged emulator suite once, records exact failed stages, and distinguishes baseline blocks from implementation revisions."
   }
 }
