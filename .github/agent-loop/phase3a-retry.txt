@@ -1,8 +1,9 @@
-run=14
-phase=3B
-reason=retry Phase 3B after workflow preflight and baseline hardening
+run=15
+phase=3C
+reason=start accepted Phase 3C client view-model groundwork after Phase 3B review acceptance
 workflow=call-v2-phase3a-retry.yml
-baseline_head=ef138f739a2c7792adee5dd7706aed107bdb7c34
+baseline_head=325132525a987bca230222dbeb81ecab2b096bec
 prompt_task=docs/agent-loop/NEXT_TASK.md
-task_blob=1882b3f64ccfe7206edc74c8b559a2b6701afe30
-accepted_checkpoint=009a1f372fabe26fe10394519ff47739788d982a
+task_blob=b8003d6cd2a6de44fa8ccdf58531f62e66fbf06b
+accepted_checkpoint=05a5407ab2d77a5f8772ae05bdf3b6a3cffa7a8e
+safety=non-production-v1-untouched-disabled-default
