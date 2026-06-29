@@ -1,26 +1,20 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "3B",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "009a1f372fabe26fe10394519ff47739788d982a",
-  "starting_sha": "8208993c1ecb3012f74b21aa4aae364312e4474b",
+  "phase": "3C",
+  "status": "task_ready",
+  "accepted_checkpoint_sha": "05a5407ab2d77a5f8772ae05bdf3b6a3cffa7a8e",
+  "starting_sha": "cd4280a6d72c9d05de333935e29dcac441cd75f5",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "05a5407ab2d77a5f8772ae05bdf3b6a3cffa7a8e",
+  "code_commit_sha": null,
   "ending_sha": "SELF",
-  "changed_files": [
-    "lib/call_v2/call_v2_harness.dart",
-    "test/call_v2/call_v2_behavior_test.dart"
-  ],
+  "changed_files": [],
   "validation": {
-    "phase3a_workflow_run": "28369246060",
-    "phase3a_job": "84042624356",
-    "latest_phase3b_run": "28385628175",
-    "latest_phase3b_job": "84099412879",
+    "accepted_phase3b_workflow_run": "28386385870",
+    "accepted_phase3b_job": "84101997464",
+    "accepted_phase3b_code_commit": "05a5407ab2d77a5f8772ae05bdf3b6a3cffa7a8e",
     "baseline_preflight": "passed",
-    "failed_stage": "backend-emulator-race-test",
-    "failed_test": "timeout lifecycle races produce one authoritative outcome",
     "node_version": "20",
     "check": "passed",
     "deployment_readiness": "passed",
@@ -31,10 +25,10 @@
       "passed"
     ],
     "index_syntax_check": "passed",
-    "flutter_format": "passed_before_backend_validation",
+    "flutter_format": "passed",
     "flutter_analysis": "passed",
     "flutter_tests": "passed",
-    "diff_check": "not_reached",
+    "diff_check": "passed",
     "emulator_transient_retries": 0
   },
   "safety": {
@@ -44,7 +38,7 @@
     "production_values_invented": false
   },
   "review": {
-    "decision": null,
-    "notes": null
+    "decision": "accepted_phase3b_prepare_phase3c",
+    "notes": "Phase 3B accepted after exact review of implementation commit 05a5407ab2d77a5f8772ae05bdf3b6a3cffa7a8e and successful workflow run 28386385870. Phase 3C is bounded to disabled, pure Dart client view-model groundwork with no startup, route, native, Firebase listener, live-service, production configuration, rollout, or V1 changes."
   }
 }
