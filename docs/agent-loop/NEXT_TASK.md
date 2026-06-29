@@ -1,20 +1,26 @@
-# Active Task — Phase 3A
+# Active Task — Phase 3A Revision
 
 Branch: `call-v2`
 Accepted backend checkpoint: `83933165d7741f06c6e47dcd94e8dbd2d92a6462`
-Implementation commit message: `feat(call-v2): add Flutter V2 client groundwork`
+Current review baseline: branch tip after parser-hardening workflow run `28339163243`
+Implementation commit message: `feat(call-v2): complete Flutter V2 client groundwork`
 
 ## Revision focus for the next retry
 
-The retained validation artifact from workflow run `28336086589` shows the prior implementation passed backend validation and failed in the focused Flutter parser tests. Do not repeat a broad rewrite. Make the smallest correction needed in the Phase 3A Flutter client groundwork.
+External review did not accept Phase 3A as complete. The retained validation for workflow run `28339163243` shows the previous focused parser failure was fixed and backend/Flutter validation passed. Do not undo that parser hardening.
 
-Required parser correction:
+Complete the remaining Phase 3A Flutter client-groundwork scope with the smallest safe additive change set. Keep the existing strict parser behavior and tests, then add the missing client foundation pieces and documentation.
 
-- A public call snapshot is valid only when `callerUid` and `calleeUid` are both present and different.
-- The public participant map/list must contain exactly two participant UIDs.
-- The exact participant UID set must be `{callerUid, calleeUid}`. No extra UID, missing UID, duplicate role, placeholder ID, or swapped role mismatch is acceptable.
-- The caller participant must have role `caller`; the callee participant must have role `callee`.
-- Add or fix focused parser tests proving same caller/callee, wrong participant IDs, missing caller/callee participant, and duplicate caller/callee roles all fail closed.
+Required completion items:
+
+- Add `docs/call-v2/PHASE_3A_FLUTTER_CLIENT_GROUNDWORK.md`.
+- Add or complete a callable API boundary exposing exactly these callable names: `startCallV2`, `acceptCallV2`, `declineCallV2`, `cancelCallV2`, `endCallV2`, `reportParticipantMediaV2`, `renewActiveCallLeaseV2`.
+- The callable request layer must not include authenticated UID, staff status, rollout mode, percentage, salt, allowlist, or cohort data.
+- Add a test transport abstraction and controlled error normalization.
+- Add a single local owner skeleton named `CallSessionManagerV2`.
+- Add a `CallNavigationCoordinatorV2` interface/value contract that emits normalized route intents only and never calls `Navigator`.
+- Add a disabled-by-default feature gate so disabled state performs no Firebase call and creates no session ownership.
+- Add focused pure/unit tests for callable names/request shape, forbidden auth/rollout fields, disabled gate, single active ownership, stale snapshot dedupe, deterministic local phases, terminal cleanup idempotence, duplicate command serialization, failed-command behavior, navigation intent dedupe, and no production network/service contact.
 
 Keep all existing Phase 3A requirements below in force.
 
@@ -44,6 +50,7 @@ Add a small, testable V2 client package containing:
 2. **Strict public snapshot parsing** for `calls/{callId}` and participant documents:
    - require `callSystem == "v2"`
    - require a valid call ID, version, caller UID, callee UID, and exact two distinct participant UIDs
+   - require caller/callee participant roles to match their UIDs exactly
    - reject unknown lifecycle/media values
    - parse optional Firestore timestamps without exposing server-only operational data
    - ignore or reject server-only operational fields such as lease claims, commands, callOps, outbox task IDs, and dispatch diagnostics
