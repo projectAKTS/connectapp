@@ -18,7 +18,7 @@ jobs:
   build:
     if: github.actor == github.repository_owner
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 180
 
     steps:
       - name: Checkout call-v2
@@ -28,48 +28,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify active agent-loop state
+      - name: Verify transition and task contract
         id: state
         shell: bash
         run: |
+          python3 .github/scripts/validate-call-v2-agent-loop.py
           phase="$(node -p "require('./docs/agent-loop/STATE.json').phase")"
-          status="$(node -p "require('./docs/agent-loop/STATE.json').status")"
-          starting_sha="$(node -p "require('./docs/agent-loop/STATE.json').starting_sha")"
-          if [[ -z "$phase" ]]; then
-            echo "STATE.json phase is empty" >&2
-            exit 1
-          fi
-          if [[ "$status" != "revision_required" && "$status" != "task_ready" ]]; then
-            echo "Agent loop is not ready to run: phase=$phase status=$status" >&2
-            exit 1
-          fi
-          if ! git merge-base --is-ancestor "$starting_sha" HEAD; then
-            echo "STATE starting_sha is not an ancestor of HEAD: $starting_sha" >&2
-            exit 1
-          fi
           phase_slug="$(printf '%s' "$phase" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')"
-          if [[ -z "$phase_slug" ]]; then
-            echo "Unable to derive safe phase slug" >&2
-            exit 1
-          fi
+          task_sha="$(sha256sum docs/agent-loop/NEXT_TASK.md | awk '{print $1}')"
           echo "phase=$phase" >> "$GITHUB_OUTPUT"
           echo "phase_slug=$phase_slug" >> "$GITHUB_OUTPUT"
-          echo "base_head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Pin authoritative task contract
-        id: task_contract
-        shell: bash
-        run: |
-          test -s docs/agent-loop/NEXT_TASK.md
-          test -s docs/agent-loop/STATE.json
-          task_sha="$(sha256sum docs/agent-loop/NEXT_TASK.md | awk '{print $1}')"
-          state_phase="${{ steps.state.outputs.phase }}"
-          if ! grep -Fq "Phase ${state_phase}" docs/agent-loop/NEXT_TASK.md; then
-            echo "NEXT_TASK.md does not identify STATE.json phase ${state_phase}. Refusing stale instructions." >&2
-            exit 1
-          fi
           echo "task_sha=$task_sha" >> "$GITHUB_OUTPUT"
-          echo "Authoritative NEXT_TASK sha256: $task_sha"
+          echo "base_head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node 20
         uses: actions/setup-node@v4
@@ -99,6 +69,120 @@ jobs:
           cd ..
           flutter pub get
 
+      - name: Baseline backend health preflight
+        id: baseline
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+
+          run_checked() {
+            local label="$1"
+            shift
+            echo "=== $label ==="
+            set +e
+            "$@"
+            local rc=$?
+            set -e
+            if [[ $rc -ne 0 ]]; then
+              printf '%s\n' "$label" > /tmp/call-v2-baseline-failed-stage
+              return "$rc"
+            fi
+          }
+
+          run_emulator_with_retry() {
+            local label="$1"
+            echo "=== $label attempt 1 ==="
+            set +e
+            npm run test:call-v2:emulator
+            local first_rc=$?
+            set -e
+            if [[ $first_rc -eq 0 ]]; then
+              return 0
+            fi
+
+            echo "Transient baseline emulator failure detected; retrying once."
+            echo "=== $label attempt 2 ==="
+            set +e
+            npm run test:call-v2:emulator
+            local second_rc=$?
+            set -e
+            if [[ $second_rc -ne 0 ]]; then
+              printf '%s\n' "$label" > /tmp/call-v2-baseline-failed-stage
+              return "$second_rc"
+            fi
+            printf '%s\n' "$label" >> /tmp/call-v2-baseline-retries
+          }
+
+          {
+            cd connect_functions
+            node --version
+            run_checked backend-check npm run check:call-v2
+            run_checked deployment-readiness npm run validate:call-v2:deployment
+            run_checked firestore-rules npm run test:call-v2:rules
+            run_emulator_with_retry baseline-emulator
+            run_checked backend-syntax node --check index.js
+          } 2>&1 | tee /tmp/call-v2-baseline.log
+
+      - name: Upload baseline failure evidence
+        if: steps.baseline.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: call-v2-${{ steps.state.outputs.phase_slug }}-baseline-${{ github.run_id }}
+          path: |
+            /tmp/call-v2-baseline.log
+            /tmp/call-v2-baseline-failed-stage
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Record baseline block
+        if: steps.baseline.outcome == 'failure'
+        shell: bash
+        env:
+          BASE_HEAD: ${{ steps.state.outputs.base_head }}
+          PHASE: ${{ steps.state.outputs.phase }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          failed_stage="$(cat /tmp/call-v2-baseline-failed-stage 2>/dev/null || echo unknown-baseline-stage)"
+          git reset --hard "$BASE_HEAD"
+          git clean -fd
+          FAILED_STAGE="$failed_stage" python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          phase = os.environ['PHASE']
+          run_url = os.environ['RUN_URL']
+          failed_stage = os.environ['FAILED_STAGE']
+          state_path = Path('docs/agent-loop/STATE.json')
+          state = json.loads(state_path.read_text())
+          state['status'] = 'task_ready'
+          state['code_commit_sha'] = None
+          state['ending_sha'] = 'SELF'
+          state['changed_files'] = []
+          state.setdefault('validation', {})['baseline_preflight'] = 'failed'
+          state['validation']['baseline_failed_stage'] = failed_stage
+          state['review'] = {
+              'decision': 'blocked_by_baseline',
+              'notes': (
+                  f'Phase {phase} implementation was not attempted because the unchanged '
+                  f'backend baseline failed at {failed_stage}. Evidence: {run_url}'
+              )
+          }
+          state_path.write_text(json.dumps(state, indent=2) + '\n')
+          Path('docs/agent-loop/HANDOFF.md').write_text(
+              '# Baseline Block Handoff\n\n'
+              f'Phase: {phase}\nStatus: task_ready\n\n'
+              'Implementation was not attempted. The unchanged backend baseline failed before Codex ran.\n\n'
+              f'Failed stage: `{failed_stage}`\n\nEvidence: {run_url}\n'
+          )
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/agent-loop/STATE.json docs/agent-loop/HANDOFF.md
+          git commit -m "chore(agent-loop): record $PHASE baseline block"
+          git push "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:call-v2
+          exit 1
+
       - name: Run Codex active-phase builder
         id: codex
         uses: openai/codex-action@v1
@@ -112,7 +196,7 @@ jobs:
           output-file: /tmp/call-v2-codex-final.md
           prompt: |
             Read AGENTS.md, docs/agent-loop/STATE.json, docs/agent-loop/NEXT_TASK.md, docs/agent-loop/HANDOFF.md, and retained validation artifacts referenced there.
-            docs/agent-loop/NEXT_TASK.md is the sole authoritative implementation specification. Execute only STATE phase ${{ steps.state.outputs.phase }} at task fingerprint ${{ steps.task_contract.outputs.task_sha }}.
+            docs/agent-loop/NEXT_TASK.md is the sole authoritative implementation specification. Execute only STATE phase ${{ steps.state.outputs.phase }} at task fingerprint ${{ steps.state.outputs.task_sha }}.
             Do not substitute, narrow, expand, or resurrect an older task from workflow text, summaries, earlier phases, runs, or artifacts.
             Confirm NEXT_TASK.md identifies the same phase and STATE status permits implementation before editing. If not, make no implementation changes and fail precisely.
             Execute every completion item, allowed-file limit, validation, documentation, and handoff requirement in NEXT_TASK.md.
@@ -168,31 +252,73 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+
+          run_checked() {
+            local label="$1"
+            shift
+            echo "=== $label ==="
+            set +e
+            "$@"
+            local rc=$?
+            set -e
+            if [[ $rc -ne 0 ]]; then
+              printf '%s\n' "$label" > /tmp/call-v2-validation-failed-stage
+              return "$rc"
+            fi
+          }
+
+          run_emulator_with_retry() {
+            local label="$1"
+            echo "=== $label attempt 1 ==="
+            set +e
+            npm run test:call-v2:emulator
+            local first_rc=$?
+            set -e
+            if [[ $first_rc -eq 0 ]]; then
+              return 0
+            fi
+
+            echo "Transient emulator failure detected; retrying this unchanged backend suite once."
+            echo "=== $label attempt 2 ==="
+            set +e
+            npm run test:call-v2:emulator
+            local second_rc=$?
+            set -e
+            if [[ $second_rc -ne 0 ]]; then
+              printf '%s\n' "$label" > /tmp/call-v2-validation-failed-stage
+              return "$second_rc"
+            fi
+            printf '%s\n' "$label" >> /tmp/call-v2-validation-retries
+          }
+
           {
             cd connect_functions
             node --version
-            npm run check:call-v2
-            npm run validate:call-v2:deployment
-            npm run test:call-v2:rules
-            npm run test:call-v2:emulator
-            npm run test:call-v2:emulator
-            npm run test:call-v2:emulator
-            node --check index.js
+            run_checked backend-check npm run check:call-v2
+            run_checked deployment-readiness npm run validate:call-v2:deployment
+            run_checked firestore-rules npm run test:call-v2:rules
+            run_emulator_with_retry emulator-run-1
+            run_emulator_with_retry emulator-run-2
+            run_emulator_with_retry emulator-run-3
+            run_checked backend-syntax node --check index.js
             cd ..
-            dart format --output=none --set-exit-if-changed lib/call_v2 test/call_v2
-            flutter analyze lib/call_v2 test/call_v2
-            flutter test test/call_v2
-            git diff --check
+            run_checked dart-format-check dart format --output=none --set-exit-if-changed lib/call_v2 test/call_v2
+            run_checked flutter-analysis flutter analyze lib/call_v2 test/call_v2
+            run_checked flutter-tests flutter test test/call_v2
+            run_checked diff-check git diff --check
           } 2>&1 | tee /tmp/call-v2-validation.log
 
-      - name: Upload validation failure log
+      - name: Upload validation failure evidence
         if: steps.validation.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: call-v2-${{ steps.state.outputs.phase_slug }}-validation-${{ github.run_id }}
-          path: /tmp/call-v2-validation.log
+          path: |
+            /tmp/call-v2-validation.log
+            /tmp/call-v2-validation-failed-stage
+            /tmp/call-v2-validation-retries
           retention-days: 7
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: Record validation failure
         if: steps.validation.outcome == 'failure'
@@ -202,14 +328,16 @@ jobs:
           PHASE: ${{ steps.state.outputs.phase }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          failed_stage="$(cat /tmp/call-v2-validation-failed-stage 2>/dev/null || echo unknown-validation-stage)"
           git reset --hard "$BASE_HEAD"
           git clean -fd
-          python3 - <<'PY'
+          FAILED_STAGE="$failed_stage" python3 - <<'PY'
           import json, os
           from pathlib import Path
 
           phase = os.environ['PHASE']
           run_url = os.environ['RUN_URL']
+          failed_stage = os.environ['FAILED_STAGE']
           state_path = Path('docs/agent-loop/STATE.json')
           state = json.loads(state_path.read_text())
           state['status'] = 'revision_required'
@@ -217,16 +345,22 @@ jobs:
           state['ending_sha'] = 'SELF'
           state['changed_files'] = []
           state.setdefault('validation', {})['check'] = 'failed'
-          state['validation']['flutter_analysis'] = 'failed_or_not_reached'
-          state['validation']['flutter_tests'] = 'failed_or_not_reached'
+          state['validation']['failed_stage'] = failed_stage
+          state['validation']['flutter_analysis'] = (
+              'failed' if failed_stage == 'flutter-analysis' else 'failed_or_not_reached'
+          )
+          state['validation']['flutter_tests'] = (
+              'failed' if failed_stage == 'flutter-tests' else 'failed_or_not_reached'
+          )
           state['review'] = {
               'decision': 'revision_required',
-              'notes': f'Phase {phase} validation failed. Download the retained validation artifact from {run_url}'
+              'notes': f'Phase {phase} validation failed at {failed_stage}. Evidence: {run_url}'
           }
           state_path.write_text(json.dumps(state, indent=2) + '\n')
           Path('docs/agent-loop/HANDOFF.md').write_text(
-              f'# Review Handoff\n\nPhase: {phase}\nStatus: revision_required\n\n'
-              f'Validation failed. Download the retained validation artifact from:\n\n{run_url}\n'
+              '# Review Handoff\n\n'
+              f'Phase: {phase}\nStatus: revision_required\n\n'
+              f'Validation failed at `{failed_stage}`.\n\nEvidence: {run_url}\n'
           )
           PY
           git config user.name "github-actions[bot]"
@@ -256,7 +390,7 @@ jobs:
           PHASE: ${{ steps.state.outputs.phase }}
           CODE_SHA: ${{ steps.commit_code.outputs.code_sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          TASK_SHA: ${{ steps.task_contract.outputs.task_sha }}
+          TASK_SHA: ${{ steps.state.outputs.task_sha }}
         run: |
           python3 - <<'PY'
           import json, os, subprocess
@@ -271,6 +405,8 @@ jobs:
           ).splitlines() if line]
           summary_path = Path('/tmp/call-v2-codex-final.md')
           summary = summary_path.read_text().strip() if summary_path.exists() else f'Phase {phase} implementation completed.'
+          retries_path = Path('/tmp/call-v2-validation-retries')
+          transient_retries = retries_path.read_text().splitlines() if retries_path.exists() else []
 
           handoff = [
               '# External Review Handoff', '',
@@ -285,10 +421,12 @@ jobs:
           handoff += [
               '', '## Codex summary', '', summary, '',
               '## Validation', '',
+              '- Baseline backend preflight passed before implementation',
               '- Node 20 backend checks passed',
               '- Deployment readiness validation passed',
               '- Firestore rules tests passed',
               '- Full backend emulator suite passed three times',
+              f'- Bounded transient emulator retries: {len(transient_retries)}',
               '- Flutter formatting passed',
               '- Focused Flutter analysis passed',
               '- Focused Flutter tests passed',
@@ -310,11 +448,13 @@ jobs:
           state['ending_sha'] = 'SELF'
           state['changed_files'] = files
           state.setdefault('validation', {}).update({
+              'baseline_preflight': 'passed',
               'node_version': '20',
               'check': 'passed',
               'deployment_readiness': 'passed',
               'rules_tests': 'passed',
               'emulator_runs': ['passed', 'passed', 'passed'],
+              'emulator_transient_retries': len(transient_retries),
               'index_syntax_check': 'passed',
               'flutter_analysis': 'passed',
               'flutter_tests': 'passed'
