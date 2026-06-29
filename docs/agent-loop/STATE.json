@@ -2,7 +2,7 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "3C",
-  "status": "task_ready",
+  "status": "revision_required",
   "accepted_checkpoint_sha": "05a5407ab2d77a5f8772ae05bdf3b6a3cffa7a8e",
   "starting_sha": "cd4280a6d72c9d05de333935e29dcac441cd75f5",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
@@ -16,7 +16,7 @@
     "accepted_phase3b_code_commit": "05a5407ab2d77a5f8772ae05bdf3b6a3cffa7a8e",
     "baseline_preflight": "passed",
     "node_version": "20",
-    "check": "passed",
+    "check": "failed",
     "deployment_readiness": "passed",
     "rules_tests": "passed",
     "emulator_runs": [
@@ -26,10 +26,11 @@
     ],
     "index_syntax_check": "passed",
     "flutter_format": "passed",
-    "flutter_analysis": "passed",
-    "flutter_tests": "passed",
+    "flutter_analysis": "failed",
+    "flutter_tests": "failed_or_not_reached",
     "diff_check": "passed",
-    "emulator_transient_retries": 0
+    "emulator_transient_retries": 0,
+    "failed_stage": "flutter-analysis"
   },
   "safety": {
     "deployed": false,
@@ -38,7 +39,7 @@
     "production_values_invented": false
   },
   "review": {
-    "decision": "accepted_phase3b_prepare_phase3c",
-    "notes": "Phase 3B accepted after exact review of implementation commit 05a5407ab2d77a5f8772ae05bdf3b6a3cffa7a8e and successful workflow run 28386385870. Phase 3C is bounded to disabled, pure Dart client view-model groundwork with no startup, route, native, Firebase listener, live-service, production configuration, rollout, or V1 changes."
+    "decision": "revision_required",
+    "notes": "Phase 3C validation failed at flutter-analysis. Evidence: https://github.com/projectAKTS/connectapp/actions/runs/28387774326"
   }
 }
