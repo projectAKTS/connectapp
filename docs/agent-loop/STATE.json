@@ -7,20 +7,12 @@
   "starting_sha": "fa78400db9790d20f4cc936a684db441c8841979",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "ca57d4ad6c6878f0424783f8d94b8493390a1146",
+  "code_commit_sha": null,
   "ending_sha": "SELF",
-  "changed_files": [
-    "docs/call-v2/PHASE_3A_FLUTTER_CLIENT_GROUNDWORK.md",
-    "lib/call_v2/call_navigation_coordinator_v2.dart",
-    "lib/call_v2/call_session_manager_v2.dart",
-    "lib/call_v2/call_v2_api.dart",
-    "lib/call_v2/call_v2_feature_gate.dart",
-    "lib/call_v2/domain/call_v2_models.dart",
-    "test/call_v2/call_v2_models_test.dart"
-  ],
+  "changed_files": [],
   "validation": {
     "node_version": "20",
-    "check": "passed",
+    "check": "failed",
     "deployment_readiness": "passed",
     "rules_tests": "passed",
     "emulator_runs": [
@@ -30,8 +22,8 @@
     ],
     "total_tests": "workflow run 28348917545 passed, but external code review rejected behavioral contract coverage",
     "index_syntax_check": "passed",
-    "flutter_analysis": "passed",
-    "flutter_tests": "passed_but_insufficient"
+    "flutter_analysis": "failed_or_not_reached",
+    "flutter_tests": "failed_or_not_reached"
   },
   "safety": {
     "deployed": false,
@@ -41,6 +33,6 @@
   },
   "review": {
     "decision": "revision_required",
-    "notes": "Exact review rejected ca57d4ad6c6878f0424783f8d94b8493390a1146: request payload sends actorUid; duplicate parallel domain model/parser changes accepted local-phase names; manager does not dedupe duplicate commands, derive phases by role, or clear terminal ownership; navigation coordinator does not dedupe; tests assert two duplicate calls and do not test navigation dedupe."
+    "notes": "Phase 3A validation failed. Download the phase3a-validation artifact from https://github.com/projectAKTS/connectapp/actions/runs/28350979605"
   }
 }
