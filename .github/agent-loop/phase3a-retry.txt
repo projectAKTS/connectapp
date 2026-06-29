@@ -1,6 +1,7 @@
-retry=6
-reason=complete remaining phase 3a client groundwork after external review rejected partial parser-only completion
+retry=7
+reason=run full Phase 3A client groundwork using NEXT_TASK.md as the sole authoritative task contract
 workflow=call-v2-phase3a-retry.yml
 baseline_state=bd3c184f904bd7f767bbe533aeb050d9e84f8382
 prompt_task=docs/agent-loop/NEXT_TASK.md
+contract_guard=phase-match-and-task-sha
 handoff=3af3e906093d3df824e0f573e3a67804cca18531
