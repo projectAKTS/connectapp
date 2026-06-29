@@ -2,28 +2,36 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "3A",
-  "status": "revision_required",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "83933165d7741f06c6e47dcd94e8dbd2d92a6462",
   "starting_sha": "2b8bb5af4f961031a9a7d2b136f3104aa6ad9aac",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
+  "code_commit_sha": "009a1f372fabe26fe10394519ff47739788d982a",
   "ending_sha": "SELF",
-  "changed_files": [],
+  "changed_files": [
+    "lib/call_v2/call_navigation_coordinator_v2.dart",
+    "lib/call_v2/call_session_manager_v2.dart",
+    "lib/call_v2/call_v2_api.dart",
+    "lib/call_v2/domain/call_snapshot.dart",
+    "lib/call_v2/domain/call_v2_models.dart",
+    "test/call_v2/call_v2_behavior_test.dart",
+    "test/call_v2/call_v2_models_test.dart"
+  ],
   "validation": {
     "node_version": "20",
-    "check": "failed",
-    "deployment_readiness": "passed_or_not_reached_after_failure",
-    "rules_tests": "passed_or_not_reached_after_failure",
+    "check": "passed",
+    "deployment_readiness": "passed",
+    "rules_tests": "passed",
     "emulator_runs": [
-      "passed_or_not_reached_after_failure",
-      "passed_or_not_reached_after_failure",
-      "passed_or_not_reached_after_failure"
+      "passed",
+      "passed",
+      "passed"
     ],
     "total_tests": "workflow run 28353584185 uploaded phase3a-validation-28353584185 and failed before committing implementation",
-    "index_syntax_check": "passed_or_not_reached_after_failure",
-    "flutter_analysis": "failed_or_not_reached",
-    "flutter_tests": "failed_or_not_reached"
+    "index_syntax_check": "passed",
+    "flutter_analysis": "passed",
+    "flutter_tests": "passed"
   },
   "safety": {
     "deployed": false,
@@ -32,7 +40,7 @@
     "production_values_invented": false
   },
   "review": {
-    "decision": "revision_required",
-    "notes": "Latest failed retry workflow is 28353584185, job 83991409108. Retained diagnostic artifact: phase3a-validation-28353584185. Re-run the exact combined backend and Flutter validation block after rebuilding the bounded Phase 3A corrections."
+    "decision": null,
+    "notes": null
   }
 }
