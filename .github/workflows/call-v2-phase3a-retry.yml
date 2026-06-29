@@ -45,6 +45,21 @@ jobs:
           echo "phase=$phase" >> "$GITHUB_OUTPUT"
           echo "base_head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+      - name: Pin authoritative task contract
+        id: task_contract
+        shell: bash
+        run: |
+          test -s docs/agent-loop/NEXT_TASK.md
+          test -s docs/agent-loop/STATE.json
+          task_sha="$(sha256sum docs/agent-loop/NEXT_TASK.md | awk '{print $1}')"
+          state_phase="$(node -p "require('./docs/agent-loop/STATE.json').phase")"
+          if ! grep -Fq "Phase ${state_phase}" docs/agent-loop/NEXT_TASK.md; then
+            echo "NEXT_TASK.md does not identify STATE.json phase ${state_phase}. Refusing to run stale instructions." >&2
+            exit 1
+          fi
+          echo "task_sha=$task_sha" >> "$GITHUB_OUTPUT"
+          echo "Authoritative NEXT_TASK sha256: $task_sha"
+
       - name: Setup Node 20
         uses: actions/setup-node@v4
         with:
@@ -85,17 +100,14 @@ jobs:
           allow-users: projectAKTS
           output-file: /tmp/phase3a-codex-final.md
           prompt: |
-            Read AGENTS.md, docs/agent-loop/STATE.json, docs/agent-loop/NEXT_TASK.md, docs/agent-loop/HANDOFF.md, and any retained validation artifacts referenced there.
-            Continue only the active Phase 3A revision described in NEXT_TASK.md.
-            Build the full Flutter V2 client groundwork requested for Phase 3A, not another parser-only fix.
-            Implement the missing non-production V2 Flutter client foundation under lib/call_v2/** with focused tests under test/call_v2/**. Include safe, disabled-by-default client groundwork such as V2 call models/parsing, repository/service boundaries, state/controller layer, UI-safe abstractions, and test coverage needed by NEXT_TASK.md.
-            Preserve the strict public call parser validation already required: callerUid and calleeUid must both be present, different, and the exact participant UID set must be {callerUid, calleeUid}; caller role must belong to callerUid and callee role must belong to calleeUid. Reject missing, extra, swapped, duplicate-role, same caller/callee, placeholder, or mismatched participant identities.
-            Add or repair focused Flutter tests for the new V2 client groundwork plus parser edge cases where needed.
-            Modify only lib/call_v2/**, test/call_v2/**, docs/call-v2/**, and pubspec files when genuinely required.
-            Do not modify legacy call code, backend code, native code, Firebase configuration, workflows, AGENTS.md, or docs/agent-loop/**.
-            Do not deploy, contact production services, enable live settings, commit, or push.
-            Before finishing, run dart format on lib/call_v2 and test/call_v2, then focused Flutter analysis and tests.
-            Leave implementation changes uncommitted. Never print secrets.
+            Read AGENTS.md, docs/agent-loop/STATE.json, docs/agent-loop/NEXT_TASK.md, docs/agent-loop/HANDOFF.md, and every retained failure artifact referenced by those files.
+            docs/agent-loop/NEXT_TASK.md is the sole authoritative implementation specification for this run. Do not substitute, narrow, expand, or resurrect an older task from workflow text, prior summaries, prior runs, or retained artifacts.
+            Confirm before editing that NEXT_TASK.md describes the same phase as STATE.json and that STATE.json status permits implementation. If they disagree, make no implementation changes and fail with a precise explanation.
+            Execute all required completion items, tests, documentation, allowed-file limits, validation commands, and handoff requirements in NEXT_TASK.md. Treat retained failure details only as diagnostic evidence, never as a replacement task specification.
+            Preserve all repository safety rules in AGENTS.md. Keep legacy V1 untouched, keep V2 disabled by default, do not deploy, do not contact production services, do not change live configuration, IAM, OIDC, queues, secrets, native configuration, or production values.
+            Do not modify workflows, AGENTS.md, or docs/agent-loop/**. Do not commit or push. Leave implementation changes uncommitted for the workflow to validate and record. Never print secrets.
+            In the final summary, state the STATE phase and authoritative NEXT_TASK sha256 ${{ steps.task_contract.outputs.task_sha }}, list exact files changed, validations run, remaining risks, and confirm all safety constraints.
+
 
       - name: Remove Codex runtime metadata
         shell: bash
