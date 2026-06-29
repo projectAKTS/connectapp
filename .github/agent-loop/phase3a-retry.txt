@@ -1,11 +1,10 @@
-run=16
+run=17
 phase=3C
-reason=focused retry after Phase 3C flutter-analysis validation failure
+reason=rebuild Phase 3C and correct presenter lifecycle fixtures to use increasing durable snapshot versions
 workflow=call-v2-phase3a-retry.yml
-baseline_head=a7c2d4669853b3f1653e53f6ea3684d555e6d07f
+baseline_head=04d24a475f96e66b586a9b8c7b93772305707131
 prompt_task=docs/agent-loop/NEXT_TASK.md
-task_blob=b8003d6cd2a6de44fa8ccdf58531f62e66fbf06b
+task_blob=21aead29b1af534f14998b9ef5ee19f21c7f34c9
 accepted_checkpoint=05a5407ab2d77a5f8772ae05bdf3b6a3cffa7a8e
-prior_failure_run=28387774326
-prior_failed_stage=flutter-analysis
-safety=non-production-v1-untouched-disabled-default
+prior_failure_run=28394453498
+prior_failed_stage=flutter-tests
