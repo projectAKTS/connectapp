@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:connect_app/call_v2/call_v2_harness.dart';
 import 'package:connect_app/call_v2/call_navigation_coordinator_v2.dart';
 import 'package:connect_app/call_v2/call_session_manager_v2.dart';
 import 'package:connect_app/call_v2/call_v2_api.dart';
@@ -261,6 +262,98 @@ void main() {
         isNotNull);
     expect(coordinator.closeIntentFor(terminal), isNotNull);
     expect(coordinator.closeIntentFor(terminal), isNull);
+  });
+
+  test('disabled harness ignores snapshots and commands', () async {
+    final fake = _FakeApi();
+    final harness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: false),
+      api: CallV2Api(fake),
+      localParticipantRole: () => CallParticipantRole.callee,
+    );
+    final snapshot = CallSnapshot.fromPublicData(
+        _snapshotData(lifecycle: CallLifecycle.active));
+
+    harness.injectPublicSnapshot(snapshot);
+    await harness.startCall(const CallV2RequestContext(
+      callId: 'call_a',
+      version: 1,
+    ));
+
+    expect(harness.snapshot, isNull);
+    expect(harness.localPhase, CallLocalPhase.idle);
+    expect(fake.calls, isEmpty);
+  });
+
+  test('enabled harness derives phase and emits one safe request', () async {
+    final fake = _FakeApi();
+    final harness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(fake),
+      localParticipantRole: () => CallParticipantRole.callee,
+    );
+    final snapshot = CallSnapshot.fromPublicData(
+        _snapshotData(lifecycle: CallLifecycle.active));
+
+    harness.injectPublicSnapshot(snapshot);
+    await harness.startCall(const CallV2RequestContext(
+      callId: 'call_a',
+      version: 1,
+    ));
+
+    expect(harness.snapshot, same(snapshot));
+    expect(harness.localPhase, CallLocalPhase.inCall);
+    expect(fake.calls['start'], hasLength(1));
+  });
+
+  test('harness suppresses duplicate command taps while in flight', () async {
+    final fake = _FakeApi();
+    final harness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(fake),
+      localParticipantRole: () => CallParticipantRole.callee,
+    );
+
+    final first = harness.acceptCall(const CallV2RequestContext(
+      callId: 'call_a',
+      version: 1,
+    ));
+    final second = harness.acceptCall(const CallV2RequestContext(
+      callId: 'call_a',
+      version: 1,
+    ));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(fake.acceptCount, 1);
+    expect(fake.calls['accept'], hasLength(1));
+
+    fake.acceptGate!.complete();
+    await Future.wait(<Future<void>>[first, second]);
+  });
+
+  test('harness closes terminal snapshots once and cleanup stays idempotent',
+      () async {
+    final fake = _FakeApi();
+    final harness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(fake),
+      localParticipantRole: () => CallParticipantRole.callee,
+    );
+    final terminal = CallSnapshot.fromPublicData(
+        _snapshotData(version: 2, lifecycle: CallLifecycle.completed));
+
+    harness.injectPublicSnapshot(terminal);
+
+    expect(harness.closeNavigationIntentFor(terminal), isNotNull);
+    expect(harness.closeNavigationIntentFor(terminal), isNull);
+
+    await harness.cleanupIfTerminal();
+    await harness.cleanupIfTerminal();
+
+    expect(harness.snapshot, isNull);
+    expect(harness.localPhase, CallLocalPhase.idle);
+    expect(harness.closeNavigationIntentFor(terminal), isNull);
+    expect(fake.calls, isEmpty);
   });
 }
 
