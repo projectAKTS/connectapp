@@ -2,17 +2,14 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "3A",
-  "status": "ready_for_review",
+  "status": "task_ready",
   "accepted_checkpoint_sha": "83933165d7741f06c6e47dcd94e8dbd2d92a6462",
-  "starting_sha": "26088624d802a4722af046107e7b7cf47d8d8528",
+  "starting_sha": "bb04f993b6ad58ae6e53c11bcddadb3dbe101d3d",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "bb04f993b6ad58ae6e53c11bcddadb3dbe101d3d",
+  "code_commit_sha": null,
   "ending_sha": "SELF",
-  "changed_files": [
-    "lib/call_v2/domain/call_snapshot.dart",
-    "test/call_v2/domain/call_snapshot_parser_test.dart"
-  ],
+  "changed_files": [],
   "validation": {
     "node_version": "20",
     "check": "passed",
@@ -23,7 +20,7 @@
       "passed",
       "passed"
     ],
-    "total_tests": "backend validation passed; focused Flutter parser tests passed in workflow run 28339163243",
+    "total_tests": "backend validation passed; focused Flutter parser tests passed in workflow run 28340624321",
     "index_syntax_check": "passed",
     "flutter_analysis": "passed",
     "flutter_tests": "passed"
@@ -35,7 +32,7 @@
     "production_values_invented": false
   },
   "review": {
-    "decision": null,
-    "notes": null
+    "decision": "revision_required",
+    "notes": "External review rejected Phase 3A as incomplete. Parser hardening passed validation, but the full Flutter V2 client groundwork scope is still missing: docs/call-v2/PHASE_3A_FLUTTER_CLIENT_GROUNDWORK.md, callable API boundary, test transport and error normalization, CallSessionManagerV2, CallNavigationCoordinatorV2, disabled-by-default feature gate, and focused pure/unit coverage. Continue from current branch tip without undoing parser hardening."
   }
 }
