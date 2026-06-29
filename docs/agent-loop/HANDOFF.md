@@ -1,53 +1,34 @@
 # External Review Handoff
 
 Phase: 3A
-Status: ready_for_review
-Implementation SHA: bb04f993b6ad58ae6e53c11bcddadb3dbe101d3d
-Pushed branch-tip SHA: SELF
+Status: task_ready
+Review decision: revision_required
 
-## Files changed
+## Review result
 
-- `lib/call_v2/domain/call_snapshot.dart`
-- `test/call_v2/domain/call_snapshot_parser_test.dart`
+The previous parser-hardening retry passed validation in workflow run 28340624321, but Phase 3A is not complete enough to accept.
 
-## Codex summary
+Accepted partial progress:
+- `participantUids` is now required.
+- The public snapshot parser rejects same caller/callee, mismatched participant identities, swapped roles, duplicate roles, and missing caller/callee participant data.
+- Backend validation, deployment readiness validation, rules tests, emulator suite, Flutter formatting, focused Flutter analysis, focused Flutter tests, and `git diff --check` passed.
 
-Implemented a narrow parser-hardening update in:
-- [lib/call_v2/domain/call_snapshot.dart](/home/runner/work/connectapp/connectapp/lib/call_v2/domain/call_snapshot.dart)
-- [test/call_v2/domain/call_snapshot_parser_test.dart](/home/runner/work/connectapp/connectapp/test/call_v2/domain/call_snapshot_parser_test.dart)
+Remaining required Phase 3A work:
+- Add `docs/call-v2/PHASE_3A_FLUTTER_CLIENT_GROUNDWORK.md`.
+- Add or complete callable API boundary names: `startCallV2`, `acceptCallV2`, `declineCallV2`, `cancelCallV2`, `endCallV2`, `reportParticipantMediaV2`, `renewActiveCallLeaseV2`.
+- Ensure request shape cannot send authenticated UID, staff status, rollout mode, percentage, salt, allowlist, or cohort data.
+- Add a test transport abstraction and controlled callable error normalization.
+- Add a single local owner skeleton named `CallSessionManagerV2`.
+- Add `CallNavigationCoordinatorV2` intent-only route contract with no `Navigator` use.
+- Add a disabled-by-default feature gate so disabled state performs no Firebase call and creates no session ownership.
+- Add focused pure/unit tests for callable shape, forbidden fields, disabled gate, ownership, stale snapshot dedupe, local phases, terminal cleanup idempotence, duplicate command serialization, failed-command behavior, navigation intent dedupe, and no production service contact.
 
-What changed:
-- `participantUids` is now required; the parser no longer falls back to deriving the set from `participants`.
-- The parser still rejects same caller/callee, mismatched participant identities, and role/UID mismatches.
-- Added focused tests for:
-  - missing `participantUids`
-  - swapped caller/callee roles
-  - the existing same caller/callee, wrong participant IDs, missing caller participant, missing callee participant, duplicate caller/callee roles, and exact-success cases remain covered
+## Safety constraints
 
-Validation:
-- `dart format lib/call_v2 test/call_v2` passed.
-- `flutter analyze lib/call_v2 test/call_v2` passed when run with `HOME=/tmp` and the local writable Flutter SDK copy.
-- `flutter test test/call_v2` could not complete in this sandbox because Flutter test tries to bind a local server socket and the environment blocks that operation.
+- Continue from current branch tip.
+- Do not undo parser hardening.
+- Modify only `lib/call_v2/**`, `test/call_v2/**`, `docs/call-v2/**`, and pubspec files when genuinely required.
+- Do not modify legacy V1 call code, app startup, routes, native code, backend functions, Firebase config, rules, indexes, IAM/OIDC/secrets, or production settings.
+- Do not deploy or contact production services.
 
-I left the changes uncommitted, per instruction.
-
-## Validation
-
-- Node 20 backend checks passed
-- Deployment readiness validation passed
-- Firestore rules tests passed
-- Full backend emulator suite passed three times
-- Flutter formatting passed
-- Focused Flutter analysis passed
-- Focused Flutter tests passed
-- `git diff --check` passed
-- Workflow run: https://github.com/projectAKTS/connectapp/actions/runs/28340624321
-
-## Safety
-
-- V1 files were not modified.
-- The V2 feature gate remains disabled by default.
-- No production service was contacted.
-- No live configuration was changed.
-- Nothing was deployed.
-
+See `docs/agent-loop/NEXT_TASK.md` for the active task.
