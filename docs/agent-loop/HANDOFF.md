@@ -1,64 +1,50 @@
 # External Review Handoff
 
 Phase: 3A
-Status: ready_for_review
+Status: revision_required
 Implementation SHA: 0e8b3a77fcd1e1cfc4a26ee1de2f19d5bab5d7fb
-Pushed branch-tip SHA: SELF
+Pushed branch-tip SHA: call-v2
 
-## Files changed
+## Review result
 
+The focused parser retry succeeded, but Phase 3A is not accepted as complete.
+
+Workflow run `28339163243` passed backend and focused Flutter validation. The prior parser failure from workflow run `28336086589` appears fixed: public call snapshots now require different `callerUid` and `calleeUid`, exact participant UID matching, and caller/callee role matching.
+
+External review found remaining required Phase 3A scope missing or not visible on branch:
+
+- `docs/call-v2/PHASE_3A_FLUTTER_CLIENT_GROUNDWORK.md` is missing.
+- No visible `CallSessionManagerV2` implementation was found.
+- No visible `CallNavigationCoordinatorV2` interface/value contract was found.
+- No visible callable API boundary for the exact V2 callable names was found.
+- No visible disabled-by-default feature gate implementation was found.
+- Required tests for manager ownership, command serialization, navigation intent dedupe, disabled gate, callable request shape, and no production service contact are missing.
+
+## Files reviewed
+
+- `docs/agent-loop/STATE.json`
+- `docs/agent-loop/HANDOFF.md`
+- `docs/agent-loop/NEXT_TASK.md`
 - `lib/call_v2/domain/call_snapshot.dart`
-- `pubspec.lock`
 - `test/call_v2/domain/call_snapshot_parser_test.dart`
+- Workflow run `28339163243`
+- Previous failed workflow run `28336086589`
 
-## Codex summary
+## Required next action
 
-Implemented the focused parser fix in [`lib/call_v2/domain/call_snapshot.dart`](/home/runner/work/connectapp/connectapp/lib/call_v2/domain/call_snapshot.dart) and added targeted parser tests in [`test/call_v2/domain/call_snapshot_parser_test.dart`](/home/runner/work/connectapp/connectapp/test/call_v2/domain/call_snapshot_parser_test.dart).
+Run a bounded targeted retry against `docs/agent-loop/NEXT_TASK.md`. Preserve the parser fix and complete the missing Phase 3A Flutter client-groundwork pieces only inside the allowed paths.
 
-What changed:
-- Added strict public parsing entry points for V2 snapshots and participant snapshots.
-- Enforced:
-  - `callSystem == "v2"`
-  - valid `callId` and `version`
-  - present and different `callerUid` / `calleeUid`
-  - exact two distinct participant UIDs
-  - exact set `{callerUid, calleeUid}`
-  - caller participant role must be `caller`
-  - callee participant role must be `callee`
-- Rejected:
-  - same caller/callee
-  - wrong participant IDs
-  - missing caller/callee participant
-  - duplicate participant UIDs
-  - duplicate/wrong roles
-  - unknown lifecycle/media values
+## Validation status
 
-Validation:
-- `dart format lib/call_v2 test/call_v2` ran successfully.
-- `flutter analyze lib/call_v2 test/call_v2` could not run in this sandbox because Flutter tries to write engine cache files under `/opt/hostedtoolcache`, which is read-only here.
-- `flutter test test/call_v2` failed for the same sandbox reason.
-
-Notes:
-- I left the implementation changes uncommitted, per your instruction.
-- `pubspec.lock` was already modified before this work and was not touched.
-
-## Validation
-
-- Node 20 backend checks passed
-- Deployment readiness validation passed
-- Firestore rules tests passed
-- Full backend emulator suite passed three times
-- Flutter formatting passed
-- Focused Flutter analysis passed
-- Focused Flutter tests passed
-- `git diff --check` passed
-- Workflow run: https://github.com/projectAKTS/connectapp/actions/runs/28339163243
+- Workflow run `28339163243`: passed.
+- Backend validation: passed.
+- Focused Flutter analysis/tests: passed.
+- Acceptance review: revision required due missing Phase 3A scope.
 
 ## Safety
 
-- V1 files were not modified.
-- The V2 feature gate remains disabled by default.
-- No production service was contacted.
-- No live configuration was changed.
-- Nothing was deployed.
-
+- V1 files must remain untouched.
+- V2 feature gate must remain disabled by default.
+- No production service may be contacted.
+- No live configuration may be changed.
+- Nothing may be deployed.
