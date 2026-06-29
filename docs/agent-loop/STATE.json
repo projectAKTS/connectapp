@@ -4,7 +4,7 @@
   "phase": "3A",
   "status": "revision_required",
   "accepted_checkpoint_sha": "83933165d7741f06c6e47dcd94e8dbd2d92a6462",
-  "starting_sha": "fa78400db9790d20f4cc936a684db441c8841979",
+  "starting_sha": "6278366b93701d667c58ea19866e50a1f4cee2b6",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
   "code_commit_sha": null,
@@ -20,8 +20,8 @@
       "passed",
       "passed"
     ],
-    "total_tests": "workflow run 28348917545 passed, but external code review rejected behavioral contract coverage",
-    "index_syntax_check": "passed",
+    "total_tests": "workflow run 28350979605 failed during Run backend and Flutter validation before implementation commit",
+    "index_syntax_check": "passed_or_not_reached_after_failure",
     "flutter_analysis": "failed_or_not_reached",
     "flutter_tests": "failed_or_not_reached"
   },
@@ -33,6 +33,6 @@
   },
   "review": {
     "decision": "revision_required",
-    "notes": "Phase 3A validation failed. Download the phase3a-validation artifact from https://github.com/projectAKTS/connectapp/actions/runs/28350979605"
+    "notes": "Latest failed retry: workflow 28350979605, job 83983600945, step Run backend and Flutter validation. The workflow discarded implementation changes and retained artifact phase3a-validation-28350979605. NEXT_TASK.md now requires reproducing the exact validation command block and preserving the earlier exact-review corrections: no client-supplied auth UID, accepted domain contract, single-owner manager behavior, duplicate-command dedupe, navigation dedupe, controlled errors, and stronger behavioral tests."
   }
 }
