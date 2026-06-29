@@ -2,34 +2,40 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "3B",
-  "status": "task_ready",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "009a1f372fabe26fe10394519ff47739788d982a",
   "starting_sha": "8208993c1ecb3012f74b21aa4aae364312e4474b",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
+  "code_commit_sha": "05a5407ab2d77a5f8772ae05bdf3b6a3cffa7a8e",
   "ending_sha": "SELF",
-  "changed_files": [],
+  "changed_files": [
+    "lib/call_v2/call_v2_harness.dart",
+    "test/call_v2/call_v2_behavior_test.dart"
+  ],
   "validation": {
     "phase3a_workflow_run": "28369246060",
     "phase3a_job": "84042624356",
     "latest_phase3b_run": "28385628175",
     "latest_phase3b_job": "84099412879",
-    "baseline_preflight": "not_available_in_failed_run",
+    "baseline_preflight": "passed",
     "failed_stage": "backend-emulator-race-test",
     "failed_test": "timeout lifecycle races produce one authoritative outcome",
     "node_version": "20",
-    "check": "blocked_by_unchanged_backend_flake",
+    "check": "passed",
     "deployment_readiness": "passed",
     "rules_tests": "passed",
     "emulator_runs": [
-      "failed_once_before_client_validation"
+      "passed",
+      "passed",
+      "passed"
     ],
-    "index_syntax_check": "not_reached",
+    "index_syntax_check": "passed",
     "flutter_format": "passed_before_backend_validation",
-    "flutter_analysis": "not_reached",
-    "flutter_tests": "not_reached",
-    "diff_check": "not_reached"
+    "flutter_analysis": "passed",
+    "flutter_tests": "passed",
+    "diff_check": "not_reached",
+    "emulator_transient_retries": 0
   },
   "safety": {
     "deployed": false,
@@ -38,7 +44,7 @@
     "production_values_invented": false
   },
   "review": {
-    "decision": "task_ready_after_workflow_hardening",
-    "notes": "Run 28385628175 was not a demonstrated Phase 3B client defect. The unchanged backend emulator race test 'timeout lifecycle races produce one authoritative outcome' failed before Flutter analysis/tests. The workflow now performs a backend baseline before Codex, retries an unchanged emulator suite once, records exact failed stages, and distinguishes baseline blocks from implementation revisions."
+    "decision": null,
+    "notes": null
   }
 }
