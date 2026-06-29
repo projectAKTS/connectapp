@@ -1,66 +1,64 @@
-# Active Task — Phase 3B Client Harness Groundwork
+# Active Task — Phase 3C Client View-Model Groundwork
 
 Branch: `call-v2`
-Accepted Phase 3A checkpoint: `009a1f372fabe26fe10394519ff47739788d982a`
-Accepted Phase 3A workflow: `28369246060`
-Phase 3A implementation commit message: `feat(call-v2): add Flutter V2 client groundwork`
+Accepted Phase 3B checkpoint: `05a5407ab2d77a5f8772ae05bdf3b6a3cffa7a8e`
+Accepted Phase 3B workflow: `28386385870`
+Phase 3B implementation commit message: `feat(call-v2): implement phase 3B task`
 
 ## Review decision
 
-Phase 3A is accepted. Exact review confirmed the implementation corrected the rejected client contracts while keeping the work bounded to disabled, non-production Call V2 client groundwork.
+Phase 3B is accepted. Exact review confirmed the implementation stayed bounded to disabled, non-production Call V2 client harness groundwork.
 
-Accepted Phase 3A properties:
+Accepted Phase 3B properties:
 
-- `CallV2RequestContext` no longer contains or serializes `actorUid` or authenticated identity.
-- Callable request payloads are limited to safe client fields such as `callId`, `version`, and media reporting fields.
-- `domain/call_v2_models.dart` is now harmless exports only; the accepted domain contract remains authoritative.
-- Local phase names remain exactly `idle`, `presentingIncoming`, `outgoingRinging`, `openingCallRoute`, `inCall`, and `closing`.
-- `CallSessionManagerV2` derives caller/callee ringing phase from an injected local participant role without sending that role as authentication authority.
-- Duplicate in-flight command taps are suppressed so the same command key produces one transport request.
-- Terminal cleanup clears local ownership and returns to `idle` idempotently.
-- `CallNavigationCoordinatorV2` is stateful and dedupes open and close intents without touching `Navigator` or existing routes.
-- Errors use a controlled client error-code contract instead of raw provider messages.
-- Workflow validation passed backend checks, deployment-readiness validation, Firestore rules tests, three emulator runs, Flutter format/analyze/tests, and `git diff --check`.
+- `CallV2Harness` composes `CallV2FeatureGate`, `CallV2Api`, `CallSessionManagerV2`, and `CallNavigationCoordinatorV2`.
+- The harness is inert when the feature gate is false.
+- Harness methods expose only testable public-snapshot injection, safe command invocation, navigation-intent derivation, and terminal cleanup.
+- Request payloads remain limited to safe client fields such as `callId`, `version`, `mediaState`, and `mediaVersion`.
+- No client-supplied authenticated UID, raw UID, rollout authority, task IDs, command IDs, lock fields, or private server authority were added.
+- Duplicate in-flight command taps remain suppressed.
+- Terminal cleanup clears local ownership idempotently.
+- Navigation intents remain deduped and do not touch `Navigator` or existing routes.
+- Tests use fake transports only.
+- Workflow validation passed backend baseline, backend checks, deployment-readiness validation, Firestore rules tests, three emulator runs, Flutter format/analyze/tests, and `git diff --check`.
 
-## Phase 3B goal
+## Phase 3C goal
 
-Build a small disabled-by-default Flutter Call V2 client harness around the accepted Phase 3A primitives. This phase must remain non-production and must not wire startup, existing routes, native call stacks, push, Firestore listeners, Agora, CallKit, PushKit, FCM, or live Firebase.
+Add a small disabled-by-default, pure Dart Call V2 client view-model/presenter layer around the accepted harness primitives. This phase should make future UI work easier to test by deriving display-safe state and allowed user actions from public snapshots and local phase, without wiring any real UI, app startup, routes, native call stacks, push, Firestore listeners, Agora, CallKit, PushKit, FCM, or live Firebase.
 
-The harness should make the Phase 3A primitives easier to exercise from tests and future UI work without making the feature reachable in the app.
+The result must remain non-production and unreachable from the existing app.
 
 ## Required work
 
-1. **Create a disabled client harness facade.**
-   - Add a small Call V2 client/controller/facade under `lib/call_v2/**` that composes:
-     - `CallV2FeatureGate`
-     - `CallV2Api`
-     - `CallSessionManagerV2`
-     - `CallNavigationCoordinatorV2`
-   - The harness must be inert when the feature gate is false.
-   - The harness must expose only testable methods for injecting public snapshots and invoking safe commands.
-   - It must not subscribe to Firestore, call startup code, register routes, request native permissions, or contact real services by default.
+1. **Create a pure Call V2 view-model/presenter.**
+   - Add a small presenter/view-model under `lib/call_v2/**` that consumes the accepted harness state or accepted domain objects.
+   - It may derive display-safe values such as local phase, title/status keys, whether accept/decline/end/cancel/report-media actions should be enabled, and whether an open or close navigation intent is pending.
+   - It must not import Flutter widgets, `Navigator`, app routes, Firebase, Agora, CallKit, PushKit, FCM, permissions, platform channels, or production configuration.
+   - It must not subscribe to Firestore, call startup code, register routes, request native permissions, or contact real services.
 
 2. **Preserve authentication and request-shape safety.**
    - Do not add `actorUid`, `authenticatedUid`, raw `uid`, staff/rollout/cohort fields, allowlists, salts, percentages, fencing/lock fields, task IDs, command IDs, or private server authority to client request payloads.
    - Do not serialize local participant role as authenticated authority.
    - Continue to rely on server-side Firebase Auth for identity.
 
-3. **Preserve ownership, monotonicity, and navigation behavior.**
+3. **Preserve ownership, monotonicity, command, and navigation behavior.**
    - Equal/lower snapshots must remain ignored for the same call.
    - A terminal snapshot must not be replaced by lower/equal nonterminal data.
    - A different call must remain ignored while a nonterminal call is owned.
+   - Duplicate command taps through the harness/presenter must still produce one in-flight transport request.
    - Terminal cleanup must clear local ownership and remain idempotent.
    - Navigation intents must stay deduped and must not call `Navigator` or existing routes.
 
-4. **Add behavioral tests for the harness.**
-   - Feature gate disabled: injected snapshots and commands do nothing and no transport call is made.
-   - Feature gate enabled: public snapshots derive expected local phase and safe commands produce exactly one safe transport request.
-   - Duplicate command taps through the harness still produce one in-flight request.
-   - Terminal snapshot through the harness produces a close intent once, cleanup clears ownership, and repeated cleanup/close does not emit duplicates.
-   - The harness must use fake transports only; no real network, Firebase, native, Agora, CallKit, PushKit, FCM, or route access.
+4. **Add behavioral tests for the presenter/view-model.**
+   - Feature gate disabled: derived state remains idle/inert and actions do not call transport.
+   - Feature gate enabled: public snapshots derive expected local phase and display-safe state.
+   - Allowed-action derivation matches ringing/accepted/active/terminal phases for caller and callee roles.
+   - Duplicate command taps through the presenter still produce one safe transport request.
+   - Terminal snapshot through the presenter produces one close intent, cleanup clears ownership, and repeated cleanup/close does not emit duplicates.
+   - Tests must use fake transports only; no real network, Firebase, native, Agora, CallKit, PushKit, FCM, widgets, routes, or platform access.
 
-5. **Keep Phase 3A tests intact.**
-   - Do not weaken existing Phase 3A request-shape, parser, manager, navigation, or error-code tests.
+5. **Keep Phase 3A and 3B tests intact.**
+   - Do not weaken existing request-shape, parser, manager, navigation, harness, or error-code tests.
    - Add tests rather than deleting behavioral coverage.
 
 ## Allowed files
