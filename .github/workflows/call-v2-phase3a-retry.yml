@@ -1,4 +1,4 @@
-name: Call V2 Phase 3A Retry
+name: Call V2 Guarded Agent Loop
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: call-v2-phase3a-retry
+  group: call-v2-guarded-agent-loop
   cancel-in-progress: false
 
 jobs:
@@ -28,21 +28,32 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify Phase 3A state
+      - name: Verify active agent-loop state
         id: state
         shell: bash
         run: |
           phase="$(node -p "require('./docs/agent-loop/STATE.json').phase")"
           status="$(node -p "require('./docs/agent-loop/STATE.json').status")"
-          if [[ "$phase" != "3A" ]]; then
-            echo "Expected Phase 3A, found $phase" >&2
+          starting_sha="$(node -p "require('./docs/agent-loop/STATE.json').starting_sha")"
+          if [[ -z "$phase" ]]; then
+            echo "STATE.json phase is empty" >&2
             exit 1
           fi
           if [[ "$status" != "revision_required" && "$status" != "task_ready" ]]; then
-            echo "Phase 3A is not ready to run: $status" >&2
+            echo "Agent loop is not ready to run: phase=$phase status=$status" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$starting_sha" HEAD; then
+            echo "STATE starting_sha is not an ancestor of HEAD: $starting_sha" >&2
+            exit 1
+          fi
+          phase_slug="$(printf '%s' "$phase" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')"
+          if [[ -z "$phase_slug" ]]; then
+            echo "Unable to derive safe phase slug" >&2
             exit 1
           fi
           echo "phase=$phase" >> "$GITHUB_OUTPUT"
+          echo "phase_slug=$phase_slug" >> "$GITHUB_OUTPUT"
           echo "base_head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Pin authoritative task contract
@@ -52,9 +63,9 @@ jobs:
           test -s docs/agent-loop/NEXT_TASK.md
           test -s docs/agent-loop/STATE.json
           task_sha="$(sha256sum docs/agent-loop/NEXT_TASK.md | awk '{print $1}')"
-          state_phase="$(node -p "require('./docs/agent-loop/STATE.json').phase")"
+          state_phase="${{ steps.state.outputs.phase }}"
           if ! grep -Fq "Phase ${state_phase}" docs/agent-loop/NEXT_TASK.md; then
-            echo "NEXT_TASK.md does not identify STATE.json phase ${state_phase}. Refusing to run stale instructions." >&2
+            echo "NEXT_TASK.md does not identify STATE.json phase ${state_phase}. Refusing stale instructions." >&2
             exit 1
           fi
           echo "task_sha=$task_sha" >> "$GITHUB_OUTPUT"
@@ -88,7 +99,7 @@ jobs:
           cd ..
           flutter pub get
 
-      - name: Run Codex Phase 3A builder
+      - name: Run Codex active-phase builder
         id: codex
         uses: openai/codex-action@v1
         with:
@@ -98,16 +109,16 @@ jobs:
           sandbox: workspace-write
           safety-strategy: drop-sudo
           allow-users: projectAKTS
-          output-file: /tmp/phase3a-codex-final.md
+          output-file: /tmp/call-v2-codex-final.md
           prompt: |
-            Read AGENTS.md, docs/agent-loop/STATE.json, docs/agent-loop/NEXT_TASK.md, docs/agent-loop/HANDOFF.md, and every retained failure artifact referenced by those files.
-            docs/agent-loop/NEXT_TASK.md is the sole authoritative implementation specification for this run. Do not substitute, narrow, expand, or resurrect an older task from workflow text, prior summaries, prior runs, or retained artifacts.
-            Confirm before editing that NEXT_TASK.md describes the same phase as STATE.json and that STATE.json status permits implementation. If they disagree, make no implementation changes and fail with a precise explanation.
-            Execute all required completion items, tests, documentation, allowed-file limits, validation commands, and handoff requirements in NEXT_TASK.md. Treat retained failure details only as diagnostic evidence, never as a replacement task specification.
-            Preserve all repository safety rules in AGENTS.md. Keep legacy V1 untouched, keep V2 disabled by default, do not deploy, do not contact production services, do not change live configuration, IAM, OIDC, queues, secrets, native configuration, or production values.
-            Do not modify workflows, AGENTS.md, or docs/agent-loop/**. Do not commit or push. Leave implementation changes uncommitted for the workflow to validate and record. Never print secrets.
-            In the final summary, state the STATE phase and authoritative NEXT_TASK sha256 ${{ steps.task_contract.outputs.task_sha }}, list exact files changed, validations run, remaining risks, and confirm all safety constraints.
-
+            Read AGENTS.md, docs/agent-loop/STATE.json, docs/agent-loop/NEXT_TASK.md, docs/agent-loop/HANDOFF.md, and retained validation artifacts referenced there.
+            docs/agent-loop/NEXT_TASK.md is the sole authoritative implementation specification. Execute only STATE phase ${{ steps.state.outputs.phase }} at task fingerprint ${{ steps.task_contract.outputs.task_sha }}.
+            Do not substitute, narrow, expand, or resurrect an older task from workflow text, summaries, earlier phases, runs, or artifacts.
+            Confirm NEXT_TASK.md identifies the same phase and STATE status permits implementation before editing. If not, make no implementation changes and fail precisely.
+            Execute every completion item, allowed-file limit, validation, documentation, and handoff requirement in NEXT_TASK.md.
+            Preserve AGENTS.md and all accepted behavior. Keep legacy V1 untouched and V2 disabled by default. Do not deploy, contact production services, enable live settings, alter IAM/OIDC/queues/secrets/native production configuration, or invent production values.
+            Do not modify workflows, AGENTS.md, or docs/agent-loop/**. Do not commit or push. Leave implementation changes uncommitted. Never print secrets.
+            In the final summary, state the phase and task fingerprint, exact files changed, validations run, remaining risks, and safety confirmations.
 
       - name: Remove Codex runtime metadata
         shell: bash
@@ -131,7 +142,7 @@ jobs:
               lib/call_v2/*|test/call_v2/*|docs/call-v2/*|pubspec.yaml|pubspec.lock)
                 ;;
               *)
-                echo "Out-of-scope Phase 3A change: $path" >&2
+                echo "Out-of-scope Call V2 change: $path" >&2
                 exit 1
                 ;;
             esac
@@ -172,14 +183,14 @@ jobs:
             flutter analyze lib/call_v2 test/call_v2
             flutter test test/call_v2
             git diff --check
-          } 2>&1 | tee /tmp/phase3a-validation.log
+          } 2>&1 | tee /tmp/call-v2-validation.log
 
       - name: Upload validation failure log
         if: steps.validation.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: phase3a-validation-${{ github.run_id }}
-          path: /tmp/phase3a-validation.log
+          name: call-v2-${{ steps.state.outputs.phase_slug }}-validation-${{ github.run_id }}
+          path: /tmp/call-v2-validation.log
           retention-days: 7
           if-no-files-found: error
 
@@ -188,6 +199,7 @@ jobs:
         shell: bash
         env:
           BASE_HEAD: ${{ steps.state.outputs.base_head }}
+          PHASE: ${{ steps.state.outputs.phase }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           git reset --hard "$BASE_HEAD"
@@ -196,6 +208,7 @@ jobs:
           import json, os
           from pathlib import Path
 
+          phase = os.environ['PHASE']
           run_url = os.environ['RUN_URL']
           state_path = Path('docs/agent-loop/STATE.json')
           state = json.loads(state_path.read_text())
@@ -203,61 +216,68 @@ jobs:
           state['code_commit_sha'] = None
           state['ending_sha'] = 'SELF'
           state['changed_files'] = []
-          state['validation']['check'] = 'failed'
+          state.setdefault('validation', {})['check'] = 'failed'
           state['validation']['flutter_analysis'] = 'failed_or_not_reached'
           state['validation']['flutter_tests'] = 'failed_or_not_reached'
           state['review'] = {
               'decision': 'revision_required',
-              'notes': f'Phase 3A validation failed. Download the phase3a-validation artifact from {run_url}'
+              'notes': f'Phase {phase} validation failed. Download the retained validation artifact from {run_url}'
           }
           state_path.write_text(json.dumps(state, indent=2) + '\n')
           Path('docs/agent-loop/HANDOFF.md').write_text(
-              '# Review Handoff\n\nPhase: 3A\nStatus: revision_required\n\n'
+              f'# Review Handoff\n\nPhase: {phase}\nStatus: revision_required\n\n'
               f'Validation failed. Download the retained validation artifact from:\n\n{run_url}\n'
           )
           PY
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs/agent-loop/STATE.json docs/agent-loop/HANDOFF.md
-          git commit -m "chore(agent-loop): record 3A retry validation failure"
+          git commit -m "chore(agent-loop): record $PHASE validation failure"
           git push "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:call-v2
           exit 1
 
-      - name: Commit Phase 3A implementation
+      - name: Commit active-phase implementation
         if: steps.validation.outcome == 'success'
         id: commit_code
         shell: bash
+        env:
+          PHASE: ${{ steps.state.outputs.phase }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "feat(call-v2): add Flutter V2 client groundwork"
+          git commit -m "feat(call-v2): implement phase $PHASE task"
           echo "code_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Write Phase 3A handoff
+      - name: Write active-phase handoff
         if: steps.validation.outcome == 'success'
         shell: bash
         env:
+          PHASE: ${{ steps.state.outputs.phase }}
           CODE_SHA: ${{ steps.commit_code.outputs.code_sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TASK_SHA: ${{ steps.task_contract.outputs.task_sha }}
         run: |
           python3 - <<'PY'
           import json, os, subprocess
           from pathlib import Path
 
+          phase = os.environ['PHASE']
           code_sha = os.environ['CODE_SHA']
           run_url = os.environ['RUN_URL']
+          task_sha = os.environ['TASK_SHA']
           files = [line for line in subprocess.check_output(
               ['git', 'show', '--pretty=', '--name-only', code_sha], text=True
           ).splitlines() if line]
-          summary_path = Path('/tmp/phase3a-codex-final.md')
-          summary = summary_path.read_text().strip() if summary_path.exists() else 'Phase 3A implementation completed.'
+          summary_path = Path('/tmp/call-v2-codex-final.md')
+          summary = summary_path.read_text().strip() if summary_path.exists() else f'Phase {phase} implementation completed.'
 
           handoff = [
               '# External Review Handoff', '',
-              'Phase: 3A',
+              f'Phase: {phase}',
               'Status: ready_for_review',
               f'Implementation SHA: {code_sha}',
+              f'Authoritative task SHA-256: {task_sha}',
               'Pushed branch-tip SHA: SELF', '',
               '## Files changed', ''
           ]
@@ -276,7 +296,7 @@ jobs:
               f'- Workflow run: {run_url}', '',
               '## Safety', '',
               '- V1 files were not modified.',
-              '- The V2 feature gate remains disabled by default.',
+              '- V2 remains disabled by default.',
               '- No production service was contacted.',
               '- No live configuration was changed.',
               '- Nothing was deployed.', ''
@@ -289,7 +309,7 @@ jobs:
           state['code_commit_sha'] = code_sha
           state['ending_sha'] = 'SELF'
           state['changed_files'] = files
-          state['validation'].update({
+          state.setdefault('validation', {}).update({
               'node_version': '20',
               'check': 'passed',
               'deployment_readiness': 'passed',
@@ -303,9 +323,9 @@ jobs:
           state_path.write_text(json.dumps(state, indent=2) + '\n')
           PY
           git add docs/agent-loop/HANDOFF.md docs/agent-loop/STATE.json
-          git commit -m "chore(agent-loop): record 3A review handoff"
+          git commit -m "chore(agent-loop): record $PHASE review handoff"
 
-      - name: Push completed Phase 3A
+      - name: Push completed active phase
         if: steps.validation.outcome == 'success'
         shell: bash
         run: |
