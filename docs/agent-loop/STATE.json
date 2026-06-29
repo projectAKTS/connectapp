@@ -33,6 +33,6 @@
   },
   "review": {
     "decision": "revision_required",
-    "notes": "Latest failed retry: workflow 28350979605, job 83983600945, step Run backend and Flutter validation. The workflow discarded implementation changes and retained artifact phase3a-validation-28350979605. NEXT_TASK.md now requires reproducing the exact validation command block and preserving the earlier exact-review corrections: no client-supplied auth UID, accepted domain contract, single-owner manager behavior, duplicate-command dedupe, navigation dedupe, controlled errors, and stronger behavioral tests."
+    "notes": "Phase 3A validation failed. Download the phase3a-validation artifact from https://github.com/projectAKTS/connectapp/actions/runs/28353584185"
   }
 }
