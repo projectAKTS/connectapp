@@ -14,7 +14,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 class _FakeApi implements CallableCallV2Api {
   final calls = <String, List<Map<String, Object?>>>{};
+  int startCount = 0;
   int acceptCount = 0;
+  Completer<void>? startGate;
   Completer<void>? acceptGate;
   Object? startResult = _startResult(callId: 'server_call');
   Object? acceptResult = _lifecycleResult(lifecycleState: 'accepted');
@@ -65,7 +67,9 @@ class _FakeApi implements CallableCallV2Api {
 
   @override
   Future<Object?> startCallV2(Map<String, Object?> request) async {
+    startCount += 1;
     calls.putIfAbsent('start', () => <Map<String, Object?>>[]).add(request);
+    await startGate?.future;
     return startResult;
   }
 }
@@ -330,6 +334,8 @@ void main() {
 
     expect(result.callId, 'server_call');
     expect(harness.pendingStartedCall!.callId, 'server_call');
+    expect(harness.pendingStartedCall!.calleeUid, 'callee');
+    expect(harness.pendingStartedCall!.idempotencyKey, 'start_key');
     expect(harness.snapshot, isNull);
     expect(harness.localPhase, CallLocalPhase.idle);
     expect(fake.calls['start'], hasLength(1));
@@ -366,7 +372,145 @@ void main() {
     expect(first.idempotentReplay, isFalse);
     expect(second.idempotentReplay, isTrue);
     expect(harness.pendingStartedCall!.callId, 'server_call');
+    expect(harness.pendingStartedCall!.calleeUid, 'callee');
+    expect(harness.pendingStartedCall!.idempotencyKey, 'start_key');
     expect(fake.calls['start'], hasLength(2));
+  });
+
+  test('same callee with different start key is rejected before transport',
+      () async {
+    final fake = _FakeApi();
+    final harness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(fake),
+      localParticipantRole: () => CallParticipantRole.caller,
+    );
+
+    await harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee',
+      isVideo: true,
+      idempotencyKey: 'start_key',
+    ));
+    await expectLater(
+      harness.startCall(const StartCallV2Request(
+        calleeUid: 'callee',
+        isVideo: true,
+        idempotencyKey: 'other_key',
+      )),
+      throwsA(isA<CallV2ClientError>().having(
+        (error) => error.code,
+        'code',
+        CallV2ClientErrorCode.rejected,
+      )),
+    );
+
+    expect(fake.calls['start'], hasLength(1));
+    expect(harness.pendingStartedCall!.callId, 'server_call');
+    expect(harness.pendingStartedCall!.calleeUid, 'callee');
+    expect(harness.pendingStartedCall!.idempotencyKey, 'start_key');
+  });
+
+  test('different callee with same start key is rejected before transport',
+      () async {
+    final fake = _FakeApi();
+    final harness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(fake),
+      localParticipantRole: () => CallParticipantRole.caller,
+    );
+
+    await harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee',
+      isVideo: true,
+      idempotencyKey: 'start_key',
+    ));
+    await expectLater(
+      harness.startCall(const StartCallV2Request(
+        calleeUid: 'other',
+        isVideo: true,
+        idempotencyKey: 'start_key',
+      )),
+      throwsA(isA<CallV2ClientError>().having(
+        (error) => error.code,
+        'code',
+        CallV2ClientErrorCode.rejected,
+      )),
+    );
+
+    expect(fake.calls['start'], hasLength(1));
+    expect(harness.pendingStartedCall!.callId, 'server_call');
+    expect(harness.pendingStartedCall!.calleeUid, 'callee');
+    expect(harness.pendingStartedCall!.idempotencyKey, 'start_key');
+  });
+
+  test('exact pending start replay rejects conflicting server call ID',
+      () async {
+    final fake = _FakeApi();
+    final harness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(fake),
+      localParticipantRole: () => CallParticipantRole.caller,
+    );
+
+    await harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee',
+      isVideo: true,
+      idempotencyKey: 'start_key',
+    ));
+    fake.startResult = _startResult(
+      callId: 'other_server_call',
+      idempotentReplay: true,
+    );
+    await expectLater(
+      harness.startCall(const StartCallV2Request(
+        calleeUid: 'callee',
+        isVideo: true,
+        idempotencyKey: 'start_key',
+      )),
+      throwsA(isA<CallV2ClientError>().having(
+        (error) => error.code,
+        'code',
+        CallV2ClientErrorCode.rejected,
+      )),
+    );
+
+    expect(fake.calls['start'], hasLength(2));
+    expect(harness.pendingStartedCall!.callId, 'server_call');
+    expect(harness.pendingStartedCall!.calleeUid, 'callee');
+    expect(harness.pendingStartedCall!.idempotencyKey, 'start_key');
+  });
+
+  test('duplicate start taps in flight preserve the first request identity',
+      () async {
+    final fake = _FakeApi()..startGate = Completer<void>();
+    final harness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(fake),
+      localParticipantRole: () => CallParticipantRole.caller,
+    );
+
+    final first = harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee',
+      isVideo: true,
+      idempotencyKey: 'start_key',
+    ));
+    final second = harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee',
+      isVideo: true,
+      idempotencyKey: 'other_key',
+    ));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(fake.startCount, 1);
+    expect(fake.calls['start'], hasLength(1));
+
+    fake.startGate!.complete();
+    final results = await Future.wait(<Future<Object?>>[first, second]);
+
+    expect(identical(results[0], results[1]), isTrue);
+    expect(harness.pendingStartedCall!.callId, 'server_call');
+    expect(harness.pendingStartedCall!.calleeUid, 'callee');
+    expect(harness.pendingStartedCall!.idempotencyKey, 'start_key');
   });
 
   test('harness suppresses duplicate command taps while in flight', () async {

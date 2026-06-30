@@ -22,7 +22,6 @@ class CallSessionManagerV2 {
   final CallV2Api _api;
   CallSnapshot? _snapshot;
   PendingStartedCallV2? _pendingStartedCall;
-  String? _pendingStartCommandKey;
   bool _commandInFlight = false;
   bool _cleanupCompleted = false;
   final List<_QueuedCommand> _commandQueue = <_QueuedCommand>[];
@@ -59,7 +58,6 @@ class CallSessionManagerV2 {
     if (pendingStartedCall != null &&
         pendingStartedCall.callId == snapshot.callId) {
       _pendingStartedCall = null;
-      _pendingStartCommandKey = null;
     }
     if (snapshot.lifecycle.isTerminal) {
       _cleanupCompleted = false;
@@ -72,26 +70,41 @@ class CallSessionManagerV2 {
     }
     final pendingStartedCall = _pendingStartedCall;
     final key = 'start:${request.calleeUid}';
-    if (pendingStartedCall != null) {
-      if (_pendingStartCommandKey != key && !_activeCommands.containsKey(key)) {
-        throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
-      }
+    if (pendingStartedCall != null &&
+        (pendingStartedCall.calleeUid != request.calleeUid ||
+            pendingStartedCall.idempotencyKey != request.idempotencyKey)) {
+      throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
     }
     final result = await _runCommand(
       key,
       () => _api.startCallV2(request),
     );
     final currentPending = _pendingStartedCall;
-    if (currentPending != null && currentPending.callId != result.callId) {
-      throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
+    if (currentPending != null) {
+      if (currentPending.callId != result.callId) {
+        throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
+      }
+      if (currentPending.calleeUid == request.calleeUid &&
+          currentPending.idempotencyKey == request.idempotencyKey) {
+        _pendingStartedCall = PendingStartedCallV2(
+          callId: currentPending.callId,
+          calleeUid: currentPending.calleeUid,
+          idempotencyKey: currentPending.idempotencyKey,
+          version: result.version,
+          idempotentReplay: result.idempotentReplay,
+          ringingDeadlineAt: result.ringingDeadlineAt,
+        );
+      }
+      return result;
     }
     _pendingStartedCall = PendingStartedCallV2(
       callId: result.callId,
+      calleeUid: request.calleeUid,
+      idempotencyKey: request.idempotencyKey,
       version: result.version,
       idempotentReplay: result.idempotentReplay,
       ringingDeadlineAt: result.ringingDeadlineAt,
     );
-    _pendingStartCommandKey = key;
     return result;
   }
 
@@ -153,7 +166,6 @@ class CallSessionManagerV2 {
     final snapshot = _snapshot;
     if (_pendingStartedCall != null && snapshot == null) {
       _pendingStartedCall = null;
-      _pendingStartCommandKey = null;
       _commandQueue.clear();
       _activeCommands.clear();
       _commandInFlight = false;
@@ -167,7 +179,6 @@ class CallSessionManagerV2 {
     _cleanupCompleted = true;
     _snapshot = null;
     _pendingStartedCall = null;
-    _pendingStartCommandKey = null;
     _commandQueue.clear();
     _activeCommands.clear();
     _commandInFlight = false;
