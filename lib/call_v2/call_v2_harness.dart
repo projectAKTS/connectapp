@@ -4,7 +4,6 @@ import 'call_v2_api.dart';
 import 'call_v2_feature_gate.dart';
 import 'domain/call_local_phase.dart';
 import 'domain/call_snapshot.dart';
-import 'domain/participant_media_state.dart';
 
 class CallV2Harness {
   CallV2Harness({
@@ -32,47 +31,39 @@ class CallV2Harness {
     _sessionManager.injectSnapshot(snapshot);
   }
 
-  Future<void> startCall(CallV2RequestContext context) {
+  Future<void> startCall(StartCallV2Request request) {
     if (!_featureGate.enabled) return Future<void>.value();
-    return _sessionManager.startCall(context);
+    return _sessionManager.startCall(request);
   }
 
-  Future<void> acceptCall(CallV2RequestContext context) {
+  Future<void> acceptCall(CallV2LifecycleCommandRequest request) {
     if (!_featureGate.enabled) return Future<void>.value();
-    return _sessionManager.acceptCall(context);
+    return _sessionManager.acceptCall(request);
   }
 
-  Future<void> declineCall(CallV2RequestContext context) {
+  Future<void> declineCall(CallV2LifecycleCommandRequest request) {
     if (!_featureGate.enabled) return Future<void>.value();
-    return _sessionManager.declineCall(context);
+    return _sessionManager.declineCall(request);
   }
 
-  Future<void> cancelCall(CallV2RequestContext context) {
+  Future<void> cancelCall(CallV2LifecycleCommandRequest request) {
     if (!_featureGate.enabled) return Future<void>.value();
-    return _sessionManager.cancelCall(context);
+    return _sessionManager.cancelCall(request);
   }
 
-  Future<void> endCall(CallV2RequestContext context) {
+  Future<void> endCall(CallV2LifecycleCommandRequest request) {
     if (!_featureGate.enabled) return Future<void>.value();
-    return _sessionManager.endCall(context);
+    return _sessionManager.endCall(request);
   }
 
-  Future<void> reportMedia(
-    CallV2RequestContext context, {
-    required ParticipantMediaState mediaState,
-    required int mediaVersion,
-  }) {
+  Future<void> reportMedia(CallV2MediaReportRequest request) {
     if (!_featureGate.enabled) return Future<void>.value();
-    return _sessionManager.reportMedia(
-      context,
-      mediaState: mediaState,
-      mediaVersion: mediaVersion,
-    );
+    return _sessionManager.reportMedia(request);
   }
 
-  Future<void> renewLease(CallV2RequestContext context) {
+  Future<void> renewLease(CallV2LeaseRenewalRequest request) {
     if (!_featureGate.enabled) return Future<void>.value();
-    return _sessionManager.renewLease(context);
+    return _sessionManager.renewLease(request);
   }
 
   CallNavigationIntent? openNavigationIntentFor(CallSnapshot snapshot) {

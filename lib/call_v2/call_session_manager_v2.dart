@@ -3,7 +3,6 @@ import 'call_v2_feature_gate.dart';
 import 'domain/call_lifecycle.dart';
 import 'domain/call_local_phase.dart';
 import 'domain/call_snapshot.dart';
-import 'domain/participant_media_state.dart';
 
 class CallSessionManagerV2 {
   CallSessionManagerV2({
@@ -48,48 +47,53 @@ class CallSessionManagerV2 {
     }
   }
 
-  Future<void> startCall(CallV2RequestContext context) async {
+  Future<void> startCall(StartCallV2Request request) async {
     await _runCommand(
-        'start:${context.callId}', () => _api.startCallV2(context));
-  }
-
-  Future<void> acceptCall(CallV2RequestContext context) async {
-    await _runCommand(
-        'accept:${context.callId}', () => _api.acceptCallV2(context));
-  }
-
-  Future<void> declineCall(CallV2RequestContext context) async {
-    await _runCommand(
-        'decline:${context.callId}', () => _api.declineCallV2(context));
-  }
-
-  Future<void> cancelCall(CallV2RequestContext context) async {
-    await _runCommand(
-        'cancel:${context.callId}', () => _api.cancelCallV2(context));
-  }
-
-  Future<void> endCall(CallV2RequestContext context) async {
-    await _runCommand('end:${context.callId}', () => _api.endCallV2(context));
-  }
-
-  Future<void> reportMedia(
-    CallV2RequestContext context, {
-    required ParticipantMediaState mediaState,
-    required int mediaVersion,
-  }) async {
-    await _runCommand(
-      'media:${context.callId}:$mediaVersion',
-      () => _api.reportParticipantMediaV2(
-        context,
-        mediaState: mediaState,
-        mediaVersion: mediaVersion,
-      ),
+      'start:${request.calleeUid}',
+      () => _api.startCallV2(request),
     );
   }
 
-  Future<void> renewLease(CallV2RequestContext context) async {
+  Future<void> acceptCall(CallV2LifecycleCommandRequest request) async {
     await _runCommand(
-        'lease:${context.callId}', () => _api.renewActiveCallLeaseV2(context));
+      'accept:${request.callId}',
+      () => _api.acceptCallV2(request),
+    );
+  }
+
+  Future<void> declineCall(CallV2LifecycleCommandRequest request) async {
+    await _runCommand(
+      'decline:${request.callId}',
+      () => _api.declineCallV2(request),
+    );
+  }
+
+  Future<void> cancelCall(CallV2LifecycleCommandRequest request) async {
+    await _runCommand(
+      'cancel:${request.callId}',
+      () => _api.cancelCallV2(request),
+    );
+  }
+
+  Future<void> endCall(CallV2LifecycleCommandRequest request) async {
+    await _runCommand(
+      'end:${request.callId}',
+      () => _api.endCallV2(request),
+    );
+  }
+
+  Future<void> reportMedia(CallV2MediaReportRequest request) async {
+    await _runCommand(
+      'media:${request.callId}',
+      () => _api.reportParticipantMediaV2(request),
+    );
+  }
+
+  Future<void> renewLease(CallV2LeaseRenewalRequest request) async {
+    await _runCommand(
+      'lease:${request.callId}',
+      () => _api.renewActiveCallLeaseV2(request),
+    );
   }
 
   Future<void> cleanupIfTerminal() async {

@@ -70,42 +70,56 @@ class CallV2Presenter {
     _refreshPresentationState();
   }
 
-  Future<void> acceptCall() {
-    final context = _contextForAllowedAction((state) => state.acceptEnabled);
-    if (context == null) return Future<void>.value();
-    return _harness.acceptCall(context);
+  Future<void> acceptCall({required String idempotencyKey}) {
+    final request = _lifecycleRequestForAllowedAction(
+      (state) => state.acceptEnabled,
+      idempotencyKey: idempotencyKey,
+    );
+    if (request == null) return Future<void>.value();
+    return _harness.acceptCall(request);
   }
 
-  Future<void> declineCall() {
-    final context = _contextForAllowedAction((state) => state.declineEnabled);
-    if (context == null) return Future<void>.value();
-    return _harness.declineCall(context);
+  Future<void> declineCall({required String idempotencyKey}) {
+    final request = _lifecycleRequestForAllowedAction(
+      (state) => state.declineEnabled,
+      idempotencyKey: idempotencyKey,
+    );
+    if (request == null) return Future<void>.value();
+    return _harness.declineCall(request);
   }
 
-  Future<void> cancelCall() {
-    final context = _contextForAllowedAction((state) => state.cancelEnabled);
-    if (context == null) return Future<void>.value();
-    return _harness.cancelCall(context);
+  Future<void> cancelCall({required String idempotencyKey}) {
+    final request = _lifecycleRequestForAllowedAction(
+      (state) => state.cancelEnabled,
+      idempotencyKey: idempotencyKey,
+    );
+    if (request == null) return Future<void>.value();
+    return _harness.cancelCall(request);
   }
 
-  Future<void> endCall() {
-    final context = _contextForAllowedAction((state) => state.endEnabled);
-    if (context == null) return Future<void>.value();
-    return _harness.endCall(context);
+  Future<void> endCall({required String idempotencyKey}) {
+    final request = _lifecycleRequestForAllowedAction(
+      (state) => state.endEnabled,
+      idempotencyKey: idempotencyKey,
+    );
+    if (request == null) return Future<void>.value();
+    return _harness.endCall(request);
   }
 
   Future<void> reportMedia({
     required ParticipantMediaState mediaState,
-    required int mediaVersion,
+    required String idempotencyKey,
   }) {
-    final context =
-        _contextForAllowedAction((state) => state.reportMediaEnabled);
-    if (context == null) return Future<void>.value();
-    return _harness.reportMedia(
-      context,
+    final currentState = state;
+    final snapshot = _harness.snapshot;
+    if (snapshot == null || !currentState.reportMediaEnabled) {
+      return Future<void>.value();
+    }
+    return _harness.reportMedia(CallV2MediaReportRequest(
+      callId: snapshot.callId,
       mediaState: mediaState,
-      mediaVersion: mediaVersion,
-    );
+      idempotencyKey: idempotencyKey,
+    ));
   }
 
   CallNavigationIntent? takeOpenNavigationIntent() {
@@ -133,15 +147,16 @@ class CallV2Presenter {
     _refreshPresentationState();
   }
 
-  CallV2RequestContext? _contextForAllowedAction(
-    bool Function(CallV2PresentationState state) isAllowed,
-  ) {
+  CallV2LifecycleCommandRequest? _lifecycleRequestForAllowedAction(
+    bool Function(CallV2PresentationState state) isAllowed, {
+    required String idempotencyKey,
+  }) {
     final currentState = state;
     final snapshot = _harness.snapshot;
     if (snapshot == null || !isAllowed(currentState)) return null;
-    return CallV2RequestContext(
+    return CallV2LifecycleCommandRequest(
       callId: snapshot.callId,
-      version: snapshot.version,
+      idempotencyKey: idempotencyKey,
     );
   }
 

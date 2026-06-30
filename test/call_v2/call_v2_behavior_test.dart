@@ -112,17 +112,24 @@ void main() {
       () async {
     final fake = _FakeApi();
     final api = CallV2Api(fake);
-    await api.startCallV2(const CallV2RequestContext(
-      callId: 'call_a',
-      version: 1,
+    await api.startCallV2(const StartCallV2Request(
+      calleeUid: 'callee',
+      isVideo: true,
+      idempotencyKey: 'start_key',
     ));
     final request = fake.calls['start']!.single;
-    expect(request, containsPair('callId', 'call_a'));
-    expect(request, containsPair('version', 1));
+    expect(request, <String, Object?>{
+      'calleeUid': 'callee',
+      'isVideo': true,
+      'idempotencyKey': 'start_key',
+    });
     for (final key in <String>[
       'actorUid',
       'authenticatedUid',
       'uid',
+      'callerUid',
+      'version',
+      'mediaVersion',
       'staff',
       'rolloutMode',
       'percentage',
@@ -141,9 +148,10 @@ void main() {
   test('controlled errors expose only a small code contract', () async {
     final api = CallV2Api(_FailingApi());
     await expectLater(
-      api.startCallV2(const CallV2RequestContext(
-        callId: 'call_a',
-        version: 1,
+      api.startCallV2(const StartCallV2Request(
+        calleeUid: 'callee',
+        isVideo: true,
+        idempotencyKey: 'start_key',
       )),
       throwsA(
         isA<CallV2ClientError>().having(
@@ -230,13 +238,13 @@ void main() {
       api: CallV2Api(fake),
       localParticipantRole: () => CallParticipantRole.callee,
     );
-    final first = manager.acceptCall(const CallV2RequestContext(
+    final first = manager.acceptCall(const CallV2LifecycleCommandRequest(
       callId: 'call_a',
-      version: 1,
+      idempotencyKey: 'accept_key_1',
     ));
-    final second = manager.acceptCall(const CallV2RequestContext(
+    final second = manager.acceptCall(const CallV2LifecycleCommandRequest(
       callId: 'call_a',
-      version: 1,
+      idempotencyKey: 'accept_key_2',
     ));
     await Future<void>.delayed(Duration.zero);
 
@@ -277,9 +285,10 @@ void main() {
         _snapshotData(lifecycle: CallLifecycle.active));
 
     harness.injectPublicSnapshot(snapshot);
-    await harness.startCall(const CallV2RequestContext(
-      callId: 'call_a',
-      version: 1,
+    await harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee',
+      isVideo: true,
+      idempotencyKey: 'start_key',
     ));
 
     expect(harness.snapshot, isNull);
@@ -298,14 +307,20 @@ void main() {
         _snapshotData(lifecycle: CallLifecycle.active));
 
     harness.injectPublicSnapshot(snapshot);
-    await harness.startCall(const CallV2RequestContext(
-      callId: 'call_a',
-      version: 1,
+    await harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee',
+      isVideo: true,
+      idempotencyKey: 'start_key',
     ));
 
     expect(harness.snapshot, same(snapshot));
     expect(harness.localPhase, CallLocalPhase.inCall);
     expect(fake.calls['start'], hasLength(1));
+    expect(fake.calls['start']!.single, <String, Object?>{
+      'calleeUid': 'callee',
+      'isVideo': true,
+      'idempotencyKey': 'start_key',
+    });
   });
 
   test('harness suppresses duplicate command taps while in flight', () async {
@@ -316,13 +331,13 @@ void main() {
       localParticipantRole: () => CallParticipantRole.callee,
     );
 
-    final first = harness.acceptCall(const CallV2RequestContext(
+    final first = harness.acceptCall(const CallV2LifecycleCommandRequest(
       callId: 'call_a',
-      version: 1,
+      idempotencyKey: 'accept_key_1',
     ));
-    final second = harness.acceptCall(const CallV2RequestContext(
+    final second = harness.acceptCall(const CallV2LifecycleCommandRequest(
       callId: 'call_a',
-      version: 1,
+      idempotencyKey: 'accept_key_2',
     ));
     await Future<void>.delayed(Duration.zero);
 
@@ -369,13 +384,13 @@ void main() {
 
     presenter.injectPublicSnapshot(CallSnapshot.fromPublicData(
         _snapshotData(lifecycle: CallLifecycle.active)));
-    await presenter.acceptCall();
-    await presenter.declineCall();
-    await presenter.cancelCall();
-    await presenter.endCall();
+    await presenter.acceptCall(idempotencyKey: 'accept_key');
+    await presenter.declineCall(idempotencyKey: 'decline_key');
+    await presenter.cancelCall(idempotencyKey: 'cancel_key');
+    await presenter.endCall(idempotencyKey: 'end_key');
     await presenter.reportMedia(
       mediaState: ParticipantMediaState.joined,
-      mediaVersion: 1,
+      idempotencyKey: 'media_key',
     );
 
     expect(presenter.state.localPhase, CallLocalPhase.idle);
@@ -557,15 +572,15 @@ void main() {
       version: 1,
       lifecycle: CallLifecycle.ringing,
     )));
-    final first = presenter.acceptCall();
-    final second = presenter.acceptCall();
+    final first = presenter.acceptCall(idempotencyKey: 'accept_key_1');
+    final second = presenter.acceptCall(idempotencyKey: 'accept_key_2');
     await Future<void>.delayed(Duration.zero);
 
     expect(fake.acceptCount, 1);
     expect(fake.calls['accept'], hasLength(1));
     expect(fake.calls['accept']!.single, <String, Object?>{
       'callId': 'call_a',
-      'version': 1,
+      'idempotencyKey': 'accept_key_1',
     });
 
     fake.acceptGate!.complete();
@@ -585,25 +600,24 @@ void main() {
       version: 3,
       lifecycle: CallLifecycle.active,
     )));
-    await presenter.acceptCall();
-    await presenter.declineCall();
-    await presenter.cancelCall();
-    await presenter.endCall();
+    await presenter.acceptCall(idempotencyKey: 'accept_key');
+    await presenter.declineCall(idempotencyKey: 'decline_key');
+    await presenter.cancelCall(idempotencyKey: 'cancel_key');
+    await presenter.endCall(idempotencyKey: 'end_key');
     await presenter.reportMedia(
       mediaState: ParticipantMediaState.joined,
-      mediaVersion: 7,
+      idempotencyKey: 'media_key',
     );
 
     expect(fake.calls.keys.toSet(), <String>{'end', 'media'});
     expect(fake.calls['end']!.single, <String, Object?>{
       'callId': 'call_a',
-      'version': 3,
+      'idempotencyKey': 'end_key',
     });
     expect(fake.calls['media']!.single, <String, Object?>{
       'callId': 'call_a',
-      'version': 3,
       'mediaState': 'joined',
-      'mediaVersion': 7,
+      'idempotencyKey': 'media_key',
     });
   });
 
