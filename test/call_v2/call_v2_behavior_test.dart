@@ -19,6 +19,7 @@ class _FakeApi implements CallableCallV2Api {
   Completer<void>? startGate;
   Completer<void>? acceptGate;
   Object? startResult = _startResult(callId: 'server_call');
+  Object? startError;
   Object? acceptResult = _lifecycleResult(lifecycleState: 'accepted');
   Object? declineResult = _lifecycleResult(lifecycleState: 'declined');
   Object? cancelResult = _lifecycleResult(lifecycleState: 'cancelled');
@@ -70,6 +71,8 @@ class _FakeApi implements CallableCallV2Api {
     startCount += 1;
     calls.putIfAbsent('start', () => <Map<String, Object?>>[]).add(request);
     await startGate?.future;
+    final error = startError;
+    if (error != null) throw error;
     return startResult;
   }
 }
@@ -511,6 +514,183 @@ void main() {
     expect(harness.pendingStartedCall!.callId, 'server_call');
     expect(harness.pendingStartedCall!.calleeUid, 'callee');
     expect(harness.pendingStartedCall!.idempotencyKey, 'start_key');
+  });
+
+  test('different callee start while in flight shares first result only',
+      () async {
+    final fake = _FakeApi()..startGate = Completer<void>();
+    final harness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(fake),
+      localParticipantRole: () => CallParticipantRole.caller,
+    );
+
+    final first = harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee_a',
+      isVideo: true,
+      idempotencyKey: 'start_key_a',
+    ));
+    final second = harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee_b',
+      isVideo: false,
+      idempotencyKey: 'start_key_b',
+    ));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(fake.startCount, 1);
+    expect(fake.calls['start'], hasLength(1));
+    expect(fake.calls['start']!.single, <String, Object?>{
+      'calleeUid': 'callee_a',
+      'isVideo': true,
+      'idempotencyKey': 'start_key_a',
+    });
+
+    fake.startGate!.complete();
+    final results = await Future.wait(<Future<Object?>>[first, second]);
+
+    expect(identical(results[0], results[1]), isTrue);
+    expect(harness.pendingStartedCall!.callId, 'server_call');
+    expect(harness.pendingStartedCall!.calleeUid, 'callee_a');
+    expect(harness.pendingStartedCall!.idempotencyKey, 'start_key_a');
+  });
+
+  test('same callee with different in-flight key invokes transport once',
+      () async {
+    final fake = _FakeApi()..startGate = Completer<void>();
+    final harness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(fake),
+      localParticipantRole: () => CallParticipantRole.caller,
+    );
+
+    final first = harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee',
+      isVideo: true,
+      idempotencyKey: 'start_key',
+    ));
+    final second = harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee',
+      isVideo: true,
+      idempotencyKey: 'other_key',
+    ));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(fake.startCount, 1);
+    expect(fake.calls['start'], hasLength(1));
+    expect(fake.calls['start']!.single['idempotencyKey'], 'start_key');
+
+    fake.startGate!.complete();
+    await Future.wait(<Future<Object?>>[first, second]);
+
+    expect(harness.pendingStartedCall!.calleeUid, 'callee');
+    expect(harness.pendingStartedCall!.idempotencyKey, 'start_key');
+  });
+
+  test('three mixed in-flight starts invoke transport once', () async {
+    final fake = _FakeApi()..startGate = Completer<void>();
+    final harness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(fake),
+      localParticipantRole: () => CallParticipantRole.caller,
+    );
+
+    final first = harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee_a',
+      isVideo: true,
+      idempotencyKey: 'start_key_a',
+    ));
+    final second = harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee_a',
+      isVideo: false,
+      idempotencyKey: 'start_key_b',
+    ));
+    final third = harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee_b',
+      isVideo: true,
+      idempotencyKey: 'start_key_c',
+    ));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(fake.startCount, 1);
+    expect(fake.calls['start'], hasLength(1));
+    expect(fake.calls['start']!.single, <String, Object?>{
+      'calleeUid': 'callee_a',
+      'isVideo': true,
+      'idempotencyKey': 'start_key_a',
+    });
+
+    fake.startGate!.complete();
+    final results = await Future.wait(<Future<Object?>>[
+      first,
+      second,
+      third,
+    ]);
+
+    expect(identical(results[0], results[1]), isTrue);
+    expect(identical(results[0], results[2]), isTrue);
+    expect(harness.pendingStartedCall!.callId, 'server_call');
+    expect(harness.pendingStartedCall!.calleeUid, 'callee_a');
+    expect(harness.pendingStartedCall!.idempotencyKey, 'start_key_a');
+  });
+
+  test('in-flight start failure is shared and allows later fresh start',
+      () async {
+    final fake = _FakeApi()
+      ..startGate = Completer<void>()
+      ..startError = StateError('start failed');
+    final harness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(fake),
+      localParticipantRole: () => CallParticipantRole.caller,
+    );
+
+    final first = harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee_a',
+      isVideo: true,
+      idempotencyKey: 'start_key_a',
+    ));
+    final second = harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee_b',
+      isVideo: true,
+      idempotencyKey: 'start_key_b',
+    ));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(fake.startCount, 1);
+    fake.startGate!.complete();
+    await expectLater(
+      first,
+      throwsA(isA<CallV2ClientError>().having(
+        (error) => error.code,
+        'code',
+        CallV2ClientErrorCode.unavailable,
+      )),
+    );
+    await expectLater(
+      second,
+      throwsA(isA<CallV2ClientError>().having(
+        (error) => error.code,
+        'code',
+        CallV2ClientErrorCode.unavailable,
+      )),
+    );
+    expect(harness.pendingStartedCall, isNull);
+
+    fake
+      ..startGate = null
+      ..startError = null
+      ..startResult = _startResult(callId: 'server_call_after_failure');
+    final retry = await harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee_after_failure',
+      isVideo: false,
+      idempotencyKey: 'retry_key',
+    ));
+
+    expect(fake.startCount, 2);
+    expect(retry.callId, 'server_call_after_failure');
+    expect(harness.pendingStartedCall!.callId, 'server_call_after_failure');
+    expect(harness.pendingStartedCall!.calleeUid, 'callee_after_failure');
+    expect(harness.pendingStartedCall!.idempotencyKey, 'retry_key');
   });
 
   test('harness suppresses duplicate command taps while in flight', () async {

@@ -22,6 +22,7 @@ class CallSessionManagerV2 {
   final CallV2Api _api;
   CallSnapshot? _snapshot;
   PendingStartedCallV2? _pendingStartedCall;
+  _StartRequestIdentity? _inFlightStartRequest;
   bool _commandInFlight = false;
   bool _cleanupCompleted = false;
   final List<_QueuedCommand> _commandQueue = <_QueuedCommand>[];
@@ -69,23 +70,38 @@ class CallSessionManagerV2 {
       throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
     }
     final pendingStartedCall = _pendingStartedCall;
-    final key = 'start:${request.calleeUid}';
     if (pendingStartedCall != null &&
         (pendingStartedCall.calleeUid != request.calleeUid ||
             pendingStartedCall.idempotencyKey != request.idempotencyKey)) {
       throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
     }
-    final result = await _runCommand(
-      key,
-      () => _api.startCallV2(request),
-    );
+    const key = 'start';
+    final existingStartRequest = _inFlightStartRequest;
+    final startRequest =
+        existingStartRequest ?? _StartRequestIdentity.fromRequest(request);
+    final capturedFirstRequest = existingStartRequest == null;
+    if (capturedFirstRequest) {
+      _inFlightStartRequest = startRequest;
+    }
+    final StartCallV2Result result;
+    try {
+      result = await _runCommand(
+        key,
+        () => _api.startCallV2(request),
+      );
+    } finally {
+      if (capturedFirstRequest &&
+          identical(_inFlightStartRequest, startRequest)) {
+        _inFlightStartRequest = null;
+      }
+    }
     final currentPending = _pendingStartedCall;
     if (currentPending != null) {
       if (currentPending.callId != result.callId) {
         throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
       }
-      if (currentPending.calleeUid == request.calleeUid &&
-          currentPending.idempotencyKey == request.idempotencyKey) {
+      if (currentPending.calleeUid == startRequest.calleeUid &&
+          currentPending.idempotencyKey == startRequest.idempotencyKey) {
         _pendingStartedCall = PendingStartedCallV2(
           callId: currentPending.callId,
           calleeUid: currentPending.calleeUid,
@@ -99,8 +115,8 @@ class CallSessionManagerV2 {
     }
     _pendingStartedCall = PendingStartedCallV2(
       callId: result.callId,
-      calleeUid: request.calleeUid,
-      idempotencyKey: request.idempotencyKey,
+      calleeUid: startRequest.calleeUid,
+      idempotencyKey: startRequest.idempotencyKey,
       version: result.version,
       idempotentReplay: result.idempotentReplay,
       ringingDeadlineAt: result.ringingDeadlineAt,
@@ -166,6 +182,7 @@ class CallSessionManagerV2 {
     final snapshot = _snapshot;
     if (_pendingStartedCall != null && snapshot == null) {
       _pendingStartedCall = null;
+      _inFlightStartRequest = null;
       _commandQueue.clear();
       _activeCommands.clear();
       _commandInFlight = false;
@@ -179,6 +196,7 @@ class CallSessionManagerV2 {
     _cleanupCompleted = true;
     _snapshot = null;
     _pendingStartedCall = null;
+    _inFlightStartRequest = null;
     _commandQueue.clear();
     _activeCommands.clear();
     _commandInFlight = false;
@@ -252,4 +270,21 @@ class _QueuedCommand {
   final String key;
   final Future<Object?> Function() action;
   final Completer<Object?> completer;
+}
+
+class _StartRequestIdentity {
+  const _StartRequestIdentity({
+    required this.calleeUid,
+    required this.idempotencyKey,
+  });
+
+  factory _StartRequestIdentity.fromRequest(StartCallV2Request request) {
+    return _StartRequestIdentity(
+      calleeUid: request.calleeUid,
+      idempotencyKey: request.idempotencyKey,
+    );
+  }
+
+  final String calleeUid;
+  final String idempotencyKey;
 }
