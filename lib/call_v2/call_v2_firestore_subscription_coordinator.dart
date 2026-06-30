@@ -18,6 +18,7 @@ typedef CallV2ParticipantDocumentStreamFactory
 
 enum CallV2SubscriptionStatus {
   idle,
+  starting,
   listening,
   stopped,
   failed,
@@ -49,6 +50,7 @@ class CallV2FirestoreSubscriptionCoordinator {
   int _generation = 0;
   CallV2SubscriptionStatus _status = CallV2SubscriptionStatus.idle;
   CallV2ClientErrorCode? _lastErrorCode;
+  Future<void>? _startFuture;
   _SubscriptionIdentity? _identity;
   DocumentSnapshot<Map<String, dynamic>>? _latestCallDocument;
   DocumentSnapshot<Map<String, dynamic>>? _latestCallerDocument;
@@ -66,73 +68,126 @@ class CallV2FirestoreSubscriptionCoordinator {
     required String callId,
     required String callerUid,
     required String calleeUid,
+  }) {
+    return Future<void>.sync(() {
+      if (!_featureGate.enabled) return null;
+
+      final nextIdentity = _SubscriptionIdentity(
+        callId: _validateIdentifier(callId),
+        callerUid: _validateIdentifier(callerUid),
+        calleeUid: _validateIdentifier(calleeUid),
+      );
+      if (nextIdentity.callerUid == nextIdentity.calleeUid) {
+        throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
+      }
+
+      final currentIdentity = _identity;
+      if (_isSessionActive && currentIdentity != null) {
+        if (currentIdentity == nextIdentity) {
+          return _startFuture ?? Future<void>.value();
+        }
+        throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
+      }
+
+      final generation = ++_generation;
+      final completer = Completer<void>();
+      _startFuture = completer.future;
+      _identity = nextIdentity;
+      _latestCallDocument = null;
+      _latestCallerDocument = null;
+      _latestCalleeDocument = null;
+      _lastErrorCode = null;
+      _status = CallV2SubscriptionStatus.starting;
+      unawaited(_start(
+        generation: generation,
+        identity: nextIdentity,
+      ).then<void>(
+        (_) => completer.complete(),
+        onError: (Object error, StackTrace stackTrace) {
+          completer.completeError(error, stackTrace);
+        },
+      ));
+      return completer.future;
+    });
+  }
+
+  bool get _isSessionActive {
+    return _status == CallV2SubscriptionStatus.starting ||
+        _status == CallV2SubscriptionStatus.listening;
+  }
+
+  Future<void> _start({
+    required int generation,
+    required _SubscriptionIdentity identity,
   }) async {
-    if (!_featureGate.enabled) return;
-
-    final nextIdentity = _SubscriptionIdentity(
-      callId: _validateIdentifier(callId),
-      callerUid: _validateIdentifier(callerUid),
-      calleeUid: _validateIdentifier(calleeUid),
-    );
-    if (nextIdentity.callerUid == nextIdentity.calleeUid) {
-      throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
-    }
-
-    final currentIdentity = _identity;
-    if (isRunning && currentIdentity != null) {
-      if (currentIdentity == nextIdentity) return;
-      throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
-    }
-
-    await stop();
-
-    final generation = ++_generation;
     final createdSubscriptions =
         <StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>>[];
     try {
-      createdSubscriptions.add(_callDocumentStream(nextIdentity.callId).listen(
-        (document) => _handleCallDocument(generation, document),
-        onError: (Object _) => _handleStreamError(generation),
-      ));
-      createdSubscriptions.add(_participantDocumentStream(
-        nextIdentity.callId,
-        nextIdentity.callerUid,
-      ).listen(
-        (document) => _handleCallerDocument(generation, document),
-        onError: (Object _) => _handleStreamError(generation),
-      ));
-      createdSubscriptions.add(_participantDocumentStream(
-        nextIdentity.callId,
-        nextIdentity.calleeUid,
-      ).listen(
-        (document) => _handleCalleeDocument(generation, document),
-        onError: (Object _) => _handleStreamError(generation),
-      ));
+      _addCreatedSubscription(
+        generation,
+        createdSubscriptions,
+        _callDocumentStream(identity.callId).listen(
+          (document) => _handleCallDocument(generation, document),
+          onError: (Object _) => _handleStreamError(generation),
+        ),
+      );
+      _addCreatedSubscription(
+        generation,
+        createdSubscriptions,
+        _participantDocumentStream(
+          identity.callId,
+          identity.callerUid,
+        ).listen(
+          (document) => _handleCallerDocument(generation, document),
+          onError: (Object _) => _handleStreamError(generation),
+        ),
+      );
+      _addCreatedSubscription(
+        generation,
+        createdSubscriptions,
+        _participantDocumentStream(
+          identity.callId,
+          identity.calleeUid,
+        ).listen(
+          (document) => _handleCalleeDocument(generation, document),
+          onError: (Object _) => _handleStreamError(generation),
+        ),
+      );
+      if (!_canCommitStartup(generation)) {
+        throw const CallV2ClientError(CallV2ClientErrorCode.unavailable);
+      }
     } catch (_) {
-      await _cancel(createdSubscriptions);
-      _lastErrorCode = CallV2ClientErrorCode.unavailable;
-      _status = CallV2SubscriptionStatus.failed;
+      await _failStartup(generation, createdSubscriptions);
       throw const CallV2ClientError(CallV2ClientErrorCode.unavailable);
     }
 
-    _subscriptions.addAll(createdSubscriptions);
-    _identity = nextIdentity;
-    _latestCallDocument = null;
-    _latestCallerDocument = null;
-    _latestCalleeDocument = null;
-    _lastErrorCode = null;
+    if (!_canCommitStartup(generation)) {
+      await _failStartup(generation, createdSubscriptions);
+      throw const CallV2ClientError(CallV2ClientErrorCode.unavailable);
+    }
     _status = CallV2SubscriptionStatus.listening;
+    _startFuture = null;
   }
 
   Future<void> stop() async {
-    _generation += 1;
+    final stopGeneration = ++_generation;
+    final startFuture = _startFuture;
+    _startFuture = null;
     await _cancel(_subscriptions);
+    if (startFuture != null) {
+      try {
+        await startFuture;
+      } on CallV2ClientError {
+        // A stopped startup may report its controlled cancellation failure.
+      }
+    }
+    if (stopGeneration != _generation) return;
     _subscriptions.clear();
     _identity = null;
     _latestCallDocument = null;
     _latestCallerDocument = null;
     _latestCalleeDocument = null;
-    if (_status != CallV2SubscriptionStatus.failed) {
+    if (startFuture != null || _status != CallV2SubscriptionStatus.failed) {
       _status = CallV2SubscriptionStatus.stopped;
     }
   }
@@ -141,7 +196,7 @@ class CallV2FirestoreSubscriptionCoordinator {
     int generation,
     DocumentSnapshot<Map<String, dynamic>> document,
   ) {
-    if (generation != _generation || !isRunning) return;
+    if (!_acceptsGeneration(generation)) return;
     _latestCallDocument = document;
     _combineLatest(generation);
   }
@@ -150,7 +205,7 @@ class CallV2FirestoreSubscriptionCoordinator {
     int generation,
     DocumentSnapshot<Map<String, dynamic>> document,
   ) {
-    if (generation != _generation || !isRunning) return;
+    if (!_acceptsGeneration(generation)) return;
     _latestCallerDocument = document;
     _combineLatest(generation);
   }
@@ -159,9 +214,15 @@ class CallV2FirestoreSubscriptionCoordinator {
     int generation,
     DocumentSnapshot<Map<String, dynamic>> document,
   ) {
-    if (generation != _generation || !isRunning) return;
+    if (!_acceptsGeneration(generation)) return;
     _latestCalleeDocument = document;
     _combineLatest(generation);
+  }
+
+  bool _acceptsGeneration(int generation) {
+    return generation == _generation &&
+        (_status == CallV2SubscriptionStatus.starting ||
+            _status == CallV2SubscriptionStatus.listening);
   }
 
   void _combineLatest(int generation) {
@@ -182,7 +243,7 @@ class CallV2FirestoreSubscriptionCoordinator {
           calleeDocument,
         ],
       );
-      if (generation != _generation || !isRunning) return;
+      if (!_acceptsGeneration(generation)) return;
       _lastErrorCode = null;
       _harness.injectPublicSnapshot(snapshot);
     } on FormatException {
@@ -191,10 +252,54 @@ class CallV2FirestoreSubscriptionCoordinator {
   }
 
   void _handleStreamError(int generation) {
-    if (generation != _generation) return;
+    if (!_acceptsGeneration(generation)) return;
     _lastErrorCode = CallV2ClientErrorCode.unavailable;
     _status = CallV2SubscriptionStatus.failed;
     unawaited(_cancelActiveGeneration(generation));
+  }
+
+  void _addCreatedSubscription(
+    int generation,
+    List<StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>> created,
+    StreamSubscription<DocumentSnapshot<Map<String, dynamic>>> subscription,
+  ) {
+    created.add(subscription);
+    if (generation == _generation) {
+      _subscriptions.add(subscription);
+    }
+  }
+
+  bool _canCommitStartup(int generation) {
+    return generation == _generation &&
+        _status == CallV2SubscriptionStatus.starting &&
+        _subscriptions.length == 3;
+  }
+
+  Future<void> _failStartup(
+    int generation,
+    List<StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>> created,
+  ) async {
+    if (generation == _generation) {
+      _generation += 1;
+    }
+    await _cancel(<StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>>{
+      ...created,
+      ..._subscriptions,
+    });
+    for (final subscription in created) {
+      _subscriptions.remove(subscription);
+    }
+    if (_status == CallV2SubscriptionStatus.starting ||
+        _status == CallV2SubscriptionStatus.listening ||
+        _status == CallV2SubscriptionStatus.failed) {
+      _lastErrorCode = CallV2ClientErrorCode.unavailable;
+      _status = CallV2SubscriptionStatus.failed;
+      _identity = null;
+      _latestCallDocument = null;
+      _latestCallerDocument = null;
+      _latestCalleeDocument = null;
+    }
+    _startFuture = null;
   }
 
   Future<void> _cancelActiveGeneration(int generation) async {

@@ -107,6 +107,170 @@ void main() {
     expect(streams.activeSubscriptionCount, 3);
   });
 
+  test('two concurrent same-identity starts share one startup', () async {
+    final streams = _TrackedStreams();
+    final coordinator = _coordinator(streams: streams);
+
+    final first = coordinator.start(
+      callId: 'call_a',
+      callerUid: 'caller',
+      calleeUid: 'callee',
+    );
+    final second = coordinator.start(
+      callId: 'call_a',
+      callerUid: 'caller',
+      calleeUid: 'callee',
+    );
+
+    await Future.wait(<Future<void>>[first, second]);
+
+    expect(streams.callRequests, <String>['call_a']);
+    expect(streams.participantRequests, <_ParticipantRequest>[
+      const _ParticipantRequest('call_a', 'caller'),
+      const _ParticipantRequest('call_a', 'callee'),
+    ]);
+    expect(streams.activeSubscriptionCount, 3);
+    expect(coordinator.status, CallV2SubscriptionStatus.listening);
+  });
+
+  test('concurrent different-identity start is rejected locally', () async {
+    final streams = _TrackedStreams();
+    final coordinator = _coordinator(streams: streams);
+
+    final first = coordinator.start(
+      callId: 'call_a',
+      callerUid: 'caller',
+      calleeUid: 'callee',
+    );
+    await expectLater(
+      coordinator.start(
+        callId: 'call_b',
+        callerUid: 'caller',
+        calleeUid: 'callee',
+      ),
+      throwsA(_clientError(CallV2ClientErrorCode.rejected)),
+    );
+    await first;
+
+    expect(streams.callRequests, <String>['call_a']);
+    expect(streams.participantRequests, <_ParticipantRequest>[
+      const _ParticipantRequest('call_a', 'caller'),
+      const _ParticipantRequest('call_a', 'callee'),
+    ]);
+    expect(streams.activeSubscriptionCount, 3);
+  });
+
+  test('three concurrent mixed starts create only the first identity',
+      () async {
+    final streams = _TrackedStreams();
+    final coordinator = _coordinator(streams: streams);
+
+    final first = coordinator.start(
+      callId: 'call_a',
+      callerUid: 'caller',
+      calleeUid: 'callee',
+    );
+    final same = coordinator.start(
+      callId: 'call_a',
+      callerUid: 'caller',
+      calleeUid: 'callee',
+    );
+    final conflicting = expectLater(
+      coordinator.start(
+        callId: 'call_b',
+        callerUid: 'caller',
+        calleeUid: 'callee',
+      ),
+      throwsA(_clientError(CallV2ClientErrorCode.rejected)),
+    );
+
+    await Future.wait(<Future<void>>[first, same, conflicting]);
+
+    expect(streams.callRequests, <String>['call_a']);
+    expect(streams.participantRequests.length, 2);
+    expect(streams.activeSubscriptionCount, 3);
+  });
+
+  test('synchronous call-document emission during listen is retained',
+      () async {
+    final docs = await _documents();
+    final streams = _TrackedStreams()
+      ..callStreamFor(
+          'call_a', _SynchronousDocumentStream(onListenData: docs.call));
+    final harness = _harness();
+    final coordinator = _coordinator(streams: streams, harness: harness);
+
+    await coordinator.start(
+      callId: 'call_a',
+      callerUid: 'caller',
+      calleeUid: 'callee',
+    );
+    streams.participant('call_a', 'caller').add(docs.caller);
+    streams.participant('call_a', 'callee').add(docs.callee);
+    await _pump();
+
+    expect(harness.snapshot!.callId, 'call_a');
+    expect(harness.snapshot!.version, 7);
+  });
+
+  test('synchronous participant emissions during listen are retained',
+      () async {
+    final docs = await _documents();
+    final streams = _TrackedStreams()
+      ..participantStreamFor(
+        'call_a',
+        'caller',
+        _SynchronousDocumentStream(onListenData: docs.caller),
+      )
+      ..participantStreamFor(
+        'call_a',
+        'callee',
+        _SynchronousDocumentStream(onListenData: docs.callee),
+      );
+    final harness = _harness();
+    final coordinator = _coordinator(streams: streams, harness: harness);
+
+    await coordinator.start(
+      callId: 'call_a',
+      callerUid: 'caller',
+      calleeUid: 'callee',
+    );
+    streams.call('call_a').add(docs.call);
+    await _pump();
+
+    expect(harness.snapshot!.callerUid, 'caller');
+    expect(harness.snapshot!.calleeUid, 'callee');
+  });
+
+  test('all three synchronous startup emissions inject one snapshot', () async {
+    final docs = await _documents();
+    final streams = _TrackedStreams()
+      ..callStreamFor(
+          'call_a', _SynchronousDocumentStream(onListenData: docs.call))
+      ..participantStreamFor(
+        'call_a',
+        'caller',
+        _SynchronousDocumentStream(onListenData: docs.caller),
+      )
+      ..participantStreamFor(
+        'call_a',
+        'callee',
+        _SynchronousDocumentStream(onListenData: docs.callee),
+      );
+    final harness = _harness();
+    final coordinator = _coordinator(streams: streams, harness: harness);
+
+    await coordinator.start(
+      callId: 'call_a',
+      callerUid: 'caller',
+      calleeUid: 'callee',
+    );
+
+    expect(coordinator.status, CallV2SubscriptionStatus.listening);
+    expect(harness.snapshot!.callId, 'call_a');
+    expect(harness.snapshot!.version, 7);
+  });
+
   test('coordinator source has no Firebase singleton or private path access',
       () {
     final source = File(
@@ -541,6 +705,213 @@ void main() {
     expect(streams.activeSubscriptionCount, 0);
   });
 
+  test('synchronous stream error during first subscription fails startup',
+      () async {
+    final streams = _TrackedStreams()
+      ..callStreamFor(
+        'call_a',
+        _SynchronousDocumentStream(onListenError: StateError('raw secret')),
+      );
+    final coordinator = _coordinator(streams: streams);
+
+    await expectLater(
+      coordinator.start(
+        callId: 'call_a',
+        callerUid: 'caller',
+        calleeUid: 'callee',
+      ),
+      throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
+    );
+
+    expect(coordinator.status, CallV2SubscriptionStatus.failed);
+    expect(coordinator.lastErrorCode, CallV2ClientErrorCode.unavailable);
+    expect(streams.activeSubscriptionCount, 0);
+  });
+
+  test('synchronous stream error during second subscription cancels first',
+      () async {
+    final streams = _TrackedStreams()
+      ..participantStreamFor(
+        'call_a',
+        'caller',
+        _SynchronousDocumentStream(onListenError: StateError('raw secret')),
+      );
+    final coordinator = _coordinator(streams: streams);
+
+    await expectLater(
+      coordinator.start(
+        callId: 'call_a',
+        callerUid: 'caller',
+        calleeUid: 'callee',
+      ),
+      throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
+    );
+
+    expect(streams.call('call_a').isActive, isFalse);
+    expect(streams.activeSubscriptionCount, 0);
+    expect(coordinator.status, CallV2SubscriptionStatus.failed);
+  });
+
+  test('synchronous stream error during third subscription cancels prior two',
+      () async {
+    final streams = _TrackedStreams()
+      ..participantStreamFor(
+        'call_a',
+        'callee',
+        _SynchronousDocumentStream(onListenError: StateError('raw secret')),
+      );
+    final coordinator = _coordinator(streams: streams);
+
+    await expectLater(
+      coordinator.start(
+        callId: 'call_a',
+        callerUid: 'caller',
+        calleeUid: 'callee',
+      ),
+      throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
+    );
+
+    expect(streams.call('call_a').isActive, isFalse);
+    expect(streams.participant('call_a', 'caller').isActive, isFalse);
+    expect(streams.activeSubscriptionCount, 0);
+    expect(coordinator.status, CallV2SubscriptionStatus.failed);
+  });
+
+  test('factory throw and listen throw both clean up partial listeners',
+      () async {
+    final factoryThrow = _TrackedStreams()..throwForParticipantUid = 'callee';
+    final factoryCoordinator = _coordinator(streams: factoryThrow);
+
+    await expectLater(
+      factoryCoordinator.start(
+        callId: 'call_a',
+        callerUid: 'caller',
+        calleeUid: 'callee',
+      ),
+      throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
+    );
+    expect(factoryThrow.activeSubscriptionCount, 0);
+
+    final listenThrow = _TrackedStreams()
+      ..participantStreamFor(
+        'call_a',
+        'callee',
+        _SynchronousDocumentStream(throwOnListen: true),
+      );
+    final listenCoordinator = _coordinator(streams: listenThrow);
+
+    await expectLater(
+      listenCoordinator.start(
+        callId: 'call_a',
+        callerUid: 'caller',
+        calleeUid: 'callee',
+      ),
+      throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
+    );
+    expect(listenThrow.call('call_a').isActive, isFalse);
+    expect(listenThrow.participant('call_a', 'caller').isActive, isFalse);
+    expect(listenThrow.activeSubscriptionCount, 0);
+  });
+
+  test('stop during startup prevents later listening and ignores old callbacks',
+      () async {
+    final docs = await _documents();
+    late CallV2FirestoreSubscriptionCoordinator coordinator;
+    final streams = _TrackedStreams()
+      ..callStreamFor(
+        'call_a',
+        _SynchronousDocumentStream(onBeforeListenReturn: () {
+          unawaited(coordinator.stop());
+        }),
+      );
+    final harness = _harness();
+    coordinator = _coordinator(streams: streams, harness: harness);
+
+    await expectLater(
+      coordinator.start(
+        callId: 'call_a',
+        callerUid: 'caller',
+        calleeUid: 'callee',
+      ),
+      throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
+    );
+    await _pump();
+
+    expect(coordinator.status, CallV2SubscriptionStatus.stopped);
+    expect(streams.activeSubscriptionCount, 0);
+    streams.call('call_a').add(docs.call);
+    await _pump();
+    expect(harness.snapshot, isNull);
+  });
+
+  test('fresh start after failed startup succeeds', () async {
+    final docs = await _documents(callId: 'call_b');
+    final streams = _TrackedStreams()
+      ..callStreamFor(
+        'call_a',
+        _SynchronousDocumentStream(onListenError: StateError('raw secret')),
+      );
+    final harness = _harness();
+    final coordinator = _coordinator(streams: streams, harness: harness);
+
+    await expectLater(
+      coordinator.start(
+        callId: 'call_a',
+        callerUid: 'caller',
+        calleeUid: 'callee',
+      ),
+      throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
+    );
+    await coordinator.stop();
+    await coordinator.start(
+      callId: 'call_b',
+      callerUid: 'caller',
+      calleeUid: 'callee',
+    );
+    streams.call('call_b').add(docs.call);
+    streams.participant('call_b', 'caller').add(docs.caller);
+    streams.participant('call_b', 'callee').add(docs.callee);
+    await _pump();
+
+    expect(coordinator.status, CallV2SubscriptionStatus.listening);
+    expect(harness.snapshot!.callId, 'call_b');
+  });
+
+  test('fresh start after stop during startup succeeds', () async {
+    final docs = await _documents(callId: 'call_b');
+    late CallV2FirestoreSubscriptionCoordinator coordinator;
+    final streams = _TrackedStreams()
+      ..callStreamFor(
+        'call_a',
+        _SynchronousDocumentStream(onBeforeListenReturn: () {
+          unawaited(coordinator.stop());
+        }),
+      );
+    final harness = _harness();
+    coordinator = _coordinator(streams: streams, harness: harness);
+
+    await expectLater(
+      coordinator.start(
+        callId: 'call_a',
+        callerUid: 'caller',
+        calleeUid: 'callee',
+      ),
+      throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
+    );
+    await coordinator.start(
+      callId: 'call_b',
+      callerUid: 'caller',
+      calleeUid: 'callee',
+    );
+    streams.call('call_b').add(docs.call);
+    streams.participant('call_b', 'caller').add(docs.caller);
+    streams.participant('call_b', 'callee').add(docs.callee);
+    await _pump();
+
+    expect(coordinator.status, CallV2SubscriptionStatus.listening);
+    expect(harness.snapshot!.callId, 'call_b');
+  });
+
   test(
       'presenter navigation remains snapshot-driven and Firebase uninitialized',
       () async {
@@ -615,12 +986,12 @@ Future<void> _pump() async {
 class _TrackedStreams {
   final callRequests = <String>[];
   final participantRequests = <_ParticipantRequest>[];
-  final _callStreams = <String, _TrackedDocumentStream>{};
-  final _participantStreams = <_ParticipantRequest, _TrackedDocumentStream>{};
+  final _callStreams = <String, _TrackedDocumentSource>{};
+  final _participantStreams = <_ParticipantRequest, _TrackedDocumentSource>{};
   String? throwForParticipantUid;
 
   int get activeSubscriptionCount {
-    return <_TrackedDocumentStream>[
+    return <_TrackedDocumentSource>[
       ..._callStreams.values,
       ..._participantStreams.values,
     ].where((stream) => stream.isActive).length;
@@ -628,9 +999,7 @@ class _TrackedStreams {
 
   Stream<DocumentSnapshot<Map<String, dynamic>>> callFactory(String callId) {
     callRequests.add(callId);
-    final stream = _TrackedDocumentStream();
-    _callStreams[callId] = stream;
-    return stream.stream;
+    return (_callStreams[callId] ??= _TrackedDocumentStream()).stream;
   }
 
   Stream<DocumentSnapshot<Map<String, dynamic>>> participantFactory(
@@ -641,26 +1010,47 @@ class _TrackedStreams {
     if (participantUid == throwForParticipantUid) {
       throw StateError('provider details must not leak');
     }
-    final stream = _TrackedDocumentStream();
-    _participantStreams[_ParticipantRequest(callId, participantUid)] = stream;
-    return stream.stream;
+    return (_participantStreams[_ParticipantRequest(callId, participantUid)] ??=
+            _TrackedDocumentStream())
+        .stream;
   }
 
-  _TrackedDocumentStream call(String callId) => _callStreams[callId]!;
+  void callStreamFor(String callId, _TrackedDocumentSource stream) {
+    _callStreams[callId] = stream;
+  }
 
-  _TrackedDocumentStream participant(String callId, String participantUid) {
+  void participantStreamFor(
+    String callId,
+    String participantUid,
+    _TrackedDocumentSource stream,
+  ) {
+    _participantStreams[_ParticipantRequest(callId, participantUid)] = stream;
+  }
+
+  _TrackedDocumentSource call(String callId) => _callStreams[callId]!;
+
+  _TrackedDocumentSource participant(String callId, String participantUid) {
     return _participantStreams[_ParticipantRequest(callId, participantUid)]!;
   }
 }
 
-class _TrackedDocumentStream {
+abstract class _TrackedDocumentSource {
+  Stream<DocumentSnapshot<Map<String, dynamic>>> get stream;
+  bool get isActive;
+  void add(DocumentSnapshot<Map<String, dynamic>> document);
+  void addError(Object error);
+}
+
+class _TrackedDocumentStream implements _TrackedDocumentSource {
   _TrackedDocumentStream()
       : _controller =
             StreamController<DocumentSnapshot<Map<String, dynamic>>>();
 
   final StreamController<DocumentSnapshot<Map<String, dynamic>>> _controller;
+  @override
   bool isActive = false;
 
+  @override
   Stream<DocumentSnapshot<Map<String, dynamic>>> get stream {
     _controller
       ..onListen = () {
@@ -672,17 +1062,153 @@ class _TrackedDocumentStream {
     return _controller.stream;
   }
 
+  @override
   void add(DocumentSnapshot<Map<String, dynamic>> document) {
     if (!_controller.isClosed) {
       _controller.add(document);
     }
   }
 
+  @override
   void addError(Object error) {
     if (!_controller.isClosed) {
       _controller.addError(error);
     }
   }
+}
+
+class _SynchronousDocumentStream
+    extends Stream<DocumentSnapshot<Map<String, dynamic>>>
+    implements _TrackedDocumentSource {
+  _SynchronousDocumentStream({
+    this.onListenData,
+    this.onListenError,
+    this.onBeforeListenReturn,
+    this.throwOnListen = false,
+  });
+
+  final DocumentSnapshot<Map<String, dynamic>>? onListenData;
+  final Object? onListenError;
+  final void Function()? onBeforeListenReturn;
+  final bool throwOnListen;
+  final _subscriptions = <_SynchronousDocumentSubscription>[];
+
+  @override
+  bool get isActive {
+    return _subscriptions.any((subscription) => subscription.isActive);
+  }
+
+  @override
+  Stream<DocumentSnapshot<Map<String, dynamic>>> get stream => this;
+
+  @override
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>> listen(
+    void Function(DocumentSnapshot<Map<String, dynamic>> event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) {
+    if (throwOnListen) {
+      throw StateError('listen details must not leak');
+    }
+    final subscription = _SynchronousDocumentSubscription();
+    subscription.setDataHandler(onData);
+    subscription.setErrorHandler(onError);
+    subscription.setDoneHandler(onDone);
+    _subscriptions.add(subscription);
+    final data = onListenData;
+    if (data != null && subscription.isActive) {
+      onData?.call(data);
+    }
+    final error = onListenError;
+    if (error != null && subscription.isActive) {
+      if (onError != null) {
+        Function.apply(onError, <Object>[error]);
+      }
+      if (cancelOnError ?? false) {
+        unawaited(subscription.cancel());
+      }
+    }
+    onBeforeListenReturn?.call();
+    return subscription;
+  }
+
+  @override
+  void add(DocumentSnapshot<Map<String, dynamic>> document) {
+    for (final subscription in _subscriptions) {
+      if (subscription.isActive) {
+        subscription.handleData?.call(document);
+      }
+    }
+  }
+
+  @override
+  void addError(Object error) {
+    for (final subscription in _subscriptions) {
+      if (subscription.isActive) {
+        subscription.handleError?.call(error);
+      }
+    }
+  }
+}
+
+class _SynchronousDocumentSubscription
+    implements StreamSubscription<DocumentSnapshot<Map<String, dynamic>>> {
+  bool isActive = true;
+  void Function(DocumentSnapshot<Map<String, dynamic>> event)? handleData;
+  void Function(Object error)? handleError;
+  void Function()? handleDone;
+
+  void setDataHandler(
+    void Function(DocumentSnapshot<Map<String, dynamic>> event)? handler,
+  ) {
+    handleData = handler;
+  }
+
+  void setErrorHandler(Function? handler) {
+    if (handler == null) {
+      handleError = null;
+    } else {
+      handleError = (Object error) => Function.apply(handler, <Object>[error]);
+    }
+  }
+
+  void setDoneHandler(void Function()? handler) {
+    handleDone = handler;
+  }
+
+  @override
+  Future<void> cancel() async {
+    isActive = false;
+  }
+
+  @override
+  void onData(
+      void Function(DocumentSnapshot<Map<String, dynamic>> data)? handleData) {
+    this.handleData = handleData;
+  }
+
+  @override
+  void onError(Function? handleError) {
+    setErrorHandler(handleError);
+  }
+
+  @override
+  void onDone(void Function()? handleDone) {
+    this.handleDone = handleDone;
+  }
+
+  @override
+  void pause([Future<void>? resumeSignal]) {}
+
+  @override
+  void resume() {}
+
+  @override
+  Future<E> asFuture<E>([E? futureValue]) => Future<E>.value(futureValue);
+
+  @override
+  bool get isPaused => false;
 }
 
 class _ParticipantRequest {
