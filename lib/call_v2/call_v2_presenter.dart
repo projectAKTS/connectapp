@@ -1,5 +1,6 @@
 import 'call_navigation_coordinator_v2.dart';
 import 'call_v2_api.dart';
+import 'call_v2_callable_results.dart';
 import 'call_v2_harness.dart';
 import 'domain/call_lifecycle.dart';
 import 'domain/call_local_phase.dart';
@@ -70,50 +71,66 @@ class CallV2Presenter {
     _refreshPresentationState();
   }
 
-  Future<void> acceptCall({required String idempotencyKey}) {
+  Future<CallV2LifecycleCommandResult?> acceptCall({
+    required String idempotencyKey,
+  }) {
     final request = _lifecycleRequestForAllowedAction(
       (state) => state.acceptEnabled,
       idempotencyKey: idempotencyKey,
     );
-    if (request == null) return Future<void>.value();
+    if (request == null) {
+      return Future<CallV2LifecycleCommandResult?>.value();
+    }
     return _harness.acceptCall(request);
   }
 
-  Future<void> declineCall({required String idempotencyKey}) {
+  Future<CallV2LifecycleCommandResult?> declineCall({
+    required String idempotencyKey,
+  }) {
     final request = _lifecycleRequestForAllowedAction(
       (state) => state.declineEnabled,
       idempotencyKey: idempotencyKey,
     );
-    if (request == null) return Future<void>.value();
+    if (request == null) {
+      return Future<CallV2LifecycleCommandResult?>.value();
+    }
     return _harness.declineCall(request);
   }
 
-  Future<void> cancelCall({required String idempotencyKey}) {
+  Future<CallV2LifecycleCommandResult?> cancelCall({
+    required String idempotencyKey,
+  }) {
     final request = _lifecycleRequestForAllowedAction(
       (state) => state.cancelEnabled,
       idempotencyKey: idempotencyKey,
     );
-    if (request == null) return Future<void>.value();
+    if (request == null) {
+      return Future<CallV2LifecycleCommandResult?>.value();
+    }
     return _harness.cancelCall(request);
   }
 
-  Future<void> endCall({required String idempotencyKey}) {
+  Future<CallV2LifecycleCommandResult?> endCall({
+    required String idempotencyKey,
+  }) {
     final request = _lifecycleRequestForAllowedAction(
       (state) => state.endEnabled,
       idempotencyKey: idempotencyKey,
     );
-    if (request == null) return Future<void>.value();
+    if (request == null) {
+      return Future<CallV2LifecycleCommandResult?>.value();
+    }
     return _harness.endCall(request);
   }
 
-  Future<void> reportMedia({
+  Future<CallV2MediaReportResult?> reportMedia({
     required ParticipantMediaState mediaState,
     required String idempotencyKey,
   }) {
     final currentState = state;
     final snapshot = _harness.snapshot;
     if (snapshot == null || !currentState.reportMediaEnabled) {
-      return Future<void>.value();
+      return Future<CallV2MediaReportResult?>.value();
     }
     return _harness.reportMedia(CallV2MediaReportRequest(
       callId: snapshot.callId,

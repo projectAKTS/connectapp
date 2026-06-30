@@ -1,7 +1,5 @@
+import 'call_v2_callable_results.dart';
 import 'domain/participant_media_state.dart';
-
-const int _maxCallableIdentifierLength = 160;
-const int _maxSafeInteger = 9007199254740991;
 
 class StartCallV2Request {
   const StartCallV2Request({
@@ -50,13 +48,13 @@ class CallV2LeaseRenewalRequest {
 }
 
 abstract interface class CallableCallV2Api {
-  Future<void> startCallV2(Map<String, Object?> request);
-  Future<void> acceptCallV2(Map<String, Object?> request);
-  Future<void> declineCallV2(Map<String, Object?> request);
-  Future<void> cancelCallV2(Map<String, Object?> request);
-  Future<void> endCallV2(Map<String, Object?> request);
-  Future<void> reportParticipantMediaV2(Map<String, Object?> request);
-  Future<void> renewActiveCallLeaseV2(Map<String, Object?> request);
+  Future<Object?> startCallV2(Map<String, Object?> request);
+  Future<Object?> acceptCallV2(Map<String, Object?> request);
+  Future<Object?> declineCallV2(Map<String, Object?> request);
+  Future<Object?> cancelCallV2(Map<String, Object?> request);
+  Future<Object?> endCallV2(Map<String, Object?> request);
+  Future<Object?> reportParticipantMediaV2(Map<String, Object?> request);
+  Future<Object?> renewActiveCallLeaseV2(Map<String, Object?> request);
 }
 
 enum CallV2ClientErrorCode {
@@ -80,34 +78,53 @@ class CallV2Api {
 
   final CallableCallV2Api _transport;
 
-  Future<void> startCallV2(StartCallV2Request request) {
-    return _normalize(() => _transport.startCallV2(_startRequest(request)));
+  Future<StartCallV2Result> startCallV2(StartCallV2Request request) {
+    return _invokeAndParse(
+      () => _transport.startCallV2(_startRequest(request)),
+      StartCallV2Result.fromCallableResult,
+    );
   }
 
-  Future<void> acceptCallV2(CallV2LifecycleCommandRequest request) {
-    return _normalize(
+  Future<CallV2LifecycleCommandResult> acceptCallV2(
+    CallV2LifecycleCommandRequest request,
+  ) {
+    return _invokeAndParse(
       () => _transport.acceptCallV2(_lifecycleRequest(request)),
+      CallV2LifecycleCommandResult.fromCallableResult,
     );
   }
 
-  Future<void> declineCallV2(CallV2LifecycleCommandRequest request) {
-    return _normalize(
+  Future<CallV2LifecycleCommandResult> declineCallV2(
+    CallV2LifecycleCommandRequest request,
+  ) {
+    return _invokeAndParse(
       () => _transport.declineCallV2(_lifecycleRequest(request)),
+      CallV2LifecycleCommandResult.fromCallableResult,
     );
   }
 
-  Future<void> cancelCallV2(CallV2LifecycleCommandRequest request) {
-    return _normalize(
+  Future<CallV2LifecycleCommandResult> cancelCallV2(
+    CallV2LifecycleCommandRequest request,
+  ) {
+    return _invokeAndParse(
       () => _transport.cancelCallV2(_lifecycleRequest(request)),
+      CallV2LifecycleCommandResult.fromCallableResult,
     );
   }
 
-  Future<void> endCallV2(CallV2LifecycleCommandRequest request) {
-    return _normalize(() => _transport.endCallV2(_lifecycleRequest(request)));
+  Future<CallV2LifecycleCommandResult> endCallV2(
+    CallV2LifecycleCommandRequest request,
+  ) {
+    return _invokeAndParse(
+      () => _transport.endCallV2(_lifecycleRequest(request)),
+      CallV2LifecycleCommandResult.fromCallableResult,
+    );
   }
 
-  Future<void> reportParticipantMediaV2(CallV2MediaReportRequest request) {
-    return _normalize(
+  Future<CallV2MediaReportResult> reportParticipantMediaV2(
+    CallV2MediaReportRequest request,
+  ) {
+    return _invokeAndParse(
       () => _transport.reportParticipantMediaV2({
         'callId': _validatedIdentifier(request.callId),
         'mediaState': _backendMediaStateName(request.mediaState),
@@ -115,11 +132,14 @@ class CallV2Api {
           request.idempotencyKey,
         ),
       }),
+      CallV2MediaReportResult.fromCallableResult,
     );
   }
 
-  Future<void> renewActiveCallLeaseV2(CallV2LeaseRenewalRequest request) {
-    return _normalize(
+  Future<CallV2LeaseRenewalResult> renewActiveCallLeaseV2(
+    CallV2LeaseRenewalRequest request,
+  ) {
+    return _invokeAndParse(
       () => _transport.renewActiveCallLeaseV2({
         'callId': _validatedIdentifier(request.callId),
         'heartbeatVersion': _validatedHeartbeatVersion(
@@ -129,6 +149,7 @@ class CallV2Api {
           request.idempotencyKey,
         ),
       }),
+      CallV2LeaseRenewalResult.fromCallableResult,
     );
   }
 
@@ -153,20 +174,29 @@ class CallV2Api {
     };
   }
 
-  Future<void> _normalize(Future<void> Function() action) async {
+  Future<T> _invokeAndParse<T>(
+    Future<Object?> Function() action,
+    T Function(Object? raw) parse,
+  ) async {
+    final Object? raw;
     try {
-      await action();
+      raw = await action();
     } on CallV2ClientError {
       rethrow;
     } catch (_) {
       throw const CallV2ClientError(CallV2ClientErrorCode.unavailable);
+    }
+    try {
+      return parse(raw);
+    } catch (_) {
+      throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
     }
   }
 
   String _validatedIdentifier(String value) {
     if (value.isEmpty ||
         value.trim() != value ||
-        value.length > _maxCallableIdentifierLength ||
+        value.length > callV2MaxCallableIdentifierLength ||
         value.contains('/')) {
       throw CallV2ClientError(CallV2ClientErrorCode.invalidRequest);
     }
@@ -174,7 +204,7 @@ class CallV2Api {
   }
 
   int _validatedHeartbeatVersion(int value) {
-    if (value <= 0 || value > _maxSafeInteger) {
+    if (value <= 0 || value > callV2MaxSafeInteger) {
       throw const CallV2ClientError(CallV2ClientErrorCode.invalidRequest);
     }
     return value;

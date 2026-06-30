@@ -16,67 +16,81 @@ class _FakeApi implements CallableCallV2Api {
   final calls = <String, List<Map<String, Object?>>>{};
   int acceptCount = 0;
   Completer<void>? acceptGate;
+  Object? startResult = _startResult(callId: 'server_call');
+  Object? acceptResult = _lifecycleResult(lifecycleState: 'accepted');
+  Object? declineResult = _lifecycleResult(lifecycleState: 'declined');
+  Object? cancelResult = _lifecycleResult(lifecycleState: 'cancelled');
+  Object? endResult = _lifecycleResult(lifecycleState: 'completed');
+  Object? mediaResult = _mediaResult(lifecycleState: 'active');
+  Object? leaseResult = _leaseResult();
 
   @override
-  Future<void> acceptCallV2(Map<String, Object?> request) async {
+  Future<Object?> acceptCallV2(Map<String, Object?> request) async {
     acceptCount += 1;
     calls.putIfAbsent('accept', () => <Map<String, Object?>>[]).add(request);
     acceptGate ??= Completer<void>();
-    return acceptGate!.future;
+    await acceptGate!.future;
+    return acceptResult;
   }
 
   @override
-  Future<void> cancelCallV2(Map<String, Object?> request) async {
+  Future<Object?> cancelCallV2(Map<String, Object?> request) async {
     calls.putIfAbsent('cancel', () => <Map<String, Object?>>[]).add(request);
+    return cancelResult;
   }
 
   @override
-  Future<void> declineCallV2(Map<String, Object?> request) async {
+  Future<Object?> declineCallV2(Map<String, Object?> request) async {
     calls.putIfAbsent('decline', () => <Map<String, Object?>>[]).add(request);
+    return declineResult;
   }
 
   @override
-  Future<void> endCallV2(Map<String, Object?> request) async {
+  Future<Object?> endCallV2(Map<String, Object?> request) async {
     calls.putIfAbsent('end', () => <Map<String, Object?>>[]).add(request);
+    return endResult;
   }
 
   @override
-  Future<void> renewActiveCallLeaseV2(Map<String, Object?> request) async {
+  Future<Object?> renewActiveCallLeaseV2(Map<String, Object?> request) async {
     calls.putIfAbsent('lease', () => <Map<String, Object?>>[]).add(request);
+    return leaseResult;
   }
 
   @override
-  Future<void> reportParticipantMediaV2(Map<String, Object?> request) async {
+  Future<Object?> reportParticipantMediaV2(Map<String, Object?> request) async {
     calls.putIfAbsent('media', () => <Map<String, Object?>>[]).add(request);
+    return mediaResult;
   }
 
   @override
-  Future<void> startCallV2(Map<String, Object?> request) async {
+  Future<Object?> startCallV2(Map<String, Object?> request) async {
     calls.putIfAbsent('start', () => <Map<String, Object?>>[]).add(request);
+    return startResult;
   }
 }
 
 class _FailingApi implements CallableCallV2Api {
   @override
-  Future<void> acceptCallV2(Map<String, Object?> request) =>
+  Future<Object?> acceptCallV2(Map<String, Object?> request) =>
       throw StateError('provider stack leak');
   @override
-  Future<void> cancelCallV2(Map<String, Object?> request) =>
+  Future<Object?> cancelCallV2(Map<String, Object?> request) =>
       throw StateError('provider stack leak');
   @override
-  Future<void> declineCallV2(Map<String, Object?> request) =>
+  Future<Object?> declineCallV2(Map<String, Object?> request) =>
       throw StateError('provider stack leak');
   @override
-  Future<void> endCallV2(Map<String, Object?> request) =>
+  Future<Object?> endCallV2(Map<String, Object?> request) =>
       throw StateError('provider stack leak');
   @override
-  Future<void> renewActiveCallLeaseV2(Map<String, Object?> request) =>
+  Future<Object?> renewActiveCallLeaseV2(Map<String, Object?> request) =>
       throw StateError('provider stack leak');
   @override
-  Future<void> reportParticipantMediaV2(Map<String, Object?> request) =>
+  Future<Object?> reportParticipantMediaV2(Map<String, Object?> request) =>
       throw StateError('provider stack leak');
   @override
-  Future<void> startCallV2(Map<String, Object?> request) =>
+  Future<Object?> startCallV2(Map<String, Object?> request) =>
       throw StateError('provider stack leak');
 }
 
@@ -252,7 +266,8 @@ void main() {
     expect(fake.calls['accept'], hasLength(1));
 
     fake.acceptGate!.complete();
-    await Future.wait(<Future<void>>[first, second]);
+    final results = await Future.wait(<Future<Object?>>[first, second]);
+    expect(identical(results[0], results[1]), isTrue);
   });
 
   test('navigation coordinator dedupes intents without route access', () {
@@ -285,42 +300,73 @@ void main() {
         _snapshotData(lifecycle: CallLifecycle.active));
 
     harness.injectPublicSnapshot(snapshot);
-    await harness.startCall(const StartCallV2Request(
-      calleeUid: 'callee',
-      isVideo: true,
-      idempotencyKey: 'start_key',
-    ));
+    await expectLater(
+      harness.startCall(const StartCallV2Request(
+        calleeUid: 'callee',
+        isVideo: true,
+        idempotencyKey: 'start_key',
+      )),
+      throwsA(isA<CallV2ClientError>()),
+    );
 
     expect(harness.snapshot, isNull);
     expect(harness.localPhase, CallLocalPhase.idle);
     expect(fake.calls, isEmpty);
   });
 
-  test('enabled harness derives phase and emits one safe request', () async {
+  test('enabled harness starts pending ownership with server callId', () async {
     final fake = _FakeApi();
     final harness = CallV2Harness(
       featureGate: const CallV2FeatureGate(enabled: true),
       api: CallV2Api(fake),
       localParticipantRole: () => CallParticipantRole.callee,
     );
-    final snapshot = CallSnapshot.fromPublicData(
-        _snapshotData(lifecycle: CallLifecycle.active));
 
-    harness.injectPublicSnapshot(snapshot);
-    await harness.startCall(const StartCallV2Request(
+    final result = await harness.startCall(const StartCallV2Request(
       calleeUid: 'callee',
       isVideo: true,
       idempotencyKey: 'start_key',
     ));
 
-    expect(harness.snapshot, same(snapshot));
-    expect(harness.localPhase, CallLocalPhase.inCall);
+    expect(result.callId, 'server_call');
+    expect(harness.pendingStartedCall!.callId, 'server_call');
+    expect(harness.snapshot, isNull);
+    expect(harness.localPhase, CallLocalPhase.idle);
     expect(fake.calls['start'], hasLength(1));
     expect(fake.calls['start']!.single, <String, Object?>{
       'calleeUid': 'callee',
       'isVideo': true,
       'idempotencyKey': 'start_key',
     });
+  });
+
+  test('same pending start is accepted as server idempotent replay', () async {
+    final fake = _FakeApi();
+    final harness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(fake),
+      localParticipantRole: () => CallParticipantRole.caller,
+    );
+
+    final first = await harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee',
+      isVideo: true,
+      idempotencyKey: 'start_key',
+    ));
+    fake.startResult = _startResult(
+      callId: 'server_call',
+      idempotentReplay: true,
+    );
+    final second = await harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee',
+      isVideo: true,
+      idempotencyKey: 'start_key',
+    ));
+
+    expect(first.idempotentReplay, isFalse);
+    expect(second.idempotentReplay, isTrue);
+    expect(harness.pendingStartedCall!.callId, 'server_call');
+    expect(fake.calls['start'], hasLength(2));
   });
 
   test('harness suppresses duplicate command taps while in flight', () async {
@@ -345,7 +391,122 @@ void main() {
     expect(fake.calls['accept'], hasLength(1));
 
     fake.acceptGate!.complete();
-    await Future.wait(<Future<void>>[first, second]);
+    final results = await Future.wait(<Future<Object?>>[first, second]);
+    expect(identical(results[0], results[1]), isTrue);
+  });
+
+  test(
+      'pending start accepts matching snapshot and rejects different call snapshot',
+      () async {
+    final fake = _FakeApi();
+    final harness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(fake),
+      localParticipantRole: () => CallParticipantRole.caller,
+    );
+
+    await harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee',
+      isVideo: true,
+      idempotencyKey: 'start_key',
+    ));
+    harness.injectPublicSnapshot(
+      CallSnapshot.fromPublicData(_snapshotData(callId: 'other_call')),
+    );
+
+    expect(harness.snapshot, isNull);
+    expect(harness.pendingStartedCall!.callId, 'server_call');
+
+    final matching = CallSnapshot.fromPublicData(
+      _snapshotData(callId: 'server_call'),
+    );
+    harness.injectPublicSnapshot(matching);
+
+    expect(harness.snapshot, same(matching));
+    expect(harness.pendingStartedCall, isNull);
+  });
+
+  test('failed or malformed start creates no ownership', () async {
+    final failingHarness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(_FailingApi()),
+      localParticipantRole: () => CallParticipantRole.caller,
+    );
+    final malformed = _FakeApi()..startResult = <String, Object?>{'bad': true};
+    final malformedHarness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(malformed),
+      localParticipantRole: () => CallParticipantRole.caller,
+    );
+
+    await expectLater(
+      failingHarness.startCall(const StartCallV2Request(
+        calleeUid: 'callee',
+        isVideo: true,
+        idempotencyKey: 'start_key',
+      )),
+      throwsA(isA<CallV2ClientError>()),
+    );
+    await expectLater(
+      malformedHarness.startCall(const StartCallV2Request(
+        calleeUid: 'callee',
+        isVideo: true,
+        idempotencyKey: 'start_key',
+      )),
+      throwsA(isA<CallV2ClientError>()),
+    );
+
+    expect(failingHarness.pendingStartedCall, isNull);
+    expect(malformedHarness.pendingStartedCall, isNull);
+  });
+
+  test('conflicting second start is rejected while pending ownership exists',
+      () async {
+    final fake = _FakeApi();
+    final harness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(fake),
+      localParticipantRole: () => CallParticipantRole.caller,
+    );
+
+    await harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee',
+      isVideo: true,
+      idempotencyKey: 'start_key',
+    ));
+    await expectLater(
+      harness.startCall(const StartCallV2Request(
+        calleeUid: 'other',
+        isVideo: true,
+        idempotencyKey: 'other_key',
+      )),
+      throwsA(isA<CallV2ClientError>().having(
+        (error) => error.code,
+        'code',
+        CallV2ClientErrorCode.rejected,
+      )),
+    );
+
+    expect(fake.calls['start'], hasLength(1));
+    expect(harness.pendingStartedCall!.callId, 'server_call');
+  });
+
+  test('cleanup clears pending started ownership', () async {
+    final harness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(_FakeApi()),
+      localParticipantRole: () => CallParticipantRole.caller,
+    );
+
+    await harness.startCall(const StartCallV2Request(
+      calleeUid: 'callee',
+      isVideo: true,
+      idempotencyKey: 'start_key',
+    ));
+    await harness.cleanupIfTerminal();
+
+    expect(harness.pendingStartedCall, isNull);
+    expect(harness.snapshot, isNull);
   });
 
   test('harness closes terminal snapshots once and cleanup stays idempotent',
@@ -584,7 +745,8 @@ void main() {
     });
 
     fake.acceptGate!.complete();
-    await Future.wait(<Future<void>>[first, second]);
+    final results = await Future.wait(<Future<Object?>>[first, second]);
+    expect(identical(results[0], results[1]), isTrue);
   });
 
   test('presenter forwards only enabled actions through the harness', () async {
@@ -619,6 +781,70 @@ void main() {
       'mediaState': 'joined',
       'idempotencyKey': 'media_key',
     });
+  });
+
+  test(
+      'callable command results do not mutate presenter lifecycle or navigation',
+      () async {
+    final fake = _FakeApi();
+    final presenter = CallV2Presenter(
+      harness: _harness(
+        fake: fake,
+        role: CallParticipantRole.callee,
+      ),
+    );
+
+    presenter.injectPublicSnapshot(CallSnapshot.fromPublicData(_snapshotData(
+      version: 2,
+      lifecycle: CallLifecycle.accepted,
+    )));
+    final media = await presenter.reportMedia(
+      mediaState: ParticipantMediaState.joined,
+      idempotencyKey: 'media_key',
+    );
+
+    expect(media!.lifecycle, CallLifecycle.active);
+    expect(presenter.state.localPhase, CallLocalPhase.openingCallRoute);
+    expect(presenter.state.statusKey, 'call_v2.status.accepted');
+    expect(presenter.takeCloseNavigationIntent(), isNull);
+
+    presenter.injectPublicSnapshot(CallSnapshot.fromPublicData(_snapshotData(
+      version: 3,
+      lifecycle: CallLifecycle.active,
+    )));
+    expect(presenter.takeOpenNavigationIntent(), isNotNull);
+    final end = await presenter.endCall(idempotencyKey: 'end_key');
+
+    expect(end!.lifecycle, CallLifecycle.completed);
+    expect(presenter.state.localPhase, CallLocalPhase.inCall);
+    expect(presenter.takeCloseNavigationIntent(), isNull);
+  });
+
+  test('different command keys remain serialized', () async {
+    final fake = _FakeApi();
+    final harness = CallV2Harness(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      api: CallV2Api(fake),
+      localParticipantRole: () => CallParticipantRole.callee,
+    );
+
+    final first = harness.acceptCall(const CallV2LifecycleCommandRequest(
+      callId: 'call_a',
+      idempotencyKey: 'accept_key',
+    ));
+    final second = harness.endCall(const CallV2LifecycleCommandRequest(
+      callId: 'call_a',
+      idempotencyKey: 'end_key',
+    ));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(fake.calls['accept'], hasLength(1));
+    expect(fake.calls['end'], isNull);
+
+    fake.acceptGate!.complete();
+    await Future.wait(<Future<Object?>>[first, second]);
+
+    expect(fake.calls['end'], hasLength(1));
   });
 
   test('presenter close navigation is emitted once and cleanup is idempotent',
@@ -734,5 +960,86 @@ Map<String, Object?> _snapshotData({
         'mediaVersion': 0,
       },
     ],
+  };
+}
+
+Map<String, Object?> _startResult({
+  String callId = 'server_call',
+  String lifecycleState = 'ringing',
+  int version = 1,
+  bool idempotentReplay = false,
+}) {
+  return <String, Object?>{
+    'callId': callId,
+    'lifecycleState': lifecycleState,
+    'version': version,
+    'ringingDeadlineAt': '2026-06-25T12:01:00.000Z',
+    'idempotentReplay': idempotentReplay,
+  };
+}
+
+Map<String, Object?> _lifecycleResult({
+  String callId = 'call_a',
+  String lifecycleState = 'accepted',
+  int version = 2,
+  bool idempotentReplay = false,
+}) {
+  final terminal = <String>{
+    'completed',
+    'declined',
+    'cancelled',
+    'missed',
+    'failed',
+  }.contains(lifecycleState);
+  return <String, Object?>{
+    'callId': callId,
+    'lifecycleState': lifecycleState,
+    'version': version,
+    if (terminal) 'terminal': true,
+    if (terminal) 'endedAt': '2026-06-25T12:05:00.000Z',
+    if (terminal) 'endReason': lifecycleState,
+    'idempotentReplay': idempotentReplay,
+  };
+}
+
+Map<String, Object?> _mediaResult({
+  String callId = 'call_a',
+  String mediaState = 'joined',
+  int mediaVersion = 1,
+  bool mediaChanged = true,
+  String lifecycleState = 'active',
+  int callVersion = 3,
+  bool promotedToActive = true,
+}) {
+  return <String, Object?>{
+    'callId': callId,
+    'participantUid': 'caller',
+    'mediaState': mediaState,
+    'mediaVersion': mediaVersion,
+    'mediaChanged': mediaChanged,
+    'lifecycleState': lifecycleState,
+    'callVersion': callVersion,
+    'promotedToActive': promotedToActive,
+    'activeAt': '2026-06-25T12:00:00.000Z',
+    'reconnectDeadlineAt': null,
+    'idempotentReplay': false,
+  };
+}
+
+Map<String, Object?> _leaseResult({
+  String callId = 'call_a',
+  int heartbeatVersion = 1,
+  String lifecycleState = 'active',
+  int callVersion = 3,
+}) {
+  return <String, Object?>{
+    'callId': callId,
+    'participantUid': 'caller',
+    'heartbeatVersion': heartbeatVersion,
+    'lastHeartbeatAt': '2026-06-25T12:00:00.000Z',
+    'leaseExpiresAt': '2026-06-25T12:01:00.000Z',
+    'lifecycleState': lifecycleState,
+    'callVersion': callVersion,
+    'idempotentReplay': false,
   };
 }

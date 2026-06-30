@@ -20,6 +20,44 @@ void main() {
     expect(recorder.calls, isEmpty);
   });
 
+  test('each Firebase callable method returns the injected callable result',
+      () async {
+    final transport = FirebaseCallableCallV2Api(
+      invoke: (functionName, _) async => <String, Object?>{
+        'route': functionName,
+      },
+    );
+
+    expect(
+      await transport.startCallV2(<String, Object?>{}),
+      <String, Object?>{'route': 'startCallV2'},
+    );
+    expect(
+      await transport.acceptCallV2(<String, Object?>{}),
+      <String, Object?>{'route': 'acceptCallV2'},
+    );
+    expect(
+      await transport.declineCallV2(<String, Object?>{}),
+      <String, Object?>{'route': 'declineCallV2'},
+    );
+    expect(
+      await transport.cancelCallV2(<String, Object?>{}),
+      <String, Object?>{'route': 'cancelCallV2'},
+    );
+    expect(
+      await transport.endCallV2(<String, Object?>{}),
+      <String, Object?>{'route': 'endCallV2'},
+    );
+    expect(
+      await transport.reportParticipantMediaV2(<String, Object?>{}),
+      <String, Object?>{'route': 'reportParticipantMediaV2'},
+    );
+    expect(
+      await transport.renewActiveCallLeaseV2(<String, Object?>{}),
+      <String, Object?>{'route': 'renewActiveCallLeaseV2'},
+    );
+  });
+
   test('routes every command to the exact callable name', () async {
     final recorder = _InvocationRecorder();
     final api = CallV2Api(FirebaseCallableCallV2Api(invoke: recorder.invoke));
@@ -247,10 +285,22 @@ void main() {
       localParticipantRole: () => CallParticipantRole.callee,
     );
 
-    await harness.startCall(_startRequest());
-    await harness.acceptCall(_lifecycleRequest());
-    await harness.reportMedia(_mediaRequest());
-    await harness.renewLease(_leaseRequest());
+    await expectLater(
+      harness.startCall(_startRequest()),
+      throwsA(isA<CallV2ClientError>()),
+    );
+    await expectLater(
+      harness.acceptCall(_lifecycleRequest()),
+      throwsA(isA<CallV2ClientError>()),
+    );
+    await expectLater(
+      harness.reportMedia(_mediaRequest()),
+      throwsA(isA<CallV2ClientError>()),
+    );
+    await expectLater(
+      harness.renewLease(_leaseRequest()),
+      throwsA(isA<CallV2ClientError>()),
+    );
 
     expect(recorder.calls, isEmpty);
   });
@@ -283,7 +333,7 @@ void main() {
     });
 
     recorder.release('acceptCallV2');
-    await Future.wait(<Future<void>>[first, second]);
+    await Future.wait(<Future<Object?>>[first, second]);
   });
 
   test('uses injected fake callable only and initializes no Firebase app', () {
@@ -379,7 +429,7 @@ class _InvocationRecorder {
   Future<Object?> invoke(String functionName, Map<String, Object?> data) async {
     calls.add(_InvocationCall(functionName, Map<String, Object?>.of(data)));
     await _held[functionName]?.future;
-    return null;
+    return _resultFor(functionName);
   }
 }
 
@@ -395,30 +445,116 @@ class _InvocationCall {
 
 class _ControlledErrorTransport implements CallableCallV2Api {
   @override
-  Future<void> acceptCallV2(Map<String, Object?> request) {
+  Future<Object?> acceptCallV2(Map<String, Object?> request) {
     throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
   }
 
   @override
-  Future<void> cancelCallV2(Map<String, Object?> request) async {}
+  Future<Object?> cancelCallV2(Map<String, Object?> request) async =>
+      _lifecycleResult('cancelled');
 
   @override
-  Future<void> declineCallV2(Map<String, Object?> request) async {}
+  Future<Object?> declineCallV2(Map<String, Object?> request) async =>
+      _lifecycleResult('declined');
 
   @override
-  Future<void> endCallV2(Map<String, Object?> request) async {}
+  Future<Object?> endCallV2(Map<String, Object?> request) async =>
+      _lifecycleResult('completed');
 
   @override
-  Future<void> renewActiveCallLeaseV2(Map<String, Object?> request) async {}
+  Future<Object?> renewActiveCallLeaseV2(Map<String, Object?> request) async =>
+      _leaseResult();
 
   @override
-  Future<void> reportParticipantMediaV2(Map<String, Object?> request) async {}
+  Future<Object?> reportParticipantMediaV2(
+          Map<String, Object?> request) async =>
+      _mediaResult();
 
   @override
-  Future<void> startCallV2(Map<String, Object?> request) async {}
+  Future<Object?> startCallV2(Map<String, Object?> request) async =>
+      _startResult();
 }
 
 class _TestFirebaseFunctionsException extends FirebaseFunctionsException {
   _TestFirebaseFunctionsException(String code)
       : super(message: 'redacted', code: code);
+}
+
+Object? _resultFor(String functionName) {
+  switch (functionName) {
+    case 'startCallV2':
+      return _startResult();
+    case 'acceptCallV2':
+      return _lifecycleResult('accepted');
+    case 'declineCallV2':
+      return _lifecycleResult('declined');
+    case 'cancelCallV2':
+      return _lifecycleResult('cancelled');
+    case 'endCallV2':
+      return _lifecycleResult('completed');
+    case 'reportParticipantMediaV2':
+      return _mediaResult();
+    case 'renewActiveCallLeaseV2':
+      return _leaseResult();
+    default:
+      return null;
+  }
+}
+
+Map<String, Object?> _startResult() {
+  return <String, Object?>{
+    'callId': 'server_call',
+    'lifecycleState': 'ringing',
+    'version': 1,
+    'ringingDeadlineAt': '2026-06-25T12:01:00.000Z',
+    'idempotentReplay': false,
+  };
+}
+
+Map<String, Object?> _lifecycleResult(String lifecycleState) {
+  final terminal = <String>{
+    'completed',
+    'declined',
+    'cancelled',
+    'missed',
+    'failed',
+  }.contains(lifecycleState);
+  return <String, Object?>{
+    'callId': 'call_a',
+    'lifecycleState': lifecycleState,
+    'version': 2,
+    if (terminal) 'terminal': true,
+    if (terminal) 'endedAt': '2026-06-25T12:05:00.000Z',
+    if (terminal) 'endReason': 'completed',
+    'idempotentReplay': false,
+  };
+}
+
+Map<String, Object?> _mediaResult() {
+  return <String, Object?>{
+    'callId': 'call_a',
+    'participantUid': 'caller',
+    'mediaState': 'joined',
+    'mediaVersion': 1,
+    'mediaChanged': true,
+    'lifecycleState': 'active',
+    'callVersion': 3,
+    'promotedToActive': true,
+    'activeAt': '2026-06-25T12:00:00.000Z',
+    'reconnectDeadlineAt': null,
+    'idempotentReplay': false,
+  };
+}
+
+Map<String, Object?> _leaseResult() {
+  return <String, Object?>{
+    'callId': 'call_a',
+    'participantUid': 'caller',
+    'heartbeatVersion': 2,
+    'lastHeartbeatAt': '2026-06-25T12:00:00.000Z',
+    'leaseExpiresAt': '2026-06-25T12:01:00.000Z',
+    'lifecycleState': 'active',
+    'callVersion': 3,
+    'idempotentReplay': false,
+  };
 }
