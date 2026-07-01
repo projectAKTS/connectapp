@@ -9,7 +9,18 @@ import 'call_v2_rtc_config_provider.dart';
 
 typedef CallV2Clock = DateTime Function();
 
-class CallV2RtcConfigResolver {
+abstract interface class CallV2RtcConfigResolving {
+  Future<CallV2ResolvedRtcConfig> resolve({
+    required bool isVideo,
+    required String idempotencyKey,
+  });
+
+  void invalidate();
+
+  void handleAuthoritativeSnapshot(CallSnapshot snapshot);
+}
+
+class CallV2RtcConfigResolver implements CallV2RtcConfigResolving {
   CallV2RtcConfigResolver({
     required CallV2FeatureGate featureGate,
     required CallV2RtcConfigProvider provider,
@@ -34,6 +45,7 @@ class CallV2RtcConfigResolver {
   Object? _inFlightOperationToken;
   Future<CallV2ResolvedRtcConfig>? _inFlightFuture;
 
+  @override
   Future<CallV2ResolvedRtcConfig> resolve({
     required bool isVideo,
     required String idempotencyKey,
@@ -91,6 +103,7 @@ class CallV2RtcConfigResolver {
     });
   }
 
+  @override
   void invalidate() {
     _generation += 1;
     _cachedConfig = null;
@@ -99,6 +112,7 @@ class CallV2RtcConfigResolver {
     _inFlightFuture = null;
   }
 
+  @override
   void handleAuthoritativeSnapshot(CallSnapshot snapshot) {
     final cached = _cachedConfig;
     final inFlight = _inFlightIdentity;

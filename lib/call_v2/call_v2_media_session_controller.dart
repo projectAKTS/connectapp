@@ -62,7 +62,19 @@ class CallV2MediaSessionState {
   }
 }
 
-class CallV2MediaSessionController {
+abstract interface class CallV2MediaSessionControlling {
+  Future<void> start({
+    required CallV2RtcSessionConfig config,
+    required String preparingIdempotencyKey,
+    required String joiningIdempotencyKey,
+  });
+
+  Future<void> handleAuthoritativeSnapshot(CallSnapshot snapshot);
+
+  Future<void> leave({required String idempotencyKey});
+}
+
+class CallV2MediaSessionController implements CallV2MediaSessionControlling {
   CallV2MediaSessionController({
     required CallV2FeatureGate featureGate,
     required CallV2RtcAdapter rtcAdapter,
@@ -93,6 +105,7 @@ class CallV2MediaSessionController {
 
   CallV2MediaSessionState get state => _state;
 
+  @override
   Future<void> start({
     required CallV2RtcSessionConfig config,
     required String preparingIdempotencyKey,
@@ -145,6 +158,7 @@ class CallV2MediaSessionController {
     });
   }
 
+  @override
   Future<void> handleAuthoritativeSnapshot(CallSnapshot snapshot) async {
     if (!_featureGate.enabled) return;
     final config = _config;
@@ -156,6 +170,7 @@ class CallV2MediaSessionController {
     }
   }
 
+  @override
   Future<void> leave({required String idempotencyKey}) {
     if (!_featureGate.enabled) return Future<void>.value();
     _validateIdentifier(idempotencyKey);
