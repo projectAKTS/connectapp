@@ -299,6 +299,205 @@ void main() {
     expect(orchestrator.state.status, CallV2MediaOrchestrationStatus.active);
   });
 
+  test(
+      'different nonterminal call during resolution is rejected before forward',
+      () async {
+    final resolver = _FakeResolver()..heldResolve = Completer<void>();
+    final media = _FakeMediaController();
+    final orchestrator = _orchestrator(resolver: resolver, media: media);
+
+    final start = orchestrator.handleAuthoritativeSnapshot(
+      _snapshot(lifecycle: CallLifecycle.accepted),
+      isVideo: true,
+    );
+    await _pump();
+
+    await expectLater(
+      orchestrator.handleAuthoritativeSnapshot(
+        _snapshot(callId: 'call_b', lifecycle: CallLifecycle.active),
+        isVideo: true,
+      ),
+      throwsA(_clientError(CallV2ClientErrorCode.rejected)),
+    );
+
+    expect(resolver.handledCallIds, <String>['call_a']);
+    expect(resolver.invalidateCount, 0);
+    expect(media.handledCallIds, <String>['call_a']);
+
+    resolver.heldResolve!.complete();
+    await start;
+
+    expect(media.startCount, 1);
+    expect(orchestrator.state.callId, 'call_a');
+    expect(orchestrator.state.status, CallV2MediaOrchestrationStatus.active);
+  });
+
+  test('different terminal call during resolution is ignored before forward',
+      () async {
+    final resolver = _FakeResolver()..heldResolve = Completer<void>();
+    final media = _FakeMediaController();
+    final orchestrator = _orchestrator(resolver: resolver, media: media);
+
+    final start = orchestrator.handleAuthoritativeSnapshot(
+      _snapshot(lifecycle: CallLifecycle.accepted),
+      isVideo: true,
+    );
+    await _pump();
+
+    await orchestrator.handleAuthoritativeSnapshot(
+      _snapshot(callId: 'call_b', lifecycle: CallLifecycle.completed),
+      isVideo: true,
+    );
+
+    expect(resolver.handledCallIds, <String>['call_a']);
+    expect(resolver.invalidateCount, 0);
+    expect(media.handledCallIds, <String>['call_a']);
+
+    resolver.heldResolve!.complete();
+    await start;
+
+    expect(media.startCount, 1);
+    expect(orchestrator.state.callId, 'call_a');
+    expect(orchestrator.state.status, CallV2MediaOrchestrationStatus.active);
+  });
+
+  test('different call after active is rejected before dependency forwarding',
+      () async {
+    final resolver = _FakeResolver();
+    final media = _FakeMediaController();
+    final orchestrator = _orchestrator(resolver: resolver, media: media);
+
+    await orchestrator.handleAuthoritativeSnapshot(
+      _snapshot(lifecycle: CallLifecycle.accepted),
+      isVideo: true,
+    );
+
+    await expectLater(
+      orchestrator.handleAuthoritativeSnapshot(
+        _snapshot(callId: 'call_b', lifecycle: CallLifecycle.active),
+        isVideo: true,
+      ),
+      throwsA(_clientError(CallV2ClientErrorCode.rejected)),
+    );
+
+    expect(resolver.handledCallIds, <String>['call_a']);
+    expect(resolver.invalidateCount, 0);
+    expect(media.handledCallIds, <String>['call_a']);
+    expect(media.leaveCount, 0);
+    expect(orchestrator.state.callId, 'call_a');
+    expect(orchestrator.state.status, CallV2MediaOrchestrationStatus.active);
+  });
+
+  test('different terminal call after active is ignored before forwarding',
+      () async {
+    final resolver = _FakeResolver();
+    final media = _FakeMediaController();
+    final orchestrator = _orchestrator(resolver: resolver, media: media);
+
+    await orchestrator.handleAuthoritativeSnapshot(
+      _snapshot(lifecycle: CallLifecycle.accepted),
+      isVideo: true,
+    );
+    await orchestrator.handleAuthoritativeSnapshot(
+      _snapshot(callId: 'call_b', lifecycle: CallLifecycle.completed),
+      isVideo: true,
+    );
+
+    expect(resolver.handledCallIds, <String>['call_a']);
+    expect(resolver.invalidateCount, 0);
+    expect(media.handledCallIds, <String>['call_a']);
+    expect(media.leaveCount, 0);
+    expect(orchestrator.state.callId, 'call_a');
+    expect(orchestrator.state.status, CallV2MediaOrchestrationStatus.active);
+  });
+
+  test('same-call conflicting video mode rejects before forwarding', () async {
+    final resolver = _FakeResolver()..heldResolve = Completer<void>();
+    final media = _FakeMediaController();
+    final orchestrator = _orchestrator(resolver: resolver, media: media);
+
+    final start = orchestrator.handleAuthoritativeSnapshot(
+      _snapshot(lifecycle: CallLifecycle.accepted),
+      isVideo: true,
+    );
+    await _pump();
+
+    await expectLater(
+      orchestrator.handleAuthoritativeSnapshot(
+        _snapshot(lifecycle: CallLifecycle.active, version: 8),
+        isVideo: false,
+      ),
+      throwsA(_clientError(CallV2ClientErrorCode.rejected)),
+    );
+
+    expect(resolver.handledCallIds, <String>['call_a']);
+    expect(media.handledCallIds, <String>['call_a']);
+
+    resolver.heldResolve!.complete();
+    await start;
+
+    expect(media.startCount, 1);
+    expect(orchestrator.state.callId, 'call_a');
+    expect(orchestrator.state.isVideo, isTrue);
+  });
+
+  test('same-call terminal cleanup ignores incoming video-mode mismatch',
+      () async {
+    final resolver = _FakeResolver();
+    final media = _FakeMediaController();
+    final orchestrator = _orchestrator(resolver: resolver, media: media);
+
+    await orchestrator.handleAuthoritativeSnapshot(
+      _snapshot(lifecycle: CallLifecycle.accepted),
+      isVideo: true,
+    );
+    await orchestrator.handleAuthoritativeSnapshot(
+      _snapshot(lifecycle: CallLifecycle.completed, version: 8),
+      isVideo: false,
+    );
+
+    expect(resolver.handledCallIds, <String>['call_a', 'call_a']);
+    expect(media.handledCallIds, <String>['call_a', 'call_a']);
+    expect(media.leaveCount, 1);
+    expect(orchestrator.state.status, CallV2MediaOrchestrationStatus.stopped);
+  });
+
+  test('rejected different-call snapshot cannot replace harness binding',
+      () async {
+    final resolver = _HarnessAwareResolver()..heldResolve = Completer<void>();
+    final media = _HarnessAwareMediaController(resolver);
+    final orchestrator = CallV2MediaOrchestrator(
+      featureGate: const CallV2FeatureGate(enabled: true),
+      configResolver: resolver,
+      mediaController: media,
+      idempotencyKeyFactory: (callId, purpose) => '${callId}_${purpose.name}',
+    );
+
+    final start = orchestrator.handleAuthoritativeSnapshot(
+      _snapshot(lifecycle: CallLifecycle.accepted),
+      isVideo: true,
+    );
+    await _pump();
+
+    await expectLater(
+      orchestrator.handleAuthoritativeSnapshot(
+        _snapshot(callId: 'call_b', lifecycle: CallLifecycle.active),
+        isVideo: true,
+      ),
+      throwsA(_clientError(CallV2ClientErrorCode.rejected)),
+    );
+
+    expect(resolver.authoritativeCallId, 'call_a');
+    expect(media.authoritativeCallId, 'call_a');
+
+    resolver.heldResolve!.complete();
+    await start;
+
+    expect(media.startCount, 1);
+    expect(orchestrator.state.callId, 'call_a');
+    expect(orchestrator.state.status, CallV2MediaOrchestrationStatus.active);
+  });
+
   test('fresh different call works after terminal cleanup', () async {
     final media = _FakeMediaController();
     final orchestrator = _orchestrator(media: media);
@@ -782,6 +981,10 @@ class _FakeResolver implements CallV2RtcConfigResolving {
   Completer<void>? heldResolve;
   Object? nextResolveError;
 
+  List<String> get handledCallIds {
+    return snapshots.map((snapshot) => snapshot.callId).toList();
+  }
+
   @override
   Future<CallV2ResolvedRtcConfig> resolve({
     required bool isVideo,
@@ -822,6 +1025,10 @@ class _FakeMediaController implements CallV2MediaSessionControlling {
   Object? nextLeaveError;
   CallV2RtcSessionConfig? lastConfig;
 
+  List<String> get handledCallIds {
+    return snapshots.map((snapshot) => snapshot.callId).toList();
+  }
+
   @override
   Future<void> start({
     required CallV2RtcSessionConfig config,
@@ -851,5 +1058,65 @@ class _FakeMediaController implements CallV2MediaSessionControlling {
     final error = nextLeaveError;
     nextLeaveError = null;
     if (error != null) throw error;
+  }
+}
+
+class _HarnessAwareResolver implements CallV2RtcConfigResolving {
+  int invalidateCount = 0;
+  Completer<void>? heldResolve;
+  String? authoritativeCallId;
+
+  @override
+  Future<CallV2ResolvedRtcConfig> resolve({
+    required bool isVideo,
+    required String idempotencyKey,
+  }) async {
+    await heldResolve?.future;
+    if (authoritativeCallId != 'call_a') {
+      throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
+    }
+    return _resolved(isVideo: isVideo);
+  }
+
+  @override
+  void invalidate() {
+    invalidateCount += 1;
+  }
+
+  @override
+  void handleAuthoritativeSnapshot(CallSnapshot snapshot) {
+    authoritativeCallId = snapshot.callId;
+    if (snapshot.lifecycle.isTerminal) invalidate();
+  }
+}
+
+class _HarnessAwareMediaController implements CallV2MediaSessionControlling {
+  _HarnessAwareMediaController(this._resolver);
+
+  final _HarnessAwareResolver _resolver;
+  int startCount = 0;
+  int leaveCount = 0;
+  String? authoritativeCallId;
+
+  @override
+  Future<void> start({
+    required CallV2RtcSessionConfig config,
+    required String preparingIdempotencyKey,
+    required String joiningIdempotencyKey,
+  }) async {
+    if (_resolver.authoritativeCallId != config.callId) {
+      throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
+    }
+    startCount += 1;
+  }
+
+  @override
+  Future<void> handleAuthoritativeSnapshot(CallSnapshot snapshot) async {
+    authoritativeCallId = snapshot.callId;
+  }
+
+  @override
+  Future<void> leave({required String idempotencyKey}) async {
+    leaveCount += 1;
   }
 }

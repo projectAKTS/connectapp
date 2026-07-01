@@ -113,8 +113,21 @@ class CallV2MediaOrchestrator {
       }
 
       _validateSnapshot(snapshot);
-      _forwardSnapshot(snapshot);
+      final activeIdentity = _activeIdentity;
+      if (activeIdentity != null) {
+        if (snapshot.callId != activeIdentity.callId) {
+          if (snapshot.lifecycle.isTerminal) {
+            return null;
+          }
+          throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
+        }
+        if (!snapshot.lifecycle.isTerminal &&
+            isVideo != activeIdentity.isVideo) {
+          throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
+        }
+      }
 
+      _forwardSnapshot(snapshot);
       if (snapshot.lifecycle.isTerminal) {
         return _handleTerminal(snapshot);
       }
@@ -123,7 +136,6 @@ class CallV2MediaOrchestrator {
         callId: snapshot.callId,
         isVideo: isVideo,
       );
-      final activeIdentity = _activeIdentity;
       if (activeIdentity != null && activeIdentity != incomingIdentity) {
         throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
       }
