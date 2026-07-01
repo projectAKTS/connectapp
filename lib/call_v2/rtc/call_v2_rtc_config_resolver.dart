@@ -31,6 +31,7 @@ class CallV2RtcConfigResolver {
   int _generation = 0;
   CallV2ResolvedRtcConfig? _cachedConfig;
   _ResolutionIdentity? _inFlightIdentity;
+  Object? _inFlightOperationToken;
   Future<CallV2ResolvedRtcConfig>? _inFlightFuture;
 
   Future<CallV2ResolvedRtcConfig> resolve({
@@ -76,8 +77,15 @@ class CallV2RtcConfigResolver {
         isVideo: identity.isVideo,
         idempotencyKey: identity.idempotencyKey,
       );
+      final operationToken = Object();
       _inFlightIdentity = identity;
-      final fresh = _resolveFresh(generation, identity, request);
+      _inFlightOperationToken = operationToken;
+      final fresh = _resolveFresh(
+        generation,
+        identity,
+        operationToken,
+        request,
+      );
       _inFlightFuture = fresh;
       return fresh;
     });
@@ -87,6 +95,7 @@ class CallV2RtcConfigResolver {
     _generation += 1;
     _cachedConfig = null;
     _inFlightIdentity = null;
+    _inFlightOperationToken = null;
     _inFlightFuture = null;
   }
 
@@ -103,6 +112,7 @@ class CallV2RtcConfigResolver {
   Future<CallV2ResolvedRtcConfig> _resolveFresh(
     int generation,
     _ResolutionIdentity identity,
+    Object operationToken,
     CallV2RtcConfigRequest request,
   ) async {
     try {
@@ -114,10 +124,10 @@ class CallV2RtcConfigResolver {
       } catch (_) {
         throw const CallV2ClientError(CallV2ClientErrorCode.unavailable);
       }
-      _requireCurrentGeneration(generation, identity);
+      _requireCurrentGeneration(generation, identity, operationToken);
       _requireCurrentSnapshot(identity);
       final resolved = _parseResolvedConfig(raw, identity);
-      _requireCurrentGeneration(generation, identity);
+      _requireCurrentGeneration(generation, identity, operationToken);
       _cachedConfig = resolved;
       return resolved;
     } on CallV2ClientError {
@@ -125,7 +135,8 @@ class CallV2RtcConfigResolver {
     } catch (_) {
       throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
     } finally {
-      if (_inFlightIdentity == identity) {
+      if (identical(_inFlightOperationToken, operationToken)) {
+        _inFlightOperationToken = null;
         _inFlightIdentity = null;
         _inFlightFuture = null;
       }
@@ -135,8 +146,11 @@ class CallV2RtcConfigResolver {
   void _requireCurrentGeneration(
     int generation,
     _ResolutionIdentity identity,
+    Object operationToken,
   ) {
-    if (generation != _generation || _inFlightIdentity != identity) {
+    if (generation != _generation ||
+        _inFlightIdentity != identity ||
+        !identical(_inFlightOperationToken, operationToken)) {
       throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
     }
   }

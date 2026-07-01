@@ -612,6 +612,201 @@ void main() {
     expect(provider.requests, hasLength(2));
   });
 
+  test('stale same-identity cleanup cannot clear newer in-flight request',
+      () async {
+    final provider = _FakeRtcConfigProvider(gated: true);
+    final resolver = _readyResolver(provider: provider, clock: () => now);
+
+    final oldFuture = _resolve(resolver);
+    await _pump();
+    resolver.invalidate();
+    final newFuture = _resolve(resolver);
+    await _pump();
+
+    expect(provider.requests, hasLength(2));
+
+    provider.completeGate(
+      0,
+      _validResponse(now, channelName: 'old_channel', token: 'old_secret'),
+    );
+    await expectLater(
+      oldFuture,
+      throwsA(isA<CallV2ClientError>().having(
+        (error) => error.toString(),
+        'toString',
+        isNot(contains('old_secret')),
+      )),
+    );
+
+    final duplicate = _resolve(resolver);
+    await _pump();
+    expect(provider.requests, hasLength(2));
+
+    provider.completeGate(1, _validResponse(now, channelName: 'new_channel'));
+    final results = await Future.wait(<Future<Object?>>[newFuture, duplicate]);
+    expect(identical(results[0], results[1]), isTrue);
+
+    final cached = await _resolve(resolver);
+    expect((cached).channelName, 'new_channel');
+    expect(provider.requests, hasLength(2));
+  });
+
+  test('old same-identity completion after new cache cannot overwrite cache',
+      () async {
+    final provider = _FakeRtcConfigProvider(gated: true);
+    final resolver = _readyResolver(provider: provider, clock: () => now);
+
+    final oldFuture = _resolve(resolver);
+    await _pump();
+    resolver.invalidate();
+    final newFuture = _resolve(resolver);
+    await _pump();
+    provider.completeGate(1, _validResponse(now, channelName: 'new_channel'));
+    final newer = await newFuture;
+
+    provider.completeGate(
+      0,
+      _validResponse(now, channelName: 'old_channel', token: 'old_secret'),
+    );
+
+    await expectLater(
+      oldFuture,
+      throwsA(_clientError(CallV2ClientErrorCode.rejected)),
+    );
+    final cached = await _resolve(resolver);
+    expect(newer.channelName, 'new_channel');
+    expect(cached.channelName, 'new_channel');
+    expect(provider.requests, hasLength(2));
+  });
+
+  test('old different-identity cleanup cannot clear newer in-flight request',
+      () async {
+    final provider = _FakeRtcConfigProvider(gated: true);
+    final resolver = _readyResolver(provider: provider, clock: () => now);
+
+    final oldFuture = _resolve(resolver);
+    await _pump();
+    resolver.invalidate();
+    final newFuture = resolver.resolve(
+      isVideo: false,
+      idempotencyKey: 'audio_key',
+    );
+    await _pump();
+
+    provider.completeGate(0, _validResponse(now, token: 'old_secret'));
+    await expectLater(
+      oldFuture,
+      throwsA(_clientError(CallV2ClientErrorCode.rejected)),
+    );
+
+    final duplicate = resolver.resolve(
+      isVideo: false,
+      idempotencyKey: 'audio_key',
+    );
+    await _pump();
+    expect(provider.requests, hasLength(2));
+
+    provider.completeGate(1, _validResponse(now, isVideo: false));
+    final results = await Future.wait(<Future<Object?>>[newFuture, duplicate]);
+    expect(identical(results[0], results[1]), isTrue);
+    expect(provider.requests, hasLength(2));
+  });
+
+  test('terminal invalidation followed by same-identity retry is safe',
+      () async {
+    final provider = _FakeRtcConfigProvider(gated: true);
+    final resolver = _readyResolver(provider: provider, clock: () => now);
+
+    final oldFuture = _resolve(resolver);
+    await _pump();
+    resolver.handleAuthoritativeSnapshot(
+      _snapshot(lifecycle: CallLifecycle.completed, version: 8),
+    );
+    final newFuture = _resolve(resolver);
+    await _pump();
+
+    provider.completeGate(0, _validResponse(now, token: 'old_secret'));
+    await expectLater(
+      oldFuture,
+      throwsA(_clientError(CallV2ClientErrorCode.rejected)),
+    );
+
+    final duplicate = _resolve(resolver);
+    await _pump();
+    expect(provider.requests, hasLength(2));
+
+    provider.completeGate(
+        1, _validResponse(now, channelName: 'after_terminal'));
+    final results = await Future.wait(<Future<Object?>>[newFuture, duplicate]);
+    expect(identical(results[0], results[1]), isTrue);
+    expect(
+        (results[0]! as CallV2ResolvedRtcConfig).channelName, 'after_terminal');
+  });
+
+  test('repeated manual invalidation preserves newest operation ownership',
+      () async {
+    final provider = _FakeRtcConfigProvider(gated: true);
+    final resolver = _readyResolver(provider: provider, clock: () => now);
+
+    final oldFuture = _resolve(resolver);
+    await _pump();
+    resolver.invalidate();
+    resolver.invalidate();
+    final newFuture = _resolve(resolver);
+    await _pump();
+
+    provider.completeGate(0, _validResponse(now, token: 'old_secret'));
+    await expectLater(
+      oldFuture,
+      throwsA(_clientError(CallV2ClientErrorCode.rejected)),
+    );
+
+    final duplicate = _resolve(resolver);
+    await _pump();
+    expect(provider.requests, hasLength(2));
+
+    provider.completeGate(
+      1,
+      _validResponse(now, channelName: 'after_repeated_invalidate'),
+    );
+    final results = await Future.wait(<Future<Object?>>[newFuture, duplicate]);
+    expect(identical(results[0], results[1]), isTrue);
+    expect(
+      (results[0]! as CallV2ResolvedRtcConfig).channelName,
+      'after_repeated_invalidate',
+    );
+  });
+
+  test('old provider failure cannot clear newer in-flight request', () async {
+    final provider = _FakeRtcConfigProvider(gated: true);
+    final resolver = _readyResolver(provider: provider, clock: () => now);
+
+    final oldFuture = _resolve(resolver);
+    await _pump();
+    resolver.invalidate();
+    final newFuture = _resolve(resolver);
+    await _pump();
+
+    provider.failGate(0, StateError('old raw secret'));
+    await expectLater(
+      oldFuture,
+      throwsA(isA<CallV2ClientError>().having(
+        (error) => error.toString(),
+        'toString',
+        isNot(contains('old raw secret')),
+      )),
+    );
+
+    final duplicate = _resolve(resolver);
+    await _pump();
+    expect(provider.requests, hasLength(2));
+
+    provider.completeGate(1, _validResponse(now, channelName: 'new_channel'));
+    final results = await Future.wait(<Future<Object?>>[newFuture, duplicate]);
+    expect(identical(results[0], results[1]), isTrue);
+    expect(provider.requests, hasLength(2));
+  });
+
   test('toSessionConfig maps only adapter fields', () async {
     final provider = _FakeRtcConfigProvider(
       nextResponse: _validResponse(
@@ -836,6 +1031,10 @@ class _FakeRtcConfigProvider implements CallV2RtcConfigProvider {
 
   void completeGate(int index, Object? value) {
     gates[index].complete(value);
+  }
+
+  void failGate(int index, Object error) {
+    gates[index].completeError(error);
   }
 }
 
