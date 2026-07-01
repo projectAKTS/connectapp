@@ -24,7 +24,18 @@ enum CallV2SubscriptionStatus {
   failed,
 }
 
-class CallV2FirestoreSubscriptionCoordinator {
+abstract interface class CallV2FirestoreSubscriptionCoordinating {
+  Future<void> start({
+    required String callId,
+    required String callerUid,
+    required String calleeUid,
+  });
+
+  Future<void> stop();
+}
+
+class CallV2FirestoreSubscriptionCoordinator
+    implements CallV2FirestoreSubscriptionCoordinating {
   CallV2FirestoreSubscriptionCoordinator({
     required CallV2FeatureGate featureGate,
     required CallV2Harness harness,
@@ -64,6 +75,7 @@ class CallV2FirestoreSubscriptionCoordinator {
 
   CallV2ClientErrorCode? get lastErrorCode => _lastErrorCode;
 
+  @override
   Future<void> start({
     required String callId,
     required String callerUid,
@@ -169,6 +181,7 @@ class CallV2FirestoreSubscriptionCoordinator {
     _startFuture = null;
   }
 
+  @override
   Future<void> stop() async {
     final stopGeneration = ++_generation;
     final startFuture = _startFuture;
