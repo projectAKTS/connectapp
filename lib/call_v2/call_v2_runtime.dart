@@ -8,6 +8,8 @@ import 'call_v2_firestore_subscription_coordinator.dart';
 import 'call_v2_harness.dart';
 import 'call_v2_media_orchestrator.dart';
 import 'call_v2_media_session_controller.dart';
+import 'call_v2_runtime_configuration.dart';
+import 'call_v2_runtime_configuration_validator.dart';
 import 'domain/call_snapshot.dart';
 import 'rtc/call_v2_rtc_adapter.dart';
 import 'rtc/call_v2_rtc_config_provider.dart';
@@ -387,6 +389,41 @@ CallV2Runtime createCallV2Runtime({
     configResolver: configResolver,
     mediaController: mediaController,
     mediaOrchestrator: mediaOrchestrator,
+  );
+}
+
+CallV2Runtime createValidatedCallV2Runtime({
+  required CallV2RuntimeConfiguration configuration,
+  required CallableCallV2Api api,
+  required CallV2CallDocumentStreamFactory callDocumentStream,
+  required CallV2ParticipantDocumentStreamFactory participantDocumentStream,
+  required CallV2RtcConfigProvider rtcConfigProvider,
+  required CallV2RtcAdapter rtcAdapter,
+  required String Function() localParticipantUid,
+  required CallParticipantRole Function() localParticipantRole,
+  required CallV2MediaReportKeyFactory mediaReportKeyFactory,
+  required String Function(
+    String callId,
+    CallV2MediaOrchestrationKeyPurpose purpose,
+  ) orchestrationKeyFactory,
+  CallV2RuntimeConfigurationValidator validator =
+      const CallV2RuntimeConfigurationValidator(),
+}) {
+  final validation = validator.validate(configuration);
+  if (!validation.isValid) {
+    throw const CallV2ClientError(CallV2ClientErrorCode.invalidRequest);
+  }
+  return createCallV2Runtime(
+    featureGate: CallV2FeatureGate(enabled: configuration.enabled),
+    api: api,
+    callDocumentStream: callDocumentStream,
+    participantDocumentStream: participantDocumentStream,
+    rtcConfigProvider: rtcConfigProvider,
+    rtcAdapter: rtcAdapter,
+    localParticipantUid: localParticipantUid,
+    localParticipantRole: localParticipantRole,
+    mediaReportKeyFactory: mediaReportKeyFactory,
+    orchestrationKeyFactory: orchestrationKeyFactory,
   );
 }
 
