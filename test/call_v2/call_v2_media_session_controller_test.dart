@@ -174,6 +174,24 @@ void main() {
     expect(rtc.disposeCount, 1);
   });
 
+  test('failed initialize still disposes when media_failed report fails',
+      () async {
+    final api = _FakeApi()..failMediaStates.add('media_failed');
+    final rtc = _FakeRtcAdapter()..failInitialize = true;
+    final harness = _readyHarness(api: api);
+    final controller = _controller(rtc: rtc, harness: harness);
+
+    await expectLater(
+      _start(controller),
+      throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
+    );
+
+    expect(controller.state.status, CallV2MediaSessionStatus.failed);
+    expect(controller.state.errorCode, CallV2ClientErrorCode.unavailable);
+    expect(api.mediaStates, contains('media_failed'));
+    expect(rtc.disposeCount, 1);
+  });
+
   test('failed join cleans up and reports media_failed', () async {
     final api = _FakeApi();
     final rtc = _FakeRtcAdapter()..failJoin = true;
@@ -188,6 +206,26 @@ void main() {
     expect(controller.state.status, CallV2MediaSessionStatus.failed);
     expect(api.mediaStates, contains('media_failed'));
     expect(rtc.disposeCount, 1);
+  });
+
+  test('failed join still leaves and disposes when media_failed report fails',
+      () async {
+    final api = _FakeApi()..failMediaStates.add('media_failed');
+    final rtc = _FakeRtcAdapter()..failJoin = true;
+    final harness = _readyHarness(api: api);
+    final controller = _controller(rtc: rtc, harness: harness);
+
+    await expectLater(
+      _start(controller),
+      throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
+    );
+
+    expect(controller.state.status, CallV2MediaSessionStatus.failed);
+    expect(rtc.leaveCount, 1);
+    expect(rtc.disposeCount, 1);
+    rtc.failJoin = false;
+    await _start(controller);
+    expect(controller.state.status, CallV2MediaSessionStatus.joining);
   });
 
   test('joined event updates local state and reports joined', () async {
@@ -256,6 +294,23 @@ void main() {
     expect(started.controller.state.status, CallV2MediaSessionStatus.failed);
     expect(started.controller.state.errorCode, CallV2ClientErrorCode.rejected);
     expect(started.api.mediaStates, contains('media_failed'));
+    expect(started.rtc.disposeCount, 1);
+  });
+
+  test('fatal error cleanup survives failed media_failed report', () async {
+    final started = await _joinedSession();
+    started.api.failMediaStates.add('media_failed');
+
+    started.rtc.emit(
+      const CallV2RtcFatalError(CallV2RtcErrorCategory.deviceUnavailable),
+    );
+    await _pump();
+
+    expect(started.controller.state.status, CallV2MediaSessionStatus.failed);
+    expect(started.controller.state.errorCode, CallV2ClientErrorCode.rejected);
+    expect(started.controller.state.errorCode.toString(),
+        isNot(contains('raw media report secret')));
+    expect(started.rtc.leaveCount, 1);
     expect(started.rtc.disposeCount, 1);
   });
 
@@ -337,6 +392,31 @@ void main() {
 
     expect(started.rtc.leaveCount, 1);
     expect(started.api.mediaStates, contains('left'));
+  });
+
+  test('leave report failure still leaves, disposes, and ends left', () async {
+    final started = await _joinedSession();
+    started.api.failMediaStates.add('left');
+
+    await expectLater(
+      started.controller.leave(idempotencyKey: 'leave_key'),
+      throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
+    );
+
+    expect(started.rtc.leaveCount, 1);
+    expect(started.rtc.disposeCount, 1);
+    expect(started.rtc.cancelCount, 1);
+    expect(started.controller.state.status, CallV2MediaSessionStatus.left);
+    expect(
+        started.controller.state.errorCode, CallV2ClientErrorCode.unavailable);
+    expect(started.api.mediaStates, contains('left'));
+
+    await started.controller.start(
+      config: _config(channelName: 'fresh_channel'),
+      preparingIdempotencyKey: 'fresh_prep',
+      joiningIdempotencyKey: 'fresh_join',
+    );
+    expect(started.controller.state.status, CallV2MediaSessionStatus.joining);
   });
 
   test('duplicate leave shares one future and dispose occurs once', () async {
@@ -473,6 +553,25 @@ void main() {
     expect(started.controller.state.status, CallV2MediaSessionStatus.left);
   });
 
+  test('terminal snapshot leave report failure still cleans up once', () async {
+    final started = await _joinedSession();
+    started.api.failMediaStates.add('left');
+
+    final terminal = started.controller.handleAuthoritativeSnapshot(
+      _snapshot(lifecycle: CallLifecycle.completed, version: 8),
+    );
+    started.rtc.emit(const CallV2RtcJoined());
+    await expectLater(
+      terminal,
+      throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
+    );
+    await _pump();
+
+    expect(started.controller.state.status, CallV2MediaSessionStatus.left);
+    expect(started.rtc.leaveCount, 1);
+    expect(started.rtc.disposeCount, 1);
+  });
+
   test('fatal error racing with leave cleans up once', () async {
     final started = await _joinedSession();
 
@@ -485,6 +584,28 @@ void main() {
 
     expect(started.rtc.leaveCount, 1);
     expect(started.rtc.disposeCount, 1);
+  });
+
+  test('fatal then leave with failed reports does not leak or stick', () async {
+    final started = await _joinedSession();
+    started.api.failMediaStates.addAll(<String>['media_failed', 'left']);
+
+    started.rtc.emit(
+      const CallV2RtcFatalError(CallV2RtcErrorCategory.permissionDenied),
+    );
+    await _pump();
+    await started.controller.leave(idempotencyKey: 'leave_key');
+
+    expect(started.rtc.leaveCount, 1);
+    expect(started.rtc.disposeCount, 1);
+    expect(started.controller.state.status, CallV2MediaSessionStatus.left);
+
+    await started.controller.start(
+      config: _config(channelName: 'fresh_after_fatal'),
+      preparingIdempotencyKey: 'fresh_prep',
+      joiningIdempotencyKey: 'fresh_join',
+    );
+    expect(started.controller.state.status, CallV2MediaSessionStatus.joining);
   });
 
   test('old generation events cannot mutate new session', () async {
@@ -504,6 +625,26 @@ void main() {
     expect(controller.state.status, CallV2MediaSessionStatus.joining);
   });
 
+  test('old generation cleanup does not overwrite fresh failed state',
+      () async {
+    final started = await _joinedSession();
+    started.api.failMediaStates.add('left');
+
+    await expectLater(
+      started.controller.leave(idempotencyKey: 'leave_key'),
+      throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
+    );
+    await started.controller.start(
+      config: _config(channelName: 'fresh_generation'),
+      preparingIdempotencyKey: 'fresh_prep',
+      joiningIdempotencyKey: 'fresh_join',
+    );
+    started.rtc.emitToSubscription(0, const CallV2RtcDisconnected());
+    await _pump();
+
+    expect(started.controller.state.status, CallV2MediaSessionStatus.joining);
+  });
+
   test('failed first session permits fresh start', () async {
     final rtc = _FakeRtcAdapter()..failInitialize = true;
     final harness = _readyHarness();
@@ -518,6 +659,48 @@ void main() {
 
     expect(controller.state.status, CallV2MediaSessionStatus.joining);
     expect(rtc.initializeCount, 2);
+  });
+
+  test('joined report failure is contained and later events continue',
+      () async {
+    final started = await _startWithSnapshot(CallLifecycle.accepted);
+    started.api.failMediaStates.add('joined');
+
+    started.rtc.emit(const CallV2RtcJoined());
+    await _pump();
+    expect(started.controller.state.status, CallV2MediaSessionStatus.joined);
+    expect(
+        started.controller.state.errorCode, CallV2ClientErrorCode.unavailable);
+    started.api.failMediaStates.remove('joined');
+    started.rtc.emit(const CallV2RtcReconnecting());
+    await _pump();
+
+    expect(
+        started.controller.state.status, CallV2MediaSessionStatus.reconnecting);
+    expect(started.controller.state.errorCode, isNull);
+    expect(started.harness.snapshot!.lifecycle, CallLifecycle.accepted);
+    expect(started.rtc.leaveCount, 0);
+    expect(started.rtc.disposeCount, 0);
+  });
+
+  test('reconnecting and disconnected report failures do not stop RTC events',
+      () async {
+    final started = await _joinedSession();
+    started.api.failMediaStates
+        .addAll(<String>['reconnecting', 'disconnected']);
+
+    started.rtc.emit(const CallV2RtcReconnecting());
+    await _pump();
+    started.rtc.emit(const CallV2RtcDisconnected());
+    await _pump();
+    started.api.failMediaStates.clear();
+    started.rtc.emit(const CallV2RtcReconnected());
+    await _pump();
+
+    expect(started.controller.state.status, CallV2MediaSessionStatus.joined);
+    expect(started.api.endRequests, isEmpty);
+    expect(started.rtc.leaveCount, 0);
+    expect(started.rtc.disposeCount, 0);
   });
 
   test(
@@ -727,6 +910,7 @@ class _FakeRtcAdapter implements CallV2RtcAdapter {
   int leaveCount = 0;
   int disposeCount = 0;
   int eventSubscriptionCount = 0;
+  int cancelCount = 0;
 
   @override
   Future<void> initialize(CallV2RtcSessionConfig config) async {
@@ -805,20 +989,28 @@ class _FakeRtcEventStream extends Stream<CallV2RtcEvent> {
     bool? cancelOnError,
   }) {
     _adapter.eventSubscriptionCount += 1;
-    final subscription = _FakeRtcSubscription(onData ?? (_) {});
+    final subscription = _FakeRtcSubscription(
+      handleEvent: onData ?? (_) {},
+      onCancel: () => _adapter.cancelCount += 1,
+    );
     _adapter._subscriptions.add(subscription);
     return subscription;
   }
 }
 
 class _FakeRtcSubscription implements StreamSubscription<CallV2RtcEvent> {
-  _FakeRtcSubscription(this.handleEvent);
+  _FakeRtcSubscription({
+    required this.handleEvent,
+    required this.onCancel,
+  });
 
   final void Function(CallV2RtcEvent event) handleEvent;
+  final void Function() onCancel;
   bool active = true;
 
   @override
   Future<void> cancel() async {
+    if (active) onCancel();
     active = false;
   }
 
@@ -850,6 +1042,7 @@ class _FakeApi implements CallableCallV2Api {
   final List<String> _log;
   final mediaRequests = <Map<String, Object?>>[];
   final endRequests = <Map<String, Object?>>[];
+  final failMediaStates = <String>{};
   String mediaResultsLifecycle = 'active';
   int _mediaVersion = 0;
 
@@ -864,6 +1057,10 @@ class _FakeApi implements CallableCallV2Api {
   Future<Object?> reportParticipantMediaV2(Map<String, Object?> request) async {
     mediaRequests.add(Map<String, Object?>.from(request));
     _log.add('report:${request['mediaState']}');
+    final mediaState = request['mediaState'];
+    if (mediaState is String && failMediaStates.contains(mediaState)) {
+      throw StateError('raw media report secret');
+    }
     _mediaVersion += 1;
     return <String, Object?>{
       'callId': request['callId'],

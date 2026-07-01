@@ -253,13 +253,19 @@ class CallV2MediaSessionController {
   }) async {
     final previousStatus = _state.status;
     _state = _state.copyWith(status: CallV2MediaSessionStatus.leaving);
+    CallV2ClientError? reportError;
     try {
-      await _eventSubscription?.cancel();
-      _eventSubscription = null;
+      await _safeCancelEventSubscription();
       if (_joinStarted || previousStatus != CallV2MediaSessionStatus.idle) {
         await _safeLeaveAdapter();
       }
-      await _reportLeft(generation, idempotencyKey);
+      try {
+        await _reportLeft(generation, idempotencyKey);
+      } catch (_) {
+        reportError =
+            const CallV2ClientError(CallV2ClientErrorCode.unavailable);
+      }
+    } finally {
       await _disposeOnce();
       if (_isCurrent(generation)) {
         _config = null;
@@ -267,15 +273,14 @@ class CallV2MediaSessionController {
         _state = _state.copyWith(
           status: CallV2MediaSessionStatus.left,
           remoteParticipantPresent: false,
-          clearError: true,
+          errorCode: reportError?.code,
+          clearError: reportError == null,
         );
-      }
-    } finally {
-      if (_isCurrent(generation)) {
         _leaveFuture = null;
         _startFuture = null;
       }
     }
+    if (reportError != null) throw reportError;
   }
 
   void _handleRtcEvent(int generation, CallV2RtcEvent event) {
@@ -326,8 +331,7 @@ class CallV2MediaSessionController {
   ) {
     if (!_isCurrent(generation) || _state.status == status) return;
     _state = _state.copyWith(status: status, clearError: true);
-    unawaited(
-        _reportMedia(generation, mediaState, _mediaReportKey(mediaState)));
+    unawaited(_reportTransitionSafely(generation, mediaState));
   }
 
   Future<void> _failSession(
@@ -339,9 +343,12 @@ class CallV2MediaSessionController {
       status: CallV2MediaSessionStatus.failed,
       errorCode: errorCode,
     );
-    await _eventSubscription?.cancel();
-    _eventSubscription = null;
-    await _reportMediaFailed(generation);
+    await _safeCancelEventSubscription();
+    try {
+      await _reportMediaFailed(generation);
+    } catch (_) {
+      // Failure cleanup preserves the original RTC/client error category.
+    }
     await _safeLeaveAdapter();
     await _disposeOnce();
     if (_isCurrent(generation)) {
@@ -349,6 +356,21 @@ class CallV2MediaSessionController {
       _joinStarted = false;
       _startFuture = null;
       _leaveFuture = null;
+    }
+  }
+
+  Future<void> _reportTransitionSafely(
+    int generation,
+    ParticipantMediaState mediaState,
+  ) async {
+    try {
+      await _reportMedia(generation, mediaState, _mediaReportKey(mediaState));
+    } catch (_) {
+      if (_isCurrent(generation)) {
+        _state = _state.copyWith(
+          errorCode: CallV2ClientErrorCode.unavailable,
+        );
+      }
     }
   }
 
@@ -395,6 +417,16 @@ class CallV2MediaSessionController {
       // Cleanup remains deterministic and does not expose provider details.
     }
     _joinStarted = false;
+  }
+
+  Future<void> _safeCancelEventSubscription() async {
+    final subscription = _eventSubscription;
+    _eventSubscription = null;
+    try {
+      await subscription?.cancel();
+    } catch (_) {
+      // Cleanup remains deterministic and does not expose provider details.
+    }
   }
 
   Future<void> _disposeOnce() async {
