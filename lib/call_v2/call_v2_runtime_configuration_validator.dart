@@ -29,13 +29,6 @@ class CallV2RuntimeConfigurationValidator {
         field: 'environment',
       ));
     }
-    if (!configuration.enabled &&
-        configuration.environment == CallV2Environment.production) {
-      issues.add(const CallV2RuntimeConfigurationIssue(
-        code: CallV2RuntimeConfigurationIssueCode.disabledProductionRuntime,
-        field: 'enabled',
-      ));
-    }
   }
 
   void _validateProvider(

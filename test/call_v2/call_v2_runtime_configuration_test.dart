@@ -26,24 +26,140 @@ void main() {
   });
 
   test('disabled local config with provider none is valid', () {
-    final validation = _validate(const CallV2RuntimeConfiguration(
-      enabled: false,
+    final validation = _validate(_disabledConfig(
       environment: CallV2Environment.local,
-      rtcProvider: CallV2RtcProviderKind.none,
-      rtcAppIdReference: '',
-      callCollectionName: 'calls',
-      participantSubcollectionName: 'participants',
-      rtcTokenMaxLifetime: Duration(minutes: 15),
-      minimumTokenRemainingValidity: Duration(seconds: 60),
     ));
 
     expect(validation.isValid, isTrue);
     expect(validation.issues, isEmpty);
   });
 
+  test('disabled development config with provider none is valid', () {
+    final validation = _validate(_disabledConfig(
+      environment: CallV2Environment.development,
+    ));
+
+    expect(validation.isValid, isTrue);
+    expect(validation.issues, isEmpty);
+  });
+
+  test('disabled staging config with provider none is valid', () {
+    final validation = _validate(_disabledConfig(
+      environment: CallV2Environment.staging,
+    ));
+
+    expect(validation.isValid, isTrue);
+    expect(validation.issues, isEmpty);
+  });
+
+  test('disabled production config with provider none is valid', () {
+    final validation = _validate(_disabledConfig(
+      environment: CallV2Environment.production,
+    ));
+
+    expect(validation.isValid, isTrue);
+    expect(validation.issues, isEmpty);
+  });
+
+  test('disabled production does not require RTC app reference', () {
+    final validation = _validate(_disabledConfig(
+      environment: CallV2Environment.production,
+      rtcAppIdReference: '',
+    ));
+
+    expect(validation.isValid, isTrue);
+    expect(
+      _codes(validation),
+      isNot(contains(
+        CallV2RuntimeConfigurationIssueCode.missingRtcAppIdReference,
+      )),
+    );
+  });
+
+  test('disabled production still rejects unsafe call collection names', () {
+    expect(
+      _codes(_validate(_disabledConfig(
+        environment: CallV2Environment.production,
+        callCollectionName: 'calls/v2',
+      ))),
+      contains(CallV2RuntimeConfigurationIssueCode.invalidCollectionName),
+    );
+  });
+
+  test('disabled production still rejects unsafe participant collections', () {
+    expect(
+      _codes(_validate(_disabledConfig(
+        environment: CallV2Environment.production,
+        participantSubcollectionName: 'participants/v2',
+      ))),
+      contains(
+        CallV2RuntimeConfigurationIssueCode.invalidParticipantCollectionName,
+      ),
+    );
+  });
+
+  test('disabled production still rejects invalid token lifetime', () {
+    expect(
+      _codes(_validate(_disabledConfig(
+        environment: CallV2Environment.production,
+        rtcTokenMaxLifetime: Duration.zero,
+      ))),
+      contains(CallV2RuntimeConfigurationIssueCode.invalidTokenLifetime),
+    );
+  });
+
+  test('disabled production still rejects invalid minimum validity', () {
+    expect(
+      _codes(_validate(_disabledConfig(
+        environment: CallV2Environment.production,
+        minimumTokenRemainingValidity: Duration.zero,
+      ))),
+      contains(
+        CallV2RuntimeConfigurationIssueCode.invalidMinimumRemainingValidity,
+      ),
+    );
+  });
+
+  test('validator never emits disabledProductionRuntime', () {
+    final validations = <CallV2RuntimeConfigurationValidation>[
+      for (final environment in CallV2Environment.values)
+        _validate(_disabledConfig(environment: environment)),
+      _validate(_disabledConfig(
+        environment: CallV2Environment.production,
+        callCollectionName: '',
+        participantSubcollectionName: '',
+        rtcTokenMaxLifetime: Duration.zero,
+        minimumTokenRemainingValidity: Duration.zero,
+      )),
+      _validate(_validConfig(
+        environment: CallV2Environment.production,
+        rtcProvider: CallV2RtcProviderKind.none,
+      )),
+    ];
+
+    for (final validation in validations) {
+      expect(
+        _codes(validation),
+        isNot(contains(
+          CallV2RuntimeConfigurationIssueCode.disabledProductionRuntime,
+        )),
+      );
+    }
+  });
+
   test('enabled config with provider none is invalid', () {
     expect(
       _codes(_validate(_validConfig(rtcProvider: CallV2RtcProviderKind.none))),
+      contains(CallV2RuntimeConfigurationIssueCode.missingRtcProvider),
+    );
+  });
+
+  test('enabled production config with provider none is invalid', () {
+    expect(
+      _codes(_validate(_validConfig(
+        environment: CallV2Environment.production,
+        rtcProvider: CallV2RtcProviderKind.none,
+      ))),
       contains(CallV2RuntimeConfigurationIssueCode.missingRtcProvider),
     );
   });
@@ -427,6 +543,27 @@ CallV2RuntimeConfiguration _validConfig({
 }) {
   return CallV2RuntimeConfiguration(
     enabled: enabled,
+    environment: environment,
+    rtcProvider: rtcProvider,
+    rtcAppIdReference: rtcAppIdReference,
+    callCollectionName: callCollectionName,
+    participantSubcollectionName: participantSubcollectionName,
+    rtcTokenMaxLifetime: rtcTokenMaxLifetime,
+    minimumTokenRemainingValidity: minimumTokenRemainingValidity,
+  );
+}
+
+CallV2RuntimeConfiguration _disabledConfig({
+  CallV2Environment environment = CallV2Environment.local,
+  CallV2RtcProviderKind rtcProvider = CallV2RtcProviderKind.none,
+  String rtcAppIdReference = '',
+  String callCollectionName = 'calls',
+  String participantSubcollectionName = 'participants',
+  Duration rtcTokenMaxLifetime = const Duration(minutes: 15),
+  Duration minimumTokenRemainingValidity = const Duration(seconds: 60),
+}) {
+  return _validConfig(
+    enabled: false,
     environment: environment,
     rtcProvider: rtcProvider,
     rtcAppIdReference: rtcAppIdReference,
