@@ -459,6 +459,281 @@ void main() {
   });
 
   group('dependency graph', () {
+    test('default manifest remains valid', () {
+      final result = _audit(configuration: _disabledConfig());
+
+      expect(
+          callV2Phase3ContractManifest.hasExactAcceptedDependencyGraph, isTrue);
+      expect(result.readyForAdapterImplementation, isTrue);
+    });
+
+    test('default allowed edge list is unmodifiable', () {
+      expect(
+        () => callV2Phase3ContractManifest.allowedDependencyEdges.add(
+          _runtimeToRtcAdapter,
+        ),
+        throwsUnsupportedError,
+      );
+    });
+
+    test('default forbidden edge list is unmodifiable', () {
+      expect(
+        () => callV2Phase3ContractManifest.forbiddenDependencyEdges.clear(),
+        throwsUnsupportedError,
+      );
+    });
+
+    test('custom manifest defensively copies allowed edges', () {
+      final source = List<CallV2ContractEdge>.of(callV2AllowedDependencyEdges);
+      final manifest = _manifest(allowedDependencyEdges: source);
+
+      expect(identical(manifest.allowedDependencyEdges, source), isFalse);
+      expect(manifest.allowedDependencyEdges, callV2AllowedDependencyEdges);
+    });
+
+    test('custom manifest defensively copies forbidden edges', () {
+      final source =
+          List<CallV2ContractEdge>.of(callV2ForbiddenDependencyEdges);
+      final manifest = _manifest(forbiddenDependencyEdges: source);
+
+      expect(identical(manifest.forbiddenDependencyEdges, source), isFalse);
+      expect(manifest.forbiddenDependencyEdges, callV2ForbiddenDependencyEdges);
+    });
+
+    test(
+        'mutating original source lists after construction does not mutate manifest',
+        () {
+      final allowed = List<CallV2ContractEdge>.of(callV2AllowedDependencyEdges);
+      final forbidden =
+          List<CallV2ContractEdge>.of(callV2ForbiddenDependencyEdges);
+      final manifest = _manifest(
+        allowedDependencyEdges: allowed,
+        forbiddenDependencyEdges: forbidden,
+      );
+
+      allowed
+        ..clear()
+        ..add(_runtimeToRtcAdapter);
+      forbidden.clear();
+
+      expect(manifest.allowedDependencyEdges, callV2AllowedDependencyEdges);
+      expect(manifest.forbiddenDependencyEdges, callV2ForbiddenDependencyEdges);
+    });
+
+    test('custom manifest exposed lists cannot be modified', () {
+      final manifest = _manifest();
+
+      expect(
+        () => manifest.allowedDependencyEdges.add(_runtimeToRtcAdapter),
+        throwsUnsupportedError,
+      );
+      expect(
+        () => manifest.forbiddenDependencyEdges.remove(_runtimeToRtcAdapter),
+        throwsUnsupportedError,
+      );
+    });
+
+    test('missing required allowed edge fails readiness', () {
+      final result = _audit(
+        manifest: _manifest(
+          allowedDependencyEdges: callV2AllowedDependencyEdges.take(5).toList(),
+        ),
+        configuration: _disabledConfig(),
+      );
+
+      _expectMalformedGraph(result, 'manifest.allowedDependencyEdges');
+    });
+
+    test('missing required forbidden edge fails readiness', () {
+      final result = _audit(
+        manifest: _manifest(
+          forbiddenDependencyEdges:
+              callV2ForbiddenDependencyEdges.take(9).toList(),
+        ),
+        configuration: _disabledConfig(),
+      );
+
+      _expectMalformedGraph(result, 'manifest.forbiddenDependencyEdges');
+    });
+
+    test('extra allowed edge fails readiness', () {
+      final result = _audit(
+        manifest: _manifest(
+          allowedDependencyEdges: <CallV2ContractEdge>[
+            ...callV2AllowedDependencyEdges,
+            _runtimeToRtcAdapter,
+          ],
+        ),
+        configuration: _disabledConfig(),
+      );
+
+      _expectMalformedGraph(result, 'manifest.allowedDependencyEdges');
+    });
+
+    test('extra forbidden edge fails readiness', () {
+      final result = _audit(
+        manifest: _manifest(
+          forbiddenDependencyEdges: <CallV2ContractEdge>[
+            ...callV2ForbiddenDependencyEdges,
+            const CallV2ContractEdge(
+              from: CallV2ContractNode.harness,
+              to: CallV2ContractNode.ui,
+            ),
+          ],
+        ),
+        configuration: _disabledConfig(),
+      );
+
+      _expectMalformedGraph(result, 'manifest.forbiddenDependencyEdges');
+    });
+
+    test('runtime to RTC adapter added to allowed edges fails readiness', () {
+      final result = _audit(
+        manifest: _manifest(
+          allowedDependencyEdges: <CallV2ContractEdge>[
+            ...callV2AllowedDependencyEdges,
+            _runtimeToRtcAdapter,
+          ],
+        ),
+        configuration: _disabledConfig(),
+      );
+
+      expect(result.readyForAdapterImplementation, isFalse);
+      expect(_fields(result), contains('manifest.allowedDependencyEdges'));
+      expect(_fields(result), contains('manifest.dependencyEdgeOverlap'));
+    });
+
+    test('edge appearing in both allowed and forbidden lists fails readiness',
+        () {
+      final result = _audit(
+        manifest: _manifest(
+          allowedDependencyEdges: <CallV2ContractEdge>[
+            ...callV2AllowedDependencyEdges,
+            _runtimeToRtcAdapter,
+          ],
+        ),
+        configuration: _disabledConfig(),
+      );
+
+      expect(result.readyForAdapterImplementation, isFalse);
+      expect(_fields(result), contains('manifest.dependencyEdgeOverlap'));
+    });
+
+    test('duplicate allowed edge fails readiness', () {
+      final result = _audit(
+        manifest: _manifest(
+          allowedDependencyEdges: <CallV2ContractEdge>[
+            ...callV2AllowedDependencyEdges,
+            callV2AllowedDependencyEdges.first,
+          ],
+        ),
+        configuration: _disabledConfig(),
+      );
+
+      _expectMalformedGraph(result, 'manifest.allowedDependencyEdges');
+    });
+
+    test('duplicate forbidden edge fails readiness', () {
+      final result = _audit(
+        manifest: _manifest(
+          forbiddenDependencyEdges: <CallV2ContractEdge>[
+            ...callV2ForbiddenDependencyEdges,
+            callV2ForbiddenDependencyEdges.first,
+          ],
+        ),
+        configuration: _disabledConfig(),
+      );
+
+      _expectMalformedGraph(result, 'manifest.forbiddenDependencyEdges');
+    });
+
+    test('canonical default edge ordering remains deterministic', () {
+      expect(
+        callV2ForbiddenDependencyEdges.map((edge) => edge.toSafeDebugMap()),
+        <Map<String, Object?>>[
+          <String, Object?>{'from': 'runtime', 'to': 'firestore'},
+          <String, Object?>{'from': 'runtime', 'to': 'firebaseAuth'},
+          <String, Object?>{'from': 'runtime', 'to': 'firebaseFunctions'},
+          <String, Object?>{'from': 'runtime', 'to': 'rtcProviderTransport'},
+          <String, Object?>{'from': 'runtime', 'to': 'rtcAdapter'},
+          <String, Object?>{'from': 'mediaOrchestrator', 'to': 'firestore'},
+          <String, Object?>{'from': 'resolver', 'to': 'rtcAdapter'},
+          <String, Object?>{'from': 'mediaController', 'to': 'firestore'},
+          <String, Object?>{'from': 'ui', 'to': 'rtcAdapter'},
+          <String, Object?>{'from': 'startup', 'to': 'rtcAdapter'},
+        ],
+      );
+    });
+
+    test('reordered edges fail because canonical ordering is required', () {
+      final result = _audit(
+        manifest: _manifest(
+          allowedDependencyEdges: List<CallV2ContractEdge>.of(
+              callV2AllowedDependencyEdges.reversed),
+        ),
+        configuration: _disabledConfig(),
+      );
+
+      _expectMalformedGraph(result, 'manifest.allowedDependencyEdges');
+    });
+
+    test('production enablement remains false for malformed graph', () {
+      final result = _audit(
+        manifest: _manifest(
+          allowedDependencyEdges: callV2AllowedDependencyEdges.take(5).toList(),
+        ),
+        configuration: _productionConfig(),
+        capabilities: _allRequiredCapabilities(),
+      );
+
+      expect(result.readyForAdapterImplementation, isFalse);
+      expect(result.readyForProductionEnablement, isFalse);
+    });
+
+    test('issue field identifies graph mismatch without raw values', () {
+      final result = _audit(
+        manifest: _manifest(
+          allowedDependencyEdges: <CallV2ContractEdge>[
+            ...callV2AllowedDependencyEdges,
+            _runtimeToRtcAdapter,
+          ],
+        ),
+        configuration: _disabledConfig(),
+      );
+      final text = result.issues.map((issue) => issue.toString()).join('\n');
+
+      expect(_fields(result), contains('manifest.allowedDependencyEdges'));
+      expect(text, isNot(contains('runtime -> rtcAdapter')));
+      _expectNoSecretLikeContent(text);
+    });
+
+    test('graph issue ordering remains deterministic', () {
+      final result = _audit(
+        manifest: _manifest(
+          allowedDependencyEdges: <CallV2ContractEdge>[
+            ...callV2AllowedDependencyEdges,
+            _runtimeToRtcAdapter,
+          ],
+          forbiddenDependencyEdges:
+              callV2ForbiddenDependencyEdges.take(9).toList(),
+        ),
+        configuration: _disabledConfig(callCollectionName: ''),
+      );
+
+      expect(_codes(result), <CallV2ProductionReadinessIssueCode>[
+        CallV2ProductionReadinessIssueCode.configurationInvalid,
+        CallV2ProductionReadinessIssueCode.contractInvariantMismatch,
+        CallV2ProductionReadinessIssueCode.contractInvariantMismatch,
+        CallV2ProductionReadinessIssueCode.contractInvariantMismatch,
+      ]);
+      expect(_fields(result), <String>[
+        'configuration',
+        'manifest.allowedDependencyEdges',
+        'manifest.forbiddenDependencyEdges',
+        'manifest.dependencyEdgeOverlap',
+      ]);
+    });
+
     test('accepted ownership edges are present', () {
       expect(
         callV2Phase3ContractManifest.allowedDependencyEdges,
@@ -689,6 +964,8 @@ CallV2ContractManifest _manifest({
   CallV2ContractVersion version = CallV2ContractVersion.v2Phase3,
   bool lifecycleSnapshotAuthoritative = true,
   bool rawCredentialsNeverAppearInPublicState = true,
+  List<CallV2ContractEdge>? allowedDependencyEdges,
+  List<CallV2ContractEdge>? forbiddenDependencyEdges,
 }) {
   return CallV2ContractManifest(
     version: version,
@@ -708,9 +985,24 @@ CallV2ContractManifest _manifest({
         rawCredentialsNeverAppearInPublicState,
     productionAdaptersAbsent: true,
     startupUiRoutesNativeWiringAbsent: true,
-    allowedDependencyEdges: callV2AllowedDependencyEdges,
-    forbiddenDependencyEdges: callV2ForbiddenDependencyEdges,
+    allowedDependencyEdges:
+        allowedDependencyEdges ?? callV2AllowedDependencyEdges,
+    forbiddenDependencyEdges:
+        forbiddenDependencyEdges ?? callV2ForbiddenDependencyEdges,
   );
+}
+
+void _expectMalformedGraph(
+  CallV2ProductionReadinessResult result,
+  String field,
+) {
+  expect(result.readyForAdapterImplementation, isFalse);
+  expect(result.readyForProductionEnablement, isFalse);
+  expect(
+    _codes(result),
+    contains(CallV2ProductionReadinessIssueCode.contractInvariantMismatch),
+  );
+  expect(_fields(result), contains(field));
 }
 
 void _expectProductionSourcesDoNotContain(List<String> forbiddenTerms) {
@@ -735,6 +1027,11 @@ const _productionSourcePaths = <String>[
   'lib/call_v2/call_v2_production_capabilities.dart',
   'lib/call_v2/call_v2_production_readiness.dart',
 ];
+
+const _runtimeToRtcAdapter = CallV2ContractEdge(
+  from: CallV2ContractNode.runtime,
+  to: CallV2ContractNode.rtcAdapter,
+);
 
 const _secretLikeTerms = <String>[
   'rawtoken',

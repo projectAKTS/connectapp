@@ -50,7 +50,59 @@ class CallV2ContractEdge {
 }
 
 class CallV2ContractManifest {
-  const CallV2ContractManifest({
+  factory CallV2ContractManifest({
+    required CallV2ContractVersion version,
+    required bool featureGateDefaultsDisabled,
+    required bool runtimeConstructionSideEffectFree,
+    required bool runtimeStartDoesNotStartMedia,
+    required bool lifecycleSnapshotAuthoritative,
+    required bool subscriptionCoordinatorOwnsFirestoreSubscriptionFlow,
+    required bool runtimeOwnsTopLevelStartStopSequencing,
+    required bool orchestratorOwnsSnapshotToMediaSequencing,
+    required bool resolverOwnsConfigResolution,
+    required bool mediaControllerOwnsRtcAdapterCalls,
+    required bool terminalSnapshotOwnsMediaCleanup,
+    required bool duplicateOperationsShareInFlightWork,
+    required bool generationAndOperationIdentityProtectStaleCompletion,
+    required bool rawCredentialsNeverAppearInPublicState,
+    required bool productionAdaptersAbsent,
+    required bool startupUiRoutesNativeWiringAbsent,
+    required List<CallV2ContractEdge> allowedDependencyEdges,
+    required List<CallV2ContractEdge> forbiddenDependencyEdges,
+  }) {
+    return CallV2ContractManifest._(
+      version: version,
+      featureGateDefaultsDisabled: featureGateDefaultsDisabled,
+      runtimeConstructionSideEffectFree: runtimeConstructionSideEffectFree,
+      runtimeStartDoesNotStartMedia: runtimeStartDoesNotStartMedia,
+      lifecycleSnapshotAuthoritative: lifecycleSnapshotAuthoritative,
+      subscriptionCoordinatorOwnsFirestoreSubscriptionFlow:
+          subscriptionCoordinatorOwnsFirestoreSubscriptionFlow,
+      runtimeOwnsTopLevelStartStopSequencing:
+          runtimeOwnsTopLevelStartStopSequencing,
+      orchestratorOwnsSnapshotToMediaSequencing:
+          orchestratorOwnsSnapshotToMediaSequencing,
+      resolverOwnsConfigResolution: resolverOwnsConfigResolution,
+      mediaControllerOwnsRtcAdapterCalls: mediaControllerOwnsRtcAdapterCalls,
+      terminalSnapshotOwnsMediaCleanup: terminalSnapshotOwnsMediaCleanup,
+      duplicateOperationsShareInFlightWork:
+          duplicateOperationsShareInFlightWork,
+      generationAndOperationIdentityProtectStaleCompletion:
+          generationAndOperationIdentityProtectStaleCompletion,
+      rawCredentialsNeverAppearInPublicState:
+          rawCredentialsNeverAppearInPublicState,
+      productionAdaptersAbsent: productionAdaptersAbsent,
+      startupUiRoutesNativeWiringAbsent: startupUiRoutesNativeWiringAbsent,
+      allowedDependencyEdges: List<CallV2ContractEdge>.unmodifiable(
+        allowedDependencyEdges,
+      ),
+      forbiddenDependencyEdges: List<CallV2ContractEdge>.unmodifiable(
+        forbiddenDependencyEdges,
+      ),
+    );
+  }
+
+  const CallV2ContractManifest._({
     required this.version,
     required this.featureGateDefaultsDisabled,
     required this.runtimeConstructionSideEffectFree,
@@ -92,6 +144,33 @@ class CallV2ContractManifest {
 
   bool get hasAcceptedVersion => version == CallV2ContractVersion.v2Phase3;
 
+  bool get allowedDependencyGraphMatchesAccepted {
+    return _hasExactOrderedEdges(
+      allowedDependencyEdges,
+      callV2AllowedDependencyEdges,
+    );
+  }
+
+  bool get forbiddenDependencyGraphMatchesAccepted {
+    return _hasExactOrderedEdges(
+      forbiddenDependencyEdges,
+      callV2ForbiddenDependencyEdges,
+    );
+  }
+
+  bool get dependencyGraphsDoNotOverlap {
+    for (final edge in allowedDependencyEdges) {
+      if (forbiddenDependencyEdges.contains(edge)) return false;
+    }
+    return true;
+  }
+
+  bool get hasExactAcceptedDependencyGraph {
+    return allowedDependencyGraphMatchesAccepted &&
+        forbiddenDependencyGraphMatchesAccepted &&
+        dependencyGraphsDoNotOverlap;
+  }
+
   bool get hasRequiredPhase3Invariants {
     return featureGateDefaultsDisabled &&
         runtimeConstructionSideEffectFree &&
@@ -108,12 +187,7 @@ class CallV2ContractManifest {
         rawCredentialsNeverAppearInPublicState &&
         productionAdaptersAbsent &&
         startupUiRoutesNativeWiringAbsent &&
-        _containsAllEdges(
-            allowedDependencyEdges, callV2AllowedDependencyEdges) &&
-        _containsAllEdges(
-          forbiddenDependencyEdges,
-          callV2ForbiddenDependencyEdges,
-        );
+        hasExactAcceptedDependencyGraph;
   }
 
   Map<String, Object?> toSafeDebugMap() {
@@ -224,7 +298,7 @@ const callV2ForbiddenDependencyEdges = <CallV2ContractEdge>[
   ),
 ];
 
-const callV2Phase3ContractManifest = CallV2ContractManifest(
+const callV2Phase3ContractManifest = CallV2ContractManifest._(
   version: CallV2ContractVersion.v2Phase3,
   featureGateDefaultsDisabled: true,
   runtimeConstructionSideEffectFree: true,
@@ -245,12 +319,13 @@ const callV2Phase3ContractManifest = CallV2ContractManifest(
   forbiddenDependencyEdges: callV2ForbiddenDependencyEdges,
 );
 
-bool _containsAllEdges(
+bool _hasExactOrderedEdges(
   List<CallV2ContractEdge> actual,
   List<CallV2ContractEdge> expected,
 ) {
-  for (final edge in expected) {
-    if (!actual.contains(edge)) return false;
+  if (actual.length != expected.length) return false;
+  for (var index = 0; index < expected.length; index += 1) {
+    if (actual[index] != expected[index]) return false;
   }
   return true;
 }

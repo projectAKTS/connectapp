@@ -211,17 +211,14 @@ class CallV2ProductionReadinessAuditor {
         'manifest.startupUiRoutesNativeWiringAbsent',
       );
     }
-    if (!_containsAllEdges(
-      manifest.allowedDependencyEdges,
-      callV2AllowedDependencyEdges,
-    )) {
+    if (!manifest.allowedDependencyGraphMatchesAccepted) {
       _addContractInvariantIssue(issues, 'manifest.allowedDependencyEdges');
     }
-    if (!_containsAllEdges(
-      manifest.forbiddenDependencyEdges,
-      callV2ForbiddenDependencyEdges,
-    )) {
+    if (!manifest.forbiddenDependencyGraphMatchesAccepted) {
       _addContractInvariantIssue(issues, 'manifest.forbiddenDependencyEdges');
+    }
+    if (!manifest.dependencyGraphsDoNotOverlap) {
+      _addContractInvariantIssue(issues, 'manifest.dependencyEdgeOverlap');
     }
   }
 
@@ -323,15 +320,5 @@ class CallV2ProductionReadinessAuditor {
         capabilities.runtimeStartupBridgeAvailable &&
         capabilities.uiRouteIntegrationAvailable &&
         capabilities.observabilityAvailable;
-  }
-
-  bool _containsAllEdges(
-    List<CallV2ContractEdge> actual,
-    List<CallV2ContractEdge> expected,
-  ) {
-    for (final edge in expected) {
-      if (!actual.contains(edge)) return false;
-    }
-    return true;
   }
 }
