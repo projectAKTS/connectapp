@@ -13,4 +13,5 @@ abstract final class CallV2CallableNames {
   static const end = 'endCallV2';
   static const reportParticipantMedia = 'reportParticipantMediaV2';
   static const renewActiveCallLease = 'renewActiveCallLeaseV2';
+  static const resolveRtcConfig = 'resolveRtcConfigV2';
 }
