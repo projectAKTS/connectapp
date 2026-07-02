@@ -229,11 +229,19 @@ void main() {
           <String, Object?>{'callId': 'call_b'});
     });
 
-    test('invalid keys, metadata, null, and non-map responses are unavailable',
-        () async {
+    test(
+        'invalid keys, metadata, unsupported values, null, and non-map '
+        'responses are unavailable', () async {
       for (final response in <Object?>[
         <Object?, Object?>{1: 'bad'},
         <String, Object?>{'metadata': 'provider-details'},
+        <String, Object?>{
+          'nested': <Object?, Object?>{1: 'bad'},
+        },
+        <String, Object?>{
+          'nested': <String, Object?>{'headers': 'provider-details'},
+        },
+        <String, Object?>{'bad': Object()},
         null,
         'not-a-map',
       ]) {
@@ -251,14 +259,35 @@ void main() {
     });
 
     test('returned response copy does not mutate original response', () async {
-      final raw = <String, Object?>{'callId': 'call_a'};
+      final nestedMap = <String, Object?>{'state': 'joined'};
+      final nestedList = <Object?>[
+        'a',
+        <String, Object?>{'media': 'active'},
+      ];
+      final raw = <String, Object?>{
+        'callId': 'call_a',
+        'participant': nestedMap,
+        'events': nestedList,
+      };
       final result = await _enabledApi(
         _FakeTransport(response: raw),
       ).endCallV2(_baseRequest()) as Map<String, Object?>;
 
       result['callId'] = 'changed';
+      (result['participant']! as Map<String, Object?>)['state'] = 'left';
+      ((result['events']! as List<Object?>)[1]!
+          as Map<String, Object?>)['media'] = 'failed';
 
-      expect(raw, <String, Object?>{'callId': 'call_a'});
+      expect(raw, <String, Object?>{
+        'callId': 'call_a',
+        'participant': <String, Object?>{'state': 'joined'},
+        'events': <Object?>[
+          'a',
+          <String, Object?>{'media': 'active'},
+        ],
+      });
+      expect(identical(result['participant'], nestedMap), isFalse);
+      expect(identical(result['events'], nestedList), isFalse);
     });
   });
 

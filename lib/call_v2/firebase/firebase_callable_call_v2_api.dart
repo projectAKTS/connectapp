@@ -119,13 +119,30 @@ Object? _normalizedResponse(Object? raw) {
   if (raw is! Map) {
     throw const CallV2ClientError(CallV2ClientErrorCode.unavailable);
   }
+  return _normalizedResponseMap(raw);
+}
+
+Object? _normalizedResponseValue(Object? value) {
+  if (value == null || value is String || value is num || value is bool) {
+    return value;
+  }
+  if (value is Map) {
+    return _normalizedResponseMap(value);
+  }
+  if (value is Iterable) {
+    return value.map(_normalizedResponseValue).toList(growable: false);
+  }
+  throw const CallV2ClientError(CallV2ClientErrorCode.unavailable);
+}
+
+Map<String, Object?> _normalizedResponseMap(Map<dynamic, dynamic> raw) {
   final normalized = <String, Object?>{};
   for (final entry in raw.entries) {
     final key = entry.key;
     if (key is! String || _firebaseMetadataKeys.contains(key)) {
       throw const CallV2ClientError(CallV2ClientErrorCode.unavailable);
     }
-    normalized[key] = entry.value;
+    normalized[key] = _normalizedResponseValue(entry.value);
   }
   return normalized;
 }
