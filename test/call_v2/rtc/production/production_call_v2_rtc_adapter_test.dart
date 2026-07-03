@@ -337,6 +337,7 @@ void main() {
         (event) => events.add(event.runtimeType.toString()),
       );
 
+      started.transport.emit(const CallV2RtcEngineJoined());
       started.transport.emit(const CallV2RtcEngineRemoteParticipantJoined());
       started.transport.emit(const CallV2RtcEngineRemoteParticipantLeft());
       started.transport.emit(const CallV2RtcEngineReconnecting());
@@ -346,6 +347,7 @@ void main() {
       await sub.cancel();
 
       expect(events, <String>[
+        'CallV2RtcJoined',
         'CallV2RtcRemoteParticipantJoined',
         'CallV2RtcRemoteParticipantLeft',
         'CallV2RtcReconnecting',
@@ -399,6 +401,226 @@ void main() {
         events.map((event) => event.runtimeType.toString()),
         isNot(contains('CallLifecycle')),
       );
+    });
+
+    test('joined callback during leaving is ignored', () async {
+      final started = await _joinedAdapterInJoinedState();
+      final events = <CallV2RtcEvent>[];
+      final sub = started.adapter.events.listen(events.add);
+      started.transport.holdLeave = Completer<void>();
+
+      final leave = started.adapter.leaveChannel();
+      await _pump();
+      started.transport.emit(const CallV2RtcEngineJoined());
+      await _pump();
+
+      expect(started.adapter.state, ProductionCallV2RtcAdapterState.leaving);
+      expect(events.whereType<CallV2RtcJoined>(), isEmpty);
+      started.transport.holdLeave!.complete();
+      await leave;
+      await sub.cancel();
+    });
+
+    test('cleanup state suppresses reconnect remote failure and disconnect',
+        () async {
+      final started = await _joinedAdapterInJoinedState();
+      final events = <CallV2RtcEvent>[];
+      final sub = started.adapter.events.listen(events.add);
+      started.transport.holdLeave = Completer<void>();
+
+      final leave = started.adapter.leaveChannel();
+      await _pump();
+      started.transport.emit(const CallV2RtcEngineReconnected());
+      started.transport.emit(const CallV2RtcEngineRemoteParticipantJoined());
+      started.transport.emit(const CallV2RtcEngineRemoteParticipantLeft());
+      started.transport.emit(
+        const CallV2RtcEngineFailure(CallV2RtcErrorCategory.unknown),
+      );
+      started.transport.emit(const CallV2RtcEngineDisconnected());
+      await _pump();
+
+      expect(started.adapter.state, ProductionCallV2RtcAdapterState.leaving);
+      expect(events, isEmpty);
+      started.transport.holdLeave!.complete();
+      await leave;
+      await sub.cancel();
+    });
+
+    test('joined callback while initialized is ignored', () async {
+      final transport = _FakeTransport();
+      final adapter = _adapter(transport: transport);
+      final events = <CallV2RtcEvent>[];
+      final sub = adapter.events.listen(events.add);
+
+      await adapter.initialize(_config());
+      transport.emit(const CallV2RtcEngineJoined());
+      await _pump();
+      await sub.cancel();
+
+      expect(adapter.state, ProductionCallV2RtcAdapterState.initialized);
+      expect(events.whereType<CallV2RtcJoined>(), isEmpty);
+    });
+
+    test('joined callback while joining transitions once', () async {
+      final started = await _joinedAdapter();
+      final events = <CallV2RtcEvent>[];
+      final sub = started.adapter.events.listen(events.add);
+
+      started.transport.emit(const CallV2RtcEngineJoined());
+      started.transport.emit(const CallV2RtcEngineJoined());
+      await _pump();
+      await sub.cancel();
+
+      expect(started.adapter.state, ProductionCallV2RtcAdapterState.joined);
+      expect(events.whereType<CallV2RtcJoined>().length, 1);
+    });
+
+    test('reconnected callback while initialized does not transition to joined',
+        () async {
+      final transport = _FakeTransport();
+      final adapter = _adapter(transport: transport);
+      final events = <CallV2RtcEvent>[];
+      final sub = adapter.events.listen(events.add);
+
+      await adapter.initialize(_config());
+      transport.emit(const CallV2RtcEngineReconnected());
+      await _pump();
+      await sub.cancel();
+
+      expect(adapter.state, ProductionCallV2RtcAdapterState.initialized);
+      expect(events.whereType<CallV2RtcReconnected>(), isEmpty);
+    });
+
+    test('remote events while initialized are ignored', () async {
+      final transport = _FakeTransport();
+      final adapter = _adapter(transport: transport);
+      final events = <CallV2RtcEvent>[];
+      final sub = adapter.events.listen(events.add);
+
+      await adapter.initialize(_config());
+      transport.emit(const CallV2RtcEngineRemoteParticipantJoined());
+      transport.emit(const CallV2RtcEngineRemoteParticipantLeft());
+      await _pump();
+      await sub.cancel();
+
+      expect(events.whereType<CallV2RtcRemoteParticipantJoined>(), isEmpty);
+      expect(events.whereType<CallV2RtcRemoteParticipantLeft>(), isEmpty);
+    });
+
+    test('remote events while joined are emitted in order', () async {
+      final started = await _joinedAdapterInJoinedState();
+      final events = <String>[];
+      final sub = started.adapter.events.listen(
+        (event) => events.add(event.runtimeType.toString()),
+      );
+
+      started.transport.emit(const CallV2RtcEngineRemoteParticipantJoined());
+      started.transport.emit(const CallV2RtcEngineRemoteParticipantLeft());
+      await _pump();
+      await sub.cancel();
+
+      expect(events, <String>[
+        'CallV2RtcRemoteParticipantJoined',
+        'CallV2RtcRemoteParticipantLeft',
+      ]);
+    });
+
+    test('events after leave completes are ignored', () async {
+      final started = await _joinedAdapterInJoinedState();
+      final events = <CallV2RtcEvent>[];
+      final sub = started.adapter.events.listen(events.add);
+
+      await started.adapter.leaveChannel();
+      started.transport.emit(const CallV2RtcEngineJoined());
+      started.transport.emit(const CallV2RtcEngineReconnected());
+      started.transport.emit(const CallV2RtcEngineRemoteParticipantJoined());
+      await _pump();
+      await sub.cancel();
+
+      expect(events, isEmpty);
+      expect(
+          started.adapter.state, ProductionCallV2RtcAdapterState.uninitialized);
+    });
+
+    test('late joined callback after held join and leave emits no joined',
+        () async {
+      final transport = _FakeTransport()
+        ..holdJoin = Completer<void>()
+        ..holdLeave = Completer<void>();
+      final adapter = _adapter(transport: transport);
+      final events = <CallV2RtcEvent>[];
+      final sub = adapter.events.listen(events.add);
+
+      await adapter.initialize(_config());
+      final join = adapter.joinChannel();
+      await _pump();
+      final leave = adapter.leaveChannel();
+      await _pump();
+      transport.emit(const CallV2RtcEngineJoined());
+      await _pump();
+      transport.holdLeave!.complete();
+      await leave;
+      transport.holdJoin!.complete();
+      await expectLater(
+        join,
+        throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
+      );
+      await sub.cancel();
+
+      expect(events.whereType<CallV2RtcJoined>(), isEmpty);
+      expect(adapter.state, ProductionCallV2RtcAdapterState.uninitialized);
+    });
+
+    test('late joined callback after held join and dispose emits no joined',
+        () async {
+      final transport = _FakeTransport()
+        ..holdJoin = Completer<void>()
+        ..holdLeave = Completer<void>();
+      final adapter = _adapter(transport: transport);
+      final events = <CallV2RtcEvent>[];
+      adapter.events.listen(events.add);
+
+      await adapter.initialize(_config());
+      final join = adapter.joinChannel();
+      await _pump();
+      final dispose = adapter.dispose();
+      await _pump();
+      transport.emit(const CallV2RtcEngineJoined());
+      await _pump();
+      transport.holdLeave!.complete();
+      await dispose;
+      transport.holdJoin!.complete();
+      await expectLater(
+        join,
+        throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
+      );
+
+      expect(events.whereType<CallV2RtcJoined>(), isEmpty);
+      expect(adapter.state, ProductionCallV2RtcAdapterState.disposed);
+    });
+
+    test('stale filtering preserves valid joined-session events', () async {
+      final started = await _joinedAdapterInJoinedState();
+      final events = <String>[];
+      final sub = started.adapter.events.listen(
+        (event) => events.add(event.runtimeType.toString()),
+      );
+
+      started.transport.emit(const CallV2RtcEngineReconnecting());
+      started.transport.emit(const CallV2RtcEngineReconnected());
+      started.transport.emit(const CallV2RtcEngineDisconnected());
+      started.transport.emit(
+        const CallV2RtcEngineFailure(CallV2RtcErrorCategory.unknown),
+      );
+      await _pump();
+      await sub.cancel();
+
+      expect(events, <String>[
+        'CallV2RtcReconnecting',
+        'CallV2RtcReconnected',
+        'CallV2RtcDisconnected',
+        'CallV2RtcFatalError',
+      ]);
     });
   });
 
@@ -519,6 +741,16 @@ Future<_StartedAdapter> _joinedAdapter({
   return _StartedAdapter(adapter: adapter, transport: transport);
 }
 
+Future<_StartedAdapter> _joinedAdapterInJoinedState({
+  CallV2RtcSessionConfig? config,
+}) async {
+  final started = await _joinedAdapter(config: config);
+  started.transport.emit(const CallV2RtcEngineJoined());
+  await _pump();
+  expect(started.adapter.state, ProductionCallV2RtcAdapterState.joined);
+  return started;
+}
+
 Matcher _clientError(CallV2ClientErrorCode code) {
   return isA<CallV2ClientError>().having(
     (error) => error.code,
@@ -560,6 +792,7 @@ class _FakeTransport implements CallV2RtcEngineTransport {
 
   Completer<void>? holdInitialize;
   Completer<void>? holdJoin;
+  Completer<void>? holdLeave;
   bool failInitialize = false;
   bool failJoin = false;
   bool failLeave = false;
@@ -593,6 +826,7 @@ class _FakeTransport implements CallV2RtcEngineTransport {
   Future<void> leaveChannel() async {
     operations.add('leave');
     leaveCount += 1;
+    await holdLeave?.future;
     if (failLeave) throw StateError('raw sdk leave secret');
   }
 

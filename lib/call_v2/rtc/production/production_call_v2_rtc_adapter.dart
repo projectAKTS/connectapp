@@ -269,31 +269,42 @@ class ProductionCallV2RtcAdapter implements CallV2RtcAdapter {
   void _handleTransportEvent(CallV2RtcEngineEvent event) {
     if (_state == ProductionCallV2RtcAdapterState.disposed ||
         _state == ProductionCallV2RtcAdapterState.uninitialized ||
+        _state == ProductionCallV2RtcAdapterState.leaving ||
         _events.isClosed) {
       return;
     }
     switch (event) {
       case CallV2RtcEngineJoined():
-        if (_state == ProductionCallV2RtcAdapterState.joining ||
-            _state == ProductionCallV2RtcAdapterState.initialized) {
+        if (_state == ProductionCallV2RtcAdapterState.joining) {
           _state = ProductionCallV2RtcAdapterState.joined;
+          _emit(const CallV2RtcJoined());
         }
-        _emit(const CallV2RtcJoined());
       case CallV2RtcEngineReconnecting():
-        _emit(const CallV2RtcReconnecting());
-      case CallV2RtcEngineReconnected():
-        if (_state != ProductionCallV2RtcAdapterState.leaving) {
-          _state = ProductionCallV2RtcAdapterState.joined;
+        if (_state == ProductionCallV2RtcAdapterState.joined) {
+          _emit(const CallV2RtcReconnecting());
         }
-        _emit(const CallV2RtcReconnected());
+      case CallV2RtcEngineReconnected():
+        if (_state == ProductionCallV2RtcAdapterState.joined) {
+          _emit(const CallV2RtcReconnected());
+        }
       case CallV2RtcEngineDisconnected():
-        _emit(const CallV2RtcDisconnected());
+        if (_state == ProductionCallV2RtcAdapterState.joining ||
+            _state == ProductionCallV2RtcAdapterState.joined) {
+          _emit(const CallV2RtcDisconnected());
+        }
       case CallV2RtcEngineRemoteParticipantJoined():
-        _emit(const CallV2RtcRemoteParticipantJoined());
+        if (_state == ProductionCallV2RtcAdapterState.joined) {
+          _emit(const CallV2RtcRemoteParticipantJoined());
+        }
       case CallV2RtcEngineRemoteParticipantLeft():
-        _emit(const CallV2RtcRemoteParticipantLeft());
+        if (_state == ProductionCallV2RtcAdapterState.joined) {
+          _emit(const CallV2RtcRemoteParticipantLeft());
+        }
       case CallV2RtcEngineFailure(:final category):
-        _emit(CallV2RtcFatalError(category));
+        if (_state == ProductionCallV2RtcAdapterState.joining ||
+            _state == ProductionCallV2RtcAdapterState.joined) {
+          _emit(CallV2RtcFatalError(category));
+        }
     }
   }
 
