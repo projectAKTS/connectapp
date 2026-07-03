@@ -117,6 +117,10 @@ class ProductionCallV2StartupBridge implements CallV2StartupBridge {
       final identity =
           await composition.authIdentityProvider.requireAuthenticatedIdentity();
       _requireCurrentStart(generation, request);
+      final participants = _deriveParticipants(
+        authenticatedUid: identity.uid,
+        request: request,
+      );
 
       await composition.appCheckBoundary.assertAvailable();
       _requireCurrentStart(generation, request);
@@ -135,8 +139,8 @@ class ProductionCallV2StartupBridge implements CallV2StartupBridge {
 
       await composition.runtime.start(
         callId: request.callId,
-        callerUid: request.callerUid,
-        calleeUid: request.calleeUid,
+        callerUid: participants.callerUid,
+        calleeUid: participants.calleeUid,
         localUid: identity.uid,
       );
       _requireCurrentStart(generation, request);
@@ -301,6 +305,38 @@ class ProductionCallV2StartupBridge implements CallV2StartupBridge {
       throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
     }
   }
+}
+
+_DerivedCallParticipants _deriveParticipants({
+  required String authenticatedUid,
+  required CallV2StartupRequest request,
+}) {
+  if (authenticatedUid == request.remoteParticipantUid) {
+    throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
+  }
+
+  switch (request.localRole) {
+    case CallV2LocalParticipantRole.caller:
+      return _DerivedCallParticipants(
+        callerUid: authenticatedUid,
+        calleeUid: request.remoteParticipantUid,
+      );
+    case CallV2LocalParticipantRole.callee:
+      return _DerivedCallParticipants(
+        callerUid: request.remoteParticipantUid,
+        calleeUid: authenticatedUid,
+      );
+  }
+}
+
+class _DerivedCallParticipants {
+  const _DerivedCallParticipants({
+    required this.callerUid,
+    required this.calleeUid,
+  });
+
+  final String callerUid;
+  final String calleeUid;
 }
 
 const callV2IsolatedStartupBridgeCapabilities = CallV2ProductionCapabilities(

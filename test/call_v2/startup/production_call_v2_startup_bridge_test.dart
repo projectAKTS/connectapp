@@ -175,11 +175,79 @@ void main() {
       final deps = _Deps()..auth.user = _FakeUser('callee');
       final bridge = deps.bridge(_enabledLocalConfig());
 
-      await bridge.start(_request());
+      await bridge.start(_request(
+        remoteParticipantUid: 'caller',
+        localRole: CallV2LocalParticipantRole.callee,
+      ));
 
       expect(deps.snapshots.callStreams, 1);
       expect(bridge.state.toString(), isNot(contains('callee')));
-      expect(_request().toString(), isNot(contains('callee')));
+      expect(
+        _request(
+          remoteParticipantUid: 'caller',
+          localRole: CallV2LocalParticipantRole.callee,
+        ).toString(),
+        isNot(contains('caller')),
+      );
+    });
+
+    test('local caller role derives caller from authenticated UID', () async {
+      final deps = _Deps()..auth.user = _FakeUser('authCaller');
+      final bridge = deps.bridge(_enabledLocalConfig());
+
+      await bridge.start(_request(remoteParticipantUid: 'remoteCallee'));
+
+      expect(deps.events, contains('participantStream:authCaller'));
+      expect(deps.events, contains('participantStream:remoteCallee'));
+      expect(
+        deps.events.indexOf('participantStream:authCaller'),
+        lessThan(deps.events.indexOf('participantStream:remoteCallee')),
+      );
+    });
+
+    test('local callee role derives callee from authenticated UID', () async {
+      final deps = _Deps()..auth.user = _FakeUser('authCallee');
+      final bridge = deps.bridge(_enabledLocalConfig());
+
+      await bridge.start(_request(
+        remoteParticipantUid: 'remoteCaller',
+        localRole: CallV2LocalParticipantRole.callee,
+      ));
+
+      expect(deps.events, contains('participantStream:remoteCaller'));
+      expect(deps.events, contains('participantStream:authCallee'));
+      expect(
+        deps.events.indexOf('participantStream:remoteCaller'),
+        lessThan(deps.events.indexOf('participantStream:authCallee')),
+      );
+    });
+
+    test('authenticated UID matching remote rejects before App Check',
+        () async {
+      final deps = _Deps()..auth.user = _FakeUser('sameUser');
+      final bridge = deps.bridge(_enabledLocalConfig());
+
+      await expectLater(
+        bridge.start(_request(remoteParticipantUid: 'sameUser')),
+        throwsA(_clientError(CallV2ClientErrorCode.rejected)),
+      );
+
+      expect(deps.events, <String>['auth']);
+      expect(deps.appCheck.calls, 0);
+      expect(deps.permissions.requests, isEmpty);
+      expect(deps.snapshots.callStreams, 0);
+    });
+
+    test('startup request validates only remote participant identity safely',
+        () {
+      expect(
+        () => _request(remoteParticipantUid: 'remote/user'),
+        throwsA(_clientError(CallV2ClientErrorCode.invalidRequest)),
+      );
+
+      final request = _request(remoteParticipantUid: 'remoteUser');
+      expect(request.toString(), isNot(contains('remoteUser')));
+      expect(request.toString(), isNot(contains('authUser')));
     });
   });
 
@@ -705,12 +773,14 @@ Matcher _clientError(CallV2ClientErrorCode code) {
 
 CallV2StartupRequest _request({
   String callId = 'callA',
+  String remoteParticipantUid = 'callee',
+  CallV2LocalParticipantRole localRole = CallV2LocalParticipantRole.caller,
   bool isVideo = false,
 }) {
   return CallV2StartupRequest(
     callId: callId,
-    callerUid: 'caller',
-    calleeUid: 'callee',
+    remoteParticipantUid: remoteParticipantUid,
+    localRole: localRole,
     isVideo: isVideo,
   );
 }

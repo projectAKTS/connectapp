@@ -19,6 +19,11 @@ enum CallV2StartupBridgeStatus {
   disposed,
 }
 
+enum CallV2LocalParticipantRole {
+  caller,
+  callee,
+}
+
 class CallV2StartupBridgeState {
   const CallV2StartupBridgeState({
     required this.status,
@@ -44,26 +49,21 @@ class CallV2StartupBridgeState {
 class CallV2StartupRequest {
   CallV2StartupRequest({
     required String callId,
-    required String callerUid,
-    required String calleeUid,
+    required String remoteParticipantUid,
+    required this.localRole,
     required this.isVideo,
   })  : callId = _validateIdentifier(callId),
-        callerUid = _validateIdentifier(callerUid),
-        calleeUid = _validateIdentifier(calleeUid) {
-    if (callerUid == calleeUid) {
-      throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
-    }
-  }
+        remoteParticipantUid = _validateIdentifier(remoteParticipantUid);
 
   final String callId;
-  final String callerUid;
-  final String calleeUid;
+  final String remoteParticipantUid;
+  final CallV2LocalParticipantRole localRole;
   final bool isVideo;
 
   bool matches(CallV2StartupRequest other) {
     return callId == other.callId &&
-        callerUid == other.callerUid &&
-        calleeUid == other.calleeUid &&
+        remoteParticipantUid == other.remoteParticipantUid &&
+        localRole == other.localRole &&
         isVideo == other.isVideo;
   }
 
@@ -71,8 +71,8 @@ class CallV2StartupRequest {
   String toString() {
     return 'CallV2StartupRequest('
         'hasCallId: ${callId.isNotEmpty}, '
-        'hasCallerUid: ${callerUid.isNotEmpty}, '
-        'hasCalleeUid: ${calleeUid.isNotEmpty}, '
+        'hasRemoteParticipantUid: ${remoteParticipantUid.isNotEmpty}, '
+        'localRole: ${localRole.name}, '
         'isVideo: $isVideo'
         ')';
   }
