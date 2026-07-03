@@ -38,6 +38,7 @@ import 'services/firestore_read_helper.dart';
 import 'services/notification_service.dart';
 import 'services/subscription_service.dart';
 import 'theme/theme.dart';
+import 'call_v2/integration/call_v2_app_integration.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 late final NotificationService notificationService;
@@ -117,6 +118,7 @@ Future<void> main() async {
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
   notificationService = NotificationService(navigatorKey: navigatorKey);
+  unawaited(initializeCallV2AppIntegrationShellSafely());
 
   runApp(const MyApp());
 }
