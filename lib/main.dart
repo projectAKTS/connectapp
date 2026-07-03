@@ -39,6 +39,7 @@ import 'services/notification_service.dart';
 import 'services/subscription_service.dart';
 import 'theme/theme.dart';
 import 'call_v2/integration/call_v2_app_integration.dart';
+import 'call_v2/integration/call_v2_route_registry.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 late final NotificationService notificationService;
@@ -360,6 +361,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             settings: settings,
           );
         }
+
+        final callV2Route = resolveCallV2Route(settings);
+        if (callV2Route != null) return callV2Route;
 
         return null;
       },
