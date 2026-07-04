@@ -408,7 +408,7 @@ void main() {
       }
     });
 
-    test('default evidence derives from type references only', () {
+    test('default evidence derives from neutral integration evidence only', () {
       final source = _read(
         'lib/call_v2/production/call_v2_pre_integration_gate.dart',
       );
@@ -422,38 +422,60 @@ void main() {
           isFalse);
       expect(source.contains('const isolatedWidgetHarnessVerified = true'),
           isFalse);
-      expect(source, contains('CallV2RouteFactory'));
-      expect(source, contains('NonProductionCallV2RouteFactory'));
-      expect(source, contains('CallV2PresentationAdapter'));
-      expect(source, contains('NonProductionCallV2PresentationAdapter'));
-      expect(source, contains('CallV2TestHarness'));
-      expect(source, contains('NonProductionCallV2TestHarness'));
-      expect(source, contains('CallV2RouteSink'));
+      expect(
+        source,
+        contains(
+          "import '../integration/call_v2_isolated_boundary_evidence.dart';",
+        ),
+      );
+      expect(source, contains('buildCallV2IsolatedBoundaryEvidence()'));
+      expect(source, contains('fromBoundaryEvidence'));
+      expect(source, contains('widgetNavigationBoundaryAvailable'));
+      expect(source.contains('NonProductionCallV2RouteFactory'), isFalse);
+      expect(
+          source.contains('NonProductionCallV2PresentationAdapter'), isFalse);
+      expect(source.contains('NonProductionCallV2TestHarness'), isFalse);
+      expect(
+        source.contains('NonProductionCallV2NavigatorRouteSink'),
+        isFalse,
+      );
       expect(source.contains('NonProductionCallV2RouteFactory('), isFalse);
       expect(
           source.contains('NonProductionCallV2PresentationAdapter('), isFalse);
       expect(source.contains('NonProductionCallV2TestHarness('), isFalse);
+      expect(
+        source.contains('NonProductionCallV2NavigatorRouteSink('),
+        isFalse,
+      );
+      expect(source.contains('.fromNavigatorKey('), isFalse);
+      expect(source.contains('GlobalKey'), isFalse);
+      expect(source.contains('Navigator.'), isFalse);
+      expect(source.contains('Navigator('), isFalse);
+      expect(source.contains('.push'), isFalse);
+      expect(source.contains('.removeRoute'), isFalse);
       expect(source.contains('CallV2RouteFactory('), isFalse);
       expect(source.contains('CallV2PresentationAdapter('), isFalse);
       expect(source.contains('CallV2TestHarness('), isFalse);
       expect(source.contains('CallV2RouteSink('), isFalse);
     });
 
-    test('concrete navigator route sink remains isolated outside production',
+    test('concrete widget route sink remains outside production gate source',
         () {
       final gateSource = _read(
         'lib/call_v2/production/call_v2_pre_integration_gate.dart',
       );
-      final sinkSource = _read(
-        'lib/call_v2/integration/non_production/'
-        'non_production_call_v2_navigator_route_sink.dart',
+      final evidenceSource = _read(
+        'lib/call_v2/integration/call_v2_isolated_boundary_evidence.dart',
       );
 
-      expect(gateSource, contains('CallV2RouteSink'));
+      expect(gateSource, contains('call_v2_isolated_boundary_evidence.dart'));
+      expect(gateSource.contains('Navigator'), isFalse);
+      expect(gateSource.contains('NavigatorState'), isFalse);
+      expect(gateSource.contains('GlobalKey'), isFalse);
       expect(gateSource.contains('NonProductionCallV2NavigatorRouteSink'),
           isFalse);
-      expect(sinkSource, contains('NonProductionCallV2NavigatorRouteSink'));
-      expect(sinkSource, contains('implements CallV2RouteSink'));
+      expect(evidenceSource, contains('CallV2RouteSink'));
+      expect(evidenceSource, contains('NonProductionCallV2NavigatorRouteSink'));
     });
 
     test('gate result exposes only booleans, enums, and enum blocker names',

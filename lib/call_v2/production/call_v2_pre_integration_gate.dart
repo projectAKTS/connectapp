@@ -1,14 +1,8 @@
 import '../call_v2_contract_manifest.dart';
 import '../call_v2_production_capabilities.dart';
 import '../call_v2_runtime_configuration.dart';
-import '../integration/call_v2_presentation_adapter.dart';
-import '../integration/call_v2_route_factory.dart';
-import '../integration/call_v2_route_sink.dart';
+import '../integration/call_v2_isolated_boundary_evidence.dart';
 import '../integration/call_v2_rollout_policy.dart';
-import '../integration/call_v2_test_harness.dart';
-import '../integration/non_production_call_v2_presentation_adapter.dart';
-import '../integration/non_production_call_v2_route_factory.dart';
-import '../integration/non_production_call_v2_test_harness.dart';
 import '../observability/call_v2_observability_capabilities.dart';
 import 'call_v2_final_readiness_audit.dart';
 import 'call_v2_production_integration_approval.dart';
@@ -63,27 +57,23 @@ class CallV2PreIntegrationStructuralEvidence {
     required this.isolatedWidgetHarnessAvailable,
   });
 
-  factory CallV2PreIntegrationStructuralEvidence.fromAcceptedTypes({
-    _CallV2PreIntegrationTypeEvidence typeEvidence =
-        const _CallV2PreIntegrationTypeEvidence(),
-  }) {
+  factory CallV2PreIntegrationStructuralEvidence.fromAcceptedTypes() {
+    final evidence = buildCallV2IsolatedBoundaryEvidence();
+    return CallV2PreIntegrationStructuralEvidence.fromBoundaryEvidence(
+      evidence,
+    );
+  }
+
+  factory CallV2PreIntegrationStructuralEvidence.fromBoundaryEvidence(
+    CallV2IsolatedBoundaryEvidence evidence,
+  ) {
     return CallV2PreIntegrationStructuralEvidence(
-      isolatedRouteFactoryAvailable:
-          typeEvidence.routeFactoryContract == CallV2RouteFactory &&
-              typeEvidence.routeFactoryImplementation ==
-                  NonProductionCallV2RouteFactory,
+      isolatedRouteFactoryAvailable: evidence.routeFactoryAvailable,
       isolatedPresentationAdapterAvailable:
-          typeEvidence.presentationAdapterContract ==
-                  CallV2PresentationAdapter &&
-              typeEvidence.presentationAdapterImplementation ==
-                  NonProductionCallV2PresentationAdapter,
-      isolatedIntegrationHarnessAvailable:
-          typeEvidence.integrationHarnessContract == CallV2TestHarness &&
-              typeEvidence.integrationHarnessImplementation ==
-                  NonProductionCallV2TestHarness,
+          evidence.presentationAdapterAvailable,
+      isolatedIntegrationHarnessAvailable: evidence.integrationHarnessAvailable,
       isolatedWidgetHarnessAvailable:
-          typeEvidence.widgetHarnessContract == CallV2RouteSink &&
-              typeEvidence.widgetHarnessImplementation == CallV2RouteSink,
+          evidence.widgetNavigationBoundaryAvailable,
     );
   }
 
@@ -102,20 +92,6 @@ class CallV2PreIntegrationStructuralEvidence {
       'isolatedWidgetHarnessAvailable': isolatedWidgetHarnessAvailable,
     };
   }
-}
-
-class _CallV2PreIntegrationTypeEvidence {
-  const _CallV2PreIntegrationTypeEvidence();
-
-  Type get routeFactoryContract => CallV2RouteFactory;
-  Type get routeFactoryImplementation => NonProductionCallV2RouteFactory;
-  Type get presentationAdapterContract => CallV2PresentationAdapter;
-  Type get presentationAdapterImplementation =>
-      NonProductionCallV2PresentationAdapter;
-  Type get integrationHarnessContract => CallV2TestHarness;
-  Type get integrationHarnessImplementation => NonProductionCallV2TestHarness;
-  Type get widgetHarnessContract => CallV2RouteSink;
-  Type get widgetHarnessImplementation => CallV2RouteSink;
 }
 
 class CallV2ProductionIntegrationGateResult {
