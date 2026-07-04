@@ -46,10 +46,18 @@ class CallV2ProductionRouteFactory {
       );
     }
 
+    final expectedRouteName =
+        CallV2ProductionRouteNames.forDestination(destination);
+    final candidateRouteName = _routeContract.routeNameFor(destination);
+    if (candidateRouteName != expectedRouteName) {
+      return const CallV2ProductionMappingResult.rejected(
+        CallV2ProductionMappingError.invalidRouteName,
+      );
+    }
+
     return CallV2ProductionMappingResult.success(
-      CallV2ProductionRouteDescriptor(
+      CallV2ProductionRouteDescriptor.forDestination(
         destination: destination,
-        routeName: _routeContract.routeNameFor(destination),
         sessionReference: snapshot.sessionReference,
         generation: snapshot.generation,
         terminalStatus: snapshot.terminalStatus,

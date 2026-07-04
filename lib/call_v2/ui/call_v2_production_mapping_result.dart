@@ -2,6 +2,7 @@ enum CallV2ProductionMappingError {
   invalidInput,
   staleGeneration,
   reservedDestination,
+  invalidRouteName,
 }
 
 sealed class CallV2ProductionMappingResult<T extends Object> {

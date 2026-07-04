@@ -2,6 +2,7 @@ import 'package:connect_app/call_v2/call_v2_api.dart';
 import 'package:connect_app/call_v2/ui/call_v2_production_mapping_result.dart';
 import 'package:connect_app/call_v2/ui/call_v2_production_presentation_snapshot.dart';
 import 'package:connect_app/call_v2/ui/call_v2_production_route_descriptor.dart';
+import 'package:connect_app/call_v2/ui/call_v2_production_route_contract.dart';
 import 'package:connect_app/call_v2/ui/call_v2_production_route_destination.dart';
 import 'package:connect_app/call_v2/ui/call_v2_production_route_factory.dart';
 import 'package:connect_app/call_v2/ui/call_v2_production_view_state.dart';
@@ -74,7 +75,12 @@ void main() {
               CallV2ProductionRouteDescriptor>)
           .value;
       expect(descriptor.routeName, entry.value);
+      expect(
+        descriptor.routeName,
+        CallV2ProductionRouteNames.forDestination(descriptor.destination),
+      );
       expect(descriptor.routeName, isNot(contains('?')));
+      expect(descriptor.routeName, isNot(contains('#')));
       expect(descriptor.routeName, isNot(contains(r'$')));
     }
   });
@@ -113,6 +119,40 @@ void main() {
     );
   });
 
+  test('injected contract must return the exact fixed destination route', () {
+    final cases = <String>[
+      '/evil',
+      '/call-v2/audio?uid=123',
+      '/call-v2/audio#token',
+      '',
+      '/call-v2/video',
+    ];
+
+    for (final candidate in cases) {
+      final result = CallV2ProductionRouteFactory(
+        routeContract: _FixedNameContract(candidate),
+      ).createDescriptor(_audioSnapshot());
+
+      expect(result, isA<CallV2ProductionMappingRejected>(), reason: candidate);
+      final rejected = result as CallV2ProductionMappingRejected;
+      expect(rejected.error, CallV2ProductionMappingError.invalidRouteName);
+      if (candidate.isNotEmpty) {
+        expect(rejected.toString(), isNot(contains(candidate)));
+        expect(rejected.toSafeDebugMap().values, isNot(contains(candidate)));
+      }
+    }
+  });
+
+  test('default fixed contract continues to pass', () {
+    final result = factory.createDescriptor(_audioSnapshot());
+
+    expect(result, isA<CallV2ProductionMappingSuccess>());
+    final descriptor = (result
+            as CallV2ProductionMappingSuccess<CallV2ProductionRouteDescriptor>)
+        .value;
+    expect(descriptor.routeName, '/call-v2/audio');
+  });
+
   test('factory performs no side effects', () {
     final snapshot = CallV2ProductionPresentationSnapshot.none(generation: 5);
     final before = snapshot.toString();
@@ -125,6 +165,20 @@ void main() {
   });
 }
 
+CallV2ProductionPresentationSnapshot _audioSnapshot() {
+  return CallV2ProductionPresentationSnapshot.activeAudio(
+    sessionReference: _session(7),
+    screenState: const CallV2ProductionActiveAudioScreenState(
+      muted: false,
+      speakerEnabled: true,
+      leaveEnabled: true,
+      connectionPhase: CallV2ProductionConnectionPhase.connected,
+      elapsedSeconds: 0,
+      reconnecting: false,
+    ),
+  );
+}
+
 CallV2UiSessionReference _session(
   int generation, {
   CallV2ProductionMediaMode mediaMode = CallV2ProductionMediaMode.audio,
@@ -135,4 +189,15 @@ CallV2UiSessionReference _session(
     localLifecycleStatus: CallV2ProductionLocalLifecycleStatus.active,
     connectionPhase: CallV2ProductionConnectionPhase.connected,
   );
+}
+
+final class _FixedNameContract implements CallV2ProductionRouteContract {
+  const _FixedNameContract(this.routeName);
+
+  final String routeName;
+
+  @override
+  String routeNameFor(CallV2ProductionRouteDestination destination) {
+    return routeName;
+  }
 }
