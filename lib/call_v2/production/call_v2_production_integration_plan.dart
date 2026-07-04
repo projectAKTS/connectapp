@@ -44,9 +44,19 @@ class CallV2ProductionIntegrationPlanItem {
 }
 
 class CallV2ProductionIntegrationPlanSnapshot {
-  const CallV2ProductionIntegrationPlanSnapshot({required this.items});
+  factory CallV2ProductionIntegrationPlanSnapshot({
+    required List<CallV2ProductionIntegrationPlanItem> items,
+  }) {
+    return CallV2ProductionIntegrationPlanSnapshot._(
+      List<CallV2ProductionIntegrationPlanItem>.unmodifiable(items),
+    );
+  }
 
-  final List<CallV2ProductionIntegrationPlanItem> items;
+  const CallV2ProductionIntegrationPlanSnapshot._(this._items);
+
+  final List<CallV2ProductionIntegrationPlanItem> _items;
+
+  List<CallV2ProductionIntegrationPlanItem> get items => _items;
 
   CallV2ProductionIntegrationPlanStepStatus statusFor(
     CallV2ProductionIntegrationPlanStep step,
@@ -67,8 +77,8 @@ class CallV2ProductionIntegrationPlanSnapshot {
 }
 
 const callV2ProductionIntegrationPlanSnapshot =
-    CallV2ProductionIntegrationPlanSnapshot(
-  items: <CallV2ProductionIntegrationPlanItem>[
+    CallV2ProductionIntegrationPlanSnapshot._(
+  <CallV2ProductionIntegrationPlanItem>[
     CallV2ProductionIntegrationPlanItem(
       step: CallV2ProductionIntegrationPlanStep.addProductionDependencyOwner,
       status: CallV2ProductionIntegrationPlanStepStatus.notStarted,

@@ -9,6 +9,18 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('pre-integration gate current state', () {
+    test('default structural evidence reports isolated boundaries available',
+        () {
+      final evidence =
+          CallV2PreIntegrationStructuralEvidence.fromAcceptedTypes();
+
+      expect(evidence.isolatedRouteFactoryAvailable, isTrue);
+      expect(evidence.isolatedPresentationAdapterAvailable, isTrue);
+      expect(evidence.isolatedIntegrationHarnessAvailable, isTrue);
+      expect(evidence.isolatedWidgetHarnessAvailable, isTrue);
+      expect(evidence.toSafeDebugMap().values, everyElement(true));
+    });
+
     test('default gate is structurally ready but approval blocked', () {
       final result = const CallV2PreIntegrationGate().evaluate();
 
@@ -72,6 +84,121 @@ void main() {
         result.blockers.length,
         17,
       );
+    });
+
+    test('custom false evidence blocks structural readiness', () {
+      final evidenceCases = <CallV2PreIntegrationStructuralEvidence>[
+        const CallV2PreIntegrationStructuralEvidence(
+          isolatedRouteFactoryAvailable: false,
+          isolatedPresentationAdapterAvailable: true,
+          isolatedIntegrationHarnessAvailable: true,
+          isolatedWidgetHarnessAvailable: true,
+        ),
+        const CallV2PreIntegrationStructuralEvidence(
+          isolatedRouteFactoryAvailable: true,
+          isolatedPresentationAdapterAvailable: false,
+          isolatedIntegrationHarnessAvailable: true,
+          isolatedWidgetHarnessAvailable: true,
+        ),
+        const CallV2PreIntegrationStructuralEvidence(
+          isolatedRouteFactoryAvailable: true,
+          isolatedPresentationAdapterAvailable: true,
+          isolatedIntegrationHarnessAvailable: false,
+          isolatedWidgetHarnessAvailable: true,
+        ),
+        const CallV2PreIntegrationStructuralEvidence(
+          isolatedRouteFactoryAvailable: true,
+          isolatedPresentationAdapterAvailable: true,
+          isolatedIntegrationHarnessAvailable: true,
+          isolatedWidgetHarnessAvailable: false,
+        ),
+      ];
+
+      for (final evidence in evidenceCases) {
+        final result = const CallV2PreIntegrationGate().evaluate(
+          structuralEvidence: evidence,
+        );
+
+        expect(result.structurallyReady, isFalse);
+        expect(result.status, CallV2ProductionIntegrationGateStatus.blocked);
+      }
+    });
+
+    test('each false evidence field produces its typed blocker', () {
+      expect(
+        const CallV2PreIntegrationGate()
+            .evaluate(
+              structuralEvidence: const CallV2PreIntegrationStructuralEvidence(
+                isolatedRouteFactoryAvailable: false,
+                isolatedPresentationAdapterAvailable: true,
+                isolatedIntegrationHarnessAvailable: true,
+                isolatedWidgetHarnessAvailable: true,
+              ),
+            )
+            .blockers,
+        contains(
+            CallV2ProductionIntegrationGateBlocker.isolatedRouteFactoryMissing),
+      );
+      expect(
+        const CallV2PreIntegrationGate()
+            .evaluate(
+              structuralEvidence: const CallV2PreIntegrationStructuralEvidence(
+                isolatedRouteFactoryAvailable: true,
+                isolatedPresentationAdapterAvailable: false,
+                isolatedIntegrationHarnessAvailable: true,
+                isolatedWidgetHarnessAvailable: true,
+              ),
+            )
+            .blockers,
+        contains(CallV2ProductionIntegrationGateBlocker
+            .isolatedPresentationAdapterMissing),
+      );
+      expect(
+        const CallV2PreIntegrationGate()
+            .evaluate(
+              structuralEvidence: const CallV2PreIntegrationStructuralEvidence(
+                isolatedRouteFactoryAvailable: true,
+                isolatedPresentationAdapterAvailable: true,
+                isolatedIntegrationHarnessAvailable: false,
+                isolatedWidgetHarnessAvailable: true,
+              ),
+            )
+            .blockers,
+        contains(CallV2ProductionIntegrationGateBlocker
+            .isolatedIntegrationHarnessMissing),
+      );
+      expect(
+        const CallV2PreIntegrationGate()
+            .evaluate(
+              structuralEvidence: const CallV2PreIntegrationStructuralEvidence(
+                isolatedRouteFactoryAvailable: true,
+                isolatedPresentationAdapterAvailable: true,
+                isolatedIntegrationHarnessAvailable: true,
+                isolatedWidgetHarnessAvailable: false,
+              ),
+            )
+            .blockers,
+        contains(CallV2ProductionIntegrationGateBlocker
+            .isolatedWidgetHarnessMissing),
+      );
+    });
+
+    test('full approval cannot override missing structural evidence', () {
+      final result = const CallV2PreIntegrationGate().evaluate(
+        approval: const CallV2ProductionIntegrationApproval.fullyApproved(),
+        structuralEvidence: const CallV2PreIntegrationStructuralEvidence(
+          isolatedRouteFactoryAvailable: false,
+          isolatedPresentationAdapterAvailable: true,
+          isolatedIntegrationHarnessAvailable: true,
+          isolatedWidgetHarnessAvailable: true,
+        ),
+      );
+
+      expect(result.approvalsComplete, isTrue);
+      expect(result.structurallyReady, isFalse);
+      expect(result.status, CallV2ProductionIntegrationGateStatus.blocked);
+      expect(result.actualIntegrationAuthorized, isFalse);
+      expect(result.rolloutAuthorized, isFalse);
     });
   });
 
@@ -156,17 +283,17 @@ void main() {
       final productionSources = _productionSources();
       final main = _read('lib/main.dart');
 
-      for (final forbidden in <String>[
-        'ProductionCallV2RouteFactory',
-        'ProductionCallV2PresentationAdapter',
+      for (final forbidden in <Pattern>[
+        RegExp(r'(?<!Non)ProductionCallV2RouteFactory'),
+        RegExp(r'(?<!Non)ProductionCallV2PresentationAdapter'),
         'ProductionCallV2NavigatorRouteSink',
         'CallV2Screen',
         'IncomingCallV2',
         'ActiveCallV2',
       ]) {
-        expect(main.contains(forbidden), isFalse, reason: forbidden);
+        expect(main.contains(forbidden), isFalse, reason: '$forbidden');
         expect(productionSources.contains(forbidden), isFalse,
-            reason: forbidden);
+            reason: '$forbidden');
       }
     });
 
@@ -219,9 +346,41 @@ void main() {
         'debugPrint',
         'runtime.start',
         'deploy',
+        'File(',
+        'Platform.',
+        'dart:io',
       ]) {
         expect(source.contains(forbidden), isFalse, reason: forbidden);
       }
+    });
+
+    test('default evidence derives from type references only', () {
+      final source = _read(
+        'lib/call_v2/production/call_v2_pre_integration_gate.dart',
+      );
+
+      expect(source.contains('const isolatedRouteFactoryVerified = true'),
+          isFalse);
+      expect(
+          source.contains('const isolatedPresentationAdapterVerified = true'),
+          isFalse);
+      expect(source.contains('const isolatedIntegrationHarnessVerified = true'),
+          isFalse);
+      expect(source.contains('const isolatedWidgetHarnessVerified = true'),
+          isFalse);
+      expect(source, contains('CallV2RouteFactory'));
+      expect(source, contains('NonProductionCallV2RouteFactory'));
+      expect(source, contains('CallV2PresentationAdapter'));
+      expect(source, contains('NonProductionCallV2PresentationAdapter'));
+      expect(source, contains('CallV2TestHarness'));
+      expect(source, contains('NonProductionCallV2TestHarness'));
+      expect(source.contains('NonProductionCallV2RouteFactory('), isFalse);
+      expect(
+          source.contains('NonProductionCallV2PresentationAdapter('), isFalse);
+      expect(source.contains('NonProductionCallV2TestHarness('), isFalse);
+      expect(source.contains('CallV2RouteFactory('), isFalse);
+      expect(source.contains('CallV2PresentationAdapter('), isFalse);
+      expect(source.contains('CallV2TestHarness('), isFalse);
     });
 
     test('gate result exposes only booleans, enums, and enum blocker names',

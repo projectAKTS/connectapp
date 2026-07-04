@@ -1,7 +1,13 @@
 import '../call_v2_contract_manifest.dart';
 import '../call_v2_production_capabilities.dart';
 import '../call_v2_runtime_configuration.dart';
+import '../integration/call_v2_presentation_adapter.dart';
+import '../integration/call_v2_route_factory.dart';
 import '../integration/call_v2_rollout_policy.dart';
+import '../integration/call_v2_test_harness.dart';
+import '../integration/non_production_call_v2_presentation_adapter.dart';
+import '../integration/non_production_call_v2_route_factory.dart';
+import '../integration/non_production_call_v2_test_harness.dart';
 import '../observability/call_v2_observability_capabilities.dart';
 import 'call_v2_final_readiness_audit.dart';
 import 'call_v2_production_integration_approval.dart';
@@ -46,6 +52,70 @@ enum CallV2ProductionIntegrationGateBlocker {
   productionRouteSinkPresent,
   runtimeStartupPresent,
   rolloutFlagEnabled,
+}
+
+class CallV2PreIntegrationStructuralEvidence {
+  const CallV2PreIntegrationStructuralEvidence({
+    required this.isolatedRouteFactoryAvailable,
+    required this.isolatedPresentationAdapterAvailable,
+    required this.isolatedIntegrationHarnessAvailable,
+    required this.isolatedWidgetHarnessAvailable,
+  });
+
+  factory CallV2PreIntegrationStructuralEvidence.fromAcceptedTypes({
+    _CallV2PreIntegrationTypeEvidence typeEvidence =
+        const _CallV2PreIntegrationTypeEvidence(),
+  }) {
+    return CallV2PreIntegrationStructuralEvidence(
+      isolatedRouteFactoryAvailable:
+          typeEvidence.routeFactoryContract == CallV2RouteFactory &&
+              typeEvidence.routeFactoryImplementation ==
+                  NonProductionCallV2RouteFactory,
+      isolatedPresentationAdapterAvailable:
+          typeEvidence.presentationAdapterContract ==
+                  CallV2PresentationAdapter &&
+              typeEvidence.presentationAdapterImplementation ==
+                  NonProductionCallV2PresentationAdapter,
+      isolatedIntegrationHarnessAvailable:
+          typeEvidence.integrationHarnessContract == CallV2TestHarness &&
+              typeEvidence.integrationHarnessImplementation ==
+                  NonProductionCallV2TestHarness,
+      isolatedWidgetHarnessAvailable:
+          typeEvidence.widgetHarnessContract == CallV2TestHarness &&
+              typeEvidence.widgetHarnessImplementation ==
+                  NonProductionCallV2TestHarness,
+    );
+  }
+
+  final bool isolatedRouteFactoryAvailable;
+  final bool isolatedPresentationAdapterAvailable;
+  final bool isolatedIntegrationHarnessAvailable;
+  final bool isolatedWidgetHarnessAvailable;
+
+  Map<String, bool> toSafeDebugMap() {
+    return <String, bool>{
+      'isolatedRouteFactoryAvailable': isolatedRouteFactoryAvailable,
+      'isolatedPresentationAdapterAvailable':
+          isolatedPresentationAdapterAvailable,
+      'isolatedIntegrationHarnessAvailable':
+          isolatedIntegrationHarnessAvailable,
+      'isolatedWidgetHarnessAvailable': isolatedWidgetHarnessAvailable,
+    };
+  }
+}
+
+class _CallV2PreIntegrationTypeEvidence {
+  const _CallV2PreIntegrationTypeEvidence();
+
+  Type get routeFactoryContract => CallV2RouteFactory;
+  Type get routeFactoryImplementation => NonProductionCallV2RouteFactory;
+  Type get presentationAdapterContract => CallV2PresentationAdapter;
+  Type get presentationAdapterImplementation =>
+      NonProductionCallV2PresentationAdapter;
+  Type get integrationHarnessContract => CallV2TestHarness;
+  Type get integrationHarnessImplementation => NonProductionCallV2TestHarness;
+  Type get widgetHarnessContract => CallV2TestHarness;
+  Type get widgetHarnessImplementation => NonProductionCallV2TestHarness;
 }
 
 class CallV2ProductionIntegrationGateResult {
@@ -151,7 +221,10 @@ class CallV2PreIntegrationGate {
         callV2IsolatedObservabilityCapabilities,
     CallV2ActualRolloutPrerequisites actualRolloutPrerequisites =
         const CallV2ActualRolloutPrerequisites(),
+    CallV2PreIntegrationStructuralEvidence? structuralEvidence,
   }) {
+    final evidence = structuralEvidence ??
+        CallV2PreIntegrationStructuralEvidence.fromAcceptedTypes();
     final finalReadiness = finalReadinessAuditor.audit(
       manifest: manifest,
       configuration: configuration,
@@ -171,10 +244,13 @@ class CallV2PreIntegrationGate {
     final hardDisabledRouteRegistryPresent =
         !CallV2RolloutPolicy.productionEnabled &&
             manifest.startupUiRoutesNativeWiringAbsent;
-    const isolatedRouteFactoryVerified = true;
-    const isolatedPresentationAdapterVerified = true;
-    const isolatedIntegrationHarnessVerified = true;
-    const isolatedWidgetHarnessVerified = true;
+    final isolatedRouteFactoryVerified = evidence.isolatedRouteFactoryAvailable;
+    final isolatedPresentationAdapterVerified =
+        evidence.isolatedPresentationAdapterAvailable;
+    final isolatedIntegrationHarnessVerified =
+        evidence.isolatedIntegrationHarnessAvailable;
+    final isolatedWidgetHarnessVerified =
+        evidence.isolatedWidgetHarnessAvailable;
     final realStartupIntegrationAbsent = !finalReadiness.appStartupWired;
     final realRouteDestinationAbsent = !finalReadiness.realRoutesWired;
     final productionScreenAbsent = !finalReadiness.realScreensWired;

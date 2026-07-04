@@ -65,6 +65,52 @@ void main() {
   });
 
   group('integration plan snapshot', () {
+    test('mutating source list after construction does not alter snapshot', () {
+      final sourceItems = <CallV2ProductionIntegrationPlanItem>[
+        const CallV2ProductionIntegrationPlanItem(
+          step:
+              CallV2ProductionIntegrationPlanStep.addProductionDependencyOwner,
+          status: CallV2ProductionIntegrationPlanStepStatus.notStarted,
+        ),
+      ];
+      final snapshot = CallV2ProductionIntegrationPlanSnapshot(
+        items: sourceItems,
+      );
+
+      sourceItems.add(
+        const CallV2ProductionIntegrationPlanItem(
+          step: CallV2ProductionIntegrationPlanStep.deployBackend,
+          status: CallV2ProductionIntegrationPlanStepStatus.blocked,
+        ),
+      );
+
+      expect(snapshot.items, hasLength(1));
+      expect(
+        snapshot.statusFor(
+          CallV2ProductionIntegrationPlanStep.addProductionDependencyOwner,
+        ),
+        CallV2ProductionIntegrationPlanStepStatus.notStarted,
+      );
+    });
+
+    test('direct mutation through snapshot items is rejected', () {
+      expect(
+        () => callV2ProductionIntegrationPlanSnapshot.items.add(
+          const CallV2ProductionIntegrationPlanItem(
+            step: CallV2ProductionIntegrationPlanStep.deployBackend,
+            status: CallV2ProductionIntegrationPlanStepStatus.blocked,
+          ),
+        ),
+        throwsUnsupportedError,
+      );
+      expect(
+        () => callV2ProductionIntegrationPlanSnapshot.items.remove(
+          callV2ProductionIntegrationPlanSnapshot.items.first,
+        ),
+        throwsUnsupportedError,
+      );
+    });
+
     test('contains every typed future production step exactly once', () {
       expect(
         callV2ProductionIntegrationPlanSnapshot.items
@@ -144,7 +190,11 @@ void main() {
 
       expect(
           source.contains('enum CallV2ProductionIntegrationPlanStep'), isTrue);
-      expect(source.contains('final List<CallV2ProductionIntegrationPlanItem>'),
+      expect(
+          source.contains('List<CallV2ProductionIntegrationPlanItem>'), isTrue);
+      expect(
+          source.contains(
+              'List<CallV2ProductionIntegrationPlanItem>.unmodifiable'),
           isTrue);
       for (final forbidden in <String>[
         'Function',
