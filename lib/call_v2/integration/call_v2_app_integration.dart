@@ -17,5 +17,5 @@ Future<void> initializeCallV2AppIntegrationShellSafely() async {
 Future<void> initializeCallV2AppIntegrationShell() async {
   if (!CallV2RolloutPolicy.productionEnabled) return;
 
-  await const DisabledCallV2AppIntegration().initialize();
+  await DisabledCallV2AppIntegration().initialize();
 }

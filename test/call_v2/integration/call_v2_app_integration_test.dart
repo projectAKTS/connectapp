@@ -46,7 +46,7 @@ void main() {
 
   group('disabled integration', () {
     test('constructor, initialize, and dispose are side-effect free', () async {
-      const integration = DisabledCallV2AppIntegration();
+      final integration = DisabledCallV2AppIntegration();
 
       await integration.initialize();
       await integration.initialize();
@@ -55,7 +55,7 @@ void main() {
     });
 
     test('dispose before initialize is safe', () async {
-      await const DisabledCallV2AppIntegration().dispose();
+      await DisabledCallV2AppIntegration().dispose();
     });
 
     test('startup shell returns while disabled and does not throw', () async {
