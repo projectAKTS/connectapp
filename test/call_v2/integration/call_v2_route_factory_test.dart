@@ -278,11 +278,14 @@ String _factorySource() {
 }
 
 String _placeholderSource() {
-  return Directory('lib/call_v2/integration/non_production')
-      .listSync(recursive: true)
-      .whereType<File>()
-      .map((file) => file.readAsStringSync())
-      .join('\n');
+  return <String>[
+    'lib/call_v2/integration/non_production/'
+        'non_production_call_v2_connecting_placeholder.dart',
+    'lib/call_v2/integration/non_production/'
+        'non_production_call_v2_failure_placeholder.dart',
+    'lib/call_v2/integration/non_production/'
+        'non_production_call_v2_ready_placeholder.dart',
+  ].map(_read).join('\n');
 }
 
 String _read(String path) => File(path).readAsStringSync();
