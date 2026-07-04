@@ -60,8 +60,9 @@ class CallV2ProductionPresentationSnapshot {
   factory CallV2ProductionPresentationSnapshot.controlledFailure({
     required CallV2UiSessionReference? sessionReference,
     required CallV2ProductionControlledFailureScreenState screenState,
+    int? generation,
   }) {
-    final generation = sessionReference?.generation ?? 0;
+    final snapshotGeneration = generation ?? sessionReference?.generation ?? 0;
     return CallV2ProductionPresentationSnapshot._(
       destination: CallV2ProductionRouteDestination.controlledFailure,
       sessionReference: sessionReference,
@@ -70,7 +71,7 @@ class CallV2ProductionPresentationSnapshot {
         destination: CallV2ProductionRouteDestination.controlledFailure,
         state: screenState,
       ),
-      generation: generation,
+      generation: snapshotGeneration,
       terminalStatus: CallV2ProductionPresentationTerminalStatus.nonterminal,
     );
   }
