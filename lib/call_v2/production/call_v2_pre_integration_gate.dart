@@ -3,6 +3,7 @@ import '../call_v2_production_capabilities.dart';
 import '../call_v2_runtime_configuration.dart';
 import '../integration/call_v2_presentation_adapter.dart';
 import '../integration/call_v2_route_factory.dart';
+import '../integration/call_v2_route_sink.dart';
 import '../integration/call_v2_rollout_policy.dart';
 import '../integration/call_v2_test_harness.dart';
 import '../integration/non_production_call_v2_presentation_adapter.dart';
@@ -81,9 +82,8 @@ class CallV2PreIntegrationStructuralEvidence {
               typeEvidence.integrationHarnessImplementation ==
                   NonProductionCallV2TestHarness,
       isolatedWidgetHarnessAvailable:
-          typeEvidence.widgetHarnessContract == CallV2TestHarness &&
-              typeEvidence.widgetHarnessImplementation ==
-                  NonProductionCallV2TestHarness,
+          typeEvidence.widgetHarnessContract == CallV2RouteSink &&
+              typeEvidence.widgetHarnessImplementation == CallV2RouteSink,
     );
   }
 
@@ -114,8 +114,8 @@ class _CallV2PreIntegrationTypeEvidence {
       NonProductionCallV2PresentationAdapter;
   Type get integrationHarnessContract => CallV2TestHarness;
   Type get integrationHarnessImplementation => NonProductionCallV2TestHarness;
-  Type get widgetHarnessContract => CallV2TestHarness;
-  Type get widgetHarnessImplementation => NonProductionCallV2TestHarness;
+  Type get widgetHarnessContract => CallV2RouteSink;
+  Type get widgetHarnessImplementation => CallV2RouteSink;
 }
 
 class CallV2ProductionIntegrationGateResult {

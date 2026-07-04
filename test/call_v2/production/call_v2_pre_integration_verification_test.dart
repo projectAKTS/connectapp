@@ -183,6 +183,32 @@ void main() {
       );
     });
 
+    test('widget evidence is independent from integration harness evidence',
+        () {
+      final result = const CallV2PreIntegrationGate().evaluate(
+        structuralEvidence: const CallV2PreIntegrationStructuralEvidence(
+          isolatedRouteFactoryAvailable: true,
+          isolatedPresentationAdapterAvailable: true,
+          isolatedIntegrationHarnessAvailable: true,
+          isolatedWidgetHarnessAvailable: false,
+        ),
+      );
+
+      expect(result.structurallyReady, isFalse);
+      expect(result.isolatedIntegrationHarnessVerified, isTrue);
+      expect(result.isolatedWidgetHarnessVerified, isFalse);
+      expect(
+        result.blockers,
+        contains(CallV2ProductionIntegrationGateBlocker
+            .isolatedWidgetHarnessMissing),
+      );
+      expect(
+        result.blockers,
+        isNot(contains(CallV2ProductionIntegrationGateBlocker
+            .isolatedIntegrationHarnessMissing)),
+      );
+    });
+
     test('full approval cannot override missing structural evidence', () {
       final result = const CallV2PreIntegrationGate().evaluate(
         approval: const CallV2ProductionIntegrationApproval.fullyApproved(),
@@ -199,6 +225,34 @@ void main() {
       expect(result.status, CallV2ProductionIntegrationGateStatus.blocked);
       expect(result.actualIntegrationAuthorized, isFalse);
       expect(result.rolloutAuthorized, isFalse);
+    });
+
+    test('full approval cannot override missing widget evidence', () {
+      final result = const CallV2PreIntegrationGate().evaluate(
+        approval: const CallV2ProductionIntegrationApproval.fullyApproved(),
+        structuralEvidence: const CallV2PreIntegrationStructuralEvidence(
+          isolatedRouteFactoryAvailable: true,
+          isolatedPresentationAdapterAvailable: true,
+          isolatedIntegrationHarnessAvailable: true,
+          isolatedWidgetHarnessAvailable: false,
+        ),
+      );
+
+      expect(result.approvalsComplete, isTrue);
+      expect(result.structurallyReady, isFalse);
+      expect(result.status, CallV2ProductionIntegrationGateStatus.blocked);
+      expect(result.actualIntegrationAuthorized, isFalse);
+      expect(result.rolloutAuthorized, isFalse);
+      expect(
+        result.blockers,
+        contains(CallV2ProductionIntegrationGateBlocker
+            .isolatedWidgetHarnessMissing),
+      );
+      expect(
+        result.blockers,
+        isNot(contains(CallV2ProductionIntegrationGateBlocker
+            .isolatedIntegrationHarnessMissing)),
+      );
     });
   });
 
@@ -286,7 +340,7 @@ void main() {
       for (final forbidden in <Pattern>[
         RegExp(r'(?<!Non)ProductionCallV2RouteFactory'),
         RegExp(r'(?<!Non)ProductionCallV2PresentationAdapter'),
-        'ProductionCallV2NavigatorRouteSink',
+        RegExp(r'(?<!Non)ProductionCallV2NavigatorRouteSink'),
         'CallV2Screen',
         'IncomingCallV2',
         'ActiveCallV2',
@@ -374,6 +428,7 @@ void main() {
       expect(source, contains('NonProductionCallV2PresentationAdapter'));
       expect(source, contains('CallV2TestHarness'));
       expect(source, contains('NonProductionCallV2TestHarness'));
+      expect(source, contains('CallV2RouteSink'));
       expect(source.contains('NonProductionCallV2RouteFactory('), isFalse);
       expect(
           source.contains('NonProductionCallV2PresentationAdapter('), isFalse);
@@ -381,6 +436,24 @@ void main() {
       expect(source.contains('CallV2RouteFactory('), isFalse);
       expect(source.contains('CallV2PresentationAdapter('), isFalse);
       expect(source.contains('CallV2TestHarness('), isFalse);
+      expect(source.contains('CallV2RouteSink('), isFalse);
+    });
+
+    test('concrete navigator route sink remains isolated outside production',
+        () {
+      final gateSource = _read(
+        'lib/call_v2/production/call_v2_pre_integration_gate.dart',
+      );
+      final sinkSource = _read(
+        'lib/call_v2/integration/non_production/'
+        'non_production_call_v2_navigator_route_sink.dart',
+      );
+
+      expect(gateSource, contains('CallV2RouteSink'));
+      expect(gateSource.contains('NonProductionCallV2NavigatorRouteSink'),
+          isFalse);
+      expect(sinkSource, contains('NonProductionCallV2NavigatorRouteSink'));
+      expect(sinkSource, contains('implements CallV2RouteSink'));
     });
 
     test('gate result exposes only booleans, enums, and enum blocker names',
