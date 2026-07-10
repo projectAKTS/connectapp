@@ -1,9 +1,10 @@
 import 'package:flutter/widgets.dart';
 
 import '../ui/call_v2_production_route_destination.dart';
+import 'call_v2_production_navigator_port.dart';
 import 'call_v2_production_route_sink_adapter.dart';
 
-typedef CallV2NavigatorProvider = Object? Function();
+typedef CallV2NavigatorProvider = CallV2ProductionNavigatorPort? Function();
 typedef CallV2CurrentRouteNameProvider = String? Function();
 
 enum CallV2ProductionNavigatorAdapterFailure {
@@ -57,7 +58,7 @@ final class CallV2ProductionNavigatorAdapter
   Future<void> push(Route<dynamic> route) async {
     final routeName = _validatedRouteName(route);
     final navigator = _requireNavigator();
-    navigator.push<dynamic>(route);
+    await navigator.push(route);
     _ownedRouteName = routeName;
   }
 
@@ -65,7 +66,7 @@ final class CallV2ProductionNavigatorAdapter
   Future<void> replace(Route<dynamic> route) async {
     final routeName = _validatedRouteName(route);
     final navigator = _requireNavigator();
-    navigator.pushReplacement<dynamic, dynamic>(route);
+    await navigator.pushReplacement(route);
     _ownedRouteName = routeName;
   }
 
@@ -84,7 +85,7 @@ final class CallV2ProductionNavigatorAdapter
     _ownedRouteName = null;
   }
 
-  dynamic _requireNavigator() {
+  CallV2ProductionNavigatorPort _requireNavigator() {
     if (_disposed) {
       throw const CallV2ProductionNavigatorAdapterException(
         CallV2ProductionNavigatorAdapterFailure.disposed,

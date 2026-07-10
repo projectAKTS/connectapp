@@ -1,4 +1,5 @@
 import 'package:connect_app/call_v2/integration/call_v2_production_navigator_adapter.dart';
+import 'package:connect_app/call_v2/integration/call_v2_production_navigator_port.dart';
 import 'package:connect_app/call_v2/integration/call_v2_production_route_sink_adapter.dart';
 import 'package:connect_app/call_v2/ui/call_v2_production_route_destination.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +10,34 @@ void main() {
     final harness = await _pumpHarness(tester);
 
     expect(harness.adapter, isA<CallV2ProductionRouteSinkAdapter>());
+  });
+
+  test('fake navigator port can be injected', () async {
+    final port = _FakeNavigatorPort();
+    var currentRouteName = CallV2ProductionRouteNames.connecting;
+    final adapter = CallV2ProductionNavigatorAdapter(
+      navigatorProvider: () => port,
+      currentRouteNameProvider: () => currentRouteName,
+    );
+
+    await adapter.push(_route(CallV2ProductionRouteNames.connecting));
+    currentRouteName = CallV2ProductionRouteNames.activeAudio;
+    await adapter.replace(_route(CallV2ProductionRouteNames.activeAudio));
+    await adapter.popCallV2Route();
+
+    expect(port.pushed, <String>[CallV2ProductionRouteNames.connecting]);
+    expect(port.replaced, <String>[CallV2ProductionRouteNames.activeAudio]);
+    expect(port.popCount, 1);
+  });
+
+  test('navigator provider contract is typed to the minimal port', () {
+    CallV2ProductionNavigatorPort? typedProvider() => _FakeNavigatorPort();
+    final adapter = CallV2ProductionNavigatorAdapter(
+      navigatorProvider: typedProvider,
+      currentRouteNameProvider: () => null,
+    );
+
+    expect(adapter, isA<CallV2ProductionRouteSinkAdapter>());
   });
 
   testWidgets('push accepts every exact canonical Call V2 route',
@@ -249,9 +278,10 @@ Future<_Harness> _pumpHarness(WidgetTester tester) async {
   );
   await tester.pumpAndSettle();
   final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+  final navigatorPort = _WidgetNavigatorPort(navigator);
   observer.markInitialRoute('/home');
   final adapter = CallV2ProductionNavigatorAdapter(
-    navigatorProvider: () => navigator,
+    navigatorProvider: () => navigatorPort,
     currentRouteNameProvider: () => observer.currentRouteName,
   );
   return _Harness(
@@ -271,6 +301,56 @@ final class _Harness {
   final CallV2ProductionNavigatorAdapter adapter;
   final NavigatorState navigator;
   final _TrackingNavigatorObserver observer;
+}
+
+final class _WidgetNavigatorPort implements CallV2ProductionNavigatorPort {
+  const _WidgetNavigatorPort(this._navigator);
+
+  final NavigatorState _navigator;
+
+  @override
+  Future<void> push(Route<dynamic> route) async {
+    _navigator.push<dynamic>(route);
+  }
+
+  @override
+  Future<void> pushReplacement(Route<dynamic> route) async {
+    _navigator.pushReplacement<dynamic, dynamic>(route);
+  }
+
+  @override
+  bool canPop() => _navigator.canPop();
+
+  @override
+  void pop() {
+    _navigator.pop();
+  }
+}
+
+final class _FakeNavigatorPort implements CallV2ProductionNavigatorPort {
+  final List<String> pushed = <String>[];
+  final List<String> replaced = <String>[];
+  var popCount = 0;
+
+  @override
+  Future<void> push(Route<dynamic> route) async {
+    final name = route.settings.name;
+    if (name != null) pushed.add(name);
+  }
+
+  @override
+  Future<void> pushReplacement(Route<dynamic> route) async {
+    final name = route.settings.name;
+    if (name != null) replaced.add(name);
+  }
+
+  @override
+  bool canPop() => true;
+
+  @override
+  void pop() {
+    popCount += 1;
+  }
 }
 
 final class _TrackingNavigatorObserver extends NavigatorObserver {

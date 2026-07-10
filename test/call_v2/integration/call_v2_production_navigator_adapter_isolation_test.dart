@@ -9,11 +9,22 @@ void main() {
     final adapter = File(
       'lib/call_v2/integration/call_v2_production_navigator_adapter.dart',
     ).readAsStringSync();
+    final port = File(
+      'lib/call_v2/integration/call_v2_production_navigator_port.dart',
+    ).readAsStringSync();
 
     expect(adapter, contains('CallV2NavigatorProvider'));
+    expect(adapter, contains('CallV2ProductionNavigatorPort'));
+    expect(port,
+        contains('abstract interface class CallV2ProductionNavigatorPort'));
     expect(adapter, contains('push'));
     expect(adapter, contains('pushReplacement'));
     expect(adapter, contains('popCallV2Route'));
+    expect(adapter, isNot(contains('Object? Function()')));
+    expect(adapter, isNot(contains('dynamic _requireNavigator')));
+    expect(
+        adapter, isNot(contains('final navigator = _navigatorProvider() as')));
+    expect(adapter, isNot(contains('noSuchMethod')));
 
     for (final forbidden in <String>[
       'GlobalKey',
@@ -34,6 +45,32 @@ void main() {
     ]) {
       expect(adapter, isNot(contains(forbidden)), reason: forbidden);
     }
+  });
+
+  test('adapter depends on typed fakeable navigator port', () {
+    final adapter = File(
+      'lib/call_v2/integration/call_v2_production_navigator_adapter.dart',
+    ).readAsStringSync();
+    final port = File(
+      'lib/call_v2/integration/call_v2_production_navigator_port.dart',
+    ).readAsStringSync();
+
+    expect(
+      adapter,
+      contains('typedef CallV2NavigatorProvider = '
+          'CallV2ProductionNavigatorPort? Function();'),
+    );
+    expect(
+      adapter,
+      contains('CallV2ProductionNavigatorPort _requireNavigator()'),
+    );
+    expect(port, contains('Future<void> push(Route<dynamic> route);'));
+    expect(
+      port,
+      contains('Future<void> pushReplacement(Route<dynamic> route);'),
+    );
+    expect(port, contains('bool canPop();'));
+    expect(port, contains('void pop();'));
   });
 
   test('real app and existing integration files remain disconnected', () {
@@ -84,6 +121,9 @@ void main() {
     final adapter = File(
       'lib/call_v2/integration/call_v2_production_navigator_adapter.dart',
     ).readAsStringSync();
+    final port = File(
+      'lib/call_v2/integration/call_v2_production_navigator_port.dart',
+    ).readAsStringSync();
 
     for (final forbidden in <String>[
       'call_v1',
@@ -99,6 +139,7 @@ void main() {
       'web/',
     ]) {
       expect(adapter, isNot(contains(forbidden)), reason: forbidden);
+      expect(port, isNot(contains(forbidden)), reason: forbidden);
     }
   });
 }
