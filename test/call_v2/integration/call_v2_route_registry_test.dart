@@ -46,6 +46,19 @@ void main() {
     test('route constants are names only and do not expose identifiers', () {
       expect(CallV2RouteNames.connecting, '/call-v2/connecting');
       expect(CallV2RouteNames.ready, '/call-v2/ready');
+      expect(
+        callV2DeveloperCanonicalRouteNames,
+        <String>{
+          '/call-v2/connecting',
+          '/call-v2/audio',
+          '/call-v2/video',
+          '/call-v2/failure',
+        },
+      );
+      expect(
+        isCallV2DeveloperCanonicalRouteName('/call-v2/ready'),
+        isFalse,
+      );
 
       for (final name in <String>[
         CallV2RouteNames.connecting,
@@ -61,26 +74,38 @@ void main() {
   group('disabled behavior', () {
     test('rollout policy remains literal false', () {
       expect(CallV2RolloutPolicy.productionEnabled, isFalse);
+      expect(isCallV2DeveloperRouteRegistrationEnabled, isFalse);
       expect(
         _read('lib/call_v2/integration/call_v2_rollout_policy.dart'),
         contains('static const bool productionEnabled = false;'),
       );
     });
 
-    test('any proposed Call V2 route returns null', () {
+    test('canonical Call V2 routes return null while rollout is false', () {
       for (final name in <String>[
         CallV2RouteNames.connecting,
-        CallV2RouteNames.ready,
-        '/call-v2/incoming',
-        '/call-v2/active',
-        '/call-v2/anything',
+        CallV2RouteNames.activeAudio,
+        CallV2RouteNames.activeVideo,
+        CallV2RouteNames.controlledFailure,
       ]) {
         expect(resolveCallV2Route(RouteSettings(name: name)), isNull);
+        expect(
+          const DisabledCallV2RouteRegistry()
+              .resolve(RouteSettings(name: name)),
+          isNull,
+        );
       }
     });
 
-    test('existing route names return null from Call V2 registry', () {
+    test('excluded and non-Call V2 routes return null while disabled', () {
       for (final name in <String>[
+        CallV2RouteNames.ready,
+        '/call-v2/connecting/extra',
+        '/call-v2/audio?mode=debug',
+        '/call-v2/video#camera',
+        '/call-v2/incoming',
+        '/call-v2/active',
+        '/call-v2/anything',
         '/',
         '/home',
         '/login',
@@ -100,6 +125,7 @@ void main() {
       for (final settings in <RouteSettings>[
         const RouteSettings(name: CallV2RouteNames.connecting),
         RouteSettings(name: CallV2RouteNames.ready, arguments: null),
+        RouteSettings(name: CallV2RouteNames.connecting, arguments: hostile),
         RouteSettings(name: CallV2RouteNames.ready, arguments: hostile),
         const RouteSettings(
           name: CallV2RouteNames.ready,
@@ -110,6 +136,39 @@ void main() {
         expect(resolveCallV2Route(settings), isNull);
       }
       expect(hostile.readCount, 0);
+    });
+
+    test('route registry decision is debug safe while disabled', () {
+      final decision = describeCallV2RouteRegistryDecision(
+        const RouteSettings(name: CallV2RouteNames.connecting),
+      );
+
+      expect(
+        decision.kind,
+        CallV2DeveloperRouteRegistryDecisionKind.rolloutDisabled,
+      );
+      expect(decision.rolloutEnabled, isFalse);
+      expect(decision.routeMayResolve, isFalse);
+      expect(decision.toSafeDebugMap()['canonicalRouteCount'], 4);
+
+      final debugText = '${decision.toSafeDebugMap()} $decision';
+      for (final forbidden in <String>[
+        '/call-v2',
+        'uid',
+        'user',
+        'participant',
+        'callId',
+        'token',
+        'credential',
+        'channel',
+        'deviceLabel',
+        'deviceId',
+        'payload',
+        'stack',
+        'raw',
+      ]) {
+        expect(debugText, isNot(contains(forbidden)), reason: forbidden);
+      }
     });
 
     test('repeated resolution is side-effect free and constructs no route', () {
@@ -128,9 +187,12 @@ void main() {
       final policyIndex =
           source.indexOf('CallV2RolloutPolicy.productionEnabled');
       final registryIndex = source.indexOf('DisabledCallV2RouteRegistry');
+      final decisionIndex =
+          source.indexOf('describeCallV2RouteRegistryDecision(settings)');
 
       expect(policyIndex, greaterThanOrEqualTo(0));
       expect(registryIndex, greaterThan(policyIndex));
+      expect(decisionIndex, greaterThan(policyIndex));
       for (final forbidden in <String>[
         'settings.arguments',
         'as Map',
@@ -144,6 +206,68 @@ void main() {
         'print(',
       ]) {
         expect(source.contains(forbidden), isFalse, reason: forbidden);
+      }
+    });
+
+    test('route registry source has no service navigator or async hooks', () {
+      final source = _registrySource();
+
+      for (final forbidden in <String>[
+        'package:firebase',
+        'cloud_firestore',
+        'cloud_functions',
+        'firebase_auth',
+        'FirebaseFirestore',
+        'FirebaseFunctions',
+        'FirebaseAuth',
+        'FirebaseAppCheck',
+        'agora_rtc_engine',
+        'permission_handler',
+        'Permission.',
+        'RtcEngine',
+        'createAgoraRtcEngine',
+        'joinChannel',
+        'Navigator.',
+        'Navigator(',
+        'BuildContext',
+        'GlobalKey',
+        'dart:async',
+        'Timer(',
+        'StreamController',
+        'StreamSubscription',
+        'listen(',
+        'AppLifecycleListener',
+        'WidgetsBindingObserver',
+      ]) {
+        expect(source.contains(forbidden), isFalse, reason: forbidden);
+      }
+    });
+
+    test('real app boundary files do not reference route metadata', () {
+      for (final path in <String>[
+        'lib/main.dart',
+        'lib/navigation/app_router.dart',
+        'lib/call_v2/startup/production_call_v2_startup_bridge.dart',
+        'lib/call_v2/production/call_v2_production_composition.dart',
+        'pubspec.yaml',
+        'pubspec.lock',
+        'android/app/src/main/AndroidManifest.xml',
+        'ios/Runner/Info.plist',
+        'firebase.json',
+        'firestore.rules',
+        'connect_functions/index.js',
+      ]) {
+        final source = _read(path);
+        expect(
+          source,
+          isNot(contains('callV2DeveloperCanonicalRouteNames')),
+          reason: path,
+        );
+        expect(
+          source,
+          isNot(contains('describeCallV2RouteRegistryDecision')),
+          reason: path,
+        );
       }
     });
   });
