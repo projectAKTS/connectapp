@@ -31,6 +31,177 @@ class CallV2RouteNames {
 const Set<String> callV2DeveloperCanonicalRouteNames =
     CallV2RouteNames.production;
 
+enum CallV2RouteRegistryActivationStatus {
+  developerOnly,
+  rolloutFalse,
+  resolverNullWhileFalse,
+  routeNamesKnown,
+  routeFactoryBlockedWhileFalse,
+  routeSinkBlockedWhileFalse,
+  noRouteObjectCreatedWhileFalse,
+  noScreenCreatedWhileFalse,
+  noRuntimeStart,
+  noBackendAccess,
+  noRtcPermissionAccess,
+  noNavigationAccess,
+  noLifecycleRegistration,
+  noAsyncHandles,
+  noDependencyPlatformConfigChanges,
+  noDeployment,
+  v1Protected,
+}
+
+enum CallV2RouteRegistryActivationDecision {
+  pass,
+  blocked,
+}
+
+final class CallV2RouteRegistryActivation {
+  const CallV2RouteRegistryActivation({
+    required this.statuses,
+    required this.canonicalRouteCount,
+    required this.excludedRouteCount,
+  });
+
+  final Set<CallV2RouteRegistryActivationStatus> statuses;
+  final int canonicalRouteCount;
+  final int excludedRouteCount;
+
+  CallV2RouteRegistryActivationDecision get decision {
+    return passes
+        ? CallV2RouteRegistryActivationDecision.pass
+        : CallV2RouteRegistryActivationDecision.blocked;
+  }
+
+  bool get passes =>
+      recordsDeveloperOnly &&
+      recordsRolloutFalse &&
+      recordsResolverNullWhileFalse &&
+      recordsRouteNamesKnown &&
+      recordsRouteFactoryBlockedWhileFalse &&
+      recordsRouteSinkBlockedWhileFalse &&
+      recordsNoRouteObjectCreatedWhileFalse &&
+      recordsNoScreenCreatedWhileFalse &&
+      recordsNoRuntimeStart &&
+      recordsNoBackendAccess &&
+      recordsNoRtcPermissionAccess &&
+      recordsNoNavigationAccess &&
+      recordsNoLifecycleRegistration &&
+      recordsNoAsyncHandles &&
+      recordsNoDependencyPlatformConfigChanges &&
+      recordsNoDeployment &&
+      recordsV1Protected;
+
+  bool get recordsDeveloperOnly =>
+      statuses.contains(CallV2RouteRegistryActivationStatus.developerOnly);
+
+  bool get recordsRolloutFalse =>
+      statuses.contains(CallV2RouteRegistryActivationStatus.rolloutFalse) &&
+      !CallV2RolloutPolicy.productionEnabled;
+
+  bool get recordsResolverNullWhileFalse => statuses.contains(
+        CallV2RouteRegistryActivationStatus.resolverNullWhileFalse,
+      );
+
+  bool get recordsRouteNamesKnown =>
+      statuses.contains(CallV2RouteRegistryActivationStatus.routeNamesKnown) &&
+      canonicalRouteCount == callV2DeveloperCanonicalRouteNames.length &&
+      !isCallV2DeveloperCanonicalRouteName(CallV2RouteNames.ready);
+
+  bool get recordsRouteFactoryBlockedWhileFalse => statuses.contains(
+        CallV2RouteRegistryActivationStatus.routeFactoryBlockedWhileFalse,
+      );
+
+  bool get recordsRouteSinkBlockedWhileFalse => statuses.contains(
+        CallV2RouteRegistryActivationStatus.routeSinkBlockedWhileFalse,
+      );
+
+  bool get recordsNoRouteObjectCreatedWhileFalse => statuses.contains(
+        CallV2RouteRegistryActivationStatus.noRouteObjectCreatedWhileFalse,
+      );
+
+  bool get recordsNoScreenCreatedWhileFalse => statuses.contains(
+        CallV2RouteRegistryActivationStatus.noScreenCreatedWhileFalse,
+      );
+
+  bool get recordsNoRuntimeStart =>
+      statuses.contains(CallV2RouteRegistryActivationStatus.noRuntimeStart);
+
+  bool get recordsNoBackendAccess =>
+      statuses.contains(CallV2RouteRegistryActivationStatus.noBackendAccess);
+
+  bool get recordsNoRtcPermissionAccess => statuses.contains(
+        CallV2RouteRegistryActivationStatus.noRtcPermissionAccess,
+      );
+
+  bool get recordsNoNavigationAccess =>
+      statuses.contains(CallV2RouteRegistryActivationStatus.noNavigationAccess);
+
+  bool get recordsNoLifecycleRegistration => statuses.contains(
+        CallV2RouteRegistryActivationStatus.noLifecycleRegistration,
+      );
+
+  bool get recordsNoAsyncHandles =>
+      statuses.contains(CallV2RouteRegistryActivationStatus.noAsyncHandles);
+
+  bool get recordsNoDependencyPlatformConfigChanges => statuses.contains(
+        CallV2RouteRegistryActivationStatus.noDependencyPlatformConfigChanges,
+      );
+
+  bool get recordsNoDeployment =>
+      statuses.contains(CallV2RouteRegistryActivationStatus.noDeployment);
+
+  bool get recordsV1Protected =>
+      statuses.contains(CallV2RouteRegistryActivationStatus.v1Protected);
+
+  Map<String, Object?> toSafeDebugMap() {
+    return <String, Object?>{
+      'decision': decision.name,
+      'statusCount': statuses.length,
+      'canonicalRouteCount': canonicalRouteCount,
+      'excludedRouteCount': excludedRouteCount,
+      'rolloutEnabled': CallV2RolloutPolicy.productionEnabled,
+      'resolverNullWhileFalse': recordsResolverNullWhileFalse,
+      'routeNamesKnown': recordsRouteNamesKnown,
+      'routesReachable': false,
+      'routeObjectsCreated': false,
+      'screensCreated': false,
+      'runtimeStarted': false,
+      'deploymentChanged': false,
+      'v1Protected': recordsV1Protected,
+    };
+  }
+
+  @override
+  String toString() {
+    return 'CallV2RouteRegistryActivation(${toSafeDebugMap()})';
+  }
+}
+
+const callV2RouteRegistryActivation = CallV2RouteRegistryActivation(
+  statuses: <CallV2RouteRegistryActivationStatus>{
+    CallV2RouteRegistryActivationStatus.developerOnly,
+    CallV2RouteRegistryActivationStatus.rolloutFalse,
+    CallV2RouteRegistryActivationStatus.resolverNullWhileFalse,
+    CallV2RouteRegistryActivationStatus.routeNamesKnown,
+    CallV2RouteRegistryActivationStatus.routeFactoryBlockedWhileFalse,
+    CallV2RouteRegistryActivationStatus.routeSinkBlockedWhileFalse,
+    CallV2RouteRegistryActivationStatus.noRouteObjectCreatedWhileFalse,
+    CallV2RouteRegistryActivationStatus.noScreenCreatedWhileFalse,
+    CallV2RouteRegistryActivationStatus.noRuntimeStart,
+    CallV2RouteRegistryActivationStatus.noBackendAccess,
+    CallV2RouteRegistryActivationStatus.noRtcPermissionAccess,
+    CallV2RouteRegistryActivationStatus.noNavigationAccess,
+    CallV2RouteRegistryActivationStatus.noLifecycleRegistration,
+    CallV2RouteRegistryActivationStatus.noAsyncHandles,
+    CallV2RouteRegistryActivationStatus.noDependencyPlatformConfigChanges,
+    CallV2RouteRegistryActivationStatus.noDeployment,
+    CallV2RouteRegistryActivationStatus.v1Protected,
+  },
+  canonicalRouteCount: 4,
+  excludedRouteCount: 1,
+);
+
 bool get isCallV2DeveloperRouteRegistrationEnabled =>
     CallV2RolloutPolicy.productionEnabled;
 

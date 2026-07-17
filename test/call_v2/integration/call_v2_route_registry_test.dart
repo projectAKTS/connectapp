@@ -43,6 +43,34 @@ void main() {
       }
     });
 
+    test('activation artifact remains developer-only and blocked', () {
+      const activation = callV2RouteRegistryActivation;
+
+      expect(activation, isA<CallV2RouteRegistryActivation>());
+      expect(
+        activation.decision,
+        CallV2RouteRegistryActivationDecision.pass,
+      );
+      expect(activation.passes, isTrue);
+      expect(activation.recordsDeveloperOnly, isTrue);
+      expect(activation.recordsRolloutFalse, isTrue);
+      expect(activation.recordsResolverNullWhileFalse, isTrue);
+      expect(activation.recordsRouteNamesKnown, isTrue);
+      expect(activation.recordsRouteFactoryBlockedWhileFalse, isTrue);
+      expect(activation.recordsRouteSinkBlockedWhileFalse, isTrue);
+      expect(activation.recordsNoRouteObjectCreatedWhileFalse, isTrue);
+      expect(activation.recordsNoScreenCreatedWhileFalse, isTrue);
+      expect(activation.recordsNoRuntimeStart, isTrue);
+      expect(activation.recordsNoBackendAccess, isTrue);
+      expect(activation.recordsNoRtcPermissionAccess, isTrue);
+      expect(activation.recordsNoNavigationAccess, isTrue);
+      expect(activation.recordsNoLifecycleRegistration, isTrue);
+      expect(activation.recordsNoAsyncHandles, isTrue);
+      expect(activation.recordsNoDependencyPlatformConfigChanges, isTrue);
+      expect(activation.recordsNoDeployment, isTrue);
+      expect(activation.recordsV1Protected, isTrue);
+    });
+
     test('route constants are names only and do not expose identifiers', () {
       expect(CallV2RouteNames.connecting, '/call-v2/connecting');
       expect(CallV2RouteNames.ready, '/call-v2/ready');
@@ -82,6 +110,16 @@ void main() {
     });
 
     test('canonical Call V2 routes return null while rollout is false', () {
+      expect(
+        callV2DeveloperCanonicalRouteNames,
+        <String>{
+          '/call-v2/connecting',
+          '/call-v2/audio',
+          '/call-v2/video',
+          '/call-v2/failure',
+        },
+      );
+
       for (final name in <String>[
         CallV2RouteNames.connecting,
         CallV2RouteNames.activeAudio,
@@ -139,6 +177,7 @@ void main() {
     });
 
     test('route registry decision is debug safe while disabled', () {
+      const activation = callV2RouteRegistryActivation;
       final decision = describeCallV2RouteRegistryDecision(
         const RouteSettings(name: CallV2RouteNames.connecting),
       );
@@ -150,8 +189,10 @@ void main() {
       expect(decision.rolloutEnabled, isFalse);
       expect(decision.routeMayResolve, isFalse);
       expect(decision.toSafeDebugMap()['canonicalRouteCount'], 4);
+      expect(activation.toSafeDebugMap()['canonicalRouteCount'], 4);
 
-      final debugText = '${decision.toSafeDebugMap()} $decision';
+      final debugText = '${decision.toSafeDebugMap()} $decision '
+          '${activation.toSafeDebugMap()} $activation';
       for (final forbidden in <String>[
         '/call-v2',
         'uid',
@@ -209,7 +250,7 @@ void main() {
       }
     });
 
-    test('route registry source has no service navigator or async hooks', () {
+    test('activation source has no route construction or service hooks', () {
       final source = _registrySource();
 
       for (final forbidden in <String>[
@@ -231,6 +272,15 @@ void main() {
         'Navigator(',
         'BuildContext',
         'GlobalKey',
+        'MaterialApp(',
+        'CallV2Runtime(',
+        'CallV2ProductionComposition',
+        'ProductionCallV2StartupBridge',
+        'CallV2ProductionRouteObjectFactory(',
+        'CallV2ProductionRouteSink',
+        '.createRoute(',
+        '.createScreen(',
+        '.show(',
         'dart:async',
         'Timer(',
         'StreamController',
@@ -266,6 +316,16 @@ void main() {
         expect(
           source,
           isNot(contains('describeCallV2RouteRegistryDecision')),
+          reason: path,
+        );
+        expect(
+          source,
+          isNot(contains('callV2RouteRegistryActivation')),
+          reason: path,
+        );
+        expect(
+          source,
+          isNot(contains('CallV2RouteRegistryActivation')),
           reason: path,
         );
       }
