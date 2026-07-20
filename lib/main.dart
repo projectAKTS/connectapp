@@ -40,6 +40,7 @@ import 'services/subscription_service.dart';
 import 'theme/theme.dart';
 import 'call_v2/integration/call_v2_app_integration.dart';
 import 'call_v2/integration/call_v2_route_registry.dart';
+import 'call_v2/integration/call_v2_rollout_policy.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 late final NotificationService notificationService;
@@ -362,7 +363,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           );
         }
 
-        final callV2Route = resolveCallV2Route(settings);
+        final callV2Route = CallV2RolloutPolicy.productionEnabled
+            ? resolveCallV2Route(settings)
+            : null;
         if (callV2Route != null) return callV2Route;
 
         return null;
