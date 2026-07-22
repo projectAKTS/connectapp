@@ -39,6 +39,7 @@ import 'services/notification_service.dart';
 import 'services/subscription_service.dart';
 import 'theme/theme.dart';
 import 'call_v2/integration/call_v2_app_integration.dart';
+import 'call_v2/integration/call_v2_disabled_startup_execution_boundary.dart';
 import 'call_v2/integration/call_v2_first_actual_app_wiring_touchpoint.dart';
 import 'call_v2/integration/call_v2_route_registry.dart';
 import 'call_v2/integration/call_v2_rollout_policy.dart';
@@ -123,6 +124,7 @@ Future<void> main() async {
   notificationService = NotificationService(navigatorKey: navigatorKey);
   unawaited(initializeCallV2AppIntegrationShellSafely());
   initializeCallV2FirstActualAppWiringTouchpointSafely();
+  executeCallV2DisabledStartupBoundarySafely();
 
   runApp(const MyApp());
 }
