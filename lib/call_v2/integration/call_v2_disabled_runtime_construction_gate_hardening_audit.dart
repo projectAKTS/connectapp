@@ -151,8 +151,8 @@ final class CallV2DisabledRuntimeConstructionGateHardeningAudit {
         CallV2DisabledRuntimeConstructionGateHardeningAuditStatus
             .gateDecisionPass,
       ) &&
-      callV2DisabledRuntimeConstructionGate.statuses.isNotEmpty &&
-      callV2DisabledRuntimeConstructionGate.rollback.isNotEmpty;
+      callV2DisabledRuntimeConstructionGate.decision ==
+          CallV2DisabledRuntimeConstructionGateDecision.pass;
 
   bool get recordsExecutorInert =>
       statuses.contains(

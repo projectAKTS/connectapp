@@ -27,8 +27,7 @@ void main() {
       expect(audit.recordsGateExists, isTrue);
       expect(audit.recordsGateDecisionPass, isTrue);
       expect(audit.recordsExecutorInert, isTrue);
-      expect(gate.statuses, isNotEmpty);
-      expect(gate.rollback, isNotEmpty);
+      expect(gate.decision, CallV2DisabledRuntimeConstructionGateDecision.pass);
       expect(
         identical(executeCallV2DisabledRuntimeConstructionGateSafely(), gate),
         isTrue,
