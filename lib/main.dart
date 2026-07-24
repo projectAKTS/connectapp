@@ -40,6 +40,7 @@ import 'services/subscription_service.dart';
 import 'theme/theme.dart';
 import 'call_v2/integration/call_v2_app_integration.dart';
 import 'call_v2/integration/call_v2_disabled_runtime_construction_gate.dart';
+import 'call_v2/integration/call_v2_disabled_runtime_construction_plan_boundary.dart';
 import 'call_v2/integration/call_v2_disabled_runtime_preflight_boundary.dart';
 import 'call_v2/integration/call_v2_disabled_startup_execution_boundary.dart';
 import 'call_v2/integration/call_v2_first_actual_app_wiring_touchpoint.dart';
@@ -129,6 +130,7 @@ Future<void> main() async {
   executeCallV2DisabledStartupBoundarySafely();
   executeCallV2DisabledRuntimePreflightBoundarySafely();
   executeCallV2DisabledRuntimeConstructionGateSafely();
+  executeCallV2DisabledRuntimeConstructionPlanBoundarySafely();
 
   runApp(const MyApp());
 }
