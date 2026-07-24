@@ -214,8 +214,25 @@ final class CallV2DisabledRuntimePreflightBoundaryHardeningAudit {
         CallV2DisabledRuntimePreflightBoundaryHardeningAuditStatus
             .startupBoundaryPass,
       ) &&
-      callV2DisabledStartupExecutionBoundary.decision ==
-          CallV2DisabledStartupExecutionBoundaryDecision.pass &&
+      callV2DisabledStartupExecutionBoundary.recordsHumanApproval &&
+      callV2DisabledStartupExecutionBoundary.recordsDeveloperOnly &&
+      callV2DisabledStartupExecutionBoundary.recordsRolloutFalse &&
+      callV2DisabledStartupExecutionBoundary
+          .recordsStartupExecutionBoundaryPresent &&
+      callV2DisabledStartupExecutionBoundary.recordsNoOpWhileRolloutFalse &&
+      callV2DisabledStartupExecutionBoundary.recordsRuntimeStartBlocked &&
+      callV2DisabledStartupExecutionBoundary.recordsBackendWritesBlocked &&
+      callV2DisabledStartupExecutionBoundary.recordsBackendReadsBlocked &&
+      callV2DisabledStartupExecutionBoundary.recordsFirestoreListenersBlocked &&
+      callV2DisabledStartupExecutionBoundary
+          .recordsAuthFunctionsAppCheckBlocked &&
+      callV2DisabledStartupExecutionBoundary.recordsRtcInitializationBlocked &&
+      callV2DisabledStartupExecutionBoundary.recordsPermissionRequestsBlocked &&
+      callV2DisabledStartupExecutionBoundary.recordsNavigatorCallsBlocked &&
+      callV2DisabledStartupExecutionBoundary
+          .recordsLifecycleRegistrationBlocked &&
+      callV2DisabledStartupExecutionBoundary.recordsAsyncHandlesBlocked &&
+      callV2DisabledStartupExecutionBoundary.recordsV1Protected &&
       callV2DisabledRuntimePreflightBoundary.recordsStartupBoundaryPass;
 
   bool get recordsStartupBoundaryHardeningAuditPass =>
@@ -223,8 +240,35 @@ final class CallV2DisabledRuntimePreflightBoundaryHardeningAudit {
         CallV2DisabledRuntimePreflightBoundaryHardeningAuditStatus
             .startupBoundaryHardeningAuditPass,
       ) &&
-      callV2DisabledStartupExecutionBoundaryHardeningAudit.decision ==
-          CallV2DisabledStartupExecutionBoundaryHardeningAuditDecision.pass &&
+      callV2DisabledStartupExecutionBoundaryHardeningAudit
+          .recordsAuditArtifactPresent &&
+      callV2DisabledStartupExecutionBoundaryHardeningAudit
+          .recordsBoundaryExists &&
+      callV2DisabledStartupExecutionBoundaryHardeningAudit
+          .recordsExecutorInert &&
+      callV2DisabledStartupExecutionBoundaryHardeningAudit
+          .recordsRolloutFalse &&
+      callV2DisabledStartupExecutionBoundaryHardeningAudit
+          .recordsRuntimeStartBlocked &&
+      callV2DisabledStartupExecutionBoundaryHardeningAudit
+          .recordsBackendWritesBlocked &&
+      callV2DisabledStartupExecutionBoundaryHardeningAudit
+          .recordsBackendReadsBlocked &&
+      callV2DisabledStartupExecutionBoundaryHardeningAudit
+          .recordsFirestoreListenersBlocked &&
+      callV2DisabledStartupExecutionBoundaryHardeningAudit
+          .recordsAuthFunctionsAppCheckBlocked &&
+      callV2DisabledStartupExecutionBoundaryHardeningAudit
+          .recordsRtcInitializationBlocked &&
+      callV2DisabledStartupExecutionBoundaryHardeningAudit
+          .recordsPermissionRequestsBlocked &&
+      callV2DisabledStartupExecutionBoundaryHardeningAudit
+          .recordsNavigatorCallsBlocked &&
+      callV2DisabledStartupExecutionBoundaryHardeningAudit
+          .recordsLifecycleRegistrationBlocked &&
+      callV2DisabledStartupExecutionBoundaryHardeningAudit
+          .recordsAsyncHandlesBlocked &&
+      callV2DisabledStartupExecutionBoundaryHardeningAudit.recordsV1Protected &&
       callV2DisabledRuntimePreflightBoundary
           .recordsStartupBoundaryHardeningAuditPass;
 

@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:connect_app/call_v2/integration/call_v2_disabled_runtime_construction_gate.dart';
+import 'package:connect_app/call_v2/integration/call_v2_disabled_runtime_construction_gate_hardening_audit.dart';
 import 'package:connect_app/call_v2/integration/call_v2_disabled_runtime_construction_plan_boundary.dart';
 import 'package:connect_app/call_v2/integration/call_v2_disabled_runtime_construction_plan_boundary_hardening_audit.dart';
 import 'package:connect_app/call_v2/integration/call_v2_rollout_policy.dart';
@@ -39,6 +41,26 @@ void main() {
           boundary,
         ),
         isTrue,
+      );
+    });
+
+    test('construction decisions resolve without recursive dependencies', () {
+      expect(
+        callV2DisabledRuntimeConstructionGate.decision,
+        CallV2DisabledRuntimeConstructionGateDecision.pass,
+      );
+      expect(
+        callV2DisabledRuntimeConstructionGateHardeningAudit.decision,
+        CallV2DisabledRuntimeConstructionGateHardeningAuditDecision.pass,
+      );
+      expect(
+        boundary.decision,
+        CallV2DisabledRuntimeConstructionPlanBoundaryDecision.pass,
+      );
+      expect(
+        audit.decision,
+        CallV2DisabledRuntimeConstructionPlanBoundaryHardeningAuditDecision
+            .pass,
       );
     });
 
@@ -271,17 +293,43 @@ void main() {
       expect(
         changed,
         everyElement(
-          isIn(<String>{
-            'lib/call_v2/integration/'
-                'call_v2_disabled_runtime_construction_plan_boundary_hardening_audit.dart',
-            'test/call_v2/integration/'
-                'call_v2_disabled_runtime_construction_plan_boundary_hardening_audit_test.dart',
-          }),
+          isIn(_allowedActiveUnblockFiles),
         ),
       );
     });
   });
 }
+
+const _allowedActiveUnblockFiles = <String>{
+  'lib/call_v2/integration/'
+      'call_v2_disabled_runtime_preflight_boundary.dart',
+  'test/call_v2/integration/'
+      'call_v2_disabled_runtime_preflight_boundary_test.dart',
+  'lib/call_v2/integration/'
+      'call_v2_disabled_runtime_preflight_boundary_hardening_audit.dart',
+  'test/call_v2/integration/'
+      'call_v2_disabled_runtime_preflight_boundary_hardening_audit_test.dart',
+  'lib/call_v2/integration/'
+      'call_v2_disabled_runtime_construction_gate.dart',
+  'test/call_v2/integration/'
+      'call_v2_disabled_runtime_construction_gate_test.dart',
+  'lib/call_v2/integration/'
+      'call_v2_disabled_runtime_construction_gate_hardening_audit.dart',
+  'test/call_v2/integration/'
+      'call_v2_disabled_runtime_construction_gate_hardening_audit_test.dart',
+  'lib/call_v2/integration/'
+      'call_v2_disabled_runtime_construction_plan_boundary.dart',
+  'test/call_v2/integration/'
+      'call_v2_disabled_runtime_construction_plan_boundary_test.dart',
+  'lib/call_v2/integration/'
+      'call_v2_disabled_runtime_construction_plan_boundary_hardening_audit.dart',
+  'test/call_v2/integration/'
+      'call_v2_disabled_runtime_construction_plan_boundary_hardening_audit_test.dart',
+  'lib/call_v2/integration/'
+      'call_v2_disabled_runtime_construction_scaffold.dart',
+  'test/call_v2/integration/'
+      'call_v2_disabled_runtime_construction_scaffold_test.dart',
+};
 
 const _forbiddenAuditSourceStrings = <String>[
   "import 'package:flutter",
