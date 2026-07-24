@@ -146,6 +146,43 @@ void main() {
       }
     });
 
+    test('new source verifies prerequisite decisions explicitly', () {
+      final source = _boundarySource();
+
+      expect(
+        source,
+        contains(
+          'callV2DisabledRuntimeConstructionGate.decision ==\n'
+          '          CallV2DisabledRuntimeConstructionGateDecision.pass',
+        ),
+      );
+      expect(
+        source,
+        contains(
+          'callV2DisabledRuntimeConstructionGateHardeningAudit.decision ==\n'
+          '          CallV2DisabledRuntimeConstructionGateHardeningAuditDecision.pass',
+        ),
+      );
+      expect(source, isNot(contains('ConstructionGate.statuses.isNotEmpty')));
+      expect(source, isNot(contains('ConstructionGate.rollback.isNotEmpty')));
+      expect(
+        source,
+        isNot(
+          contains(
+            'ConstructionGateHardeningAudit.statuses.isNotEmpty',
+          ),
+        ),
+      );
+      expect(
+        source,
+        isNot(
+          contains(
+            'ConstructionGateHardeningAudit.rollback.isNotEmpty',
+          ),
+        ),
+      );
+    });
+
     test('main.dart imports and executes plan boundary once in order', () {
       final main = _read('lib/main.dart');
       const shell = 'initializeCallV2AppIntegrationShellSafely';

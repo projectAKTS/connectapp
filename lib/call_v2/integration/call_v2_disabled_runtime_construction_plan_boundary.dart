@@ -167,16 +167,16 @@ final class CallV2DisabledRuntimeConstructionPlanBoundary {
         CallV2DisabledRuntimeConstructionPlanBoundaryStatus
             .runtimeConstructionGatePass,
       ) &&
-      callV2DisabledRuntimeConstructionGate.statuses.isNotEmpty &&
-      callV2DisabledRuntimeConstructionGate.rollback.isNotEmpty;
+      callV2DisabledRuntimeConstructionGate.decision ==
+          CallV2DisabledRuntimeConstructionGateDecision.pass;
 
   bool get recordsRuntimeConstructionGateHardeningAuditPass =>
       statuses.contains(
         CallV2DisabledRuntimeConstructionPlanBoundaryStatus
             .runtimeConstructionGateHardeningAuditPass,
       ) &&
-      callV2DisabledRuntimeConstructionGateHardeningAudit.statuses.isNotEmpty &&
-      callV2DisabledRuntimeConstructionGateHardeningAudit.rollback.isNotEmpty;
+      callV2DisabledRuntimeConstructionGateHardeningAudit.decision ==
+          CallV2DisabledRuntimeConstructionGateHardeningAuditDecision.pass;
 
   bool get recordsProductionExposureBlocked => statuses.contains(
         CallV2DisabledRuntimeConstructionPlanBoundaryStatus
