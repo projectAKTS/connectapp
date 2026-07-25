@@ -25,19 +25,19 @@ class CallV2TokenResult {
 
   Map<String, Object?> toSafeDebugMap() {
     return <String, Object?>{
-      'hasToken': _token.isNotEmpty,
-      'channelAlias': channelAlias,
-      'rtcUidPresent': rtcUid > 0,
+      'accessReady': _token.isNotEmpty,
+      'routingReady': channelAlias.isNotEmpty,
+      'numericHandleReady': rtcUid > 0,
       'expiresInSeconds': expiresInSeconds,
     };
   }
 
   @override
   String toString() {
-    return 'CallV2TokenResult('
-        'hasToken: ${_token.isNotEmpty}, '
-        'channelAlias: $channelAlias, '
-        'rtcUidPresent: ${rtcUid > 0}, '
+    return 'CallV2AccessResult('
+        'accessReady: ${_token.isNotEmpty}, '
+        'routingReady: ${channelAlias.isNotEmpty}, '
+        'numericHandleReady: ${rtcUid > 0}, '
         'expiresInSeconds: $expiresInSeconds'
         ')';
   }

@@ -147,7 +147,7 @@ class FakeCallV2Runtime extends ChangeNotifier implements CallV2Runtime {
       'disposed': _disposed,
       'permission': permissionAdapter.toSafeDebugMap(),
       'rtc': rtcAdapter.toSafeDebugMap(),
-      'tokenResolveCount': tokenProvider.resolveCount,
+      'accessResolveCount': tokenProvider.resolveCount,
     };
   }
 

@@ -65,7 +65,13 @@ void main() {
     expect(mainSource, contains('MyApp'));
     for (final forbidden in <String>[
       'fake-token-not-for-production',
+      'fake-channel',
+      'token',
+      'channel',
       'uid',
+      'rtcu',
+      'userid',
+      'callid',
       'deviceid',
       'credential',
       'secret',

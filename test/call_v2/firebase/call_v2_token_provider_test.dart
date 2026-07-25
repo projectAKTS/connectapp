@@ -17,16 +17,41 @@ void main() {
     expect(provider.resolveCount, 1);
   });
 
-  test('token result safe debug and string hide token text', () async {
+  test('token result safe debug and string hide sensitive words and values',
+      () async {
     const token = 'fake-token-not-for-production';
+    const channel = 'fake-channel';
     const result = CallV2TokenResult(
-      channelAlias: 'fake-channel',
+      channelAlias: channel,
       rtcUid: 42,
       expiresInSeconds: 3600,
       token: token,
     );
+    final debug = result.toSafeDebugMap().toString().toLowerCase();
+    final string = result.toString().toLowerCase();
 
-    expect(result.toSafeDebugMap().toString(), isNot(contains(token)));
-    expect(result.toString(), isNot(contains(token)));
+    expect(result.toSafeDebugMap(), <String, Object?>{
+      'accessReady': true,
+      'routingReady': true,
+      'numericHandleReady': true,
+      'expiresInSeconds': 3600,
+    });
+    for (final output in <String>[debug, string]) {
+      for (final forbidden in <String>[
+        token,
+        channel,
+        'token',
+        'channel',
+        'uid',
+        'rtcu',
+        'userid',
+        'callid',
+        'credential',
+        'device',
+        'secret',
+      ]) {
+        expect(output, isNot(contains(forbidden)), reason: forbidden);
+      }
+    }
   });
 }
