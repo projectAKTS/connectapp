@@ -13,7 +13,8 @@ class AppRouter {
   static Route<dynamic>? onGenerateSharedRoute(RouteSettings settings) {
     final name = settings.name;
     if (name == null) return null;
-    debugPrint('[TabRoute] onGenerateSharedRoute name=$name args=${settings.arguments}');
+    debugPrint(
+        '[TabRoute] onGenerateSharedRoute name=$name args=${settings.arguments}');
 
     // Handle deep link style: /profile/<id> and /post/<id>
     final uri = Uri.tryParse(name);
@@ -44,7 +45,8 @@ class AppRouter {
       final otherUserId = args?['otherUserId'] as String?;
       final otherUserName = args?['otherUserName'] as String?;
       final otherUserAvatar = args?['otherUserAvatar'] as String?;
-      debugPrint('[TabRoute:/chat] otherUserId=$otherUserId otherUserName=$otherUserName');
+      debugPrint(
+          '[TabRoute:/chat] otherUserId=$otherUserId otherUserName=$otherUserName');
 
       if (otherUserId == null || otherUserId.isEmpty) {
         return CupertinoPageRoute(
@@ -73,7 +75,10 @@ class AppRouter {
       final id = args?['targetUserId'] as String?;
       final targetName = args?['targetUserName'] as String?;
 
-      if (id == null || id.isEmpty || targetName == null || targetName.isEmpty) {
+      if (id == null ||
+          id.isEmpty ||
+          targetName == null ||
+          targetName.isEmpty) {
         return CupertinoPageRoute(
           settings: settings,
           builder: (_) => const Scaffold(
