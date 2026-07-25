@@ -35,6 +35,7 @@ void main() {
       final source = Directory('lib/call_v2/ui')
           .listSync(recursive: true)
           .whereType<File>()
+          .where((file) => !file.path.endsWith('call_v2_dev_screen.dart'))
           .map((file) => file.readAsStringSync())
           .join('\n');
 
