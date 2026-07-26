@@ -6,8 +6,10 @@ const test = require("node:test");
 const {
   CALL_V2_RTC_TOKEN_CALLABLE_NAME,
   TOKEN_TTL_SECONDS,
+  createAgoraRtcTokenForDevV2,
   createRtcTokenCallableGateV2,
   createFakeRtcTokenForTestV2,
+  isNonProductionEnvironment,
   safeRtcTokenCallableGateDebugV2,
   safeRtcTokenDebugV2,
   validateRtcTokenRequestV2,
@@ -45,6 +47,7 @@ test("rejects malformed token requests", () => {
     { callId: "call_a", participantUid: " users/a", isVideo: true },
     { callId: "call_a", participantUid: "participant_a", isVideo: "true" },
     { callId: "call_a/", participantUid: "participant_a", isVideo: true },
+    { callId: "call\\a", participantUid: "participant_a", isVideo: true },
     { callId: "/call_a", participantUid: "participant_a", isVideo: true },
     { callId: " call_a", participantUid: "participant_a", isVideo: true },
     { callId: "call_a", participantUid: "", isVideo: true },
@@ -75,6 +78,7 @@ test("creates emulator-safe fake token result and safe debug output", () => {
   assert.equal(result.schemaVersion, 1);
   assert.equal(result.callSystem, "v2");
   assert.equal(result.callId, "call_a");
+  assert.equal(result.channelAlias.startsWith("helperly-call-v2-"), true);
   assert.equal(result.isVideo, false);
   assert.equal(
     result.expiresAtMillis,
@@ -136,9 +140,30 @@ test("callable gate is disabled by default and does not create a token", async (
   assert.deepEqual(result, { status: "disabled" });
 });
 
-test("enabled callable gate creates emulator-safe access through injected dependency", async () => {
+test("enabled callable gate still requires non-production environment", async () => {
   const handler = createRtcTokenCallableGateV2({
     enabled: true,
+    environment: "production",
+    createToken: () => {
+      throw new Error("should_not_run");
+    },
+  });
+
+  const result = await handler({
+    data: {
+      callId: "call_a",
+      participantUid: "participant_a",
+      isVideo: false,
+    },
+  });
+
+  assert.deepEqual(result, { status: "disabled" });
+});
+
+test("enabled dev callable gate creates emulator-safe access through injection", async () => {
+  const handler = createRtcTokenCallableGateV2({
+    enabled: true,
+    environment: "dev",
     now: () => new Date("2026-01-01T00:00:00.000Z"),
   });
 
@@ -153,6 +178,62 @@ test("enabled callable gate creates emulator-safe access through injected depend
   assert.equal(result.status, "ok");
   assert.equal(result.result.callId, "call_a");
   assert.equal(result.result.isVideo, true);
+});
+
+test("non-production environment allowlist is explicit", () => {
+  for (const value of ["dev", "demo", "staging", "test", "emulator", "local"]) {
+    assert.equal(isNonProductionEnvironment(value), true, value);
+  }
+  for (const value of ["", "prod", "production", "live", "connectapp-278b4"]) {
+    assert.equal(isNonProductionEnvironment(value), false, value);
+  }
+});
+
+test("dev Agora token generator validates secrets and keeps same-call routing", () => {
+  const now = new Date("2026-01-01T00:00:00.000Z");
+  const appId = "a".repeat(32);
+  const appCertificate = "b".repeat(32);
+
+  const first = createAgoraRtcTokenForDevV2({
+    request: {
+      callId: "call_a",
+      participantUid: "participant_a",
+      isVideo: true,
+    },
+    now,
+    appId,
+    appCertificate,
+  });
+  const second = createAgoraRtcTokenForDevV2({
+    request: {
+      callId: "call_a",
+      participantUid: "participant_b",
+      isVideo: true,
+    },
+    now,
+    appId,
+    appCertificate,
+  });
+
+  assert.equal(first.channelAlias, second.channelAlias);
+  assert.notEqual(first.rtcUid, second.rtcUid);
+  assert.equal(first.token.length > 0, true);
+  assert.equal(JSON.stringify(safeRtcTokenDebugV2(first)).includes(first.token), false);
+
+  assert.throws(
+    () =>
+      createAgoraRtcTokenForDevV2({
+        request: {
+          callId: "call_a",
+          participantUid: "participant_a",
+          isVideo: true,
+        },
+        now,
+        appId: "",
+        appCertificate,
+      }),
+    /invalid_argument/,
+  );
 });
 
 test("callable gate rejects unknown wrapper keys", async () => {

@@ -20,6 +20,10 @@ const { OAuth2Client } = require("google-auth-library");
 const {
   createCallV2FirebaseWiring,
 } = require("./call_v2/firebase_wiring_v2");
+const {
+  createAgoraRtcTokenForDevV2,
+  createRtcTokenCallableGateV2,
+} = require("./call_v2/rtc_token_v2");
 const admin = require("firebase-admin");
 admin.initializeApp();
 
@@ -64,6 +68,11 @@ const CALL_V2_OBSERVABILITY_ENABLED = defineBoolean(
   "CALL_V2_OBSERVABILITY_ENABLED",
   { default: false }
 );
+const CALL_V2_RTC_TOKEN_ENABLED = defineBoolean(
+  "CALL_V2_RTC_TOKEN_ENABLED",
+  { default: false }
+);
+const CALL_V2_ENV = defineString("CALL_V2_ENV", { default: "" });
 
 const callV2Config = Object.freeze({
   callV2Enabled: () => CALL_V2_ENABLED.value(),
@@ -1569,6 +1578,27 @@ exports.renewActiveCallLeaseV2 = onCall(
   callV2CallableOptions,
   (request) =>
     getCallV2Wiring().callableHandlers.renewActiveCallLeaseV2(request)
+);
+
+exports.callV2RtcToken = onCall(
+  {
+    region: CALL_V2_REGION,
+    invoker: "public",
+    secrets: [AGORA_APP_ID, AGORA_APP_CERTIFICATE],
+  },
+  (request) =>
+    createRtcTokenCallableGateV2({
+      enabled: CALL_V2_RTC_TOKEN_ENABLED.value(),
+      environment: CALL_V2_ENV.value(),
+      createToken: ({ request: data, now }) =>
+        createAgoraRtcTokenForDevV2({
+          request: data,
+          now,
+          appId: AGORA_APP_ID.value(),
+          appCertificate: AGORA_APP_CERTIFICATE.value(),
+        }),
+      now: () => new Date(),
+    })(request)
 );
 
 exports.onCallV2TaskOutboxCreated = onDocumentCreated(

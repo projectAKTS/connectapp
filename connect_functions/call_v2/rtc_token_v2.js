@@ -1,17 +1,20 @@
 "use strict";
 
+const { RtcRole, RtcTokenBuilder } = require("agora-token");
+
 const MAX_IDENTIFIER_LENGTH = 128;
 const TOKEN_TTL_SECONDS = 60 * 60;
 const CALL_V2_RTC_TOKEN_CALLABLE_NAME = "callV2RtcToken";
 
 function createRtcTokenCallableGateV2({
   enabled = false,
+  environment = "",
   createToken = createFakeRtcTokenForTestV2,
   now = () => new Date(),
 } = {}) {
   return async function rtcTokenCallableGateV2(request) {
     requireExactKeys(request, ["data"]);
-    if (enabled !== true) {
+    if (enabled !== true || !isNonProductionEnvironment(environment)) {
       return {
         status: "disabled",
       };
@@ -48,11 +51,45 @@ function createFakeRtcTokenForTestV2({ request, now }) {
     schemaVersion: 1,
     callSystem: "v2",
     callId: normalized.callId,
-    channelAlias: "test-call-v2-channel",
+    channelAlias: channelAliasForCallId(normalized.callId),
     rtcUid: stableRtcUid(normalized.participantUid),
     isVideo: normalized.isVideo,
     token: "test-token-not-for-production",
     expiresAtMillis: nowMillis + TOKEN_TTL_SECONDS * 1000,
+  };
+}
+
+function createAgoraRtcTokenForDevV2({
+  request,
+  now,
+  appId,
+  appCertificate,
+}) {
+  const normalized = validateRtcTokenRequestV2(request);
+  const nowMillis = requireStrictNow(now).getTime();
+  const cleanAppId = requireAgoraAppId(appId);
+  const cleanCertificate = requireAgoraCertificate(appCertificate);
+  const expiresAtSeconds = Math.floor(nowMillis / 1000) + TOKEN_TTL_SECONDS;
+  const channelAlias = channelAliasForCallId(normalized.callId);
+  const rtcUid = stableRtcUid(normalized.participantUid);
+  const token = RtcTokenBuilder.buildTokenWithUid(
+    cleanAppId,
+    cleanCertificate,
+    channelAlias,
+    rtcUid,
+    RtcRole.PUBLISHER,
+    expiresAtSeconds,
+    expiresAtSeconds,
+  );
+  return {
+    schemaVersion: 1,
+    callSystem: "v2",
+    callId: normalized.callId,
+    channelAlias,
+    rtcUid,
+    isVideo: normalized.isVideo,
+    token,
+    expiresAtMillis: expiresAtSeconds * 1000,
   };
 }
 
@@ -75,12 +112,26 @@ function safeRtcTokenCallableGateDebugV2({ enabled = false } = {}) {
   };
 }
 
+function isNonProductionEnvironment(value) {
+  return ["dev", "demo", "staging", "test", "emulator", "local"].includes(
+    `${value || ""}`.trim().toLowerCase(),
+  );
+}
+
 function stableRtcUid(value) {
   let hash = 0;
   for (let index = 0; index < value.length; index += 1) {
     hash = (hash * 31 + value.charCodeAt(index)) % 2147483647;
   }
   return hash + 1;
+}
+
+function channelAliasForCallId(callId) {
+  let hash = 5381;
+  for (let index = 0; index < callId.length; index += 1) {
+    hash = ((hash << 5) + hash + callId.charCodeAt(index)) >>> 0;
+  }
+  return `helperly-call-v2-${hash.toString(16)}`;
 }
 
 function requireExactKeys(value, allowedKeys) {
@@ -101,12 +152,29 @@ function requireIdentifier(value) {
     typeof value !== "string" ||
     value.length === 0 ||
     value.length > MAX_IDENTIFIER_LENGTH ||
-    value.trim() !== value ||
-    value.includes("/")
+      value.trim() !== value ||
+    value.includes("/") ||
+    value.includes("\\")
   ) {
     throw new Error("invalid_argument");
   }
   return value;
+}
+
+function requireAgoraAppId(value) {
+  const clean = `${value || ""}`.trim();
+  if (!/^[0-9a-fA-F]{32}$/.test(clean)) {
+    throw new Error("invalid_argument");
+  }
+  return clean;
+}
+
+function requireAgoraCertificate(value) {
+  const clean = `${value || ""}`.trim();
+  if (!/^[0-9a-fA-F]{32}$/.test(clean)) {
+    throw new Error("invalid_argument");
+  }
+  return clean;
 }
 
 function requireStrictNow(value) {
@@ -119,8 +187,10 @@ function requireStrictNow(value) {
 module.exports = {
   CALL_V2_RTC_TOKEN_CALLABLE_NAME,
   TOKEN_TTL_SECONDS,
+  createAgoraRtcTokenForDevV2,
   createRtcTokenCallableGateV2,
   createFakeRtcTokenForTestV2,
+  isNonProductionEnvironment,
   safeRtcTokenCallableGateDebugV2,
   safeRtcTokenDebugV2,
   validateRtcTokenRequestV2,
