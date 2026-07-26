@@ -23,7 +23,7 @@ class CallV2DevScreenFactory {
     CallV2RuntimeConfig config = const CallV2RuntimeConfig.fake(),
   }) {
     return <String, Object?>{
-      'mode': config.mode.name,
+      'mode': config.toSafeDebugMap()['mode'],
       'fakeDefault': config.mode == CallV2RuntimeMode.fake,
       'devUiExposed': config.exposeDevUi,
       'rolloutEnabled': config.productionRolloutEnabled,

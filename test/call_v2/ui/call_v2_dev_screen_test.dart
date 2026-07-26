@@ -1,6 +1,11 @@
 import 'dart:io';
 
 import 'package:connect_app/call_v2/runtime/fake_call_v2_runtime.dart';
+import 'package:connect_app/call_v2/runtime/internal_call_v2_runtime.dart';
+import 'package:connect_app/call_v2/runtime/call_v2_runtime_config.dart';
+import 'package:connect_app/call_v2/firebase/fake_call_v2_token_provider.dart';
+import 'package:connect_app/call_v2/permissions/fake_call_v2_permission_adapter.dart';
+import 'package:connect_app/call_v2/rtc/fake_call_v2_rtc_adapter.dart';
 import 'package:connect_app/call_v2/ui/call_v2_dev_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -44,5 +49,45 @@ void main() {
     expect(mainSource, isNot(contains('CallV2DevScreen')));
     expect(routerSource, isNot(contains('CallV2DevScreen')));
     expect(routerSource, isNot(contains('/call-v2/dev')));
+  });
+
+  testWidgets('dev screen exposes explicit internal real-device steps',
+      (tester) async {
+    final rtc = FakeCallV2RtcAdapter();
+    final runtime = InternalCallV2Runtime(
+      config: const CallV2RuntimeConfig.internalRealDevice(
+        allowPermissionRequests: true,
+        allowTokenRequests: true,
+        allowRtcInitialization: true,
+        allowRtcJoin: true,
+        exposeDevUi: true,
+      ),
+      permissionAdapter: FakeCallV2PermissionAdapter(),
+      rtcAdapter: rtc,
+      tokenProvider: FakeCallV2TokenProvider(),
+    );
+    addTearDown(runtime.dispose);
+
+    await tester
+        .pumpWidget(MaterialApp(home: CallV2DevScreen(runtime: runtime)));
+
+    await tester.tap(find.byKey(const ValueKey<String>('start-video')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey<String>('request-permission')));
+    await tester.pump();
+    await tester
+        .tap(find.byKey(const ValueKey<String>('request-internal-access')));
+    await tester.pump();
+    await tester
+        .tap(find.byKey(const ValueKey<String>('initialize-internal-rtc')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey<String>('join-internal-rtc')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey<String>('activate-call')));
+    await tester.pump();
+
+    expect(find.text('Active'), findsOneWidget);
+    expect(rtc.initializeCount, 1);
+    expect(rtc.joinCount, 1);
   });
 }

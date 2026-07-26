@@ -30,7 +30,24 @@ void main() {
 
     expect(widget, isA<CallV2DevScreen>());
     expect(debug['fakeDefault'], isFalse);
+    expect(debug['mode'], 'internal');
     expect(debug['devUiExposed'], isTrue);
     expect(debug['rolloutEnabled'], isFalse);
+    for (final forbidden in <String>[
+      'token',
+      'channel',
+      'uid',
+      'user',
+      'participant',
+      'callid',
+      'device',
+      'credential',
+      'secret',
+      'raw',
+      'payload',
+      'stack',
+    ]) {
+      expect(debug.toString().toLowerCase(), isNot(contains(forbidden)));
+    }
   });
 }
