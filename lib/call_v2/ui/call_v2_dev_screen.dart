@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../runtime/call_v2_runtime.dart';
 import '../runtime/call_v2_runtime_state.dart';
 import '../runtime/fake_call_v2_runtime.dart';
+import '../runtime/internal_call_v2_runtime.dart';
 
 class CallV2DevScreen extends StatefulWidget {
   const CallV2DevScreen({
@@ -9,14 +11,14 @@ class CallV2DevScreen extends StatefulWidget {
     this.runtime,
   });
 
-  final FakeCallV2Runtime? runtime;
+  final CallV2Runtime? runtime;
 
   @override
   State<CallV2DevScreen> createState() => _CallV2DevScreenState();
 }
 
 class _CallV2DevScreenState extends State<CallV2DevScreen> {
-  late final FakeCallV2Runtime _runtime = widget.runtime ?? FakeCallV2Runtime();
+  late final CallV2Runtime _runtime = widget.runtime ?? FakeCallV2Runtime();
   late final bool _ownsRuntime = widget.runtime == null;
 
   @override
@@ -64,21 +66,42 @@ class _CallV2DevScreenState extends State<CallV2DevScreen> {
                   key: const ValueKey<String>('request-permission'),
                   onPressed:
                       state.phase == CallV2RuntimePhase.permissionPreflight
-                          ? _runtime.requestRequiredPermissions
+                          ? _requestPermissions
                           : null,
                   child: const Text('Request permissions'),
                 ),
                 FilledButton(
                   key: const ValueKey<String>('connect-fake-rtc'),
                   onPressed: state.phase == CallV2RuntimePhase.connecting
-                      ? _runtime.connectFakeRtc
+                      ? _connectFakeRtc
                       : null,
                   child: const Text('Connect fake RTC'),
                 ),
                 FilledButton(
+                  key: const ValueKey<String>('request-internal-access'),
+                  onPressed: state.phase == CallV2RuntimePhase.connecting
+                      ? _requestInternalAccess
+                      : null,
+                  child: const Text('Request internal access'),
+                ),
+                FilledButton(
+                  key: const ValueKey<String>('initialize-internal-rtc'),
+                  onPressed: state.phase == CallV2RuntimePhase.connecting
+                      ? _initializeInternalRtc
+                      : null,
+                  child: const Text('Initialize internal RTC'),
+                ),
+                FilledButton(
+                  key: const ValueKey<String>('join-internal-rtc'),
+                  onPressed: state.phase == CallV2RuntimePhase.connecting
+                      ? _joinInternalRtc
+                      : null,
+                  child: const Text('Join internal RTC'),
+                ),
+                FilledButton(
                   key: const ValueKey<String>('activate-call'),
                   onPressed: state.phase == CallV2RuntimePhase.ready
-                      ? _runtime.activateCall
+                      ? _activateCall
                       : null,
                   child: const Text('Activate'),
                 ),
@@ -95,6 +118,60 @@ class _CallV2DevScreenState extends State<CallV2DevScreen> {
         );
       },
     );
+  }
+
+  Future<void> _requestPermissions() {
+    final runtime = _runtime;
+    if (runtime is FakeCallV2Runtime) {
+      return runtime.requestRequiredPermissions();
+    }
+    if (runtime is InternalCallV2Runtime) {
+      return runtime.requestPermissionsExplicitly();
+    }
+    return Future<void>.value();
+  }
+
+  Future<void> _connectFakeRtc() {
+    final runtime = _runtime;
+    if (runtime is FakeCallV2Runtime) {
+      return runtime.connectFakeRtc();
+    }
+    return Future<void>.value();
+  }
+
+  Future<void> _requestInternalAccess() {
+    final runtime = _runtime;
+    if (runtime is InternalCallV2Runtime) {
+      return runtime.requestTokenExplicitly();
+    }
+    return Future<void>.value();
+  }
+
+  Future<void> _initializeInternalRtc() {
+    final runtime = _runtime;
+    if (runtime is InternalCallV2Runtime) {
+      return runtime.initializeRtcExplicitly();
+    }
+    return Future<void>.value();
+  }
+
+  Future<void> _joinInternalRtc() {
+    final runtime = _runtime;
+    if (runtime is InternalCallV2Runtime) {
+      return runtime.joinRtcExplicitly();
+    }
+    return Future<void>.value();
+  }
+
+  Future<void> _activateCall() {
+    final runtime = _runtime;
+    if (runtime is FakeCallV2Runtime) {
+      return runtime.activateCall();
+    }
+    if (runtime is InternalCallV2Runtime) {
+      return runtime.activateCall();
+    }
+    return Future<void>.value();
   }
 }
 
