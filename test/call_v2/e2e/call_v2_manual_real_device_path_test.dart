@@ -126,10 +126,41 @@ void main() {
     final b = _inputs(local: 'manual_b', remote: 'manual_a');
 
     expect(a.sessionIdentifier, b.sessionIdentifier);
+    expect(a.toTokenBackendData()['callId'], b.toTokenBackendData()['callId']);
+    expect(a.toTokenBackendData()['participantUid'], 'manual_a');
+    expect(b.toTokenBackendData()['participantUid'], 'manual_b');
     expect(a.toSafeDebugMap()['realAdaptersReady'], isTrue);
     expect(b.toSafeDebugMap()['realAdaptersReady'], isTrue);
     expect(a.toString(), isNot(contains('manual_a')));
     expect(b.toString(), isNot(contains('manual_b')));
+  });
+
+  test(
+      'two-device mirrored explicit access uses same route and distinct handles',
+      () async {
+    final callableA = _FakeCallableClient(rtcUid: 101);
+    final callableB = _FakeCallableClient(rtcUid: 202);
+    final inputsA = _inputs(local: 'manual_a', remote: 'manual_b');
+    final inputsB = _inputs(local: 'manual_b', remote: 'manual_a');
+    final controllerA = _controllerFor(inputsA, callableA);
+    final controllerB = _controllerFor(inputsB, callableB);
+    addTearDown(controllerA.dispose);
+    addTearDown(controllerB.dispose);
+
+    await controllerA.startOutgoingVideo();
+    await controllerB.startOutgoingVideo();
+    await controllerA.requestPermissions();
+    await controllerB.requestPermissions();
+    await controllerA.requestAccess();
+    await controllerB.requestAccess();
+
+    expect(callableA.lastData['callId'], callableB.lastData['callId']);
+    expect(callableA.lastData['participantUid'], 'manual_a');
+    expect(callableB.lastData['participantUid'], 'manual_b');
+    expect(callableA.lastData['isVideo'], isTrue);
+    expect(callableB.lastData['isVideo'], isTrue);
+    expect(controllerA.state.phase, CallV2RuntimePhase.connecting);
+    expect(controllerB.state.phase, CallV2RuntimePhase.connecting);
   });
 
   test('disabled callable and missing app id fail safely', () async {
@@ -163,6 +194,21 @@ void main() {
       throwsA(isA<CallV2ClientError>()),
     );
   });
+}
+
+CallV2InternalStepController _controllerFor(
+  CallV2ManualSessionInputs inputs,
+  _FakeCallableClient callable,
+) {
+  return CallV2InternalStepController(
+    config: inputs.toRuntimeConfig(),
+    runtimeFactory: CallV2RuntimeFactory.manualRealDevice(
+      inputs: inputs,
+      transport: FirebaseCallV2CallableTransport(client: callable),
+      permissionClient: _RealPermissionFake(),
+      rtcClient: _AgoraFake(),
+    ),
+  );
 }
 
 class _Harness {
@@ -228,16 +274,21 @@ CallV2ManualSessionInputs _inputs({
 }
 
 class _FakeCallableClient implements FirebaseCallV2CallableClient {
+  _FakeCallableClient({this.rtcUid = 7});
+
+  final int rtcUid;
   int calls = 0;
+  Map<String, Object?> lastData = const <String, Object?>{};
 
   @override
   Future<Object?> call(String name, Map<String, Object?> data) async {
     calls += 1;
+    lastData = Map<String, Object?>.of(data);
     return <String, Object?>{
       'status': 'ok',
       'result': <String, Object?>{
         'channelAlias': 'same-channel',
-        'rtcUid': 7,
+        'rtcUid': rtcUid,
         'expiresInSeconds': 3600,
         'token': 'same-token',
       },
