@@ -1,5 +1,6 @@
 {
   "projects": {
+    "callv2dev": "helperly-call-v2-dev",
     "connectapp": "connectapp-278b4",
     "default": "connectapp-278b4"
   },
