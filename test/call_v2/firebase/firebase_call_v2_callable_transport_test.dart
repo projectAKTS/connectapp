@@ -1,5 +1,6 @@
 import 'package:connect_app/call_v2/call_v2_api.dart';
 import 'package:connect_app/call_v2/firebase/firebase_call_v2_callable_transport.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -56,6 +57,28 @@ void main() {
       throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
     );
   });
+
+  test('Firebase callable failures map to stable client errors', () async {
+    final cases = <String, CallV2ClientErrorCode>{
+      'unauthenticated': CallV2ClientErrorCode.unauthorized,
+      'permission-denied': CallV2ClientErrorCode.unauthorized,
+      'invalid-argument': CallV2ClientErrorCode.invalidRequest,
+      'failed-precondition': CallV2ClientErrorCode.rejected,
+      'unavailable': CallV2ClientErrorCode.unavailable,
+    };
+
+    for (final entry in cases.entries) {
+      final transport = FirebaseCallV2CallableTransport(
+        client: _FirebaseFailureClient(entry.key),
+      );
+
+      await expectLater(
+        transport.call('callV2RtcToken', const <String, Object?>{}),
+        throwsA(_clientError(entry.value)),
+        reason: entry.key,
+      );
+    }
+  });
 }
 
 Matcher _clientError(CallV2ClientErrorCode code) {
@@ -79,5 +102,16 @@ class _FakeCallableClient implements FirebaseCallV2CallableClient {
     names.add(name);
     if (fail) throw StateError('unsafe details');
     return response;
+  }
+}
+
+class _FirebaseFailureClient implements FirebaseCallV2CallableClient {
+  const _FirebaseFailureClient(this.code);
+
+  final String code;
+
+  @override
+  Future<Object?> call(String name, Map<String, Object?> data) async {
+    throw FirebaseFunctionsException(code: code, message: 'unsafe details');
   }
 }

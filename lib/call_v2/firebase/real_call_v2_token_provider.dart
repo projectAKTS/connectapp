@@ -155,7 +155,8 @@ String _validateIdentifier(String value) {
   if (value.isEmpty ||
       value.trim() != value ||
       value.length > 128 ||
-      value.contains('/')) {
+      value.contains('/') ||
+      value.contains('\\')) {
     throw const CallV2ClientError(CallV2ClientErrorCode.invalidRequest);
   }
   return value;

@@ -45,6 +45,32 @@ void main() {
     expect(result.expiresInSeconds, 3600);
   });
 
+  test('enabled real token provider accepts direct result response shape',
+      () async {
+    final provider = RealCallV2TokenProvider(
+      allowRequests: true,
+      transport: _FakeCallableTransport(
+        response: const <String, Object?>{
+          'channelAlias': 'safe-channel',
+          'rtcUid': 9,
+          'token': 'safe-token',
+          'expiresAtMillis': 4102444800000,
+        },
+      ),
+      defaultRequest: const CallV2TokenBackendRequest(
+        callId: 'call_a',
+        localParticipantUid: 'local_a',
+      ),
+    );
+
+    final result = await provider.resolveToken(
+      const CallV2TokenRequest(mode: CallV2RuntimeCallMode.audio),
+    );
+
+    expect(result.rtcUid, 9);
+    expect(result.expiresInSeconds, greaterThan(0));
+  });
+
   test('disabled callable result is rejected safely', () async {
     final provider = RealCallV2TokenProvider(
       allowRequests: true,
@@ -85,6 +111,39 @@ void main() {
         ),
         throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
       );
+    }
+  });
+
+  test('backend request rejects slash path segments before transport call',
+      () async {
+    for (final request in const <CallV2TokenBackendRequest>[
+      CallV2TokenBackendRequest(
+        callId: 'call/a',
+        localParticipantUid: 'local_a',
+      ),
+      CallV2TokenBackendRequest(
+        callId: 'call\\a',
+        localParticipantUid: 'local_a',
+      ),
+      CallV2TokenBackendRequest(
+        callId: 'call_a',
+        localParticipantUid: 'local\\a',
+      ),
+    ]) {
+      final transport = _FakeCallableTransport();
+      final provider = RealCallV2TokenProvider(
+        allowRequests: true,
+        transport: transport,
+        defaultRequest: request,
+      );
+
+      await expectLater(
+        provider.resolveToken(
+          const CallV2TokenRequest(mode: CallV2RuntimeCallMode.audio),
+        ),
+        throwsA(_clientError(CallV2ClientErrorCode.invalidRequest)),
+      );
+      expect(transport.callCount, 0);
     }
   });
 

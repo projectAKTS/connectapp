@@ -234,6 +234,47 @@ test("dev Agora token generator validates secrets and keeps same-call routing", 
       }),
     /invalid_argument/,
   );
+  assert.throws(
+    () =>
+      createAgoraRtcTokenForDevV2({
+        request: {
+          callId: "call_a",
+          participantUid: "participant_a",
+          isVideo: true,
+        },
+        now,
+        appId,
+        appCertificate: "not-a-certificate",
+      }),
+    /invalid_argument/,
+  );
+});
+
+test("enabled dev callable gate rejects invalid secrets without token output", async () => {
+  const handler = createRtcTokenCallableGateV2({
+    enabled: true,
+    environment: "dev",
+    createToken: ({ request, now }) =>
+      createAgoraRtcTokenForDevV2({
+        request,
+        now,
+        appId: "",
+        appCertificate: "b".repeat(32),
+      }),
+    now: () => new Date("2026-01-01T00:00:00.000Z"),
+  });
+
+  await assert.rejects(
+    () =>
+      handler({
+        data: {
+          callId: "call_a",
+          participantUid: "participant_a",
+          isVideo: true,
+        },
+      }),
+    /invalid_argument/,
+  );
 });
 
 test("callable gate rejects unknown wrapper keys", async () => {
