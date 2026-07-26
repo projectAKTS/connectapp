@@ -1,5 +1,7 @@
 import '../firebase/call_v2_token_provider.dart';
+import '../firebase/call_v2_callable_transport.dart';
 import '../firebase/fake_call_v2_token_provider.dart';
+import '../firebase/firebase_call_v2_callable_transport.dart';
 import '../firebase/real_call_v2_token_provider.dart';
 import '../permissions/call_v2_permission_adapter.dart';
 import '../permissions/fake_call_v2_permission_adapter.dart';
@@ -9,6 +11,7 @@ import '../rtc/call_v2_rtc_adapter.dart';
 import '../rtc/fake_call_v2_rtc_adapter.dart';
 import '../rtc/internal_call_v2_rtc_adapter_gate.dart';
 import '../call_v2_feature_gate.dart';
+import 'call_v2_manual_session_inputs.dart';
 import 'call_v2_runtime.dart';
 import 'call_v2_runtime_config.dart';
 import 'call_v2_runtime_mode.dart';
@@ -22,6 +25,45 @@ class CallV2RuntimeFactory {
     this.rtcAdapter,
     this.tokenProvider,
   });
+
+  factory CallV2RuntimeFactory.manualRealDevice({
+    required CallV2ManualSessionInputs inputs,
+    CallV2CallableTransport? transport,
+    RealCallV2PermissionClient? permissionClient,
+    AgoraCallV2RtcEngineClient? rtcClient,
+  }) {
+    return CallV2RuntimeFactory(
+      permissionAdapter: RealCallV2PermissionAdapter(
+        allowRequests: inputs.allowPermissionRequests,
+        client:
+            permissionClient ?? const PermissionHandlerCallV2PermissionClient(),
+      ),
+      tokenProvider: RealCallV2TokenProvider(
+        allowRequests: inputs.allowTokenRequests,
+        transport:
+            transport ?? FirebaseCallV2CallableTransport.cloudFunctions(),
+        defaultRequest: CallV2TokenBackendRequest(
+          callId: inputs.sessionIdentifier,
+          localParticipantUid: inputs.localParticipantIdentifier,
+        ),
+      ),
+      rtcAdapter: AgoraCallV2RtcAdapter(
+        gate: AgoraCallV2RtcAdapterGate(
+          featureGate: const CallV2FeatureGate(enabled: true),
+          internalGate: InternalCallV2RtcAdapterGate(
+            allowAdapterConstruction: inputs.useRealAdapters,
+            allowInitialization:
+                inputs.allowRtcInitialization && inputs.applicationReady,
+            allowJoin: inputs.allowRtcJoin && inputs.applicationReady,
+          ),
+        ),
+        client: rtcClient ??
+            AgoraSdkCallV2RtcEngineClient(
+              applicationIdentifier: inputs.rtcApplicationIdentifier,
+            ),
+      ),
+    );
+  }
 
   final CallV2PermissionAdapter? permissionAdapter;
   final CallV2RtcAdapter? rtcAdapter;
