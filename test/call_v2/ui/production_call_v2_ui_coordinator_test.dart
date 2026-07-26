@@ -39,6 +39,9 @@ void main() {
           .where(
             (file) => !file.path.endsWith('call_v2_manual_dev_entry.dart'),
           )
+          .where(
+            (file) => !file.path.endsWith('call_v2_manual_dev_form.dart'),
+          )
           .map((file) => file.readAsStringSync())
           .join('\n');
 
