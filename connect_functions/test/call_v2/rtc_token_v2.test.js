@@ -4,6 +4,7 @@ const assert = require("node:assert");
 const test = require("node:test");
 
 const {
+  CALL_V2_RTC_TOKEN_CALLABLE_NAME,
   TOKEN_TTL_SECONDS,
   createRtcTokenCallableGateV2,
   createFakeRtcTokenForTestV2,
@@ -11,6 +12,10 @@ const {
   safeRtcTokenDebugV2,
   validateRtcTokenRequestV2,
 } = require("../../call_v2/rtc_token_v2");
+
+test("exports stable callable handler name without index wiring", () => {
+  assert.equal(CALL_V2_RTC_TOKEN_CALLABLE_NAME, "callV2RtcToken");
+});
 
 test("validates RTC token request without production credentials", () => {
   const result = validateRtcTokenRequestV2({

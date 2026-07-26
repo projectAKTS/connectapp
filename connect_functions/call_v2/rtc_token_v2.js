@@ -2,6 +2,7 @@
 
 const MAX_IDENTIFIER_LENGTH = 128;
 const TOKEN_TTL_SECONDS = 60 * 60;
+const CALL_V2_RTC_TOKEN_CALLABLE_NAME = "callV2RtcToken";
 
 function createRtcTokenCallableGateV2({
   enabled = false,
@@ -116,6 +117,7 @@ function requireStrictNow(value) {
 }
 
 module.exports = {
+  CALL_V2_RTC_TOKEN_CALLABLE_NAME,
   TOKEN_TTL_SECONDS,
   createRtcTokenCallableGateV2,
   createFakeRtcTokenForTestV2,
