@@ -62,6 +62,7 @@ const _forbiddenDebugFragments = <String>[
   'channel',
   'uid',
   'user',
+  'participant',
   'callid',
   'device',
   'credential',

@@ -71,6 +71,7 @@ void main() {
       'uid',
       'rtcu',
       'userid',
+      'participant',
       'callid',
       'deviceid',
       'credential',
