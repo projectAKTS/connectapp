@@ -27,6 +27,7 @@ class CallV2DevScreenFactory {
       'fakeDefault': config.mode == CallV2RuntimeMode.fake,
       'devUiExposed': config.exposeDevUi,
       'rolloutEnabled': config.productionRolloutEnabled,
+      'realAdaptersReady': config.canUseRealInternalAdapters,
     };
   }
 }

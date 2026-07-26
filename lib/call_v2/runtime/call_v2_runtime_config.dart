@@ -9,6 +9,8 @@ class CallV2RuntimeConfig {
     required this.allowRtcInitialization,
     required this.allowRtcJoin,
     required this.exposeDevUi,
+    this.useRealAdapters = false,
+    this.rtcApplicationIdentifier,
   });
 
   const CallV2RuntimeConfig.fake()
@@ -17,7 +19,9 @@ class CallV2RuntimeConfig {
         allowTokenRequests = true,
         allowRtcInitialization = true,
         allowRtcJoin = true,
-        exposeDevUi = true;
+        exposeDevUi = true,
+        useRealAdapters = false,
+        rtcApplicationIdentifier = null;
 
   const CallV2RuntimeConfig.internalRealDevice({
     this.allowPermissionRequests = false,
@@ -25,6 +29,8 @@ class CallV2RuntimeConfig {
     this.allowRtcInitialization = false,
     this.allowRtcJoin = false,
     this.exposeDevUi = false,
+    this.useRealAdapters = false,
+    this.rtcApplicationIdentifier,
   }) : mode = CallV2RuntimeMode.internalRealDevice;
 
   const CallV2RuntimeConfig.productionDisabled()
@@ -33,7 +39,9 @@ class CallV2RuntimeConfig {
         allowTokenRequests = false,
         allowRtcInitialization = false,
         allowRtcJoin = false,
-        exposeDevUi = false;
+        exposeDevUi = false,
+        useRealAdapters = false,
+        rtcApplicationIdentifier = null;
 
   static const CallV2RuntimeConfig defaultDevelopment =
       CallV2RuntimeConfig.fake();
@@ -47,12 +55,18 @@ class CallV2RuntimeConfig {
   final bool allowRtcInitialization;
   final bool allowRtcJoin;
   final bool exposeDevUi;
+  final bool useRealAdapters;
+  final String? rtcApplicationIdentifier;
 
   bool get productionRolloutEnabled => CallV2RolloutPolicy.productionEnabled;
 
   bool get canUseInternalRealDevice {
     return mode == CallV2RuntimeMode.internalRealDevice &&
         !productionRolloutEnabled;
+  }
+
+  bool get canUseRealInternalAdapters {
+    return canUseInternalRealDevice && useRealAdapters;
   }
 
   Map<String, Object?> toSafeDebugMap() {
@@ -64,6 +78,8 @@ class CallV2RuntimeConfig {
       'joinStepAllowed': allowRtcJoin,
       'devUiExposed': exposeDevUi,
       'rolloutEnabled': productionRolloutEnabled,
+      'realAdaptersReady': canUseRealInternalAdapters,
+      'rtcAppReady': rtcApplicationIdentifier?.isNotEmpty == true,
     };
   }
 
