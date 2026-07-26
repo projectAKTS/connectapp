@@ -45,6 +45,49 @@ void main() {
     expect(result.expiresInSeconds, 3600);
   });
 
+  test('disabled callable result is rejected safely', () async {
+    final provider = RealCallV2TokenProvider(
+      allowRequests: true,
+      transport: _FakeCallableTransport(
+        response: const <String, Object?>{'status': 'disabled'},
+      ),
+      defaultRequest: const CallV2TokenBackendRequest(
+        callId: 'call_a',
+        localParticipantUid: 'local_a',
+      ),
+    );
+
+    await expectLater(
+      provider.resolveToken(
+        const CallV2TokenRequest(mode: CallV2RuntimeCallMode.audio),
+      ),
+      throwsA(_clientError(CallV2ClientErrorCode.rejected)),
+    );
+  });
+
+  test('malformed and transport failures normalize to unavailable', () async {
+    for (final transport in <CallV2CallableTransport>[
+      _FakeCallableTransport(response: const <String, Object?>{'status': 'ok'}),
+      _FakeCallableTransport(fail: true),
+    ]) {
+      final provider = RealCallV2TokenProvider(
+        allowRequests: true,
+        transport: transport,
+        defaultRequest: const CallV2TokenBackendRequest(
+          callId: 'call_a',
+          localParticipantUid: 'local_a',
+        ),
+      );
+
+      await expectLater(
+        provider.resolveToken(
+          const CallV2TokenRequest(mode: CallV2RuntimeCallMode.audio),
+        ),
+        throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
+      );
+    }
+  });
+
   test('real token provider source uses injected transport only', () {
     final source = File(
       'lib/call_v2/firebase/real_call_v2_token_provider.dart',
@@ -65,6 +108,10 @@ void main() {
   });
 }
 
+Matcher _clientError(CallV2ClientErrorCode code) {
+  return isA<CallV2ClientError>().having((error) => error.code, 'code', code);
+}
+
 const _forbiddenDebugFragments = <String>[
   'token',
   'channel',
@@ -81,6 +128,13 @@ const _forbiddenDebugFragments = <String>[
 ];
 
 class _FakeCallableTransport implements CallV2CallableTransport {
+  _FakeCallableTransport({
+    this.response,
+    this.fail = false,
+  });
+
+  final Object? response;
+  final bool fail;
   int callCount = 0;
   String? lastCallableName;
 
@@ -89,14 +143,16 @@ class _FakeCallableTransport implements CallV2CallableTransport {
       String callableName, Map<String, Object?> request) async {
     callCount += 1;
     lastCallableName = callableName;
-    return <String, Object?>{
-      'status': 'ok',
-      'result': <String, Object?>{
-        'channelAlias': 'safe-channel',
-        'rtcUid': 7,
-        'token': 'safe-token',
-        'expiresInSeconds': 3600,
-      },
-    };
+    if (fail) throw StateError('unsafe details');
+    return response ??
+        <String, Object?>{
+          'status': 'ok',
+          'result': <String, Object?>{
+            'channelAlias': 'safe-channel',
+            'rtcUid': 7,
+            'token': 'safe-token',
+            'expiresInSeconds': 3600,
+          },
+        };
   }
 }

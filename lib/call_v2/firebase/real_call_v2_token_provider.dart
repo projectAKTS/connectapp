@@ -81,6 +81,12 @@ CallV2TokenResult _tokenResultFromResponse(Object? raw) {
   }
   final data = _normalizeResponseMap(raw);
   final result = data['result'];
+  if (data['status'] == 'disabled') {
+    throw const CallV2ClientError(CallV2ClientErrorCode.rejected);
+  }
+  if (data.containsKey('status') && data['status'] != 'ok') {
+    throw const CallV2ClientError(CallV2ClientErrorCode.unavailable);
+  }
   final source = result is Map<String, Object?> ? result : data;
   final alias = source['channelAlias'];
   final handle = source['rtcUid'];
