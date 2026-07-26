@@ -5,7 +5,9 @@ const test = require("node:test");
 
 const {
   TOKEN_TTL_SECONDS,
+  createRtcTokenCallableGateV2,
   createFakeRtcTokenForTestV2,
+  safeRtcTokenCallableGateDebugV2,
   safeRtcTokenDebugV2,
   validateRtcTokenRequestV2,
 } = require("../../call_v2/rtc_token_v2");
@@ -28,7 +30,12 @@ test("rejects malformed token requests", () => {
   for (const request of [
     null,
     {},
-    { callId: "call_a", participantUid: "participant_a", isVideo: true, extra: true },
+    {
+      callId: "call_a",
+      participantUid: "participant_a",
+      isVideo: true,
+      extra: true,
+    },
     { callId: "calls/call_a", participantUid: "participant_a", isVideo: true },
     { callId: "call_a", participantUid: " users/a", isVideo: true },
     { callId: "call_a", participantUid: "participant_a", isVideo: "true" },
@@ -64,7 +71,10 @@ test("creates emulator-safe fake token result and safe debug output", () => {
   assert.equal(result.callSystem, "v2");
   assert.equal(result.callId, "call_a");
   assert.equal(result.isVideo, false);
-  assert.equal(result.expiresAtMillis, now.getTime() + TOKEN_TTL_SECONDS * 1000);
+  assert.equal(
+    result.expiresAtMillis,
+    now.getTime() + TOKEN_TTL_SECONDS * 1000,
+  );
   assert.equal(result.token, "test-token-not-for-production");
 
   const debug = safeRtcTokenDebugV2(result);
@@ -80,6 +90,7 @@ test("creates emulator-safe fake token result and safe debug output", () => {
     "channel",
     "uid",
     "user",
+    "participant",
     "callid",
     "credential",
     "secret",
@@ -89,12 +100,91 @@ test("creates emulator-safe fake token result and safe debug output", () => {
   ]) {
     assert.equal(serializedDebug.includes(forbidden), false, forbidden);
   }
-  assert.deepEqual(Object.keys(debug).sort(), [
-    "accessReady",
-    "expiryReady",
-    "numericHandleReady",
-    "routingReady",
-    "version",
-    "videoReady",
-  ].sort());
+  assert.deepEqual(
+    Object.keys(debug).sort(),
+    [
+      "accessReady",
+      "expiryReady",
+      "numericHandleReady",
+      "routingReady",
+      "version",
+      "videoReady",
+    ].sort(),
+  );
+});
+
+test("callable gate is disabled by default and does not create a token", async () => {
+  const handler = createRtcTokenCallableGateV2({
+    createToken: () => {
+      throw new Error("should_not_run");
+    },
+  });
+
+  const result = await handler({
+    data: {
+      callId: "call_a",
+      participantUid: "participant_a",
+      isVideo: false,
+    },
+  });
+
+  assert.deepEqual(result, { status: "disabled" });
+});
+
+test("enabled callable gate creates emulator-safe access through injected dependency", async () => {
+  const handler = createRtcTokenCallableGateV2({
+    enabled: true,
+    now: () => new Date("2026-01-01T00:00:00.000Z"),
+  });
+
+  const result = await handler({
+    data: {
+      callId: "call_a",
+      participantUid: "participant_a",
+      isVideo: true,
+    },
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.result.callId, "call_a");
+  assert.equal(result.result.isVideo, true);
+});
+
+test("callable gate rejects unknown wrapper keys", async () => {
+  const handler = createRtcTokenCallableGateV2();
+
+  await assert.rejects(
+    () =>
+      handler({
+        data: {
+          callId: "call_a",
+          participantUid: "participant_a",
+          isVideo: false,
+        },
+        extra: true,
+      }),
+    /invalid_argument/,
+  );
+});
+
+test("callable gate safe debug contains no sensitive identifier wording", () => {
+  const debug = safeRtcTokenCallableGateDebugV2({ enabled: true });
+  const serializedDebug = JSON.stringify(debug).toLowerCase();
+
+  for (const forbidden of [
+    "token",
+    "channel",
+    "uid",
+    "user",
+    "participant",
+    "callid",
+    "device",
+    "credential",
+    "secret",
+    "raw",
+    "payload",
+    "stack",
+  ]) {
+    assert.equal(serializedDebug.includes(forbidden), false, forbidden);
+  }
 });

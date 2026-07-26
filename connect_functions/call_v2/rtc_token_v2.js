@@ -3,6 +3,29 @@
 const MAX_IDENTIFIER_LENGTH = 128;
 const TOKEN_TTL_SECONDS = 60 * 60;
 
+function createRtcTokenCallableGateV2({
+  enabled = false,
+  createToken = createFakeRtcTokenForTestV2,
+  now = () => new Date(),
+} = {}) {
+  return async function rtcTokenCallableGateV2(request) {
+    requireExactKeys(request, ["data"]);
+    if (enabled !== true) {
+      return {
+        status: "disabled",
+      };
+    }
+    const result = createToken({
+      request: request.data,
+      now: now(),
+    });
+    return {
+      status: "ok",
+      result,
+    };
+  };
+}
+
 function validateRtcTokenRequestV2(request) {
   requireExactKeys(request, ["callId", "participantUid", "isVideo"]);
   const callId = requireIdentifier(request.callId);
@@ -42,6 +65,12 @@ function safeRtcTokenDebugV2(result) {
       Number.isSafeInteger(result.rtcUid) && result.rtcUid > 0,
     videoReady: result.isVideo,
     expiryReady: Number.isSafeInteger(result.expiresAtMillis),
+  };
+}
+
+function safeRtcTokenCallableGateDebugV2({ enabled = false } = {}) {
+  return {
+    enabled: enabled === true,
   };
 }
 
@@ -88,7 +117,9 @@ function requireStrictNow(value) {
 
 module.exports = {
   TOKEN_TTL_SECONDS,
+  createRtcTokenCallableGateV2,
   createFakeRtcTokenForTestV2,
+  safeRtcTokenCallableGateDebugV2,
   safeRtcTokenDebugV2,
   validateRtcTokenRequestV2,
 };
