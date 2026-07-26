@@ -1,10 +1,17 @@
 import 'dart:io';
 
+import 'package:connect_app/call_v2/call_v2_api.dart';
 import 'package:connect_app/call_v2/firebase/fake_call_v2_token_provider.dart';
+import 'package:connect_app/call_v2/firebase/firebase_call_v2_callable_transport.dart';
 import 'package:connect_app/call_v2/integration/call_v2_rollout_policy.dart';
+import 'package:connect_app/call_v2/permissions/call_v2_permission_adapter.dart';
 import 'package:connect_app/call_v2/permissions/fake_call_v2_permission_adapter.dart';
+import 'package:connect_app/call_v2/permissions/real_call_v2_permission_adapter.dart';
+import 'package:connect_app/call_v2/rtc/agora_call_v2_rtc_adapter.dart';
+import 'package:connect_app/call_v2/rtc/call_v2_rtc_adapter.dart';
 import 'package:connect_app/call_v2/rtc/fake_call_v2_rtc_adapter.dart';
 import 'package:connect_app/call_v2/runtime/call_v2_internal_step_controller.dart';
+import 'package:connect_app/call_v2/runtime/call_v2_manual_session_inputs.dart';
 import 'package:connect_app/call_v2/runtime/call_v2_runtime_config.dart';
 import 'package:connect_app/call_v2/runtime/call_v2_runtime_factory.dart';
 import 'package:connect_app/call_v2/runtime/call_v2_runtime_state.dart';
@@ -75,6 +82,87 @@ void main() {
     expect(router, isNot(contains('CallV2ManualDevEntry')));
     expect(router, isNot(contains('/call-v2/manual')));
   });
+
+  test('manual real-device path uses fake clients one explicit step at a time',
+      () async {
+    final callable = _FakeCallableClient();
+    final permissions = _RealPermissionFake();
+    final rtc = _AgoraFake();
+    final inputs = _inputs(local: 'manual_a', remote: 'manual_b');
+    final controller = CallV2InternalStepController(
+      config: inputs.toRuntimeConfig(),
+      runtimeFactory: CallV2RuntimeFactory.manualRealDevice(
+        inputs: inputs,
+        transport: FirebaseCallV2CallableTransport(client: callable),
+        permissionClient: permissions,
+        rtcClient: rtc,
+      ),
+    );
+    addTearDown(controller.dispose);
+
+    expect(callable.calls, 0);
+    expect(permissions.requests, 0);
+    expect(rtc.initializes, 0);
+
+    await controller.startOutgoingVideo();
+    await controller.requestPermissions();
+    await controller.requestAccess();
+    await controller.initializeRtc();
+    await controller.joinRtc();
+    await controller.activate();
+    await controller.end();
+    await controller.dispose();
+
+    expect(permissions.requests, 2);
+    expect(callable.calls, 1);
+    expect(rtc.initializes, 1);
+    expect(rtc.joins, 1);
+    expect(rtc.leaves, 1);
+    expect(controller.state.phase, CallV2RuntimePhase.ended);
+  });
+
+  test('two-device mirrored inputs produce same routing readiness', () {
+    final a = _inputs(local: 'manual_a', remote: 'manual_b');
+    final b = _inputs(local: 'manual_b', remote: 'manual_a');
+
+    expect(a.sessionIdentifier, b.sessionIdentifier);
+    expect(a.toSafeDebugMap()['realAdaptersReady'], isTrue);
+    expect(b.toSafeDebugMap()['realAdaptersReady'], isTrue);
+    expect(a.toString(), isNot(contains('manual_a')));
+    expect(b.toString(), isNot(contains('manual_b')));
+  });
+
+  test('disabled callable and missing app id fail safely', () async {
+    final disabled = _Harness(access: FakeCallV2TokenProvider(fail: true));
+    addTearDown(disabled.dispose);
+    await disabled.startThroughPermissions();
+    await disabled.controller.requestAccess();
+    expect(
+      disabled.controller.state.errorCategory,
+      CallV2RuntimeErrorCategory.backendUnavailable,
+    );
+
+    final missingApp = _inputs(app: '');
+    final controller = CallV2InternalStepController(
+      config: missingApp.toRuntimeConfig(),
+      runtimeFactory: CallV2RuntimeFactory.manualRealDevice(
+        inputs: missingApp,
+        transport: FirebaseCallV2CallableTransport(
+          client: _FakeCallableClient(),
+        ),
+        permissionClient: _RealPermissionFake(),
+        rtcClient: _AgoraFake(),
+      ),
+    );
+    addTearDown(controller.dispose);
+    await controller.startOutgoingAudio();
+    await controller.requestPermissions();
+    await controller.requestAccess();
+    expect(
+      () => controller.initializeRtc(),
+      throwsA(isA<CallV2ClientError>()),
+    );
+  });
 }
 
 class _Harness {
@@ -118,4 +206,92 @@ class _Harness {
   }
 
   Future<void> dispose() => controller.dispose();
+}
+
+CallV2ManualSessionInputs _inputs({
+  String app = 'app-for-test',
+  String local = 'manual_a',
+  String remote = 'manual_b',
+}) {
+  return CallV2ManualSessionInputs(
+    rtcApplicationIdentifier: app,
+    sessionIdentifier: 'same_session',
+    localParticipantIdentifier: local,
+    remoteParticipantIdentifier: remote,
+    mode: CallV2RuntimeCallMode.video,
+    useRealAdapters: true,
+    allowPermissionRequests: true,
+    allowTokenRequests: true,
+    allowRtcInitialization: true,
+    allowRtcJoin: true,
+  );
+}
+
+class _FakeCallableClient implements FirebaseCallV2CallableClient {
+  int calls = 0;
+
+  @override
+  Future<Object?> call(String name, Map<String, Object?> data) async {
+    calls += 1;
+    return <String, Object?>{
+      'status': 'ok',
+      'result': <String, Object?>{
+        'channelAlias': 'same-channel',
+        'rtcUid': 7,
+        'expiresInSeconds': 3600,
+        'token': 'same-token',
+      },
+    };
+  }
+}
+
+class _RealPermissionFake implements RealCallV2PermissionClient {
+  int requests = 0;
+
+  @override
+  Future<CallV2PermissionDecision> check(
+      CallV2PermissionKind permission) async {
+    return CallV2PermissionDecision.granted;
+  }
+
+  @override
+  Future<CallV2PermissionDecision> request(
+    CallV2PermissionKind permission,
+  ) async {
+    requests += 1;
+    return CallV2PermissionDecision.granted;
+  }
+}
+
+class _AgoraFake implements AgoraCallV2RtcEngineClient {
+  int initializes = 0;
+  int joins = 0;
+  int leaves = 0;
+
+  @override
+  Future<void> initialize({
+    required CallV2RtcSessionConfig config,
+    required void Function(CallV2RtcEvent event) emit,
+  }) async {
+    initializes += 1;
+  }
+
+  @override
+  Future<void> join() async {
+    joins += 1;
+  }
+
+  @override
+  Future<void> leave() async {
+    leaves += 1;
+  }
+
+  @override
+  Future<void> setCameraEnabled(bool enabled) async {}
+
+  @override
+  Future<void> setMicrophoneEnabled(bool enabled) async {}
+
+  @override
+  Future<void> dispose() async {}
 }
