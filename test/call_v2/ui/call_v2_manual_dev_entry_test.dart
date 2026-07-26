@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('manual developer entry starts in fake mode without side effects',
+  testWidgets('manual developer entry starts in fake mode without runtime',
       (tester) async {
     await tester.pumpWidget(
       const MaterialApp(home: Scaffold(body: CallV2ManualDevEntry())),
@@ -13,7 +13,7 @@ void main() {
     expect(find.byKey(const ValueKey<String>('call-v2-manual-dev-entry')),
         findsOneWidget);
     expect(find.text('Fake mode'), findsOneWidget);
-    expect(find.text('Idle'), findsOneWidget);
+    expect(find.text('Idle'), findsNothing);
     expect(find.text('Permission preflight'), findsNothing);
   });
 
@@ -29,6 +29,20 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Internal mode with real adapters'), findsOneWidget);
+    expect(find.text('Idle'), findsNothing);
+  });
+
+  testWidgets('manual developer entry creates runtime only after button',
+      (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: CallV2ManualDevEntry())),
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('call-v2-create-manual-runtime')),
+    );
+    await tester.pumpAndSettle();
+
     expect(find.text('Idle'), findsOneWidget);
   });
 
