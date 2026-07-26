@@ -39,13 +39,16 @@ class _CallV2DevScreenState extends State<CallV2DevScreen> {
           appBar: AppBar(title: const Text('Call V2 Dev')),
           body: Padding(
             padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+            child: ListView(
               children: <Widget>[
                 Text(
                   _labelFor(state),
                   key: const ValueKey<String>('call-v2-dev-state'),
                   style: Theme.of(context).textTheme.titleLarge,
+                ),
+                Text(
+                  _safeDiagnosticsFor(_runtime),
+                  key: const ValueKey<String>('call-v2-dev-diagnostics'),
                 ),
                 const SizedBox(height: 16),
                 FilledButton(
@@ -112,6 +115,11 @@ class _CallV2DevScreenState extends State<CallV2DevScreen> {
                       : _runtime.endCall,
                   child: const Text('End'),
                 ),
+                OutlinedButton(
+                  key: const ValueKey<String>('dispose-reset'),
+                  onPressed: _disposeOrReset,
+                  child: const Text('Dispose/Reset'),
+                ),
               ],
             ),
           ),
@@ -173,6 +181,31 @@ class _CallV2DevScreenState extends State<CallV2DevScreen> {
     }
     return Future<void>.value();
   }
+
+  Future<void> _disposeOrReset() async {
+    final runtime = _runtime;
+    if (runtime.currentState.phase != CallV2RuntimePhase.idle &&
+        runtime.currentState.phase != CallV2RuntimePhase.ended) {
+      await runtime.endCall();
+    }
+    if (_ownsRuntime) {
+      await runtime.dispose();
+    }
+    if (mounted) setState(() {});
+  }
+}
+
+String _safeDiagnosticsFor(CallV2Runtime runtime) {
+  if (runtime is InternalCallV2Runtime) {
+    final debug = runtime.toSafeDebugMap();
+    return 'ready=${debug['setupReady']} joined=${debug['joined']} '
+        'access=${debug['accessReady']}';
+  }
+  if (runtime is FakeCallV2Runtime) {
+    final debug = runtime.toSafeDebugMap();
+    return 'ready=${debug['rtc'] != null} fake=true';
+  }
+  return 'ready=false';
 }
 
 String _labelFor(CallV2RuntimeState state) {
