@@ -34,11 +34,14 @@ function createFakeRtcTokenForTestV2({ request, now }) {
 
 function safeRtcTokenDebugV2(result) {
   return {
-    schemaVersion: result.schemaVersion,
-    callSystem: result.callSystem,
-    hasToken: typeof result.token === "string" && result.token.length > 0,
-    isVideo: result.isVideo,
-    expiresAtPresent: Number.isSafeInteger(result.expiresAtMillis),
+    version: result.schemaVersion,
+    accessReady: typeof result.token === "string" && result.token.length > 0,
+    routingReady:
+      typeof result.channelAlias === "string" && result.channelAlias.length > 0,
+    numericHandleReady:
+      Number.isSafeInteger(result.rtcUid) && result.rtcUid > 0,
+    videoReady: result.isVideo,
+    expiryReady: Number.isSafeInteger(result.expiresAtMillis),
   };
 }
 

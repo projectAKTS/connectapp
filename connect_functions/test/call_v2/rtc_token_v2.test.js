@@ -32,6 +32,18 @@ test("rejects malformed token requests", () => {
     { callId: "calls/call_a", participantUid: "participant_a", isVideo: true },
     { callId: "call_a", participantUid: " users/a", isVideo: true },
     { callId: "call_a", participantUid: "participant_a", isVideo: "true" },
+    { callId: "call_a/", participantUid: "participant_a", isVideo: true },
+    { callId: "/call_a", participantUid: "participant_a", isVideo: true },
+    { callId: " call_a", participantUid: "participant_a", isVideo: true },
+    { callId: "call_a", participantUid: "", isVideo: true },
+    {
+      callId: "call_a",
+      participantUid: "participant_a ".trimStart(),
+      isVideo: true,
+    },
+    { callId: "a".repeat(129), participantUid: "participant_a", isVideo: true },
+    { callId: "call_a", participantUid: "b".repeat(129), isVideo: true },
+    { callId: 123, participantUid: "participant_a", isVideo: true },
   ]) {
     assert.throws(() => validateRtcTokenRequestV2(request), /invalid_argument/);
   }
@@ -56,6 +68,33 @@ test("creates emulator-safe fake token result and safe debug output", () => {
   assert.equal(result.token, "test-token-not-for-production");
 
   const debug = safeRtcTokenDebugV2(result);
-  assert.equal(JSON.stringify(debug).includes(result.token), false);
-  assert.equal(JSON.stringify(debug).includes("participant_a"), false);
+  const serializedDebug = JSON.stringify(debug).toLowerCase();
+  assert.equal(serializedDebug.includes(result.token), false);
+  assert.equal(
+    serializedDebug.includes(result.channelAlias.toLowerCase()),
+    false,
+  );
+  assert.equal(serializedDebug.includes("participant_a"), false);
+  for (const forbidden of [
+    "token",
+    "channel",
+    "uid",
+    "user",
+    "callid",
+    "credential",
+    "secret",
+    "raw",
+    "payload",
+    "stack",
+  ]) {
+    assert.equal(serializedDebug.includes(forbidden), false, forbidden);
+  }
+  assert.deepEqual(Object.keys(debug).sort(), [
+    "accessReady",
+    "expiryReady",
+    "numericHandleReady",
+    "routingReady",
+    "version",
+    "videoReady",
+  ].sort());
 });
