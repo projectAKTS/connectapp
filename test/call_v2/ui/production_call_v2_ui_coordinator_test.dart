@@ -36,6 +36,9 @@ void main() {
           .listSync(recursive: true)
           .whereType<File>()
           .where((file) => !file.path.endsWith('call_v2_dev_screen.dart'))
+          .where(
+            (file) => !file.path.endsWith('call_v2_manual_dev_entry.dart'),
+          )
           .map((file) => file.readAsStringSync())
           .join('\n');
 
