@@ -4,6 +4,7 @@ import '../call_v2_api.dart';
 import '../firebase/call_v2_token_provider.dart';
 import '../permissions/call_v2_permission_adapter.dart';
 import '../rtc/call_v2_rtc_adapter.dart';
+import '../rtc/call_v2_rtc_session_config_mapper.dart';
 import 'call_v2_runtime.dart';
 import 'call_v2_runtime_config.dart';
 import 'call_v2_runtime_mode.dart';
@@ -30,6 +31,14 @@ class InternalCallV2Runtime extends ChangeNotifier implements CallV2Runtime {
 
   @override
   CallV2RuntimeState get currentState => _currentState;
+
+  bool get hasAccess => _resolvedAccess != null;
+
+  bool get isRtcInitialized => _setupReady;
+
+  bool get isRtcJoined => _joined;
+
+  bool get isDisposed => _disposed;
 
   @override
   Future<void> startOutgoingCall({
@@ -114,13 +123,16 @@ class InternalCallV2Runtime extends ChangeNotifier implements CallV2Runtime {
       return;
     }
     try {
-      await rtcAdapter.initialize(CallV2RtcSessionConfig(
-        callId: 'internal-dev-session',
-        channelName: access.channelAlias,
-        rtcUid: access.rtcUid,
-        isVideo: state.mode == CallV2RuntimeCallMode.video,
-        token: access.token,
-      ));
+      final mapping = CallV2RtcSessionConfigMapping(
+        config: CallV2RtcSessionConfig(
+          callId: 'internal-dev-session',
+          channelName: access.channelAlias,
+          rtcUid: access.rtcUid,
+          isVideo: state.mode == CallV2RuntimeCallMode.video,
+          token: access.token,
+        ),
+      );
+      await rtcAdapter.initialize(mapping.config);
       _setupReady = true;
     } catch (_) {
       _fail(CallV2RuntimeErrorCategory.rtcUnavailable);
@@ -156,6 +168,7 @@ class InternalCallV2Runtime extends ChangeNotifier implements CallV2Runtime {
 
   @override
   Future<void> endCall() async {
+    if (_disposed) return;
     _requireUsable();
     final state = _currentState;
     if (state.phase == CallV2RuntimePhase.idle ||

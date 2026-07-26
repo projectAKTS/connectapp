@@ -55,13 +55,16 @@ void main() {
     await runtime.requestTokenExplicitly();
     expect(access.resolveCount, 1);
     expect(rtc.initializeCount, 0);
+    expect(runtime.hasAccess, isTrue);
 
     await runtime.initializeRtcExplicitly();
     expect(rtc.initializeCount, 1);
+    expect(runtime.isRtcInitialized, isTrue);
     expect(rtc.joinCount, 0);
 
     await runtime.joinRtcExplicitly();
     expect(rtc.joinCount, 1);
+    expect(runtime.isRtcJoined, isTrue);
     expect(runtime.currentState.phase, CallV2RuntimePhase.ready);
 
     await runtime.activateCall();
@@ -69,7 +72,72 @@ void main() {
 
     await runtime.endCall();
     expect(rtc.leaveCount, 1);
+    expect(runtime.hasAccess, isFalse);
+    expect(runtime.isRtcInitialized, isFalse);
+    expect(runtime.isRtcJoined, isFalse);
     expect(runtime.currentState.phase, CallV2RuntimePhase.ended);
+  });
+
+  test('token permission RTC init and join failures are controlled', () async {
+    final tokenFailure = InternalCallV2Runtime(
+      config: _internalConfig,
+      permissionAdapter: FakeCallV2PermissionAdapter(),
+      rtcAdapter: FakeCallV2RtcAdapter(),
+      tokenProvider: FakeCallV2TokenProvider(fail: true),
+    );
+    final initFailure = InternalCallV2Runtime(
+      config: _internalConfig,
+      permissionAdapter: FakeCallV2PermissionAdapter(),
+      rtcAdapter: FakeCallV2RtcAdapter(failInitialize: true),
+      tokenProvider: FakeCallV2TokenProvider(),
+    );
+    final joinFailure = InternalCallV2Runtime(
+      config: _internalConfig,
+      permissionAdapter: FakeCallV2PermissionAdapter(),
+      rtcAdapter: FakeCallV2RtcAdapter(failJoin: true),
+      tokenProvider: FakeCallV2TokenProvider(),
+    );
+    addTearDown(tokenFailure.dispose);
+    addTearDown(initFailure.dispose);
+    addTearDown(joinFailure.dispose);
+
+    await tokenFailure.startOutgoingCall(mode: CallV2RuntimeCallMode.audio);
+    await tokenFailure.requestPermissionsExplicitly();
+    await tokenFailure.requestTokenExplicitly();
+    expect(tokenFailure.currentState.errorCategory,
+        CallV2RuntimeErrorCategory.backendUnavailable);
+
+    await initFailure.startOutgoingCall(mode: CallV2RuntimeCallMode.audio);
+    await initFailure.requestPermissionsExplicitly();
+    await initFailure.requestTokenExplicitly();
+    await initFailure.initializeRtcExplicitly();
+    expect(initFailure.currentState.errorCategory,
+        CallV2RuntimeErrorCategory.rtcUnavailable);
+
+    await joinFailure.startOutgoingCall(mode: CallV2RuntimeCallMode.audio);
+    await joinFailure.requestPermissionsExplicitly();
+    await joinFailure.requestTokenExplicitly();
+    await joinFailure.initializeRtcExplicitly();
+    await joinFailure.joinRtcExplicitly();
+    expect(joinFailure.currentState.errorCategory,
+        CallV2RuntimeErrorCategory.rtcUnavailable);
+  });
+
+  test('dispose and end are idempotent', () async {
+    final rtc = FakeCallV2RtcAdapter();
+    final runtime = InternalCallV2Runtime(
+      config: _internalConfig,
+      permissionAdapter: FakeCallV2PermissionAdapter(),
+      rtcAdapter: rtc,
+      tokenProvider: FakeCallV2TokenProvider(),
+    );
+
+    await runtime.dispose();
+    await runtime.dispose();
+    await runtime.endCall();
+
+    expect(runtime.isDisposed, isTrue);
+    expect(rtc.disposeCount, 1);
   });
 
   test('internal steps are blocked unless explicitly allowed', () async {
@@ -118,6 +186,7 @@ const _forbiddenDebugFragments = <String>[
   'channel',
   'uid',
   'user',
+  'participant',
   'callid',
   'device',
   'credential',
