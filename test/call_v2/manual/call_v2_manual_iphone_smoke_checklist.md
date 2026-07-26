@@ -9,6 +9,35 @@ This checklist is developer-only. Production rollout remains disabled.
 - Install the app on two iPhones from a development build.
 - Do not print or capture tokens, routing handles, numeric handles, user identifiers, call identifiers, device labels, or raw provider payloads in logs.
 
+## Dev Firebase Verification
+
+Run these before any deploy:
+
+```bash
+firebase projects:list
+firebase use
+firebase target
+firebase functions:config:get
+```
+
+Proceed only when the selected project is clearly non-production. Treat `connectapp-278b4` as production-like or unclear unless a human explicitly confirms otherwise.
+
+Required dev-only values:
+
+- `CALL_V2_RTC_TOKEN_ENABLED=true`
+- `CALL_V2_ENV=dev`
+- `CALL_V2_REGION=us-central1`
+- `AGORA_APP_ID`
+- `AGORA_APP_CERTIFICATE`
+
+Deploy only the dev token callable:
+
+```bash
+firebase deploy --only functions:callV2RtcToken --project <dev-project-id>
+```
+
+Do not deploy hosting, rules, storage, scheduled functions, triggers, or any other functions.
+
 ## Device A
 
 1. Open the hidden developer-only Call V2 manual entry.
@@ -19,14 +48,19 @@ This checklist is developer-only. Production rollout remains disabled.
 6. Enter the development Agora App ID.
 7. Choose audio or video.
 8. Tap Create Manual Runtime.
+   - Expected: safe debug shows readiness booleans only.
 9. Tap Start Audio or Start Video.
 10. Confirm the app reaches permission preflight.
 11. Tap Request Permissions.
 12. Grant microphone for audio; grant microphone and camera for video.
+   - If denied: open iOS Settings for the dev build and allow microphone/camera, then retry the explicit permission step.
 13. Tap Request Access.
 14. Confirm the access step succeeds without unsafe logs.
+   - If disabled: confirm the callable is deployed only to the dev project and `CALL_V2_ENV` is a non-production value.
 15. Tap Initialize RTC.
+   - If initialization fails: confirm the App ID field matches the dev Agora project and is not empty.
 16. Tap Join RTC.
+   - If join fails: confirm the token callable uses matching dev Agora credentials and both devices use the same shared session.
 17. Tap Activate.
 18. Confirm the state shows active.
 
@@ -42,6 +76,14 @@ This checklist is developer-only. Production rollout remains disabled.
 8. Tap Create Manual Runtime.
 9. Repeat Start, Request Permissions, Request Access, Initialize RTC, Join RTC, and Activate.
 10. Confirm audio/video media behavior manually.
+
+Expected mirrored inputs:
+
+- Device A and Device B use the same shared session value.
+- Device A local value is Device B remote value.
+- Device B local value is Device A remote value.
+- Both devices use the same Agora App ID.
+- Both devices choose the same audio/video mode.
 
 ## End And Recovery
 
@@ -60,3 +102,19 @@ This checklist is developer-only. Production rollout remains disabled.
 - Join timeout: confirm both devices used the same shared session value and reversed local/remote participant values.
 - No audio/video: confirm microphone/camera permission was granted, both devices joined, and only safe state diagnostics are logged.
 - Safe logs checklist: logs must not include access strings, routing handles, numeric handles, user identifiers, call identifiers, device labels, raw payloads, or stack traces.
+
+## Safe Smoke Log Template
+
+Record only:
+
+- dev project confirmed: yes/no
+- token callable deployed: yes/no
+- Device A access ready: yes/no
+- Device B access ready: yes/no
+- Device A setup ready: yes/no
+- Device B setup ready: yes/no
+- Device A joined: yes/no
+- Device B joined: yes/no
+- media confirmed: audio/video/not confirmed
+- end/dispose completed: yes/no
+- blocker category: project/config/permission/access/setup/join/media/none
