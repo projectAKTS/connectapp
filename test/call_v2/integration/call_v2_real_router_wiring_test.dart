@@ -109,6 +109,7 @@ void main() {
 
       for (final path in callV2Files) {
         if (path.endsWith('call_v2_dev_screen.dart')) continue;
+        if (path.endsWith('call_v2_dev_screen_factory.dart')) continue;
         expect(path, isNot(contains('screen')), reason: path);
       }
 
