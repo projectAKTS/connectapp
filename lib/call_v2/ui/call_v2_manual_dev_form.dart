@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../firebase/call_v2_callable_transport.dart';
+import '../firebase/call_v2_dev_callable_target.dart';
 import '../permissions/real_call_v2_permission_adapter.dart';
 import '../rtc/agora_call_v2_rtc_adapter.dart';
 import '../runtime/call_v2_manual_session_inputs.dart';
@@ -15,12 +16,14 @@ class CallV2ManualDevForm extends StatefulWidget {
     super.key,
     this.screenFactory = const CallV2DevScreenFactory(),
     this.callableTransport,
+    this.devCallableTarget = const FirebaseCallV2DevCallableTarget(),
     this.permissionClient,
     this.rtcClient,
   });
 
   final CallV2DevScreenFactory screenFactory;
   final CallV2CallableTransport? callableTransport;
+  final CallV2DevCallableTarget devCallableTarget;
   final RealCallV2PermissionClient? permissionClient;
   final AgoraCallV2RtcEngineClient? rtcClient;
 
@@ -35,6 +38,7 @@ class _CallV2ManualDevFormState extends State<CallV2ManualDevForm> {
   final _remoteController = TextEditingController(text: 'manual-b');
   CallV2RuntimeCallMode _callMode = CallV2RuntimeCallMode.audio;
   CallV2ManualDevMode _mode = CallV2ManualDevMode.fake;
+  bool _useDeployedDevCallable = false;
   Widget? _createdScreen;
   Map<String, Object?>? _safeDebug;
   bool _inputRejected = false;
@@ -51,7 +55,7 @@ class _CallV2ManualDevFormState extends State<CallV2ManualDevForm> {
   @override
   Widget build(BuildContext context) {
     final screen = _createdScreen;
-    return Column(
+    return ListView(
       key: const ValueKey<String>('call-v2-manual-dev-entry'),
       children: <Widget>[
         Padding(
@@ -117,9 +121,19 @@ class _CallV2ManualDevFormState extends State<CallV2ManualDevForm> {
                   setState(() => _callMode = value.single);
                 },
               ),
+              CheckboxListTile(
+                key: const ValueKey<String>('call-v2-use-dev-callable'),
+                value: _useDeployedDevCallable,
+                onChanged: (value) {
+                  setState(() => _useDeployedDevCallable = value ?? false);
+                },
+                title: const Text('Use deployed dev callable'),
+              ),
               FilledButton(
                 key: const ValueKey<String>('call-v2-create-manual-runtime'),
-                onPressed: _createManualRuntime,
+                onPressed: () {
+                  _createManualRuntime();
+                },
                 child: const Text('Create Manual Runtime'),
               ),
               Text(
@@ -134,12 +148,12 @@ class _CallV2ManualDevFormState extends State<CallV2ManualDevForm> {
             ],
           ),
         ),
-        if (screen != null) Expanded(child: screen),
+        if (screen != null) SizedBox(height: 640, child: screen),
       ],
     );
   }
 
-  void _createManualRuntime() {
+  Future<void> _createManualRuntime() async {
     try {
       final inputs = CallV2ManualSessionInputs(
         rtcApplicationIdentifier: _applicationController.text,
@@ -153,17 +167,52 @@ class _CallV2ManualDevFormState extends State<CallV2ManualDevForm> {
         allowRtcInitialization: true,
         allowRtcJoin: true,
       );
+      final useDevCallable = _useDeployedDevCallable &&
+          _mode == CallV2ManualDevMode.internalRealAdapters;
+      final CallV2CallableTransport? callableTransport;
+      if (useDevCallable) {
+        try {
+          callableTransport = await widget.devCallableTarget.createTransport();
+        } on Object {
+          if (!mounted) return;
+          setState(() {
+            _inputRejected = true;
+            _safeDebug = const <String, Object?>{
+              'inputReady': false,
+              'devTargetReady': false,
+              'callableReachable': false,
+            };
+            _createdScreen = null;
+          });
+          return;
+        }
+      } else {
+        callableTransport = widget.callableTransport;
+      }
+      if (!mounted) return;
       final config = _configForMode(inputs);
-      final factory = _factoryForMode(inputs);
+      final factory = _factoryForMode(
+        inputs,
+        callableTransport: callableTransport,
+      );
       setState(() {
         _inputRejected = false;
-        _safeDebug = inputs.toSafeDebugMap();
+        _safeDebug = <String, Object?>{
+          ...inputs.toSafeDebugMap(),
+          'devTargetSelected': useDevCallable,
+          if (useDevCallable) ...widget.devCallableTarget.toSafeDebugMap(),
+        };
         _createdScreen = factory.create(config: config);
       });
     } on CallV2ManualSessionInputError {
+      if (!mounted) return;
       setState(() {
         _inputRejected = true;
-        _safeDebug = const <String, Object?>{'inputReady': false};
+        _safeDebug = const <String, Object?>{
+          'inputReady': false,
+          'devTargetReady': false,
+          'callableReachable': false,
+        };
         _createdScreen = null;
       });
     }
@@ -186,14 +235,17 @@ class _CallV2ManualDevFormState extends State<CallV2ManualDevForm> {
     }
   }
 
-  CallV2DevScreenFactory _factoryForMode(CallV2ManualSessionInputs inputs) {
+  CallV2DevScreenFactory _factoryForMode(
+    CallV2ManualSessionInputs inputs, {
+    required CallV2CallableTransport? callableTransport,
+  }) {
     if (_mode != CallV2ManualDevMode.internalRealAdapters) {
       return widget.screenFactory;
     }
     return CallV2DevScreenFactory(
       runtimeFactory: CallV2RuntimeFactory.manualRealDevice(
         inputs: inputs,
-        transport: widget.callableTransport,
+        transport: callableTransport,
         permissionClient: widget.permissionClient,
         rtcClient: widget.rtcClient,
       ),
