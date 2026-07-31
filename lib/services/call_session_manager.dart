@@ -2119,7 +2119,6 @@ class CallSessionManager {
     const allowed = <String>{
       'none',
       'disabled',
-      'missing_dev_application',
       'dev_callable_disabled',
       'active_ui_or_session',
       'caller_start',

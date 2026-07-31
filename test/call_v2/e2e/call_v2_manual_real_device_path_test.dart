@@ -287,6 +287,7 @@ class _FakeCallableClient implements FirebaseCallV2CallableClient {
     return <String, Object?>{
       'status': 'ok',
       'result': <String, Object?>{
+        'appId': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         'channelAlias': 'same-channel',
         'rtcUid': rtcUid,
         'expiresInSeconds': 3600,

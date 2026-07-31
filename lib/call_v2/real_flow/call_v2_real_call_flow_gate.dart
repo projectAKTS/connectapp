@@ -9,7 +9,6 @@ class CallV2RealCallFlowConfig {
   const CallV2RealCallFlowConfig({
     this.enabled = _defaultEnabled,
     this.devCallableEnabled = _defaultDevCallableEnabled,
-    this.devAgoraAppId = _defaultDevAgoraAppId,
   });
 
   static const bool _defaultEnabled = bool.fromEnvironment(
@@ -20,26 +19,26 @@ class CallV2RealCallFlowConfig {
     'CALL_V2_REAL_FLOW_DEV_CALLABLE',
     defaultValue: true,
   );
-  static const String _defaultDevAgoraAppId = String.fromEnvironment(
-    'CALL_V2_DEV_AGORA_APP_ID',
+  static const String _defaultBuildCommit = String.fromEnvironment(
+    'CALL_V2_BUILD_COMMIT',
     defaultValue: '',
   );
 
   final bool enabled;
   final bool devCallableEnabled;
-  final String devAgoraAppId;
 
-  bool get hasDevAgoraAppId => _isAgoraAppId(devAgoraAppId);
+  bool get buildCommitPresent => _defaultBuildCommit.trim().isNotEmpty;
 
   bool get canUseCallV2Dev {
-    return enabled && devCallableEnabled && hasDevAgoraAppId;
+    return enabled && devCallableEnabled;
   }
 
   Map<String, Object?> toSafeDebugMap() {
     return <String, Object?>{
       'callV2Selected': canUseCallV2Dev,
+      'buildCommitPresent': buildCommitPresent,
       'devCallableSelected': enabled && devCallableEnabled,
-      'configurationReady': hasDevAgoraAppId,
+      'configurationReady': enabled && devCallableEnabled,
       'fallbackUsed': enabled && !canUseCallV2Dev,
       'blockerCode': _blockerCode,
     };
@@ -48,7 +47,6 @@ class CallV2RealCallFlowConfig {
   String get _blockerCode {
     if (!enabled) return 'disabled';
     if (!devCallableEnabled) return 'dev_callable_disabled';
-    if (!hasDevAgoraAppId) return 'missing_dev_application';
     return 'none';
   }
 
@@ -143,8 +141,4 @@ String? callConnectionSystemToInviteValue(
     case CallV2RealCallConnectionSystem.callV2Dev:
       return callV2DevInviteSystemValue;
   }
-}
-
-bool _isAgoraAppId(String value) {
-  return RegExp(r'^[0-9a-fA-F]{32}$').hasMatch(value.trim());
 }

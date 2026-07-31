@@ -116,14 +116,9 @@ Future<AgoraJoinAuth> fetchCallV2DevAgoraToken({
   required String callIdentifier,
   required String participantIdentifier,
   required bool isVideo,
-  required String devAgoraAppId,
   CallV2DevCallableTarget devCallableTarget =
       const FirebaseCallV2DevCallableTarget(),
 }) async {
-  final appId = devAgoraAppId.trim();
-  if (!RegExp(r'^[0-9a-fA-F]{32}$').hasMatch(appId)) {
-    throw const CallV2ClientError(CallV2ClientErrorCode.invalidRequest);
-  }
   final transport = await devCallableTarget.createTransport();
   final provider = RealCallV2TokenProvider(
     allowRequests: true,
@@ -140,7 +135,7 @@ Future<AgoraJoinAuth> fetchCallV2DevAgoraToken({
   );
   return AgoraJoinAuth(
     token: result.token,
-    appId: appId,
+    appId: result.appId,
     channelName: result.channelAlias,
     uid: result.rtcUid,
     userAccount: result.rtcUid.toString(),
@@ -223,11 +218,19 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   bool _missedLogged = false;
   bool _callkitMarkedConnected = false;
   bool _nativeAcceptedCallCleared = false;
+  bool _callV2CallableReached = false;
+  bool _callV2TokenReady = false;
+  bool _callV2AppIdReady = false;
   bool _callV2AccessReady = false;
   bool _callV2RtcInitialized = false;
+  bool _callV2JoinAttempted = false;
   bool _callV2RtcJoined = false;
+  bool _callV2RemoteJoined = false;
   bool _callV2MediaActive = false;
   String _callV2BlockerCode = 'none';
+  String _callV2AgoraErrorCode = 'none';
+  String _callV2ConnectionState = 'none';
+  String _callV2ConnectionReason = 'none';
 
   bool get _useFlutterTextureRenderer =>
       Platform.isIOS && _preferFlutterTextureRendererOnIOS;
@@ -238,6 +241,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
   bool get _showCallV2SafeStatus {
     return _callV2Selected || widget.callV2FallbackUsed;
+  }
+
+  CallV2RealCallFlowConfig get _callV2RealFlowConfig {
+    return const CallV2RealCallFlowConfig();
   }
 
   String get _videoRendererLabel =>
@@ -529,7 +536,6 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
               callIdentifier: inviteId.isNotEmpty ? inviteId : channel,
               participantIdentifier: currentUserUid ?? requestedUserAccount,
               isVideo: widget.isVideo,
-              devAgoraAppId: const CallV2RealCallFlowConfig().devAgoraAppId,
             )
           : await fetchAgoraToken(
               channelName: channel,
@@ -542,12 +548,16 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       _joinedChannelName = auth.channelName;
       _rtcUid = auth.uid > 0 ? auth.uid : requestedUid;
       if (_callV2Selected) {
+        _callV2CallableReached = true;
+        _callV2TokenReady = auth.token.isNotEmpty;
+        _callV2AppIdReady = isCallV2AgoraAppId(auth.appId);
         _callV2AccessReady = true;
         _callV2BlockerCode = 'none';
       }
       await _diagCall('token_ok', meta: {
         'callV2Selected': _callV2Selected,
         'accessReady': _callV2Selected ? _callV2AccessReady : true,
+        'appIdReady': _callV2Selected ? _callV2AppIdReady : true,
         'tokenIdentityMode': auth.identityMode,
         'tokenVersion': auth.tokenVersion,
         'appIdSource': auth.appId.toLowerCase() == _agoraFallbackAppId
@@ -601,6 +611,15 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       final handler = RtcEngineEventHandler(
         onError: (ErrorCodeType err, String msg) {
           _diagCall('agora_error', meta: {'code': '$err', 'msg': msg});
+          if (_callV2Selected && mounted) {
+            setState(() {
+              _callV2AgoraErrorCode = _safeAgoraDiagString('$err');
+              _callV2BlockerCode = 'agora_error';
+            });
+          } else if (_callV2Selected) {
+            _callV2AgoraErrorCode = _safeAgoraDiagString('$err');
+            _callV2BlockerCode = 'agora_error';
+          }
           if (!_joined && mounted && !_ended) {
             setState(() {
               _fatalError = 'Call connection failed. Please try again.';
@@ -624,6 +643,21 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
             'state': '$state',
             'reason': '$reason',
           });
+          if (_callV2Selected && mounted) {
+            setState(() {
+              _callV2ConnectionState = _safeAgoraDiagString('$state');
+              _callV2ConnectionReason = _safeAgoraDiagString('$reason');
+              if (state == ConnectionStateType.connectionStateFailed) {
+                _callV2BlockerCode = 'connection_failed';
+              }
+            });
+          } else if (_callV2Selected) {
+            _callV2ConnectionState = _safeAgoraDiagString('$state');
+            _callV2ConnectionReason = _safeAgoraDiagString('$reason');
+            if (state == ConnectionStateType.connectionStateFailed) {
+              _callV2BlockerCode = 'connection_failed';
+            }
+          }
           if (!_joined &&
               !_ended &&
               mounted &&
@@ -706,6 +740,21 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           RemoteAudioStateReason reason,
           int elapsed,
         ) {
+          final mediaActive =
+              state == RemoteAudioState.remoteAudioStateDecoding;
+          if (_callV2Selected && mounted) {
+            setState(() {
+              _callV2MediaActive = mediaActive;
+              if (state == RemoteAudioState.remoteAudioStateFailed) {
+                _callV2BlockerCode = 'remote_audio_failed';
+              }
+            });
+          } else if (_callV2Selected) {
+            _callV2MediaActive = mediaActive;
+            if (state == RemoteAudioState.remoteAudioStateFailed) {
+              _callV2BlockerCode = 'remote_audio_failed';
+            }
+          }
           _diagCall('remote_audio_state', meta: {
             'remoteUid': remoteUid,
             'state': '$state',
@@ -921,7 +970,6 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
               _joined = true;
               if (_callV2Selected) {
                 _callV2RtcJoined = true;
-                _callV2MediaActive = true;
               }
             });
           }
@@ -939,7 +987,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
               _remoteVideoReady = false;
               _remoteVideoMuted = false;
               if (_callV2Selected) {
-                _callV2MediaActive = true;
+                _callV2RemoteJoined = true;
               }
             });
           }
@@ -1015,6 +1063,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
               _ended = true;
               _remoteVideoReady = false;
               _remoteVideoMuted = false;
+              if (_callV2Selected) {
+                _callV2MediaActive = false;
+              }
             });
           }
         },
@@ -1051,6 +1102,13 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         'autoSubscribeAudio': true,
         'autoSubscribeVideo': widget.isVideo,
       });
+      if (_callV2Selected && mounted) {
+        setState(() {
+          _callV2JoinAttempted = true;
+        });
+      } else if (_callV2Selected) {
+        _callV2JoinAttempted = true;
+      }
       await engine.joinChannel(
         token: _token ?? '',
         channelId: auth.channelName,
@@ -1073,7 +1131,14 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       }
       await _diagCall('begin_error', meta: {'error': '$e'});
       if (_callV2Selected) {
-        _callV2BlockerCode = _safeBlockerCodeForError(e);
+        final blocker = _safeBlockerCodeForError(e);
+        if (mounted) {
+          setState(() {
+            _callV2BlockerCode = blocker;
+          });
+        } else {
+          _callV2BlockerCode = blocker;
+        }
       }
       final inviteId = (widget.inviteId ?? '').trim();
       if (inviteId.isNotEmpty) {
@@ -1129,9 +1194,14 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         _localVideoReady = widget.isVideo;
         _speakerOn = true;
         if (_callV2Selected) {
+          _callV2CallableReached = true;
+          _callV2TokenReady = true;
+          _callV2AppIdReady = true;
           _callV2AccessReady = true;
           _callV2RtcInitialized = true;
+          _callV2JoinAttempted = true;
           _callV2RtcJoined = true;
+          _callV2RemoteJoined = true;
           _callV2MediaActive = true;
           _callV2BlockerCode = 'none';
         }
@@ -1201,7 +1271,6 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     const allowed = <String>{
       'none',
       'disabled',
-      'missing_dev_application',
       'dev_callable_disabled',
       'call_v2_dev_config',
       'server',
@@ -2176,13 +2245,25 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
   Widget _callV2SafeStatusPanel({bool dark = false}) {
     if (!_showCallV2SafeStatus) return const SizedBox.shrink();
-    final text = 'callV2Selected=$_callV2Selected '
+    final config = _callV2RealFlowConfig;
+    final text = 'buildCommitPresent=${config.buildCommitPresent} '
+        'realFlowEnabled=${config.enabled} '
+        'devCallableEnabled=${config.devCallableEnabled} '
+        'callV2Selected=$_callV2Selected '
+        'callableReached=$_callV2CallableReached '
+        'tokenReady=$_callV2TokenReady '
+        'appIdReady=$_callV2AppIdReady '
         'accessReady=$_callV2AccessReady '
         'rtcInitialized=$_callV2RtcInitialized '
+        'joinAttempted=$_callV2JoinAttempted '
         'rtcJoined=$_callV2RtcJoined '
+        'remoteJoined=$_callV2RemoteJoined '
         'mediaActive=$_callV2MediaActive '
         'fallbackUsed=${widget.callV2FallbackUsed} '
-        'blockerCode=$_callV2BlockerCode';
+        'blockerCode=$_callV2BlockerCode '
+        'agoraErrorCode=$_callV2AgoraErrorCode '
+        'connectionState=$_callV2ConnectionState '
+        'connectionReason=$_callV2ConnectionReason';
     return Padding(
       padding: const EdgeInsets.only(top: 10),
       child: DecoratedBox(

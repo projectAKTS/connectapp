@@ -15,6 +15,7 @@ class FakeCallV2TokenProvider implements CallV2TokenProvider {
       throw const FakeCallV2TokenProviderFailure();
     }
     return const CallV2TokenResult(
+      appId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       channelAlias: 'fake-channel',
       rtcUid: 42,
       expiresInSeconds: 3600,

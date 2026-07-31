@@ -88,12 +88,15 @@ CallV2TokenResult _tokenResultFromResponse(Object? raw) {
     throw const CallV2ClientError(CallV2ClientErrorCode.unavailable);
   }
   final source = result is Map<String, Object?> ? result : data;
+  final appId = source['appId'];
   final alias = source['channelAlias'];
   final handle = source['rtcUid'];
   final access = source['token'];
   final expiresInSeconds = source['expiresInSeconds'];
   final expiresAtMillis = source['expiresAtMillis'];
-  if (alias is! String ||
+  if (appId is! String ||
+      !isCallV2AgoraAppId(appId) ||
+      alias is! String ||
       alias.isEmpty ||
       handle is! num ||
       access is! String ||
@@ -101,6 +104,7 @@ CallV2TokenResult _tokenResultFromResponse(Object? raw) {
     throw const CallV2ClientError(CallV2ClientErrorCode.unavailable);
   }
   return CallV2TokenResult(
+    appId: appId.trim(),
     channelAlias: alias,
     rtcUid: handle.toInt(),
     expiresInSeconds: _expiresInSeconds(

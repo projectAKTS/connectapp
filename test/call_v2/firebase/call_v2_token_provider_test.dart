@@ -22,6 +22,7 @@ void main() {
     const token = 'fake-token-not-for-production';
     const channel = 'fake-channel';
     const result = CallV2TokenResult(
+      appId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       channelAlias: channel,
       rtcUid: 42,
       expiresInSeconds: 3600,
@@ -32,6 +33,7 @@ void main() {
 
     expect(result.toSafeDebugMap(), <String, Object?>{
       'accessReady': true,
+      'appIdReady': true,
       'routingReady': true,
       'numericHandleReady': true,
       'expiresInSeconds': 3600,

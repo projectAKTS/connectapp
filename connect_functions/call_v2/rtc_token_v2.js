@@ -85,6 +85,7 @@ function createAgoraRtcTokenForDevV2({
     schemaVersion: 1,
     callSystem: "v2",
     callId: normalized.callId,
+    appId: cleanAppId,
     channelAlias,
     rtcUid,
     isVideo: normalized.isVideo,
@@ -101,6 +102,8 @@ function safeRtcTokenDebugV2(result) {
       typeof result.channelAlias === "string" && result.channelAlias.length > 0,
     numericHandleReady:
       Number.isSafeInteger(result.rtcUid) && result.rtcUid > 0,
+    appIdReady:
+      typeof result.appId === "string" && /^[0-9a-fA-F]{32}$/.test(result.appId),
     videoReady: result.isVideo,
     expiryReady: Number.isSafeInteger(result.expiresAtMillis),
   };

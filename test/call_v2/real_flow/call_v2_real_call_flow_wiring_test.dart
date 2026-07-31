@@ -18,13 +18,11 @@ void main() {
     expect(decision.fallbackUsed, isFalse);
   });
 
-  test('developer gate selects Call V2 dev only with explicit configuration',
-      () {
+  test('developer gate selects Call V2 dev without manual app id define', () {
     const gate = CallV2RealCallFlowGate(
       config: CallV2RealCallFlowConfig(
         enabled: true,
         devCallableEnabled: true,
-        devAgoraAppId: validDevAppId,
       ),
     );
     final decision = gate.selectForUserStartedCall(isVideo: true);
@@ -35,12 +33,12 @@ void main() {
     expect(decision.fallbackUsed, isFalse);
   });
 
-  test('developer gate preserves V1 fallback when dev app config is missing',
+  test('developer gate preserves V1 fallback when dev callable is disabled',
       () {
     const gate = CallV2RealCallFlowGate(
       config: CallV2RealCallFlowConfig(
         enabled: true,
-        devCallableEnabled: true,
+        devCallableEnabled: false,
       ),
     );
     final decision = gate.selectForUserStartedCall(isVideo: false);
@@ -48,7 +46,19 @@ void main() {
     expect(decision.connectionSystem, CallV2RealCallConnectionSystem.legacyV1);
     expect(decision.callV2Selected, isFalse);
     expect(decision.fallbackUsed, isTrue);
-    expect(decision.blockerCode, 'missing_dev_application');
+    expect(decision.blockerCode, 'dev_callable_disabled');
+  });
+
+  test('caller and receiver select Call V2 from invite marker', () {
+    final callerSystem =
+        callConnectionSystemFromInviteValue(callV2DevInviteSystemValue);
+    final receiverSystem =
+        callConnectionSystemFromInviteValue(callV2DevInviteSystemValue);
+
+    expect(callerSystem, CallV2RealCallConnectionSystem.callV2Dev);
+    expect(receiverSystem, CallV2RealCallConnectionSystem.callV2Dev);
+    expect(callConnectionSystemFromInviteValue(null),
+        CallV2RealCallConnectionSystem.legacyV1);
   });
 
   testWidgets('real call button selects Call V2 under developer gate',
@@ -60,7 +70,6 @@ void main() {
         config: CallV2RealCallFlowConfig(
           enabled: true,
           devCallableEnabled: true,
-          devAgoraAppId: validDevAppId,
         ),
       ),
       startSession: (
@@ -161,7 +170,6 @@ void main() {
       callIdentifier: 'real-call',
       participantIdentifier: 'local-participant',
       isVideo: false,
-      devAgoraAppId: validDevAppId,
       devCallableTarget: target,
     );
 
@@ -180,7 +188,6 @@ void main() {
       config: CallV2RealCallFlowConfig(
         enabled: true,
         devCallableEnabled: true,
-        devAgoraAppId: validDevAppId,
       ),
     );
     final debug = gate.toSafeDebugMap().toString().toLowerCase();
@@ -195,6 +202,7 @@ void main() {
       'secret',
       'payload',
       'raw',
+      'CALL_V2_DEV_AGORA_APP_ID'.toLowerCase(),
       validDevAppId,
     ]) {
       expect(debug, isNot(contains(forbidden)), reason: forbidden);
@@ -234,6 +242,7 @@ class _FakeCallableClient implements FirebaseCallV2CallableClient {
         'channelAlias': 'safe-route',
         'rtcUid': 42,
         'token': 'test-access',
+        'appId': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         'expiresInSeconds': 3600,
       },
     };

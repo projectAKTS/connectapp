@@ -113,6 +113,7 @@ test("creates emulator-safe fake token result and safe debug output", () => {
     Object.keys(debug).sort(),
     [
       "accessReady",
+      "appIdReady",
       "expiryReady",
       "numericHandleReady",
       "routingReady",
@@ -217,8 +218,13 @@ test("dev Agora token generator validates secrets and keeps same-call routing", 
 
   assert.equal(first.channelAlias, second.channelAlias);
   assert.notEqual(first.rtcUid, second.rtcUid);
+  assert.equal(first.appId, appId);
   assert.equal(first.token.length > 0, true);
+  assert.equal(first.appCertificate, undefined);
+  assert.equal(first.certificate, undefined);
+  assert.equal(JSON.stringify(first).includes(appCertificate), false);
   assert.equal(JSON.stringify(safeRtcTokenDebugV2(first)).includes(first.token), false);
+  assert.equal(JSON.stringify(safeRtcTokenDebugV2(first)).includes(appId), false);
 
   assert.throws(
     () =>
@@ -248,6 +254,32 @@ test("dev Agora token generator validates secrets and keeps same-call routing", 
       }),
     /invalid_argument/,
   );
+});
+
+test("dev Agora token result returns app id but never certificate", () => {
+  const appId = "c".repeat(32);
+  const appCertificate = "d".repeat(32);
+  const result = createAgoraRtcTokenForDevV2({
+    request: {
+      callId: "call_for_app",
+      participantUid: "participant_for_app",
+      isVideo: false,
+    },
+    now: new Date("2026-01-01T00:00:00.000Z"),
+    appId,
+    appCertificate,
+  });
+
+  assert.equal(result.appId, appId);
+  assert.equal(result.appCertificate, undefined);
+  assert.equal(result.certificate, undefined);
+  assert.equal(JSON.stringify(result).includes(appCertificate), false);
+
+  const debug = JSON.stringify(safeRtcTokenDebugV2(result)).toLowerCase();
+  assert.equal(debug.includes(appId), false);
+  assert.equal(debug.includes(appCertificate), false);
+  assert.equal(debug.includes("certificate"), false);
+  assert.equal(debug.includes("secret"), false);
 });
 
 test("enabled dev callable gate rejects invalid secrets without token output", async () => {

@@ -7,6 +7,8 @@ import 'package:connect_app/call_v2/firebase/real_call_v2_token_provider.dart';
 import 'package:connect_app/call_v2/runtime/call_v2_runtime_state.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+const validAppId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
 void main() {
   test(
       'real token provider is gated and does not call Firebase on construction',
@@ -41,6 +43,7 @@ void main() {
 
     expect(transport.callCount, 1);
     expect(transport.lastCallableName, callV2RtcTokenCallableName);
+    expect(result.appId, validAppId);
     expect(result.rtcUid, 7);
     expect(result.expiresInSeconds, 3600);
   });
@@ -51,6 +54,7 @@ void main() {
       allowRequests: true,
       transport: _FakeCallableTransport(
         response: const <String, Object?>{
+          'appId': validAppId,
           'channelAlias': 'safe-channel',
           'rtcUid': 9,
           'token': 'safe-token',
@@ -68,7 +72,42 @@ void main() {
     );
 
     expect(result.rtcUid, 9);
+    expect(result.appId, validAppId);
     expect(result.expiresInSeconds, greaterThan(0));
+  });
+
+  test('missing or malformed backend app id is rejected safely', () async {
+    for (final response in const <Map<String, Object?>>[
+      <String, Object?>{
+        'channelAlias': 'safe-channel',
+        'rtcUid': 9,
+        'token': 'safe-token',
+        'expiresAtMillis': 4102444800000,
+      },
+      <String, Object?>{
+        'appId': 'not-valid',
+        'channelAlias': 'safe-channel',
+        'rtcUid': 9,
+        'token': 'safe-token',
+        'expiresAtMillis': 4102444800000,
+      },
+    ]) {
+      final provider = RealCallV2TokenProvider(
+        allowRequests: true,
+        transport: _FakeCallableTransport(response: response),
+        defaultRequest: const CallV2TokenBackendRequest(
+          callId: 'call_a',
+          localParticipantUid: 'local_a',
+        ),
+      );
+
+      await expectLater(
+        provider.resolveToken(
+          const CallV2TokenRequest(mode: CallV2RuntimeCallMode.audio),
+        ),
+        throwsA(_clientError(CallV2ClientErrorCode.unavailable)),
+      );
+    }
   });
 
   test('disabled callable result is rejected safely', () async {
@@ -207,6 +246,7 @@ class _FakeCallableTransport implements CallV2CallableTransport {
         <String, Object?>{
           'status': 'ok',
           'result': <String, Object?>{
+            'appId': validAppId,
             'channelAlias': 'safe-channel',
             'rtcUid': 7,
             'token': 'safe-token',
