@@ -218,6 +218,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   bool _missedLogged = false;
   bool _callkitMarkedConnected = false;
   bool _nativeAcceptedCallCleared = false;
+  bool _callV2CallableAttempted = false;
   bool _callV2CallableReached = false;
   bool _callV2TokenReady = false;
   bool _callV2AppIdReady = false;
@@ -531,18 +532,36 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       final requestedUid = _deriveRtcUidFromFirebaseUid(currentUserUid ?? '');
       final requestedUserAccount = requestedUid.toString();
 
-      final auth = _callV2Selected
-          ? await fetchCallV2DevAgoraToken(
-              callIdentifier: inviteId.isNotEmpty ? inviteId : channel,
-              participantIdentifier: currentUserUid ?? requestedUserAccount,
-              isVideo: widget.isVideo,
-            )
-          : await fetchAgoraToken(
-              channelName: channel,
-              uid: requestedUid,
-              userAccount: requestedUserAccount,
-              identityMode: 'uid',
-            );
+      late final AgoraJoinAuth auth;
+      if (_callV2Selected) {
+        if (mounted) {
+          setState(() {
+            _callV2CallableAttempted = true;
+          });
+        } else {
+          _callV2CallableAttempted = true;
+        }
+        try {
+          auth = await fetchCallV2DevAgoraToken(
+            callIdentifier: inviteId.isNotEmpty ? inviteId : channel,
+            participantIdentifier: currentUserUid ?? requestedUserAccount,
+            isVideo: widget.isVideo,
+          );
+        } on CallV2ClientError catch (error) {
+          _setCallV2BlockerCode('callable_${error.code.name}');
+          rethrow;
+        } catch (_) {
+          _setCallV2BlockerCode('callable_unavailable');
+          rethrow;
+        }
+      } else {
+        auth = await fetchAgoraToken(
+          channelName: channel,
+          uid: requestedUid,
+          userAccount: requestedUserAccount,
+          identityMode: 'uid',
+        );
+      }
       _token = auth.token;
       _agoraAppId = auth.appId;
       _joinedChannelName = auth.channelName;
@@ -1132,12 +1151,14 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       await _diagCall('begin_error', meta: {'error': '$e'});
       if (_callV2Selected) {
         final blocker = _safeBlockerCodeForError(e);
-        if (mounted) {
-          setState(() {
+        if (!_callV2BlockerCode.startsWith('callable_')) {
+          if (mounted) {
+            setState(() {
+              _callV2BlockerCode = blocker;
+            });
+          } else {
             _callV2BlockerCode = blocker;
-          });
-        } else {
-          _callV2BlockerCode = blocker;
+          }
         }
       }
       final inviteId = (widget.inviteId ?? '').trim();
@@ -1305,6 +1326,37 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     if (error is TimeoutException) return 'timeout';
     if (error is CallV2ClientError) return error.code.name;
     return 'setup_failed';
+  }
+
+  void _setCallV2BlockerCode(String value) {
+    final safe = _safeCallV2BlockerCode(value);
+    if (mounted) {
+      setState(() {
+        _callV2BlockerCode = safe;
+      });
+    } else {
+      _callV2BlockerCode = safe;
+    }
+  }
+
+  String _safeCallV2BlockerCode(String value) {
+    const allowed = <String>{
+      'none',
+      'timeout',
+      'setup_failed',
+      'unavailable',
+      'rejected',
+      'unauthorized',
+      'invalidRequest',
+      'callable_unavailable',
+      'callable_rejected',
+      'callable_unauthorized',
+      'callable_invalidRequest',
+      'agora_error',
+      'connection_failed',
+      'remote_audio_failed',
+    };
+    return allowed.contains(value) ? value : 'setup_failed';
   }
 
   String _safeAgoraErrorCategory(Object? value) {
@@ -2250,6 +2302,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         'realFlowEnabled=${config.enabled} '
         'devCallableEnabled=${config.devCallableEnabled} '
         'callV2Selected=$_callV2Selected '
+        'callableAttempted=$_callV2CallableAttempted '
         'callableReached=$_callV2CallableReached '
         'tokenReady=$_callV2TokenReady '
         'appIdReady=$_callV2AppIdReady '

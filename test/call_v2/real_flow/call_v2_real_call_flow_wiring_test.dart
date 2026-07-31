@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:connect_app/call_v2/firebase/call_v2_dev_callable_target.dart';
 import 'package:connect_app/call_v2/firebase/firebase_call_v2_callable_transport.dart';
 import 'package:connect_app/call_v2/real_flow/call_v2_real_call_flow_gate.dart';
@@ -207,6 +209,23 @@ void main() {
     ]) {
       expect(debug, isNot(contains(forbidden)), reason: forbidden);
     }
+  });
+
+  test('real call status separates callable attempted from reached', () {
+    final source =
+        File('lib/screens/call/agora_call_screen.dart').readAsStringSync();
+
+    expect(source, contains('callableAttempted='));
+    expect(source, contains('callableReached='));
+    final attemptedIndex = source.indexOf('_callV2CallableAttempted = true');
+    final runtimeFetchIndex =
+        source.indexOf('fetchCallV2DevAgoraToken(', attemptedIndex);
+    expect(attemptedIndex, isNonNegative);
+    expect(runtimeFetchIndex, isNonNegative);
+    expect(attemptedIndex, lessThan(runtimeFetchIndex));
+    expect(source, contains("_callV2CallableReached = true"));
+    expect(source, contains("'callable_\${error.code.name}'"));
+    expect(source, contains("'callable_unavailable'"));
   });
 }
 

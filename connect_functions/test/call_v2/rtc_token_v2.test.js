@@ -181,6 +181,35 @@ test("enabled dev callable gate creates emulator-safe access through injection",
   assert.equal(result.result.isVideo, true);
 });
 
+test("enabled dev callable gate accepts Firebase CallableRequest metadata", async () => {
+  const handler = createRtcTokenCallableGateV2({
+    enabled: true,
+    environment: "dev",
+    now: () => new Date("2026-01-01T00:00:00.000Z"),
+  });
+
+  const result = await handler({
+    data: {
+      callId: "call_a",
+      participantUid: "participant_a",
+      isVideo: false,
+    },
+    rawRequest: {},
+    acceptsStreaming: false,
+    auth: {
+      uid: "test-user",
+      token: {},
+    },
+    app: undefined,
+    instanceIdToken: undefined,
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.result.callId, "call_a");
+  assert.equal(result.result.isVideo, false);
+  assert.equal(safeRtcTokenDebugV2(result.result).accessReady, true);
+});
+
 test("non-production environment allowlist is explicit", () => {
   for (const value of ["dev", "demo", "staging", "test", "emulator", "local"]) {
     assert.equal(isNonProductionEnvironment(value), true, value);
@@ -309,8 +338,11 @@ test("enabled dev callable gate rejects invalid secrets without token output", a
   );
 });
 
-test("callable gate rejects unknown wrapper keys", async () => {
-  const handler = createRtcTokenCallableGateV2();
+test("callable gate rejects unexpected data keys but accepts wrapper metadata", async () => {
+  const handler = createRtcTokenCallableGateV2({
+    enabled: true,
+    environment: "dev",
+  });
 
   await assert.rejects(
     () =>
@@ -319,8 +351,16 @@ test("callable gate rejects unknown wrapper keys", async () => {
           callId: "call_a",
           participantUid: "participant_a",
           isVideo: false,
+          extra: true,
         },
-        extra: true,
+        rawRequest: {},
+        acceptsStreaming: false,
+        auth: {
+          uid: "test-user",
+          token: {},
+        },
+        app: undefined,
+        instanceIdToken: undefined,
       }),
     /invalid_argument/,
   );

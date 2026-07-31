@@ -13,14 +13,14 @@ function createRtcTokenCallableGateV2({
   now = () => new Date(),
 } = {}) {
   return async function rtcTokenCallableGateV2(request) {
-    requireExactKeys(request, ["data"]);
+    const data = requireCallableRequestData(request);
     if (enabled !== true || !isNonProductionEnvironment(environment)) {
       return {
         status: "disabled",
       };
     }
     const result = createToken({
-      request: request.data,
+      request: data,
       now: now(),
     });
     return {
@@ -28,6 +28,17 @@ function createRtcTokenCallableGateV2({
       result,
     };
   };
+}
+
+function requireCallableRequestData(request) {
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    throw new Error("invalid_argument");
+  }
+  const data = request.data;
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("invalid_argument");
+  }
+  return data;
 }
 
 function validateRtcTokenRequestV2(request) {
