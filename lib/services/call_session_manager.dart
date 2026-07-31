@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../call_v2/real_flow/call_v2_real_call_flow_gate.dart';
 import '../screens/call/agora_call_screen.dart';
 import '../screens/call/incoming_call_screen.dart';
 import 'callkit_id.dart';
@@ -66,6 +67,7 @@ class CallInvitePayload {
     required this.fromName,
     required this.fromUid,
     required this.toUid,
+    this.connectionSystem = CallV2RealCallConnectionSystem.legacyV1,
   });
 
   final String inviteId;
@@ -74,6 +76,7 @@ class CallInvitePayload {
   final String fromName;
   final String fromUid;
   final String toUid;
+  final CallV2RealCallConnectionSystem connectionSystem;
 }
 
 class NativeCallSnapshot {
@@ -105,6 +108,9 @@ class _CallSession {
     required this.otherUserName,
     required this.phase,
     required this.status,
+    this.connectionSystem = CallV2RealCallConnectionSystem.legacyV1,
+    this.callV2FallbackUsed = false,
+    this.callV2BlockerCode = 'none',
     DateTime? createdAt,
     DateTime? lastTouchedAt,
   })  : createdAt = createdAt ?? DateTime.now(),
@@ -116,6 +122,9 @@ class _CallSession {
   final bool isCaller;
   final String otherUserId;
   final String otherUserName;
+  final CallV2RealCallConnectionSystem connectionSystem;
+  final bool callV2FallbackUsed;
+  final String callV2BlockerCode;
   final DateTime createdAt;
   CallSessionPhase phase;
   CallInviteStatus status;
@@ -398,14 +407,18 @@ class CallSessionManager {
     required String toName,
     required bool isVideo,
     bool openScreen = true,
+    CallV2RealCallFlowDecision callV2Decision =
+        const CallV2RealCallFlowDecision.legacy(),
   }) async {
     final meUid = _currentUid.trim();
     if (meUid.isEmpty) {
       throw Exception('Not signed in');
     }
     await _diagManager('outgoing_tap', meta: {
-      'toUid': toUid,
       'isVideo': isVideo,
+      'callV2Selected': callV2Decision.callV2Selected,
+      'fallbackUsed': callV2Decision.fallbackUsed,
+      'blockerCode': callV2Decision.blockerCode,
     });
 
     if (HelperlyTestRuntime.isEnabled && !openScreen) {
@@ -423,22 +436,21 @@ class CallSessionManager {
     final inviteRef = _db.collection('callInvites').doc();
 
     await _diagManager('preflight_start', meta: {
-      'toUid': toUid,
       'isVideo': isVideo,
+      'callV2Selected': callV2Decision.callV2Selected,
     });
     await _runPreflightSweepSafely(
       reason: isVideo ? 'outgoing_video_preflight' : 'outgoing_audio_preflight',
       endUnownedNativeCalls: true,
     );
     await _diagManager('preflight_done', meta: {
-      'toUid': toUid,
       'isVideo': isVideo,
+      'callV2Selected': callV2Decision.callV2Selected,
     });
     if (hasActiveUiOrSession) {
       final nativeCalls = await _listNativeCallsSafely();
       final blockedMeta = {
         ..._sessionSnapshot(nativeCalls: nativeCalls),
-        'requestedToUid': toUid,
         'requestedIsVideo': isVideo,
         'reason': 'active_ui_or_session',
       };
@@ -453,13 +465,11 @@ class CallSessionManager {
     final fromName = authName.isEmpty ? 'Caller' : authName;
 
     await _diagManager('invite_write_start', meta: {
-      'inviteId': inviteRef.id,
-      'channel': channel,
-      'toUid': toUid,
       'isVideo': isVideo,
+      'callV2Selected': callV2Decision.callV2Selected,
     });
     try {
-      await inviteRef.set({
+      final inviteData = <String, dynamic>{
         'fromUid': meUid,
         'fromName': fromName,
         'toUid': toUid,
@@ -474,12 +484,20 @@ class CallSessionManager {
         'calleeLastError': '',
         'endReason': '',
         'endedBy': '',
+      };
+      final connectionValue = callConnectionSystemToInviteValue(
+        callV2Decision.connectionSystem,
+      );
+      if (connectionValue != null) {
+        inviteData['callSystem'] = connectionValue;
+        inviteData['callV2DevCallable'] = true;
+      }
+      await inviteRef.set({
+        ...inviteData,
       }).timeout(const Duration(seconds: 8));
     } catch (error) {
       await _diagManager('failed', meta: {
         'source': 'invite_write',
-        'inviteId': inviteRef.id,
-        'channel': channel,
         'error': '$error',
       });
       unawaited(FirestoreReadHelper.recoverNetwork(
@@ -494,10 +512,8 @@ class CallSessionManager {
       return false;
     }
     await _diagManager('invite_created', meta: {
-      'inviteId': inviteRef.id,
-      'channel': channel,
-      'toUid': toUid,
       'isVideo': isVideo,
+      'callV2Selected': callV2Decision.callV2Selected,
     });
 
     final session = _CallSession(
@@ -509,6 +525,9 @@ class CallSessionManager {
       otherUserName: toName,
       phase: CallSessionPhase.outgoingRinging,
       status: CallInviteStatus.ringing,
+      connectionSystem: callV2Decision.connectionSystem,
+      callV2FallbackUsed: callV2Decision.fallbackUsed,
+      callV2BlockerCode: callV2Decision.blockerCode,
     );
 
     await _activateSession(
@@ -903,14 +922,16 @@ class CallSessionManager {
       fromName: (data['fromName'] ?? 'Caller').toString(),
       fromUid: (data['fromUid'] ?? '').toString().trim(),
       toUid: toUid,
+      connectionSystem: callConnectionSystemFromInviteValue(
+        data['callSystem'],
+      ),
     );
     if (payload.channel.isEmpty) return;
     await _diagManager('incoming_received', meta: {
-      'inviteId': payload.inviteId,
-      'channel': payload.channel,
-      'fromUid': payload.fromUid,
       'source': source,
       'isVideo': payload.isVideo,
+      'callV2Selected':
+          payload.connectionSystem == CallV2RealCallConnectionSystem.callV2Dev,
     });
 
     if (_hasTrulyActiveCall()) {
@@ -1104,6 +1125,7 @@ class CallSessionManager {
       status: latestStatus == CallInviteStatus.ringing
           ? CallInviteStatus.accepted
           : latestStatus,
+      connectionSystem: payload.connectionSystem,
     );
 
     await _activateSession(session, openScreen: true, source: source);
@@ -1228,9 +1250,9 @@ class CallSessionManager {
       _callRouteActive = true;
       pushed = true;
       await _diagManager('route_push', meta: {
-        'inviteId': session.inviteId,
-        'channel': session.channel,
         'source': source,
+        'callV2Selected': session.connectionSystem ==
+            CallV2RealCallConnectionSystem.callV2Dev,
       });
       await nav.push(
         MaterialPageRoute(
@@ -1243,6 +1265,9 @@ class CallSessionManager {
                 session.otherUserId.isEmpty ? null : session.otherUserId,
             inviteId: session.inviteId,
             isCaller: session.isCaller,
+            connectionSystem: session.connectionSystem,
+            callV2FallbackUsed: session.callV2FallbackUsed,
+            callV2BlockerCode: session.callV2BlockerCode,
           ),
         ),
       );
@@ -1251,9 +1276,9 @@ class CallSessionManager {
       _openingCallRoute = false;
       if (pushed) {
         await _diagManager('route_pop', meta: {
-          'inviteId': session.inviteId,
-          'channel': session.channel,
           'source': source,
+          'callV2Selected': session.connectionSystem ==
+              CallV2RealCallConnectionSystem.callV2Dev,
         });
         await handleCallScreenClosed(session.inviteId);
       }
@@ -1695,8 +1720,7 @@ class CallSessionManager {
   }) {
     final session = _current;
     return <String, dynamic>{
-      'activeInviteId': session?.inviteId ?? '',
-      'activeChannel': session?.channel ?? '',
+      'activeSessionPresent': session != null,
       'phase': session?.phase.name ?? CallSessionPhase.idle.name,
       'status': session?.status.name ?? CallInviteStatus.unknown.name,
       'hasActiveUi': hasActiveUi,
@@ -1713,14 +1737,15 @@ class CallSessionManager {
     String stage, {
     Map<String, dynamic>? meta,
   }) async {
-    final payload = (meta ?? const <String, dynamic>{}).toString();
+    final safeMeta = _safeCallManagerDiagMeta(meta);
+    final payload = safeMeta.toString();
     _lastDiagStage = stage;
     _lastDiagMeta = payload;
     debugPrint('[DIAG][call_manager] $stage meta=$payload');
     DiagnosticService.logCall(
       stage,
       uid: _currentUid,
-      meta: meta,
+      meta: safeMeta,
       counters: debugResourceCounts(),
     );
   }
@@ -1833,6 +1858,9 @@ class CallSessionManager {
       fromName: (data?['fromName'] ?? fallbackFromName).toString(),
       fromUid: (data?['fromUid'] ?? fallbackFromUid).toString().trim(),
       toUid: toUid,
+      connectionSystem: callConnectionSystemFromInviteValue(
+        data?['callSystem'],
+      ),
     );
   }
 
@@ -2047,6 +2075,76 @@ class CallSessionManager {
   static bool _truthy(dynamic raw) {
     final value = (raw ?? '').toString().trim().toLowerCase();
     return raw == true || value == 'true' || value == '1';
+  }
+
+  static Map<String, dynamic> _safeCallManagerDiagMeta(
+    Map<String, dynamic>? meta,
+  ) {
+    if (meta == null || meta.isEmpty) return const <String, dynamic>{};
+    final safe = <String, dynamic>{};
+    for (final entry in meta.entries) {
+      final key = entry.key;
+      final lower = key.toLowerCase();
+      if (lower.contains('uid') ||
+          lower.contains('userid') ||
+          lower.contains('inviteid') ||
+          lower == 'channel' ||
+          lower.contains('token') ||
+          lower.contains('device')) {
+        safe['identifierFieldPresent'] =
+            entry.value.toString().trim().isNotEmpty;
+        continue;
+      }
+      if (lower.contains('error')) {
+        safe['errorCategory'] = _safeErrorCategory(entry.value);
+        continue;
+      }
+      final value = entry.value;
+      if (value == null || value is bool || value is num) {
+        safe[key] = value;
+      } else if (value is String) {
+        safe[key] = _safeDiagString(value);
+      } else if (value is Map || value is Iterable) {
+        safe[key] = 'structured';
+      } else {
+        safe[key] = value.runtimeType.toString();
+      }
+    }
+    return safe;
+  }
+
+  static String _safeDiagString(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return '';
+    const allowed = <String>{
+      'none',
+      'disabled',
+      'missing_dev_application',
+      'dev_callable_disabled',
+      'active_ui_or_session',
+      'caller_start',
+      'manual_decline',
+      'busy_active_call',
+      'local_end',
+      'screen_closed',
+      'screen_closed_before_accept',
+    };
+    if (allowed.contains(trimmed)) return trimmed;
+    if (RegExp(r'^[A-Za-z_]+:[A-Za-z_]+$').hasMatch(trimmed)) {
+      return trimmed;
+    }
+    return trimmed.length > 64 ? 'text' : trimmed;
+  }
+
+  static String _safeErrorCategory(Object? value) {
+    final text = (value ?? '').toString().toLowerCase();
+    if (text.contains('timeout')) return 'timeout';
+    if (text.contains('permission')) return 'permission';
+    if (text.contains('network') || text.contains('unavailable')) {
+      return 'network';
+    }
+    if (text.trim().isEmpty) return 'none';
+    return 'error';
   }
 
   static String _truncate(String value, {int max = 300}) {

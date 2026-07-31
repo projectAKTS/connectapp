@@ -11,6 +11,12 @@ import 'package:agora_rtc_engine/src/impl/agora_rtc_engine_impl.dart'
     as agora_internal;
 import 'package:agora_rtc_engine/src/impl/platform/platform_bindings_provider.dart'
     show createPlatformBindingsProvider;
+import 'package:connect_app/call_v2/firebase/call_v2_dev_callable_target.dart';
+import 'package:connect_app/call_v2/firebase/call_v2_token_provider.dart';
+import 'package:connect_app/call_v2/firebase/real_call_v2_token_provider.dart';
+import 'package:connect_app/call_v2/call_v2_api.dart';
+import 'package:connect_app/call_v2/real_flow/call_v2_real_call_flow_gate.dart';
+import 'package:connect_app/call_v2/runtime/call_v2_runtime_state.dart';
 import 'package:connect_app/theme/tokens.dart';
 import 'package:firebase_auth/firebase_auth.dart' hide UserInfo;
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -27,6 +33,7 @@ import 'package:path_provider/path_provider.dart';
 class AgoraJoinAuth {
   final String token;
   final String appId;
+  final String channelName;
   final int uid;
   final String userAccount;
   final String tokenVersion;
@@ -34,6 +41,7 @@ class AgoraJoinAuth {
   const AgoraJoinAuth({
     required this.token,
     required this.appId,
+    required this.channelName,
     required this.uid,
     required this.userAccount,
     required this.tokenVersion,
@@ -94,12 +102,50 @@ Future<AgoraJoinAuth> fetchAgoraToken({
     appId: (serverAppId == null || serverAppId.isEmpty)
         ? _agoraFallbackAppId
         : serverAppId,
+    channelName: channelName,
     uid: serverUid,
     userAccount: (serverUserAccount == null || serverUserAccount.isEmpty)
         ? userAccount
         : serverUserAccount,
     tokenVersion: detectedVersion,
     identityMode: tokenIdentityMode,
+  );
+}
+
+Future<AgoraJoinAuth> fetchCallV2DevAgoraToken({
+  required String callIdentifier,
+  required String participantIdentifier,
+  required bool isVideo,
+  required String devAgoraAppId,
+  CallV2DevCallableTarget devCallableTarget =
+      const FirebaseCallV2DevCallableTarget(),
+}) async {
+  final appId = devAgoraAppId.trim();
+  if (!RegExp(r'^[0-9a-fA-F]{32}$').hasMatch(appId)) {
+    throw const CallV2ClientError(CallV2ClientErrorCode.invalidRequest);
+  }
+  final transport = await devCallableTarget.createTransport();
+  final provider = RealCallV2TokenProvider(
+    allowRequests: true,
+    transport: transport,
+    defaultRequest: CallV2TokenBackendRequest(
+      callId: callIdentifier,
+      localParticipantUid: participantIdentifier,
+    ),
+  );
+  final result = await provider.resolveToken(
+    CallV2TokenRequest(
+      mode: isVideo ? CallV2RuntimeCallMode.video : CallV2RuntimeCallMode.audio,
+    ),
+  );
+  return AgoraJoinAuth(
+    token: result.token,
+    appId: appId,
+    channelName: result.channelAlias,
+    uid: result.rtcUid,
+    userAccount: result.rtcUid.toString(),
+    tokenVersion: 'v2',
+    identityMode: 'uid',
   );
 }
 
@@ -110,6 +156,9 @@ class AgoraCallScreen extends StatefulWidget {
   final String? otherUserId;
   final String? inviteId;
   final bool isCaller;
+  final CallV2RealCallConnectionSystem connectionSystem;
+  final bool callV2FallbackUsed;
+  final String callV2BlockerCode;
 
   const AgoraCallScreen({
     super.key,
@@ -119,6 +168,9 @@ class AgoraCallScreen extends StatefulWidget {
     this.otherUserId,
     this.inviteId,
     this.isCaller = false,
+    this.connectionSystem = CallV2RealCallConnectionSystem.legacyV1,
+    this.callV2FallbackUsed = false,
+    this.callV2BlockerCode = 'none',
   });
 
   @override
@@ -137,7 +189,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   RtcEngineEventHandler? _eventHandler;
   String? _token;
   String? _agoraAppId;
-  String? _rtcUserAccount;
+  String? _joinedChannelName;
   int _rtcUid = 0;
   String? _seenTerminalInviteStatus;
 
@@ -171,9 +223,22 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   bool _missedLogged = false;
   bool _callkitMarkedConnected = false;
   bool _nativeAcceptedCallCleared = false;
+  bool _callV2AccessReady = false;
+  bool _callV2RtcInitialized = false;
+  bool _callV2RtcJoined = false;
+  bool _callV2MediaActive = false;
+  String _callV2BlockerCode = 'none';
 
   bool get _useFlutterTextureRenderer =>
       Platform.isIOS && _preferFlutterTextureRendererOnIOS;
+
+  bool get _callV2Selected {
+    return widget.connectionSystem == CallV2RealCallConnectionSystem.callV2Dev;
+  }
+
+  bool get _showCallV2SafeStatus {
+    return _callV2Selected || widget.callV2FallbackUsed;
+  }
 
   String get _videoRendererLabel =>
       _useFlutterTextureRenderer ? 'texture' : 'platform_view';
@@ -235,6 +300,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   @override
   void initState() {
     super.initState();
+    _callV2BlockerCode = widget.callV2BlockerCode;
     CallSessionManager.instance.terminalSignal
         .addListener(_handleManagerTerminalSignal);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -272,13 +338,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     Map<String, dynamic>? meta,
     int metaLimit = 500,
   }) async {
-    final baseMeta = <String, dynamic>{
-      'inviteId': widget.inviteId ?? '',
-      'channel': widget.channelName,
+    final safeMeta = _safeAgoraDiagMeta(<String, dynamic>{
+      'callV2Selected': _callV2Selected,
       'isCaller': widget.isCaller,
       ...?meta,
-    };
-    final metaStr = baseMeta.toString();
+    });
+    final metaStr = safeMeta.toString();
     final payload = <String, dynamic>{
       'stage': stage,
       'meta': metaStr.length > metaLimit
@@ -459,37 +524,44 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       final requestedUid = _deriveRtcUidFromFirebaseUid(currentUserUid ?? '');
       final requestedUserAccount = requestedUid.toString();
 
-      final auth = await fetchAgoraToken(
-        channelName: channel,
-        uid: requestedUid,
-        userAccount: requestedUserAccount,
-        identityMode: 'uid',
-      );
+      final auth = _callV2Selected
+          ? await fetchCallV2DevAgoraToken(
+              callIdentifier: inviteId.isNotEmpty ? inviteId : channel,
+              participantIdentifier: currentUserUid ?? requestedUserAccount,
+              isVideo: widget.isVideo,
+              devAgoraAppId: const CallV2RealCallFlowConfig().devAgoraAppId,
+            )
+          : await fetchAgoraToken(
+              channelName: channel,
+              uid: requestedUid,
+              userAccount: requestedUserAccount,
+              identityMode: 'uid',
+            );
       _token = auth.token;
       _agoraAppId = auth.appId;
-      _rtcUserAccount = auth.userAccount;
+      _joinedChannelName = auth.channelName;
       _rtcUid = auth.uid > 0 ? auth.uid : requestedUid;
+      if (_callV2Selected) {
+        _callV2AccessReady = true;
+        _callV2BlockerCode = 'none';
+      }
       await _diagCall('token_ok', meta: {
-        'rtcUidRequested': requestedUid,
-        'rtcUidServer': auth.uid,
-        'rtcUidFinal': _rtcUid,
-        'rtcUserAccountRequested': requestedUserAccount,
-        'rtcUserAccountServer': auth.userAccount,
+        'callV2Selected': _callV2Selected,
+        'accessReady': _callV2Selected ? _callV2AccessReady : true,
         'tokenIdentityMode': auth.identityMode,
         'tokenVersion': auth.tokenVersion,
-        'appIdSuffix': _agoraAppId!.substring(_agoraAppId!.length - 6),
         'appIdSource': auth.appId.toLowerCase() == _agoraFallbackAppId
             ? 'server_matches_fallback'
-            : 'server',
+            : (_callV2Selected ? 'call_v2_dev_config' : 'server'),
         'serverAppIdLen': auth.appId.length,
         'serverAppIdMatchesFallback':
             auth.appId.toLowerCase() == _agoraFallbackAppId,
-        'serverAppIdSuffix': auth.appId.length >= 6
-            ? auth.appId.substring(auth.appId.length - 6)
-            : auth.appId,
       });
 
       final engine = await _createAndInitializeEngine();
+      if (_callV2Selected) {
+        _callV2RtcInitialized = true;
+      }
       await _diagCall('engine_initialized');
 
       await engine.enableAudio();
@@ -830,7 +902,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         onJoinChannelSuccess: (RtcConnection connection, int elapsed) async {
           _joinWatchdog?.cancel();
           _diagCall('join_success', meta: {
-            'localUid': connection.localUid ?? -1,
+            'callV2Selected': _callV2Selected,
             'elapsedMs': elapsed,
           });
           unawaited(_markCallkitConnected());
@@ -845,11 +917,20 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
             await _forceVideoAudioState(engine, source: 'join_success');
           }
           if (mounted) {
-            setState(() => _joined = true);
+            setState(() {
+              _joined = true;
+              if (_callV2Selected) {
+                _callV2RtcJoined = true;
+                _callV2MediaActive = true;
+              }
+            });
           }
         },
         onUserJoined: (RtcConnection connection, int uid, int elapsed) async {
-          await _diagCall('remote_joined', meta: {'remoteUid': uid});
+          await _diagCall('remote_joined', meta: {
+            'callV2Selected': _callV2Selected,
+            'elapsedMs': elapsed,
+          });
           _ringTimeout?.cancel();
           _remoteEverJoined = true;
           if (mounted) {
@@ -857,6 +938,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
               _remoteUid = uid;
               _remoteVideoReady = false;
               _remoteVideoMuted = false;
+              if (_callV2Selected) {
+                _callV2MediaActive = true;
+              }
             });
           }
           if (widget.isVideo) {
@@ -955,9 +1039,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       );
 
       await _diagCall('join_attempt', meta: {
-        'channel': channel,
-        'uid': _rtcUid,
-        'userAccount': _rtcUserAccount ?? '',
+        'callV2Selected': _callV2Selected,
         'joinMode': 'uid',
         'tokenIdentityMode': auth.identityMode,
         'tokenMode': 'provided',
@@ -971,19 +1053,18 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       });
       await engine.joinChannel(
         token: _token ?? '',
-        channelId: channel,
+        channelId: auth.channelName,
         uid: _rtcUid,
         options: joinOptions,
       );
       await _diagCall('join_returned', meta: {
-        'channel': channel,
-        'uid': _rtcUid,
+        'callV2Selected': _callV2Selected,
         'joinMode': 'uid',
         'tokenIdentityMode': auth.identityMode,
       });
       await _pollConnectionState('join_returned');
       _scheduleConnectionStatePolls();
-      _startJoinWatchdog(channel);
+      _startJoinWatchdog(auth.channelName);
       await _diagCall('begin_done');
     } catch (e) {
       if (_engine != null) {
@@ -991,6 +1072,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         await _lastEngineShutdown;
       }
       await _diagCall('begin_error', meta: {'error': '$e'});
+      if (_callV2Selected) {
+        _callV2BlockerCode = _safeBlockerCodeForError(e);
+      }
       final inviteId = (widget.inviteId ?? '').trim();
       if (inviteId.isNotEmpty) {
         await CallSessionManager.instance.reportCallFailure(
@@ -1044,6 +1128,13 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         _isLoading = false;
         _localVideoReady = widget.isVideo;
         _speakerOn = true;
+        if (_callV2Selected) {
+          _callV2AccessReady = true;
+          _callV2RtcInitialized = true;
+          _callV2RtcJoined = true;
+          _callV2MediaActive = true;
+          _callV2BlockerCode = 'none';
+        }
       });
     }
     await _diagCall('join_success', meta: {
@@ -1069,15 +1160,103 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     return cleaned.isEmpty ? 'call' : cleaned;
   }
 
+  Map<String, dynamic> _safeAgoraDiagMeta(Map<String, dynamic> meta) {
+    if (meta.isEmpty) return const <String, dynamic>{};
+    final safe = <String, dynamic>{};
+    for (final entry in meta.entries) {
+      final key = entry.key;
+      final lower = key.toLowerCase();
+      if (lower.contains('uid') ||
+          lower.contains('user') ||
+          lower.contains('channel') ||
+          lower.contains('invite') ||
+          lower.contains('callid') ||
+          lower.contains('token') ||
+          lower.contains('device')) {
+        safe['identifierFieldPresent'] =
+            entry.value.toString().trim().isNotEmpty;
+        continue;
+      }
+      if (lower.contains('error') || lower == 'msg') {
+        safe['errorCategory'] = _safeAgoraErrorCategory(entry.value);
+        continue;
+      }
+      final value = entry.value;
+      if (value == null || value is bool || value is num) {
+        safe[key] = value;
+      } else if (value is String) {
+        safe[key] = _safeAgoraDiagString(value);
+      } else if (value is Map || value is Iterable) {
+        safe[key] = 'structured';
+      } else {
+        safe[key] = value.runtimeType.toString();
+      }
+    }
+    return safe;
+  }
+
+  String _safeAgoraDiagString(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return '';
+    const allowed = <String>{
+      'none',
+      'disabled',
+      'missing_dev_application',
+      'dev_callable_disabled',
+      'call_v2_dev_config',
+      'server',
+      'server_matches_fallback',
+      'provided',
+      'communication',
+      'engine_and_join_options',
+      'join_returned',
+      'begin',
+      'test',
+    };
+    if (trimmed == 'uid') return 'numeric';
+    if (allowed.contains(trimmed)) return trimmed;
+    if (trimmed.startsWith('ConnectionStateType.') ||
+        trimmed.startsWith('ConnectionChangedReasonType.') ||
+        trimmed.startsWith('NetworkType.') ||
+        trimmed.startsWith('ErrorCodeType.') ||
+        trimmed.startsWith('RemoteAudioState') ||
+        trimmed.startsWith('RemoteVideoState') ||
+        trimmed.startsWith('LocalAudioStream') ||
+        trimmed.startsWith('LocalVideoStream') ||
+        trimmed.startsWith('UserOfflineReasonType.') ||
+        trimmed.startsWith('VideoSourceType.') ||
+        trimmed.startsWith('VideoStreamType.') ||
+        trimmed.startsWith('QualityAdaptIndication.')) {
+      return trimmed;
+    }
+    return trimmed.length > 64 ? 'text' : trimmed;
+  }
+
+  String _safeBlockerCodeForError(Object error) {
+    if (error is TimeoutException) return 'timeout';
+    if (error is CallV2ClientError) return error.code.name;
+    return 'setup_failed';
+  }
+
+  String _safeAgoraErrorCategory(Object? value) {
+    final text = (value ?? '').toString().toLowerCase();
+    if (text.contains('timeout')) return 'timeout';
+    if (text.contains('permission')) return 'permission';
+    if (text.contains('token')) return 'access';
+    if (text.contains('network') || text.contains('unavailable')) {
+      return 'network';
+    }
+    if (text.trim().isEmpty) return 'none';
+    return 'error';
+  }
+
   Future<String?> _prepareAgoraLogPath({required int attempt}) async {
     try {
       final supportDir = await getApplicationSupportDirectory();
       final agoraDir = Directory('${supportDir.path}/agora_logs');
       await agoraDir.create(recursive: true);
       final callId = _sanitizeAgoraLogSegment(
-        (widget.inviteId ?? '').trim().isNotEmpty
-            ? widget.inviteId!.trim()
-            : widget.channelName,
+        _callV2Selected ? 'call_v2' : 'call',
       );
       final file = File('${agoraDir.path}/${callId}_attempt_$attempt.log');
       if (await file.exists()) {
@@ -1622,13 +1801,25 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     if (_isLoading) {
       return Scaffold(
         appBar: AppBar(title: const Text('Connecting...')),
-        body: const Center(child: CircularProgressIndicator()),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              _callV2SafeStatusPanel(),
+            ],
+          ),
+        ),
       );
     }
 
     if (_fatalError != null) {
       return _ErrorScreen(
-          title: title, message: _fatalError!, onClose: () => _endCall());
+        title: title,
+        message: _fatalError!,
+        onClose: () => _endCall(),
+        footer: _callV2SafeStatusPanel(),
+      );
     }
 
     if (_ended) {
@@ -1636,6 +1827,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         title: title,
         message: _endedMessage,
         onClose: () => _endCall(),
+        footer: _callV2SafeStatusPanel(),
       );
     }
 
@@ -1678,6 +1870,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
               status,
               style: textTheme.bodyMedium?.copyWith(color: AppColors.muted),
             ),
+            _callV2SafeStatusPanel(),
           ],
         ),
       ),
@@ -1715,19 +1908,25 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
               right: 12,
               top: 6,
               child: SafeArea(
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _statusPill(
-                      icon: Icons.videocam_rounded,
-                      label: widget.otherUserName,
+                    Row(
+                      children: [
+                        _statusPill(
+                          icon: Icons.videocam_rounded,
+                          label: widget.otherUserName,
+                        ),
+                        const SizedBox(width: 8),
+                        _statusPill(
+                          icon: _joined
+                              ? Icons.wifi_tethering
+                              : Icons.access_time_rounded,
+                          label: _joined ? 'Connected' : 'Calling…',
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    _statusPill(
-                      icon: _joined
-                          ? Icons.wifi_tethering
-                          : Icons.access_time_rounded,
-                      label: _joined ? 'Connected' : 'Calling…',
-                    ),
+                    _callV2SafeStatusPanel(dark: true),
                   ],
                 ),
               ),
@@ -1751,7 +1950,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
                 uid: _remoteUid,
                 renderMode: RenderModeType.renderModeFit,
               ),
-              connection: RtcConnection(channelId: widget.channelName),
+              connection: RtcConnection(
+                channelId: _joinedChannelName ?? widget.channelName,
+              ),
               useFlutterTexture: _useFlutterTextureRenderer,
             ),
             onAgoraVideoViewCreated: (viewId) {
@@ -1839,19 +2040,26 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
                 right: 12,
                 top: 6,
                 child: SafeArea(
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _statusPill(
-                        icon: Icons.videocam_rounded,
-                        label: widget.otherUserName,
+                      Row(
+                        children: [
+                          _statusPill(
+                            icon: Icons.videocam_rounded,
+                            label: widget.otherUserName,
+                          ),
+                          const SizedBox(width: 8),
+                          _statusPill(
+                            icon: _remoteUid != null
+                                ? Icons.wifi_tethering
+                                : Icons.access_time_rounded,
+                            label:
+                                _remoteUid != null ? 'Connected' : 'Calling…',
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      _statusPill(
-                        icon: _remoteUid != null
-                            ? Icons.wifi_tethering
-                            : Icons.access_time_rounded,
-                        label: _remoteUid != null ? 'Connected' : 'Calling…',
-                      ),
+                      _callV2SafeStatusPanel(dark: true),
                     ],
                   ),
                 ),
@@ -1963,6 +2171,43 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
             ),
           ),
       ],
+    );
+  }
+
+  Widget _callV2SafeStatusPanel({bool dark = false}) {
+    if (!_showCallV2SafeStatus) return const SizedBox.shrink();
+    final text = 'callV2Selected=$_callV2Selected '
+        'accessReady=$_callV2AccessReady '
+        'rtcInitialized=$_callV2RtcInitialized '
+        'rtcJoined=$_callV2RtcJoined '
+        'mediaActive=$_callV2MediaActive '
+        'fallbackUsed=${widget.callV2FallbackUsed} '
+        'blockerCode=$_callV2BlockerCode';
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: dark
+              ? Colors.black.withValues(alpha: 0.55)
+              : AppColors.card.withValues(alpha: 0.92),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: dark ? Colors.white24 : AppColors.border,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Text(
+            text,
+            key: const ValueKey<String>('call-v2-real-flow-safe-status'),
+            style: TextStyle(
+              color: dark ? Colors.white : AppColors.text,
+              fontSize: 12,
+              height: 1.25,
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -2080,10 +2325,12 @@ class _EndedScreen extends StatelessWidget {
     required this.title,
     required this.message,
     required this.onClose,
+    this.footer = const SizedBox.shrink(),
   });
   final String title;
   final String message;
   final VoidCallback onClose;
+  final Widget footer;
 
   @override
   Widget build(BuildContext context) {
@@ -2104,6 +2351,8 @@ class _EndedScreen extends StatelessWidget {
               style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
+            footer,
+            const SizedBox(height: 12),
             ElevatedButton(onPressed: onClose, child: const Text('Close')),
           ],
         ),
@@ -2117,11 +2366,13 @@ class _ErrorScreen extends StatelessWidget {
     required this.title,
     required this.message,
     required this.onClose,
+    this.footer = const SizedBox.shrink(),
   });
 
   final String title;
   final String message;
   final VoidCallback onClose;
+  final Widget footer;
 
   @override
   Widget build(BuildContext context) {
@@ -2150,6 +2401,8 @@ class _ErrorScreen extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 14, color: AppColors.muted),
               ),
+              const SizedBox(height: 16),
+              footer,
               const SizedBox(height: 16),
               if (isPermissionError) ...[
                 OutlinedButton(
