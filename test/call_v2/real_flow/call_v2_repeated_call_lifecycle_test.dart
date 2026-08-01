@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:connect_app/call_v2/real_flow/call_v2_call_lifecycle_arbiter.dart';
 import 'package:connect_app/call_v2/real_flow/call_v2_engine_cleanup_coordinator.dart';
 import 'package:connect_app/call_v2/real_flow/call_v2_incoming_listener_backoff.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -281,6 +282,214 @@ void main() {
     policy.recordHealthySnapshot();
     expect(policy.attempt, 0);
     expect(policy.recordErrorAndGetDelay(), const Duration(milliseconds: 250));
+  });
+
+  test('same invite from multiple incoming sources is claimed once', () {
+    final arbiter = CallV2CallLifecycleArbiter();
+
+    final firestore = arbiter.reserveIncoming('invite_a');
+    final recovery = arbiter.reserveIncoming('invite_a');
+    final notification = arbiter.reserveIncoming('invite_a');
+
+    expect(firestore.action, CallV2CallReservationAction.reserved);
+    expect(recovery.action, CallV2CallReservationAction.duplicate);
+    expect(notification.action, CallV2CallReservationAction.duplicate);
+    expect(arbiter.activePromptCount, 1);
+    expect(arbiter.duplicateInviteSuppressedCount, 2);
+  });
+
+  test('overlapping Firestore events for same invite keep one prompt claim',
+      () {
+    final arbiter = CallV2CallLifecycleArbiter();
+
+    final first = arbiter.reserveIncoming('invite_a');
+    final second = arbiter.reserveIncoming('invite_a');
+
+    expect(first.reserved, isTrue);
+    expect(second.action, CallV2CallReservationAction.duplicate);
+    expect(arbiter.incomingPipelineBusy, isTrue);
+    expect(arbiter.activePromptCount, 1);
+  });
+
+  test('different invite while connected is busy-declined without prompt', () {
+    final arbiter = CallV2CallLifecycleArbiter();
+
+    final outgoing = arbiter.reserveOutgoing();
+    arbiter.outgoingInviteCreated(
+      generation: outgoing.generation,
+      inviteId: 'invite_a',
+    );
+    arbiter.markJoining(outgoing.generation);
+    arbiter.markConnected(outgoing.generation);
+
+    final incoming = arbiter.reserveIncoming('invite_b');
+
+    expect(incoming.action, CallV2CallReservationAction.busyDecline);
+    expect(arbiter.state, CallV2CallLifecycleState.connected);
+    expect(arbiter.activePromptCount, 0);
+    expect(arbiter.busyInviteDeclinedCount, 1);
+  });
+
+  test('invite during teardown waits and presents once after idle', () {
+    final arbiter = CallV2CallLifecycleArbiter();
+
+    final outgoing = arbiter.reserveOutgoing();
+    arbiter.outgoingInviteCreated(
+      generation: outgoing.generation,
+      inviteId: 'invite_a',
+    );
+    arbiter.markConnected(outgoing.generation);
+    arbiter.beginEnding(outgoing.generation);
+    arbiter.beginTeardown(outgoing.generation);
+
+    final pending = arbiter.reserveIncoming('invite_b');
+
+    expect(pending.action, CallV2CallReservationAction.pending);
+    expect(arbiter.pendingIncomingCount, 1);
+    expect(arbiter.activePromptCount, 0);
+
+    final pendingInvite = arbiter.completeTeardown(outgoing.generation);
+    final claimed = arbiter.reserveIncoming(pendingInvite!);
+
+    expect(pendingInvite, 'invite_b');
+    expect(claimed.action, CallV2CallReservationAction.reserved);
+    expect(arbiter.activePromptCount, 1);
+  });
+
+  test('newest pending invite wins while teardown is in progress', () {
+    final arbiter = CallV2CallLifecycleArbiter();
+
+    final outgoing = arbiter.reserveOutgoing();
+    arbiter.outgoingInviteCreated(
+      generation: outgoing.generation,
+      inviteId: 'invite_a',
+    );
+    arbiter.markConnected(outgoing.generation);
+    arbiter.beginTeardown(outgoing.generation);
+
+    expect(
+      arbiter.reserveIncoming('invite_b').action,
+      CallV2CallReservationAction.pending,
+    );
+    expect(
+      arbiter.reserveIncoming('invite_c').action,
+      CallV2CallReservationAction.pending,
+    );
+
+    expect(arbiter.completeTeardown(outgoing.generation), 'invite_c');
+  });
+
+  test('rapid outgoing redial during ending does not clear active generation',
+      () {
+    final arbiter = CallV2CallLifecycleArbiter();
+
+    final first = arbiter.reserveOutgoing();
+    arbiter.outgoingInviteCreated(
+      generation: first.generation,
+      inviteId: 'invite_a',
+    );
+    arbiter.markConnected(first.generation);
+    arbiter.beginEnding(first.generation);
+
+    final second = arbiter.reserveOutgoing();
+
+    expect(second.action, CallV2CallReservationAction.blocked);
+    expect(arbiter.state, CallV2CallLifecycleState.ending);
+    expect(arbiter.generation, first.generation);
+    expect(arbiter.rapidRedialBlockedCount, 1);
+  });
+
+  test('ten sequential rapid call reservations restore idle baseline', () {
+    final arbiter = CallV2CallLifecycleArbiter();
+
+    for (var i = 1; i <= 10; i += 1) {
+      final reservation = arbiter.reserveOutgoing();
+      expect(reservation.action, CallV2CallReservationAction.reserved);
+      arbiter.outgoingInviteCreated(
+        generation: reservation.generation,
+        inviteId: 'invite_$i',
+      );
+      arbiter.markJoining(reservation.generation);
+      arbiter.markConnected(reservation.generation);
+      arbiter.beginEnding(reservation.generation);
+      arbiter.beginTeardown(reservation.generation);
+      expect(arbiter.completeTeardown(reservation.generation), isNull);
+      expect(arbiter.isIdle, isTrue, reason: 'call $i');
+      expect(arbiter.pendingIncomingCount, 0, reason: 'call $i');
+      expect(arbiter.activePromptCount, 0, reason: 'call $i');
+      expect(arbiter.activeCallRouteCount, 0, reason: 'call $i');
+    }
+
+    expect(arbiter.generation, 10);
+  });
+
+  test('next invite cannot present while previous route cleanup is held', () {
+    final arbiter = CallV2CallLifecycleArbiter();
+
+    final first = arbiter.reserveOutgoing();
+    arbiter.outgoingInviteCreated(
+      generation: first.generation,
+      inviteId: 'invite_a',
+    );
+    arbiter.markConnected(first.generation);
+    arbiter.beginEnding(first.generation);
+    arbiter.beginTeardown(first.generation);
+
+    final next = arbiter.reserveIncoming('invite_b');
+
+    expect(next.action, CallV2CallReservationAction.pending);
+    expect(arbiter.state, CallV2CallLifecycleState.teardown);
+    expect(arbiter.activePromptCount, 0);
+    expect(arbiter.pendingIncomingPresent, isTrue);
+  });
+
+  test('stale generation callback cannot mutate newer generation', () {
+    final arbiter = CallV2CallLifecycleArbiter();
+
+    final incoming = arbiter.reserveIncoming('invite_a');
+    arbiter.incomingDeclined(
+      generation: incoming.generation,
+      inviteId: 'invite_a',
+    );
+    final outgoing = arbiter.reserveOutgoing();
+    arbiter.outgoingInviteCreated(
+      generation: outgoing.generation,
+      inviteId: 'invite_b',
+    );
+
+    arbiter.incomingAccepted(
+      generation: incoming.generation,
+      inviteId: 'invite_a',
+    );
+    arbiter.dropIncoming(
+      generation: incoming.generation,
+      inviteId: 'invite_a',
+    );
+
+    expect(arbiter.generation, outgoing.generation);
+    expect(arbiter.state, CallV2CallLifecycleState.outgoingRinging);
+    expect(arbiter.staleCandidateDroppedCount, 1);
+  });
+
+  test('arbiter diagnostics contain no unsafe invite/session identifiers', () {
+    final arbiter = CallV2CallLifecycleArbiter();
+
+    arbiter.reserveIncoming('invite_a');
+    final debugText = arbiter.toSafeDebugMap().toString();
+
+    for (final forbidden in <String>[
+      'invite_a',
+      'channel',
+      'token',
+      'uid',
+      'user',
+      'device',
+      'payload',
+    ]) {
+      expect(debugText.toLowerCase(), isNot(contains(forbidden)));
+    }
+    expect(debugText, contains('callLifecycleState'));
+    expect(debugText, contains('incomingPipelineBusy'));
   });
 }
 

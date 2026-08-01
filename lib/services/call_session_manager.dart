@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../call_v2/real_flow/call_v2_call_lifecycle_arbiter.dart';
 import '../call_v2/real_flow/call_v2_incoming_listener_backoff.dart';
 import '../call_v2/real_flow/call_v2_real_call_flow_gate.dart';
 import '../screens/call/agora_call_screen.dart';
@@ -112,6 +113,7 @@ class _CallSession {
     this.connectionSystem = CallV2RealCallConnectionSystem.legacyV1,
     this.callV2FallbackUsed = false,
     this.callV2BlockerCode = 'none',
+    this.lifecycleGeneration = 0,
     DateTime? createdAt,
     DateTime? lastTouchedAt,
   })  : createdAt = createdAt ?? DateTime.now(),
@@ -126,6 +128,7 @@ class _CallSession {
   final CallV2RealCallConnectionSystem connectionSystem;
   final bool callV2FallbackUsed;
   final String callV2BlockerCode;
+  final int lifecycleGeneration;
   final DateTime createdAt;
   CallSessionPhase phase;
   CallInviteStatus status;
@@ -161,6 +164,8 @@ class CallSessionManager {
   Timer? _incomingListenerRebindTimer;
   final CallV2IncomingListenerBackoff _incomingListenerBackoff =
       CallV2IncomingListenerBackoff();
+  final CallV2CallLifecycleArbiter _callLifecycleArbiter =
+      CallV2CallLifecycleArbiter();
   _CallSession? _current;
   String _lastDiagStage = '';
   String _lastDiagMeta = '';
@@ -176,7 +181,10 @@ class CallSessionManager {
   FirebaseFirestore get _db => HelperlyTestRuntime.firestore;
   String get _currentUid => HelperlyTestRuntime.currentUid ?? '';
   bool get isIdleForDebug =>
-      _current == null && !hasActiveUi && _terminalSignal.value == null;
+      _callLifecycleArbiter.isIdle &&
+      _current == null &&
+      !hasActiveUi &&
+      _terminalSignal.value == null;
   String get debugLastDiagStage => _lastDiagStage;
   String get debugLastDiagMeta => _lastDiagMeta;
   Map<String, dynamic> debugSnapshot() => _sessionSnapshot();
@@ -235,6 +243,7 @@ class CallSessionManager {
     _pendingIncomingPromptRetryTimer = null;
     _pendingIncomingPromptPayload = null;
     _pendingIncomingPromptSource = null;
+    _callLifecycleArbiter.forceIdleForTest();
   }
 
   String? get activeInviteId => _current?.inviteId;
@@ -413,19 +422,59 @@ class CallSessionManager {
       clearHandledInvites: true,
       forceClearUiFlags: true,
     );
+    _callLifecycleArbiter.forceIdleForTest();
   }
 
   Future<void> hardResetForNewCall({
     String reason = 'hard_reset_for_new_call',
   }) async {
     try {
-      await _resetSessionState(
-        reason: reason,
-        endCurrentNativeCall: true,
-        endUnownedNativeCalls: true,
-        clearStoredAcceptedRecovery: true,
-        forceClearUiFlags: true,
-      );
+      final session = _current;
+      if (session != null && !session.isTerminal) {
+        await _diagManager('hard_reset_deferred_active_session', meta: {
+          ..._sessionSnapshot(),
+          'reason': reason,
+        });
+        return;
+      }
+      if (session != null && (_callRouteActive || _openingCallRoute)) {
+        _callLifecycleArbiter.beginTeardown(session.lifecycleGeneration);
+        await _activeInviteSub?.cancel();
+        _activeInviteSub = null;
+        _cancelSessionTimers();
+        _terminalSignal.value = null;
+        if (session.callkitId.isNotEmpty) {
+          await _endNativeCallSafely(
+            session.callkitId,
+            reason: '$reason:end_current_native',
+          );
+        }
+        await _endStaleNativeCalls(
+          keepCallkitId: session.callkitId.isEmpty ? null : session.callkitId,
+          reason: reason,
+        );
+        await _clearStoredAcceptedCallRecoverySafely(reason);
+        await _diagManager('hard_reset_deferred_until_route_closed', meta: {
+          ..._sessionSnapshot(),
+          'reason': reason,
+        });
+        return;
+      }
+      if (session != null) {
+        await _finalizeTerminalSessionCleanup(
+          inviteId: session.inviteId,
+          reason: reason,
+          forceClearUiFlags: true,
+        );
+      } else {
+        await _resetSessionState(
+          reason: reason,
+          endCurrentNativeCall: true,
+          endUnownedNativeCalls: true,
+          clearStoredAcceptedRecovery: true,
+          forceClearUiFlags: true,
+        );
+      }
     } catch (e) {
       await _diagManager('hard_reset_error', meta: {
         'reason': reason,
@@ -464,22 +513,30 @@ class CallSessionManager {
     if (meUid.isEmpty) {
       throw Exception('Not signed in');
     }
+    final outgoingReservation = _callLifecycleArbiter.reserveOutgoing();
+    if (!outgoingReservation.reserved) {
+      await _diagManager('start_blocked', meta: {
+        ..._sessionSnapshot(),
+        'requestedIsVideo': isVideo,
+        'reason': _callLifecycleArbiter.teardownInProgress
+            ? 'teardown_in_progress'
+            : 'active_ui_or_session',
+      });
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(_callLifecycleArbiter.teardownInProgress
+              ? 'Finishing previous call...'
+              : 'A call is already in progress.'),
+        ),
+      );
+      return false;
+    }
     await _diagManager('outgoing_tap', meta: {
       'isVideo': isVideo,
       'callV2Selected': callV2Decision.callV2Selected,
       'fallbackUsed': callV2Decision.fallbackUsed,
       'blockerCode': callV2Decision.blockerCode,
     });
-
-    if (HelperlyTestRuntime.isEnabled && !openScreen) {
-      await forceIdleForTest();
-      await Future<void>.delayed(const Duration(milliseconds: 10));
-    } else {
-      await hardResetForNewCall(
-        reason:
-            isVideo ? 'outgoing_video_hard_reset' : 'outgoing_audio_hard_reset',
-      );
-    }
     await FirestoreReadHelper.recoverNetwork(reason: 'outgoing_call_start');
 
     final channel = generateChannelName(meUid, toUid);
@@ -507,6 +564,9 @@ class CallSessionManager {
       await _diagManager('start_blocked', meta: blockedMeta);
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
         const SnackBar(content: Text('A call is already in progress.')),
+      );
+      _callLifecycleArbiter.releaseOutgoingReservation(
+        outgoingReservation.generation,
       );
       return false;
     }
@@ -554,6 +614,9 @@ class CallSessionManager {
         reason: 'invite_write_error',
         force: true,
       ));
+      _callLifecycleArbiter.releaseOutgoingReservation(
+        outgoingReservation.generation,
+      );
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
         const SnackBar(
           content: Text('Unable to start call. Check your connection.'),
@@ -565,6 +628,10 @@ class CallSessionManager {
       'isVideo': isVideo,
       'callV2Selected': callV2Decision.callV2Selected,
     });
+    _callLifecycleArbiter.outgoingInviteCreated(
+      generation: outgoingReservation.generation,
+      inviteId: inviteRef.id,
+    );
 
     final session = _CallSession(
       inviteId: inviteRef.id,
@@ -578,6 +645,7 @@ class CallSessionManager {
       connectionSystem: callV2Decision.connectionSystem,
       callV2FallbackUsed: callV2Decision.fallbackUsed,
       callV2BlockerCode: callV2Decision.blockerCode,
+      lifecycleGeneration: outgoingReservation.generation,
     );
 
     await _activateSession(
@@ -657,19 +725,12 @@ class CallSessionManager {
       fallbackFromUid: fromUid ?? '',
     );
     if (payload == null) return;
-    await _diagManager('incoming_received', meta: {
-      'inviteId': payload.inviteId,
-      'channel': payload.channel,
-      'fromUid': payload.fromUid,
-      'source': source,
-      'isVideo': payload.isVideo,
-      'via': 'notification_tap',
-    });
-    if (autoAccept) {
-      await _acceptInviteAndOpen(payload, source: source);
-      return;
-    }
-    await _presentIncomingPrompt(payload, source: source);
+    await _handleIncomingCandidate(
+      payload,
+      source: source,
+      via: 'notification_tap',
+      autoAccept: autoAccept,
+    );
   }
 
   Future<void> handleRecoveredAcceptedInvite({
@@ -688,7 +749,12 @@ class CallSessionManager {
       fallbackFromUid: fromUid ?? '',
     );
     if (payload == null) return;
-    await _acceptInviteAndOpen(payload, source: 'callkit_recovery');
+    await _handleIncomingCandidate(
+      payload,
+      source: 'callkit_recovery',
+      via: 'callkit_recovery',
+      autoAccept: true,
+    );
   }
 
   Future<void> declineInvite({
@@ -758,6 +824,7 @@ class CallSessionManager {
       return;
     }
 
+    _callLifecycleArbiter.markJoining(session.lifecycleGeneration);
     session.phase = CallSessionPhase.joining;
     _touchSession(session);
     await _updateInviteForActor(
@@ -785,6 +852,7 @@ class CallSessionManager {
     session.localJoined = true;
     if (session.phase != CallSessionPhase.connected &&
         (!isCaller || session.status != CallInviteStatus.ringing)) {
+      _callLifecycleArbiter.markJoining(session.lifecycleGeneration);
       session.phase = CallSessionPhase.joining;
     }
     _touchSession(session);
@@ -809,6 +877,7 @@ class CallSessionManager {
     final session = _current;
     if (session == null || session.inviteId != inviteId) return;
     session.remoteJoined = true;
+    _callLifecycleArbiter.markConnected(session.lifecycleGeneration);
     session.phase = CallSessionPhase.connected;
     session.status = CallInviteStatus.connected;
     _touchSession(session);
@@ -962,9 +1031,6 @@ class CallSessionManager {
       return;
     }
 
-    if (!await _isAppActuallyForeground()) return;
-    await _runPreflightSweepSafely(reason: 'incoming_snapshot:$source');
-
     final payload = CallInvitePayload(
       inviteId: inviteId,
       channel: (data['channel'] ?? '').toString().trim(),
@@ -977,45 +1043,127 @@ class CallSessionManager {
       ),
     );
     if (payload.channel.isEmpty) return;
+    await _handleIncomingCandidate(
+      payload,
+      source: source,
+      via: 'firestore_snapshot',
+    );
+  }
+
+  Future<void> _handleIncomingCandidate(
+    CallInvitePayload payload, {
+    required String source,
+    required String via,
+    bool autoAccept = false,
+  }) async {
+    final reservation = _callLifecycleArbiter.reserveIncoming(payload.inviteId);
+    if (reservation.action == CallV2CallReservationAction.duplicate) {
+      await _diagManager('incoming_duplicate_suppressed', meta: {
+        'source': source,
+        'via': via,
+      });
+      return;
+    }
+    if (reservation.action == CallV2CallReservationAction.busyDecline) {
+      await _declineInviteTransaction(payload.inviteId,
+          source: 'busy_active_call');
+      _markInviteHandled(payload.inviteId);
+      await _diagManager('incoming_busy_declined', meta: {
+        'source': source,
+        'via': via,
+      });
+      return;
+    }
+    if (reservation.action == CallV2CallReservationAction.pending) {
+      _schedulePendingIncomingPrompt(
+        payload,
+        source: source,
+        reason: 'lifecycle_${reservation.lifecycleState.name}',
+      );
+      await _diagManager('incoming_pending_recorded', meta: {
+        'source': source,
+        'via': via,
+      });
+      return;
+    }
+    if (!reservation.reserved) return;
+
+    _incomingPromptActive = true;
+    _incomingPromptInviteId = payload.inviteId;
     await _diagManager('incoming_received', meta: {
       'source': source,
+      'via': via,
       'isVideo': payload.isVideo,
       'callV2Selected':
           payload.connectionSystem == CallV2RealCallConnectionSystem.callV2Dev,
     });
 
     if (_hasTrulyActiveCall()) {
-      if (_current?.inviteId == inviteId) return;
-      await _declineInviteTransaction(inviteId, source: 'busy_active_call');
-      _markInviteHandled(inviteId);
+      _callLifecycleArbiter.dropIncoming(
+        generation: reservation.generation,
+        inviteId: payload.inviteId,
+      );
+      _incomingPromptActive = false;
+      _incomingPromptInviteId = null;
+      await _declineInviteTransaction(payload.inviteId,
+          source: 'busy_active_call');
       return;
     }
 
-    if (hasActiveUi && _incomingPromptInviteId != inviteId) {
+    await _runPreflightSweepSafely(reason: 'incoming_candidate:$source');
+    if (!_callLifecycleArbiter.ownsIncoming(
+      generation: reservation.generation,
+      inviteId: payload.inviteId,
+    )) {
       return;
     }
-
-    await _presentIncomingPrompt(payload, source: source);
+    if (autoAccept) {
+      _callLifecycleArbiter.incomingAccepted(
+        generation: reservation.generation,
+        inviteId: payload.inviteId,
+      );
+      if (_callLifecycleArbiter.state != CallV2CallLifecycleState.joining ||
+          !_callLifecycleArbiter.ownsGeneration(reservation.generation)) {
+        return;
+      }
+      _incomingPromptActive = false;
+      _incomingPromptInviteId = null;
+      await _acceptInviteAndOpen(
+        payload,
+        source: source,
+        lifecycleGeneration: reservation.generation,
+      );
+      return;
+    }
+    await _presentIncomingPrompt(
+      payload,
+      source: source,
+      lifecycleGeneration: reservation.generation,
+    );
   }
 
   Future<void> _presentIncomingPrompt(
     CallInvitePayload payload, {
     required String source,
+    required int lifecycleGeneration,
   }) async {
-    if (_incomingPromptActive && _incomingPromptInviteId == payload.inviteId) {
-      return;
-    }
-    if (hasActiveUi && _incomingPromptInviteId != payload.inviteId) {
-      _schedulePendingIncomingPrompt(
-        payload,
-        source: source,
-        reason: 'active_ui_busy',
-      );
-      return;
-    }
+    if (!_callLifecycleArbiter.ownsIncoming(
+      generation: lifecycleGeneration,
+      inviteId: payload.inviteId,
+    )) return;
 
     await _waitForAppResumed();
+    if (!_callLifecycleArbiter.ownsIncoming(
+      generation: lifecycleGeneration,
+      inviteId: payload.inviteId,
+    )) return;
     if (!await _isAppActuallyForeground()) {
+      _callLifecycleArbiter.dropIncoming(
+        generation: lifecycleGeneration,
+        inviteId: payload.inviteId,
+      );
+      _incomingPromptActive = false;
+      _incomingPromptInviteId = null;
       _schedulePendingIncomingPrompt(
         payload,
         source: source,
@@ -1025,7 +1173,17 @@ class CallSessionManager {
     }
 
     final nav = await _waitForNavigator();
+    if (!_callLifecycleArbiter.ownsIncoming(
+      generation: lifecycleGeneration,
+      inviteId: payload.inviteId,
+    )) return;
     if (nav == null || !nav.mounted) {
+      _callLifecycleArbiter.dropIncoming(
+        generation: lifecycleGeneration,
+        inviteId: payload.inviteId,
+      );
+      _incomingPromptActive = false;
+      _incomingPromptInviteId = null;
       _schedulePendingIncomingPrompt(
         payload,
         source: source,
@@ -1045,19 +1203,31 @@ class CallSessionManager {
         'error': '$error',
       });
     }
+    if (!_callLifecycleArbiter.ownsIncoming(
+      generation: lifecycleGeneration,
+      inviteId: payload.inviteId,
+    )) return;
     final latestStatus = _parseStatus(latest?['status']);
     if (latest != null && latestStatus != CallInviteStatus.ringing) {
+      _callLifecycleArbiter.dropIncoming(
+        generation: lifecycleGeneration,
+        inviteId: payload.inviteId,
+      );
+      _incomingPromptActive = false;
+      _incomingPromptInviteId = null;
       _clearPendingIncomingPrompt(payload.inviteId);
       return;
     }
 
     _clearPendingIncomingPrompt(payload.inviteId);
     _markInviteHandled(payload.inviteId);
-    _incomingPromptActive = true;
-    _incomingPromptInviteId = payload.inviteId;
     StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? promptSub;
     var routeClosed = false;
     try {
+      if (!_callLifecycleArbiter.ownsIncoming(
+        generation: lifecycleGeneration,
+        inviteId: payload.inviteId,
+      )) return;
       promptSub = _db
           .collection('callInvites')
           .doc(payload.inviteId)
@@ -1094,24 +1264,47 @@ class CallSessionManager {
       routeClosed = true;
 
       if (accepted == true) {
-        await _acceptInviteAndOpen(payload, source: '$source:prompt_accept');
+        _callLifecycleArbiter.incomingAccepted(
+          generation: lifecycleGeneration,
+          inviteId: payload.inviteId,
+        );
+        if (_callLifecycleArbiter.state != CallV2CallLifecycleState.joining ||
+            !_callLifecycleArbiter.ownsGeneration(lifecycleGeneration)) {
+          return;
+        }
+        await _acceptInviteAndOpen(
+          payload,
+          source: '$source:prompt_accept',
+          lifecycleGeneration: lifecycleGeneration,
+        );
       } else {
         await _declineInviteTransaction(
           payload.inviteId,
           source: '$source:prompt_decline',
         );
+        _callLifecycleArbiter.incomingDeclined(
+          generation: lifecycleGeneration,
+          inviteId: payload.inviteId,
+        );
       }
     } finally {
       await promptSub?.cancel();
-      _incomingPromptActive = false;
-      _incomingPromptInviteId = null;
+      if (_incomingPromptInviteId == payload.inviteId) {
+        _incomingPromptActive = false;
+        _incomingPromptInviteId = null;
+      }
     }
   }
 
   Future<void> _acceptInviteAndOpen(
     CallInvitePayload payload, {
     required String source,
+    int? lifecycleGeneration,
   }) async {
+    if (lifecycleGeneration != null &&
+        !_callLifecycleArbiter.ownsGeneration(lifecycleGeneration)) {
+      return;
+    }
     await _diagManager('accept_tap', meta: {
       'inviteId': payload.inviteId,
       'channel': payload.channel,
@@ -1122,9 +1315,17 @@ class CallSessionManager {
       inviteId: payload.inviteId,
       channel: payload.channel,
     );
+    if (lifecycleGeneration != null &&
+        !_callLifecycleArbiter.ownsGeneration(lifecycleGeneration)) {
+      return;
+    }
     if (_hasTrulyActiveCall() && _current?.inviteId != payload.inviteId) {
       await _declineInviteTransaction(payload.inviteId,
           source: 'busy_active_call');
+      if (lifecycleGeneration != null) {
+        _callLifecycleArbiter.beginTeardown(lifecycleGeneration);
+        _callLifecycleArbiter.completeTeardown(lifecycleGeneration);
+      }
       return;
     }
 
@@ -1132,8 +1333,16 @@ class CallSessionManager {
       payload,
       source: source,
     );
+    if (lifecycleGeneration != null &&
+        !_callLifecycleArbiter.ownsGeneration(lifecycleGeneration)) {
+      return;
+    }
     if (acceptResult != _AcceptInviteResult.accepted &&
         acceptResult != _AcceptInviteResult.alreadyAccepted) {
+      if (lifecycleGeneration != null) {
+        _callLifecycleArbiter.beginTeardown(lifecycleGeneration);
+        _callLifecycleArbiter.completeTeardown(lifecycleGeneration);
+      }
       return;
     }
     await _diagManager('accepted', meta: {
@@ -1154,6 +1363,10 @@ class CallSessionManager {
         'error': '$error',
       });
     }
+    if (lifecycleGeneration != null &&
+        !_callLifecycleArbiter.ownsGeneration(lifecycleGeneration)) {
+      return;
+    }
     final latestStatus = latest == null
         ? CallInviteStatus.accepted
         : _parseStatus(latest['status']);
@@ -1161,9 +1374,14 @@ class CallSessionManager {
         latestStatus == CallInviteStatus.joining ||
         latestStatus == CallInviteStatus.connected ||
         latestStatus == CallInviteStatus.ringing)) {
+      if (lifecycleGeneration != null) {
+        _callLifecycleArbiter.beginTeardown(lifecycleGeneration);
+        _callLifecycleArbiter.completeTeardown(lifecycleGeneration);
+      }
       return;
     }
 
+    final generation = lifecycleGeneration ?? _callLifecycleArbiter.generation;
     final session = _CallSession(
       inviteId: payload.inviteId,
       channel: payload.channel,
@@ -1176,8 +1394,10 @@ class CallSessionManager {
           ? CallInviteStatus.accepted
           : latestStatus,
       connectionSystem: payload.connectionSystem,
+      lifecycleGeneration: generation,
     );
 
+    _callLifecycleArbiter.markJoining(generation);
     await _activateSession(session, openScreen: true, source: source);
   }
 
@@ -1360,6 +1580,7 @@ class CallSessionManager {
       _restartTimeoutsForStatus(status);
 
       if (status == CallInviteStatus.connected) {
+        _callLifecycleArbiter.markConnected(session.lifecycleGeneration);
         session.phase = CallSessionPhase.connected;
         return;
       }
@@ -1367,6 +1588,7 @@ class CallSessionManager {
       if (status == CallInviteStatus.accepted ||
           status == CallInviteStatus.joining) {
         if (session.phase != CallSessionPhase.connected) {
+          _callLifecycleArbiter.markJoining(session.lifecycleGeneration);
           session.phase = CallSessionPhase.joining;
         }
         return;
@@ -1396,6 +1618,7 @@ class CallSessionManager {
     if (session == null || session.inviteId != inviteId) return;
     if (session.isTerminal) return;
 
+    _callLifecycleArbiter.beginEnding(session.lifecycleGeneration);
     session.phase = CallSessionPhase.terminal;
     session.status = status;
     _touchSession(session);
@@ -1494,6 +1717,7 @@ class CallSessionManager {
         ..._sessionSnapshot(nativeCalls: nativeCalls),
         'reason': reason,
       });
+      _callLifecycleArbiter.beginTeardown(session.lifecycleGeneration);
       await _resetSessionState(
         reason: reason,
         endCurrentNativeCall: true,
@@ -1501,6 +1725,7 @@ class CallSessionManager {
         clearStoredAcceptedRecovery: true,
         forceClearUiFlags: true,
       );
+      _callLifecycleArbiter.completeTeardown(session.lifecycleGeneration);
       return;
     }
 
@@ -1517,6 +1742,7 @@ class CallSessionManager {
           clearStoredAcceptedRecovery: true,
           forceClearUiFlags: true,
         );
+        _callLifecycleArbiter.forceIdleForTest();
         if (endUnownedNativeCalls && nativeCalls.isNotEmpty) {
           await _endStaleNativeCalls(keepCallkitId: null, reason: reason);
         }
@@ -1575,6 +1801,9 @@ class CallSessionManager {
     if (!session.isTerminal && !_isTerminalStatus(session.status)) {
       return;
     }
+    _callLifecycleArbiter.beginTeardown(session.lifecycleGeneration);
+    final pendingPayload = _pendingIncomingPromptPayload;
+    final pendingSource = _pendingIncomingPromptSource;
     await _resetSessionState(
       reason: reason,
       onlyInviteId: inviteId,
@@ -1583,6 +1812,18 @@ class CallSessionManager {
       forceClearUiFlags:
           forceClearUiFlags || (!_callRouteActive && !_openingCallRoute),
     );
+    final pendingInviteId =
+        _callLifecycleArbiter.completeTeardown(session.lifecycleGeneration);
+    if (pendingInviteId != null &&
+        pendingPayload != null &&
+        pendingPayload.inviteId == pendingInviteId &&
+        pendingSource != null) {
+      _schedulePendingIncomingPrompt(
+        pendingPayload,
+        source: pendingSource,
+        reason: 'teardown_complete',
+      );
+    }
   }
 
   Future<void> _resetSessionState({
@@ -1773,6 +2014,7 @@ class CallSessionManager {
       'activeSessionPresent': session != null,
       'phase': session?.phase.name ?? CallSessionPhase.idle.name,
       'status': session?.status.name ?? CallInviteStatus.unknown.name,
+      ..._callLifecycleArbiter.toSafeDebugMap(),
       'hasActiveUi': hasActiveUi,
       'hasActiveSession': hasActiveSession,
       'openingCallRoute': _openingCallRoute,
@@ -1981,6 +2223,14 @@ class CallSessionManager {
     final payload = _pendingIncomingPromptPayload;
     final source = _pendingIncomingPromptSource;
     if (payload == null || source == null) return;
+    if (!_callLifecycleArbiter.isIdle || _hasTrulyActiveCall() || hasActiveUi) {
+      _schedulePendingIncomingPrompt(
+        payload,
+        source: source,
+        reason: 'retry_wait_${_callLifecycleArbiter.state.name}',
+      );
+      return;
+    }
     Map<String, dynamic>? latest;
     try {
       latest = await _readInviteData(payload.inviteId);
@@ -2004,16 +2254,11 @@ class CallSessionManager {
       _clearPendingIncomingPrompt(payload.inviteId);
       return;
     }
-    await _diagManager('incoming_received', meta: {
-      'inviteId': payload.inviteId,
-      'channel': payload.channel,
-      'fromUid': payload.fromUid,
-      'source': source,
-      'isVideo': payload.isVideo,
-      'via': 'pending_retry',
-      'reason': reason,
-    });
-    await _presentIncomingPrompt(payload, source: '$source:retry');
+    await _handleIncomingCandidate(
+      payload,
+      source: '$source:retry',
+      via: 'pending_retry',
+    );
   }
 
   void _clearPendingIncomingPrompt(String inviteId) {
