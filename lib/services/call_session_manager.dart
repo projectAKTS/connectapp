@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../call_v2/real_flow/call_v2_incoming_listener_backoff.dart';
 import '../call_v2/real_flow/call_v2_real_call_flow_gate.dart';
 import '../screens/call/agora_call_screen.dart';
 import '../screens/call/incoming_call_screen.dart';
@@ -14,7 +15,6 @@ import 'helperly_test_runtime.dart';
 const Duration _callInviteHandledTtl = Duration(minutes: 2);
 const Duration _ringingTimeout = Duration(seconds: 45);
 const Duration _acceptedJoiningTimeout = Duration(seconds: 35);
-const Duration _incomingListenerMaxRebindBackoff = Duration(seconds: 5);
 
 enum CallInviteStatus {
   ringing,
@@ -159,7 +159,8 @@ class CallSessionManager {
   Timer? _acceptedJoiningTimeoutTimer;
   Timer? _pendingIncomingPromptRetryTimer;
   Timer? _incomingListenerRebindTimer;
-  int _incomingListenerRebindAttempt = 0;
+  final CallV2IncomingListenerBackoff _incomingListenerBackoff =
+      CallV2IncomingListenerBackoff();
   _CallSession? _current;
   String _lastDiagStage = '';
   String _lastDiagMeta = '';
@@ -291,7 +292,6 @@ class CallSessionManager {
     _incomingInviteSub = null;
     _incomingListenerRebindTimer?.cancel();
     _incomingListenerRebindTimer = null;
-    _incomingListenerRebindAttempt = 0;
 
     final uid = _currentUid.trim();
     if (uid.isEmpty) return;
@@ -301,6 +301,7 @@ class CallSessionManager {
         .where('toUid', isEqualTo: uid)
         .snapshots()
         .listen((snapshot) async {
+      _incomingListenerBackoff.recordHealthySnapshot();
       final changes = snapshot.docChanges;
       if (changes.isEmpty) {
         for (final doc in snapshot.docs) {
@@ -328,7 +329,6 @@ class CallSessionManager {
       ));
       unawaited(_recoverIncomingInviteListenerAfterError(uid));
     });
-    _incomingListenerRebindAttempt = 0;
     await _diagResourceCounts('incoming_listener_bound');
     unawaited(recoverForegroundIncomingInvites(source: 'listener_bound'));
   }
@@ -343,14 +343,8 @@ class CallSessionManager {
 
   void _scheduleIncomingInviteListenerRebind(String uid) {
     _incomingListenerRebindTimer?.cancel();
-    final attempt = (_incomingListenerRebindAttempt + 1).clamp(1, 6);
-    _incomingListenerRebindAttempt = attempt;
-    final delayMs = (250 * (1 << (attempt - 1))).clamp(
-      250,
-      _incomingListenerMaxRebindBackoff.inMilliseconds,
-    );
-    _incomingListenerRebindTimer =
-        Timer(Duration(milliseconds: delayMs), () async {
+    final delay = _incomingListenerBackoff.recordErrorAndGetDelay();
+    _incomingListenerRebindTimer = Timer(delay, () async {
       if (_currentUid.trim() != uid.trim()) return;
       await bindIncomingInviteListener();
     });
@@ -408,7 +402,7 @@ class CallSessionManager {
     _incomingInviteSub = null;
     _incomingListenerRebindTimer?.cancel();
     _incomingListenerRebindTimer = null;
-    _incomingListenerRebindAttempt = 0;
+    _incomingListenerBackoff.reset();
     _handledInviteExpiries.clear();
     await _diagResourceCounts('clear_for_signed_out_start');
     await _resetSessionState(

@@ -13,6 +13,7 @@ import 'package:connect_app/call_v2/firebase/call_v2_dev_callable_target.dart';
 import 'package:connect_app/call_v2/firebase/call_v2_token_provider.dart';
 import 'package:connect_app/call_v2/firebase/real_call_v2_token_provider.dart';
 import 'package:connect_app/call_v2/call_v2_api.dart';
+import 'package:connect_app/call_v2/real_flow/call_v2_engine_cleanup_coordinator.dart';
 import 'package:connect_app/call_v2/real_flow/call_v2_real_call_flow_gate.dart';
 import 'package:connect_app/call_v2/runtime/call_v2_runtime_state.dart';
 import 'package:connect_app/theme/tokens.dart';
@@ -171,7 +172,8 @@ class AgoraCallScreen extends StatefulWidget {
 class _AgoraCallScreenState extends State<AgoraCallScreen> {
   static const MethodChannel _pushTokenChannel =
       MethodChannel('connectapp/pushTokens');
-  static Future<void> _lastEngineShutdown = Future<void>.value();
+  static Future<CallV2EngineCleanupResult?> _lastEngineShutdown =
+      Future<CallV2EngineCleanupResult?>.value();
   static int _nextCallSequenceNumber = 0;
   static int _nextEngineGeneration = 0;
   static const bool _testMode =
@@ -181,7 +183,8 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   late final int _callSequenceNumber;
   RtcEngine? _engine;
   RtcEngineEventHandler? _eventHandler;
-  Future<void>? _cleanupFuture;
+  final CallV2EngineCleanupCoordinator _cleanupCoordinator =
+      CallV2EngineCleanupCoordinator();
   int _engineGeneration = 0;
   bool _acceptEngineCallbacks = false;
   String? _token;
@@ -244,6 +247,11 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   bool _engineReleased = false;
   bool _irisDisposed = false;
   int _staleCallbackIgnoredCount = 0;
+  int _cleanupAttemptNumber = 0;
+  int _cleanupFailureCount = 0;
+  bool _cleanupRetryPossible = false;
+  bool _routeCleanupCompleted = false;
+  bool _sessionResetCompleted = false;
 
   bool get _useFlutterTextureRenderer =>
       Platform.isIOS && _preferFlutterTextureRendererOnIOS;
@@ -518,6 +526,16 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         return;
       }
       await _lastEngineShutdown;
+      if (_engine != null && !_cleanupCoordinator.lastCleanupSucceeded) {
+        await _diagCall('engine_recovery_cleanup_start', meta: {
+          'cleanupRetryPossible': _cleanupCoordinator.retryPossible,
+        });
+        final recovery = await _cleanupEngine();
+        if (!recovery.succeeded) {
+          _setCallV2BlockerCode('cleanup_failed');
+          throw StateError('Previous call cleanup has not completed.');
+        }
+      }
       await _diagCall('engine_wait_previous_shutdown');
       await _diagCall('engine_precleanup_done');
 
@@ -1414,6 +1432,11 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     bool? engineReleased,
     bool? irisDisposed,
     String? blockerCode,
+    int? cleanupAttemptNumber,
+    int? cleanupFailureCount,
+    bool? cleanupRetryPossible,
+    bool? routeCleanupCompleted,
+    bool? sessionResetCompleted,
   }) {
     void apply() {
       if (previousCleanupCompleted != null) {
@@ -1439,6 +1462,21 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       }
       if (blockerCode != null) {
         _callV2BlockerCode = _safeCallV2BlockerCode(blockerCode);
+      }
+      if (cleanupAttemptNumber != null) {
+        _cleanupAttemptNumber = cleanupAttemptNumber;
+      }
+      if (cleanupFailureCount != null) {
+        _cleanupFailureCount = cleanupFailureCount;
+      }
+      if (cleanupRetryPossible != null) {
+        _cleanupRetryPossible = cleanupRetryPossible;
+      }
+      if (routeCleanupCompleted != null) {
+        _routeCleanupCompleted = routeCleanupCompleted;
+      }
+      if (sessionResetCompleted != null) {
+        _sessionResetCompleted = sessionResetCompleted;
       }
     }
 
@@ -1748,7 +1786,6 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     });
     final engine = _createFreshAgoraEngine();
     _engine = engine;
-    _cleanupFuture = null;
     _engineGeneration = ++_nextEngineGeneration;
     _acceptEngineCallbacks = true;
     _updateCallV2LifecycleStatus(
@@ -2035,38 +2072,36 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     }
   }
 
-  Future<void> _cleanupEngine({bool release = true}) {
-    final existing = _cleanupFuture;
-    if (existing != null) return existing;
-
-    final future = _cleanupEngineOnce(release: release);
-    _cleanupFuture = future;
-    _lastEngineShutdown = future;
-    return future;
-  }
-
-  Future<void> _cleanupEngineOnce({required bool release}) async {
+  Future<CallV2EngineCleanupResult> _cleanupEngine({bool release = true}) {
     _joinWatchdog?.cancel();
     _joinWatchdog = null;
     _cancelGenerationTimers();
     final engine = _engine;
     final handler = _eventHandler;
     final generation = _engineGeneration;
-    _acceptEngineCallbacks = false;
+
     _updateCallV2LifecycleStatus(
       previousCleanupCompleted: false,
       cleanupInProgress: true,
       channelLeft: false,
       engineReleased: false,
       irisDisposed: false,
+      routeCleanupCompleted: false,
+      sessionResetCompleted: false,
     );
-    await _diagCall('cleanup_start', meta: {
-      'release': release,
-      'hasEngine': engine != null,
-      'hasHandler': handler != null,
-      'engineGeneration': generation,
-    });
+
     if (engine == null) {
+      final result = CallV2EngineCleanupResult(
+        generation: generation,
+        attemptNumber: _cleanupCoordinator.attemptNumber,
+        succeeded: true,
+        handlerUnregistered: true,
+        channelLeft: true,
+        engineReleased: true,
+        forcedDisposalAttempted: false,
+        irisDisposed: false,
+        errorCode: 'none',
+      );
       _eventHandler = null;
       _updateCallV2LifecycleStatus(
         previousCleanupCompleted: true,
@@ -2075,97 +2110,109 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         handlerRegistered: false,
         channelLeft: true,
         engineReleased: true,
+        cleanupAttemptNumber: _cleanupCoordinator.attemptNumber,
+        cleanupFailureCount: _cleanupCoordinator.failureCount,
+        cleanupRetryPossible: false,
       );
-      await _diagCall('cleanup_done', meta: {
+      _lastEngineShutdown = Future<CallV2EngineCleanupResult?>.value(result);
+      unawaited(_diagCall('cleanup_done', meta: {
         'release': release,
         'hadEngine': false,
         'engineGeneration': generation,
-      });
-      return;
+      }));
+      return Future<CallV2EngineCleanupResult>.value(result);
     }
 
-    var channelLeft = false;
-    var engineReleased = !release;
-    var irisDisposed = false;
-    try {
-      if (handler != null) {
-        engine.unregisterEventHandler(handler);
-      }
-      _eventHandler = null;
-      _updateCallV2LifecycleStatus(handlerRegistered: false);
-      await _diagCall('unregister_handler_done',
-          meta: {'hadHandler': handler != null});
-    } catch (e) {
-      await _diagCall('unregister_handler_error', meta: {'error': '$e'});
-    }
-    try {
-      await engine.leaveChannel().timeout(const Duration(seconds: 2));
-      channelLeft = true;
-      _updateCallV2LifecycleStatus(channelLeft: true);
-      await _diagCall('leave_channel_done');
-    } catch (e) {
-      await _diagCall('leave_channel_error', meta: {'error': '$e'});
-    }
-    if (widget.isVideo) {
-      try {
-        await engine.stopPreview().timeout(const Duration(seconds: 1));
-        await _diagCall('stop_preview_done');
-      } catch (e) {
-        await _diagCall('stop_preview_error', meta: {'error': '$e'});
-      }
-    }
-    if (release) {
-      try {
-        await engine.release(sync: true).timeout(const Duration(seconds: 4));
-        engineReleased = true;
-        _updateCallV2LifecycleStatus(engineReleased: true);
-        await _diagCall('release_done');
-      } catch (e) {
-        await _diagCall('release_error', meta: {'error': '$e'});
-        irisDisposed = await _forceDisposeEngine(
-          engine,
-          reason: 'release_failed',
-          error: e,
-        );
-      }
-    }
+    late final Future<CallV2EngineCleanupResult> attempt;
+    attempt = _cleanupCoordinator.cleanup(
+      CallV2EngineCleanupOperations(
+        generation: generation,
+        release: release,
+        invalidateGeneration: () {
+          _acceptEngineCallbacks = false;
+          _cancelGenerationTimers();
+        },
+        unregisterHandler: () async {
+          if (handler != null) {
+            engine.unregisterEventHandler(handler);
+          }
+          _eventHandler = null;
+          _updateCallV2LifecycleStatus(handlerRegistered: false);
+          await _diagCall('unregister_handler_done', meta: {
+            'hadHandler': handler != null,
+            'engineGeneration': generation,
+          });
+        },
+        leaveChannel: () async {
+          await engine.leaveChannel();
+          _updateCallV2LifecycleStatus(channelLeft: true);
+          await _diagCall('leave_channel_done', meta: {
+            'engineGeneration': generation,
+          });
+        },
+        releaseEngine: () async {
+          if (widget.isVideo) {
+            try {
+              await engine.stopPreview();
+              await _diagCall('stop_preview_done', meta: {
+                'engineGeneration': generation,
+              });
+            } catch (e) {
+              await _diagCall('stop_preview_error', meta: {'error': '$e'});
+            }
+          }
+          await engine.release(sync: true);
+          _updateCallV2LifecycleStatus(engineReleased: true);
+          await _diagCall('release_done', meta: {
+            'engineGeneration': generation,
+          });
+        },
+        forceDispose: () async {
+          return _forceDisposeEngine(
+            engine,
+            reason: 'release_failed',
+          );
+        },
+      ),
+    );
 
-    final disposalConfirmed = engineReleased || irisDisposed || !release;
-    if (!disposalConfirmed) {
+    _lastEngineShutdown = attempt.then<CallV2EngineCleanupResult?>(
+      (result) => result,
+      onError: (_) => null,
+    );
+
+    return attempt.then((result) async {
+      final succeeded = result.succeeded;
+      if (succeeded) {
+        _engine = null;
+        _eventHandler = null;
+      }
       _updateCallV2LifecycleStatus(
+        previousCleanupCompleted: succeeded,
         cleanupInProgress: false,
-        blockerCode: 'cleanup_failed',
+        engineCreated: !succeeded,
+        handlerRegistered: false,
+        channelLeft: result.channelLeft,
+        engineReleased: result.engineReleased,
+        irisDisposed: result.irisDisposed,
+        blockerCode: succeeded ? 'none' : 'cleanup_failed',
+        cleanupAttemptNumber: result.attemptNumber,
+        cleanupFailureCount: _cleanupCoordinator.failureCount,
+        cleanupRetryPossible: _cleanupCoordinator.retryPossible,
       );
-      await _diagCall('cleanup_failed', meta: {
+      await _diagCall(succeeded ? 'cleanup_done' : 'cleanup_failed', meta: {
         'release': release,
         'hadEngine': true,
-        'channelLeft': channelLeft,
-        'engineReleased': engineReleased,
-        'irisDisposed': irisDisposed,
+        'channelLeft': result.channelLeft,
+        'engineReleased': result.engineReleased,
+        'irisDisposed': result.irisDisposed,
+        'forcedDisposalAttempted': result.forcedDisposalAttempted,
         'engineGeneration': generation,
+        'attemptNumber': result.attemptNumber,
+        'failureCount': _cleanupCoordinator.failureCount,
+        'errorCode': result.errorCode,
       });
-      throw StateError('Agora engine cleanup failed');
-    }
-
-    _engine = null;
-    _eventHandler = null;
-    _updateCallV2LifecycleStatus(
-      previousCleanupCompleted: true,
-      cleanupInProgress: false,
-      engineCreated: false,
-      handlerRegistered: false,
-      channelLeft: channelLeft || !release,
-      engineReleased: engineReleased,
-      irisDisposed: irisDisposed,
-      blockerCode: 'none',
-    );
-    await _diagCall('cleanup_done', meta: {
-      'release': release,
-      'hadEngine': true,
-      'channelLeft': channelLeft,
-      'engineReleased': engineReleased,
-      'irisDisposed': irisDisposed,
-      'engineGeneration': generation,
+      return result;
     });
   }
 
@@ -2185,13 +2232,18 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     _autoCloseTimer?.cancel();
     await _diagCall('screen_auto_close', meta: {'reason': reason});
     try {
-      await _cleanupEngine();
+      final cleanupResult = await _cleanupEngine();
       await _clearStoredAcceptedCallRecovery();
       await _cleanupCallkitUi(reason: 'screen_terminal_hard_reset');
+      _updateCallV2LifecycleStatus(routeCleanupCompleted: true);
       await CallSessionManager.instance.hardResetForNewCall(
         reason: 'screen_terminal_hard_reset',
       );
+      _updateCallV2LifecycleStatus(sessionResetCompleted: true);
       _returnToAppAfterCall();
+      if (!cleanupResult.succeeded) {
+        _setCallV2BlockerCode('cleanup_failed');
+      }
     } finally {
       _endingCall = false;
     }
@@ -2216,7 +2268,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     _autoCloseTimer?.cancel();
     _cancelGenerationTimers();
     _lastEngineShutdown = _cleanupEngine();
-    unawaited(_lastEngineShutdown.catchError((_) {}));
+    unawaited(_lastEngineShutdown.catchError((_) => null));
     super.dispose();
   }
 
@@ -2252,13 +2304,18 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           source: 'end_button',
         );
       }
-      await _cleanupEngine();
+      final cleanupResult = await _cleanupEngine();
       await _clearStoredAcceptedCallRecovery();
       await _cleanupCallkitUi(reason: 'manual_end_hard_reset');
+      _updateCallV2LifecycleStatus(routeCleanupCompleted: true);
       await CallSessionManager.instance.hardResetForNewCall(
         reason: 'manual_end_hard_reset',
       );
+      _updateCallV2LifecycleStatus(sessionResetCompleted: true);
       _returnToAppAfterCall();
+      if (!cleanupResult.succeeded) {
+        _setCallV2BlockerCode('cleanup_failed');
+      }
     } finally {
       _endingCall = false;
     }
@@ -2673,6 +2730,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         'engineGeneration=$_engineGeneration '
         'previousCleanupCompleted=$_previousCleanupCompleted '
         'cleanupInProgress=$_cleanupInProgress '
+        'cleanupAttemptNumber=$_cleanupAttemptNumber '
+        'cleanupFailureCount=$_cleanupFailureCount '
+        'cleanupRetryPossible=$_cleanupRetryPossible '
         'engineCreated=$_engineCreated '
         'handlerRegistered=$_handlerRegistered '
         'channelLeft=$_channelLeft '
@@ -2685,6 +2745,8 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         'nativeCallCount=$nativeCallCount '
         'sessionIdle=${CallSessionManager.instance.isIdleForDebug} '
         'resourceBaselineRestored=$resourceBaselineRestored '
+        'routeCleanupCompleted=$_routeCleanupCompleted '
+        'sessionResetCompleted=$_sessionResetCompleted '
         'stage=$_callV2Stage '
         'callableAttempted=$_callV2CallableAttempted '
         'callableReached=$_callV2CallableReached '
