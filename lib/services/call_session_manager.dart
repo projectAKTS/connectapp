@@ -14,6 +14,7 @@ import 'helperly_test_runtime.dart';
 const Duration _callInviteHandledTtl = Duration(minutes: 2);
 const Duration _ringingTimeout = Duration(seconds: 45);
 const Duration _acceptedJoiningTimeout = Duration(seconds: 35);
+const Duration _incomingListenerMaxRebindBackoff = Duration(seconds: 5);
 
 enum CallInviteStatus {
   ringing,
@@ -157,6 +158,8 @@ class CallSessionManager {
   Timer? _ringingTimeoutTimer;
   Timer? _acceptedJoiningTimeoutTimer;
   Timer? _pendingIncomingPromptRetryTimer;
+  Timer? _incomingListenerRebindTimer;
+  int _incomingListenerRebindAttempt = 0;
   _CallSession? _current;
   String _lastDiagStage = '';
   String _lastDiagMeta = '';
@@ -177,21 +180,43 @@ class CallSessionManager {
   String get debugLastDiagMeta => _lastDiagMeta;
   Map<String, dynamic> debugSnapshot() => _sessionSnapshot();
   Map<String, int> debugResourceCounts() {
-    final activeCallSubscriptions = [
-      _incomingInviteSub,
-      _activeInviteSub,
-    ].where((sub) => sub != null).length;
+    final incomingInviteListenerCount = _incomingInviteSub == null ? 0 : 1;
+    final activeInviteListenerCount = _activeInviteSub == null ? 0 : 1;
+    final activeCallSubscriptions =
+        incomingInviteListenerCount + activeInviteListenerCount;
     final activeListeners = activeCallSubscriptions;
+    final ringingTimerCount =
+        _ringingTimeoutTimer != null && _ringingTimeoutTimer!.isActive ? 1 : 0;
+    final joiningTimerCount = _acceptedJoiningTimeoutTimer != null &&
+            _acceptedJoiningTimeoutTimer!.isActive
+        ? 1
+        : 0;
+    final pendingPromptTimerCount = _pendingIncomingPromptRetryTimer != null &&
+            _pendingIncomingPromptRetryTimer!.isActive
+        ? 1
+        : 0;
+    final incomingListenerRebindTimerCount =
+        _incomingListenerRebindTimer != null &&
+                _incomingListenerRebindTimer!.isActive
+            ? 1
+            : 0;
     final activeTimers = [
       _ringingTimeoutTimer,
       _acceptedJoiningTimeoutTimer,
       _pendingIncomingPromptRetryTimer,
+      _incomingListenerRebindTimer,
     ].where((timer) => timer != null && timer.isActive).length;
     return <String, int>{
       'activeListeners': activeListeners,
       'activeTimers': activeTimers,
       'activeCallSubscriptions': activeCallSubscriptions,
       'activeChatSubscriptions': 0,
+      'incomingInviteListenerCount': incomingInviteListenerCount,
+      'activeInviteListenerCount': activeInviteListenerCount,
+      'ringingTimerCount': ringingTimerCount,
+      'joiningTimerCount': joiningTimerCount,
+      'pendingPromptTimerCount': pendingPromptTimerCount,
+      'incomingListenerRebindTimerCount': incomingListenerRebindTimerCount,
     };
   }
 
@@ -264,6 +289,9 @@ class CallSessionManager {
   Future<void> bindIncomingInviteListener() async {
     await _incomingInviteSub?.cancel();
     _incomingInviteSub = null;
+    _incomingListenerRebindTimer?.cancel();
+    _incomingListenerRebindTimer = null;
+    _incomingListenerRebindAttempt = 0;
 
     final uid = _currentUid.trim();
     if (uid.isEmpty) return;
@@ -298,9 +326,34 @@ class CallSessionManager {
         reason: 'incoming_listener_error',
         force: true,
       ));
+      unawaited(_recoverIncomingInviteListenerAfterError(uid));
     });
+    _incomingListenerRebindAttempt = 0;
     await _diagResourceCounts('incoming_listener_bound');
     unawaited(recoverForegroundIncomingInvites(source: 'listener_bound'));
+  }
+
+  Future<void> _recoverIncomingInviteListenerAfterError(String uid) async {
+    if (_currentUid.trim() != uid.trim()) return;
+    await _incomingInviteSub?.cancel();
+    _incomingInviteSub = null;
+    _scheduleIncomingInviteListenerRebind(uid);
+    await _diagResourceCounts('incoming_listener_rebind_scheduled');
+  }
+
+  void _scheduleIncomingInviteListenerRebind(String uid) {
+    _incomingListenerRebindTimer?.cancel();
+    final attempt = (_incomingListenerRebindAttempt + 1).clamp(1, 6);
+    _incomingListenerRebindAttempt = attempt;
+    final delayMs = (250 * (1 << (attempt - 1))).clamp(
+      250,
+      _incomingListenerMaxRebindBackoff.inMilliseconds,
+    );
+    _incomingListenerRebindTimer =
+        Timer(Duration(milliseconds: delayMs), () async {
+      if (_currentUid.trim() != uid.trim()) return;
+      await bindIncomingInviteListener();
+    });
   }
 
   Future<void> recoverForegroundIncomingInvites({
@@ -353,6 +406,9 @@ class CallSessionManager {
   Future<void> clearForSignedOut() async {
     await _incomingInviteSub?.cancel();
     _incomingInviteSub = null;
+    _incomingListenerRebindTimer?.cancel();
+    _incomingListenerRebindTimer = null;
+    _incomingListenerRebindAttempt = 0;
     _handledInviteExpiries.clear();
     await _diagResourceCounts('clear_for_signed_out_start');
     await _resetSessionState(

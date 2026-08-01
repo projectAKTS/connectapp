@@ -9,8 +9,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:agora_rtc_engine/src/impl/agora_rtc_engine_impl.dart'
     as agora_internal;
-import 'package:agora_rtc_engine/src/impl/platform/platform_bindings_provider.dart'
-    show createPlatformBindingsProvider;
 import 'package:connect_app/call_v2/firebase/call_v2_dev_callable_target.dart';
 import 'package:connect_app/call_v2/firebase/call_v2_token_provider.dart';
 import 'package:connect_app/call_v2/firebase/real_call_v2_token_provider.dart';
@@ -26,8 +24,6 @@ import 'package:connect_app/services/callkit_id.dart';
 import 'package:connect_app/services/diagnostic_service.dart';
 import 'package:connect_app/services/helperly_test_runtime.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
-import 'package:iris_method_channel/iris_method_channel.dart'
-    show IrisMethodChannel;
 import 'package:path_provider/path_provider.dart';
 
 class AgoraJoinAuth {
@@ -176,12 +172,18 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   static const MethodChannel _pushTokenChannel =
       MethodChannel('connectapp/pushTokens');
   static Future<void> _lastEngineShutdown = Future<void>.value();
+  static int _nextCallSequenceNumber = 0;
+  static int _nextEngineGeneration = 0;
   static const bool _testMode =
       bool.fromEnvironment('HELPERLY_TEST_MODE', defaultValue: false);
   static const Duration _engineInitializeTimeout = Duration(seconds: 30);
   static const Duration _joinWatchdogTimeout = Duration(seconds: 35);
+  late final int _callSequenceNumber;
   RtcEngine? _engine;
   RtcEngineEventHandler? _eventHandler;
+  Future<void>? _cleanupFuture;
+  int _engineGeneration = 0;
+  bool _acceptEngineCallbacks = false;
   String? _token;
   String? _agoraAppId;
   String? _joinedChannelName;
@@ -214,6 +216,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   Timer? _ringTimeout;
   Timer? _joinWatchdog;
   Timer? _autoCloseTimer;
+  final Set<Timer> _generationTimers = <Timer>{};
   bool _remoteEverJoined = false;
   bool _missedLogged = false;
   bool _callkitMarkedConnected = false;
@@ -232,6 +235,15 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   String _callV2AgoraErrorCode = 'none';
   String _callV2ConnectionState = 'none';
   String _callV2ConnectionReason = 'none';
+  String _callV2Stage = 'none';
+  bool _previousCleanupCompleted = true;
+  bool _cleanupInProgress = false;
+  bool _engineCreated = false;
+  bool _handlerRegistered = false;
+  bool _channelLeft = false;
+  bool _engineReleased = false;
+  bool _irisDisposed = false;
+  int _staleCallbackIgnoredCount = 0;
 
   bool get _useFlutterTextureRenderer =>
       Platform.isIOS && _preferFlutterTextureRendererOnIOS;
@@ -308,6 +320,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   @override
   void initState() {
     super.initState();
+    _callSequenceNumber = ++_nextCallSequenceNumber;
     _callV2BlockerCode = widget.callV2BlockerCode;
     CallSessionManager.instance.terminalSignal
         .addListener(_handleManagerTerminalSignal);
@@ -346,6 +359,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     Map<String, dynamic>? meta,
     int metaLimit = 500,
   }) async {
+    _callV2Stage = _safeAgoraDiagString(stage);
     final safeMeta = _safeAgoraDiagMeta(<String, dynamic>{
       'callV2Selected': _callV2Selected,
       'isCaller': widget.isCaller,
@@ -442,7 +456,6 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       await _diagCall('callkit_active_before', meta: {
         'reason': reason,
         'count': 0,
-        'ids': '',
         'testMode': true,
       });
       await _diagCall('callkit_end_all_done', meta: {
@@ -452,7 +465,6 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       await _diagCall('callkit_active_after', meta: {
         'reason': reason,
         'count': 0,
-        'ids': '',
         'testMode': true,
       });
       return;
@@ -462,7 +474,6 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     await _diagCall('callkit_active_before', meta: {
       'reason': reason,
       'count': before.length,
-      'ids': before.join(','),
     });
 
     final callkitId = _callkitId;
@@ -495,7 +506,6 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     await _diagCall('callkit_active_after', meta: {
       'reason': reason,
       'count': after.length,
-      'ids': after.join(','),
     });
   }
 
@@ -582,9 +592,6 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         'appIdSource': auth.appId.toLowerCase() == _agoraFallbackAppId
             ? 'server_matches_fallback'
             : (_callV2Selected ? 'call_v2_dev_config' : 'server'),
-        'serverAppIdLen': auth.appId.length,
-        'serverAppIdMatchesFallback':
-            auth.appId.toLowerCase() == _agoraFallbackAppId,
       });
 
       final engine = await _createAndInitializeEngine();
@@ -627,8 +634,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         'source': 'engine_and_join_options',
       });
 
+      final generation = _engineGeneration;
       final handler = RtcEngineEventHandler(
         onError: (ErrorCodeType err, String msg) {
+          if (!_acceptCallbackForGeneration(generation, 'onError')) return;
           _diagCall('agora_error', meta: {'code': '$err', 'msg': msg});
           if (_callV2Selected && mounted) {
             setState(() {
@@ -646,6 +655,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           }
         },
         onConnectionLost: (RtcConnection connection) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onConnectionLost',
+          )) {
+            return;
+          }
           _diagCall('conn_lost', meta: {
             'channel': connection.channelId ?? '',
             'localUid': connection.localUid ?? -1,
@@ -656,6 +671,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           ConnectionStateType state,
           ConnectionChangedReasonType reason,
         ) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onConnectionStateChanged',
+          )) {
+            return;
+          }
           _diagCall('conn_state_changed', meta: {
             'channel': connection.channelId ?? '',
             'localUid': connection.localUid ?? -1,
@@ -687,6 +708,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           }
         },
         onNetworkTypeChanged: (RtcConnection connection, NetworkType type) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onNetworkTypeChanged',
+          )) {
+            return;
+          }
           _diagCall('network_type_changed', meta: {
             'channel': connection.channelId ?? '',
             'localUid': connection.localUid ?? -1,
@@ -700,6 +727,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           String localProxyIp,
           int elapsed,
         ) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onProxyConnected',
+          )) {
+            return;
+          }
           _diagCall('proxy_connected', meta: {
             'channel': channel,
             'uid': uid,
@@ -709,18 +742,33 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           });
         },
         onRequestToken: (RtcConnection connection) {
+          if (!_acceptCallbackForGeneration(generation, 'onRequestToken')) {
+            return;
+          }
           _diagCall('token_requested', meta: {
             'channel': connection.channelId ?? '',
             'localUid': connection.localUid ?? -1,
           });
         },
         onLocalUserRegistered: (int uid, String userAccount) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onLocalUserRegistered',
+          )) {
+            return;
+          }
           _diagCall('local_user_registered', meta: {
             'uid': uid,
             'userAccount': userAccount,
           });
         },
         onUserInfoUpdated: (int uid, UserInfo info) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onUserInfoUpdated',
+          )) {
+            return;
+          }
           _diagCall('user_info_updated', meta: {
             'uid': uid,
             'infoUid': info.uid,
@@ -732,6 +780,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           int remoteUid,
           String remoteUserAccount,
         ) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onUserAccountUpdated',
+          )) {
+            return;
+          }
           _diagCall('user_account_updated', meta: {
             'channel': connection.channelId ?? '',
             'localUid': connection.localUid ?? -1,
@@ -740,6 +794,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           });
         },
         onTokenPrivilegeWillExpire: (RtcConnection connection, String token) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onTokenPrivilegeWillExpire',
+          )) {
+            return;
+          }
           _diagCall('token_will_expire', meta: {
             'channel': connection.channelId ?? '',
             'localUid': connection.localUid ?? -1,
@@ -747,6 +807,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           });
         },
         onUserMuteAudio: (RtcConnection connection, int remoteUid, bool muted) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onUserMuteAudio',
+          )) {
+            return;
+          }
           _diagCall('user_mute_audio', meta: {
             'remoteUid': remoteUid,
             'muted': muted,
@@ -759,6 +825,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           RemoteAudioStateReason reason,
           int elapsed,
         ) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onRemoteAudioStateChanged',
+          )) {
+            return;
+          }
           final mediaActive =
               state == RemoteAudioState.remoteAudioStateDecoding;
           if (_callV2Selected && mounted) {
@@ -782,6 +854,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           });
         },
         onAudioRoutingChanged: (int routing) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onAudioRoutingChanged',
+          )) {
+            return;
+          }
           _diagCall('audio_routing_changed', meta: {
             'routing': routing,
           });
@@ -791,6 +869,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           LocalAudioStreamState state,
           LocalAudioStreamReason reason,
         ) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onLocalAudioStateChanged',
+          )) {
+            return;
+          }
           _diagCall('local_audio_state', meta: {
             'state': '$state',
             'reason': '$reason',
@@ -801,6 +885,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           LocalVideoStreamState state,
           LocalVideoStreamReason reason,
         ) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onLocalVideoStateChanged',
+          )) {
+            return;
+          }
           final ready =
               state == LocalVideoStreamState.localVideoStreamStateCapturing ||
                   state == LocalVideoStreamState.localVideoStreamStateEncoding;
@@ -816,6 +906,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           });
         },
         onLocalVideoStats: (RtcConnection connection, LocalVideoStats stats) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onLocalVideoStats',
+          )) {
+            return;
+          }
           final adapt = stats.qualityAdaptIndication;
           final txPacketLossRate = stats.txPacketLossRate ?? 0;
           final encodedWidth = stats.encodedFrameWidth ?? 0;
@@ -847,6 +943,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           int height,
           int elapsed,
         ) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onFirstLocalVideoFrame',
+          )) {
+            return;
+          }
           if (mounted) {
             setState(() {
               _localVideoReady = true;
@@ -863,6 +965,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           RtcConnection connection,
           int elapsed,
         ) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onFirstLocalVideoFramePublished',
+          )) {
+            return;
+          }
           _diagCall('first_local_video_frame_published', meta: {
             'localUid': connection.localUid ?? -1,
             'elapsedMs': elapsed,
@@ -875,6 +983,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           RemoteVideoStateReason reason,
           int elapsed,
         ) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onRemoteVideoStateChanged',
+          )) {
+            return;
+          }
           final ready = state == RemoteVideoState.remoteVideoStateDecoding;
           if (mounted && _remoteUid == remoteUid) {
             setState(() {
@@ -889,6 +1003,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           });
         },
         onRemoteVideoStats: (RtcConnection connection, RemoteVideoStats stats) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onRemoteVideoStats',
+          )) {
+            return;
+          }
           final packetLossRate = stats.packetLossRate ?? 0;
           final frozenRate = stats.frozenRate ?? 0;
           final width = stats.width ?? 0;
@@ -918,6 +1038,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           int height,
           int elapsed,
         ) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onFirstRemoteVideoFrame',
+          )) {
+            return;
+          }
           if (mounted && _remoteUid == remoteUid) {
             setState(() {
               _remoteVideoReady = true;
@@ -938,6 +1064,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           int height,
           int elapsed,
         ) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onFirstRemoteVideoDecoded',
+          )) {
+            return;
+          }
           if (mounted && _remoteUid == remoteUid) {
             setState(() {
               _remoteVideoReady = true;
@@ -956,6 +1088,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           int remoteUid,
           bool muted,
         ) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onUserMuteVideo',
+          )) {
+            return;
+          }
           if (mounted && _remoteUid == remoteUid) {
             setState(() {
               _remoteVideoMuted = muted;
@@ -968,6 +1106,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           });
         },
         onJoinChannelSuccess: (RtcConnection connection, int elapsed) async {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onJoinChannelSuccess',
+          )) {
+            return;
+          }
           _joinWatchdog?.cancel();
           _diagCall('join_success', meta: {
             'callV2Selected': _callV2Selected,
@@ -994,6 +1138,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           }
         },
         onUserJoined: (RtcConnection connection, int uid, int elapsed) async {
+          if (!_acceptCallbackForGeneration(generation, 'onUserJoined')) {
+            return;
+          }
           await _diagCall('remote_joined', meta: {
             'callV2Selected': _callV2Selected,
             'elapsedMs': elapsed,
@@ -1041,6 +1188,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         },
         onUserOffline:
             (RtcConnection connection, int uid, UserOfflineReasonType r) {
+          if (!_acceptCallbackForGeneration(generation, 'onUserOffline')) {
+            return;
+          }
           _diagCall('remote_offline', meta: {'remoteUid': uid, 'reason': '$r'});
           final remoteEndedConnectedCall = _remoteEverJoined || _joined;
           if (!remoteEndedConnectedCall) {
@@ -1074,6 +1224,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           }
         },
         onLeaveChannel: (RtcConnection connection, RtcStats stats) {
+          if (!_acceptCallbackForGeneration(generation, 'onLeaveChannel')) {
+            return;
+          }
           _joinWatchdog?.cancel();
           _diagCall('leave_channel');
           if (mounted) {
@@ -1091,6 +1244,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       );
       _eventHandler = handler;
       engine.registerEventHandler(handler);
+      _updateCallV2LifecycleStatus(handlerRegistered: true);
       await _diagCall('handler_registered');
 
       if (widget.isVideo) {
@@ -1139,14 +1293,19 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         'joinMode': 'uid',
         'tokenIdentityMode': auth.identityMode,
       });
-      await _pollConnectionState('join_returned');
-      _scheduleConnectionStatePolls();
-      _startJoinWatchdog(auth.channelName);
+      await _pollConnectionState('join_returned', generation: generation);
+      _scheduleConnectionStatePolls(generation);
+      _startJoinWatchdog(auth.channelName, generation: generation);
       await _diagCall('begin_done');
     } catch (e) {
       if (_engine != null) {
-        _lastEngineShutdown = _cleanupEngine();
-        await _lastEngineShutdown;
+        try {
+          _lastEngineShutdown = _cleanupEngine();
+          await _lastEngineShutdown;
+        } catch (cleanupError) {
+          await _diagCall('cleanup_failed', meta: {'error': '$cleanupError'});
+          _setCallV2BlockerCode('cleanup_failed');
+        }
       }
       await _diagCall('begin_error', meta: {'error': '$e'});
       if (_callV2Selected) {
@@ -1246,6 +1405,94 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     return _createAndInitializeEngineAttempt(attempt: 1);
   }
 
+  void _updateCallV2LifecycleStatus({
+    bool? previousCleanupCompleted,
+    bool? cleanupInProgress,
+    bool? engineCreated,
+    bool? handlerRegistered,
+    bool? channelLeft,
+    bool? engineReleased,
+    bool? irisDisposed,
+    String? blockerCode,
+  }) {
+    void apply() {
+      if (previousCleanupCompleted != null) {
+        _previousCleanupCompleted = previousCleanupCompleted;
+      }
+      if (cleanupInProgress != null) {
+        _cleanupInProgress = cleanupInProgress;
+      }
+      if (engineCreated != null) {
+        _engineCreated = engineCreated;
+      }
+      if (handlerRegistered != null) {
+        _handlerRegistered = handlerRegistered;
+      }
+      if (channelLeft != null) {
+        _channelLeft = channelLeft;
+      }
+      if (engineReleased != null) {
+        _engineReleased = engineReleased;
+      }
+      if (irisDisposed != null) {
+        _irisDisposed = irisDisposed;
+      }
+      if (blockerCode != null) {
+        _callV2BlockerCode = _safeCallV2BlockerCode(blockerCode);
+      }
+    }
+
+    if (mounted) {
+      setState(apply);
+    } else {
+      apply();
+    }
+  }
+
+  bool _acceptCallbackForGeneration(int generation, String stage) {
+    if (_acceptEngineCallbacks && generation == _engineGeneration) {
+      return true;
+    }
+    _staleCallbackIgnoredCount += 1;
+    unawaited(_diagCall('stale_callback_ignored', meta: {
+      'stage': stage,
+      'engineGeneration': generation,
+      'currentEngineGeneration': _engineGeneration,
+    }));
+    return false;
+  }
+
+  Timer _generationTimer(
+    Duration delay,
+    int generation,
+    FutureOr<void> Function() callback,
+  ) {
+    late final Timer timer;
+    timer = Timer(delay, () {
+      _generationTimers.remove(timer);
+      if (!_acceptCallbackForGeneration(generation, 'timer')) return;
+      unawaited(Future<void>.sync(callback));
+    });
+    _generationTimers.add(timer);
+    return timer;
+  }
+
+  void _cancelGenerationTimers() {
+    for (final timer in _generationTimers.toList()) {
+      timer.cancel();
+    }
+    _generationTimers.clear();
+  }
+
+  int _activeScreenTimerCount() {
+    return <Timer?>[
+      _ringTimeout,
+      _joinWatchdog,
+      _autoCloseTimer,
+      ..._generationTimers,
+    ].where((timer) => timer != null && timer.isActive).length;
+  }
+
   String _sanitizeAgoraLogSegment(String raw) {
     final cleaned = raw.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
     return cleaned.isEmpty ? 'call' : cleaned;
@@ -1262,6 +1509,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           lower.contains('channel') ||
           lower.contains('invite') ||
           lower.contains('callid') ||
+          lower.contains('appid') ||
           lower.contains('token') ||
           lower.contains('device')) {
         safe['identifierFieldPresent'] =
@@ -1355,6 +1603,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       'agora_error',
       'connection_failed',
       'remote_audio_failed',
+      'cleanup_failed',
     };
     return allowed.contains(value) ? value : 'setup_failed';
   }
@@ -1459,12 +1708,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   }
 
   RtcEngine _createFreshAgoraEngine() {
-    return agora_internal.RtcEngineImpl.createForTesting(
-      irisMethodChannel: IrisMethodChannel(createPlatformBindingsProvider()),
-    );
+    return createAgoraRtcEngine();
   }
 
-  Future<void> _forceDisposeFailedInitialize(
+  Future<bool> _forceDisposeEngine(
     RtcEngine engine, {
     required String reason,
     Object? error,
@@ -1478,14 +1725,17 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           .irisMethodChannel
           .dispose()
           .timeout(const Duration(seconds: 3));
+      _updateCallV2LifecycleStatus(irisDisposed: true);
       await _diagCall('engine_force_dispose_done', meta: {
         'reason': reason,
       });
+      return true;
     } catch (disposeError) {
       await _diagCall('engine_force_dispose_error', meta: {
         'reason': reason,
         'error': '$disposeError',
       });
+      return false;
     }
   }
 
@@ -1498,18 +1748,29 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     });
     final engine = _createFreshAgoraEngine();
     _engine = engine;
+    _cleanupFuture = null;
+    _engineGeneration = ++_nextEngineGeneration;
+    _acceptEngineCallbacks = true;
+    _updateCallV2LifecycleStatus(
+      previousCleanupCompleted: true,
+      cleanupInProgress: false,
+      engineCreated: true,
+      handlerRegistered: false,
+      channelLeft: false,
+      engineReleased: false,
+      irisDisposed: false,
+    );
     await _diagCall('engine_factory_selected', meta: {
       'attempt': attempt,
-      'factory': 'create_for_testing_fresh_instance',
+      'factory': 'create_agora_rtc_engine_public',
+      'engineGeneration': _engineGeneration,
     });
     await _diagCall('engine_create_done', meta: {
       'attempt': attempt,
     });
     await _diagCall('engine_initialize_start', meta: {
       'attempt': attempt,
-      'appIdSuffix': _agoraAppId!.length >= 6
-          ? _agoraAppId!.substring(_agoraAppId!.length - 6)
-          : _agoraAppId!,
+      'appIdReady': _agoraAppId!.trim().isNotEmpty,
     });
 
     var initialized = false;
@@ -1559,14 +1820,14 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           'note': 'native_initialize_future_did_not_complete',
         });
         throw TimeoutException(
-          'Agora engine did not start. Fully close and reopen the app, then try again.',
+          'Agora engine did not start. Please end the call and try again.',
           _engineInitializeTimeout,
         );
       });
       initialized = true;
       return engine;
     } on TimeoutException catch (e) {
-      await _forceDisposeFailedInitialize(
+      await _forceDisposeEngine(
         engine,
         reason: 'initialize_timeout',
         error: e,
@@ -1594,7 +1855,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       rethrow;
     } catch (e) {
       if (!initialized) {
-        await _forceDisposeFailedInitialize(
+        await _forceDisposeEngine(
           engine,
           reason: 'initialize_error',
           error: e,
@@ -1662,7 +1923,11 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     });
   }
 
-  Future<void> _pollConnectionState(String source) async {
+  Future<void> _pollConnectionState(String source, {int? generation}) async {
+    if (generation != null &&
+        !_acceptCallbackForGeneration(generation, 'connection_state_poll')) {
+      return;
+    }
     final engine = _engine;
     if (engine == null) return;
     try {
@@ -1679,18 +1944,21 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     }
   }
 
-  void _scheduleConnectionStatePolls() {
+  void _scheduleConnectionStatePolls(int generation) {
     for (final seconds in const <int>[1, 5, 15]) {
-      unawaited(Future<void>.delayed(Duration(seconds: seconds), () async {
-        if (!mounted || _ended || _joined) return;
+      _generationTimer(Duration(seconds: seconds), generation, () async {
+        if (!mounted || _ended || _joined) {
+          return;
+        }
         await _pollConnectionState('after_${seconds}s');
-      }));
+      });
     }
   }
 
-  void _startJoinWatchdog(String channel) {
+  void _startJoinWatchdog(String channel, {required int generation}) {
     _joinWatchdog?.cancel();
-    _joinWatchdog = Timer(_joinWatchdogTimeout, () async {
+    _joinWatchdog =
+        _generationTimer(_joinWatchdogTimeout, generation, () async {
       if (!mounted || _ended || _joined) return;
       await _diagCall('join_watchdog_timeout', meta: {
         'channel': channel,
@@ -1767,27 +2035,64 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     }
   }
 
-  Future<void> _cleanupEngine({bool release = true}) async {
+  Future<void> _cleanupEngine({bool release = true}) {
+    final existing = _cleanupFuture;
+    if (existing != null) return existing;
+
+    final future = _cleanupEngineOnce(release: release);
+    _cleanupFuture = future;
+    _lastEngineShutdown = future;
+    return future;
+  }
+
+  Future<void> _cleanupEngineOnce({required bool release}) async {
     _joinWatchdog?.cancel();
+    _joinWatchdog = null;
+    _cancelGenerationTimers();
     final engine = _engine;
     final handler = _eventHandler;
+    final generation = _engineGeneration;
+    _acceptEngineCallbacks = false;
+    _updateCallV2LifecycleStatus(
+      previousCleanupCompleted: false,
+      cleanupInProgress: true,
+      channelLeft: false,
+      engineReleased: false,
+      irisDisposed: false,
+    );
     await _diagCall('cleanup_start', meta: {
       'release': release,
       'hasEngine': engine != null,
       'hasHandler': handler != null,
+      'engineGeneration': generation,
     });
     if (engine == null) {
-      await _diagCall('cleanup_done',
-          meta: {'release': release, 'hadEngine': false});
+      _eventHandler = null;
+      _updateCallV2LifecycleStatus(
+        previousCleanupCompleted: true,
+        cleanupInProgress: false,
+        engineCreated: false,
+        handlerRegistered: false,
+        channelLeft: true,
+        engineReleased: true,
+      );
+      await _diagCall('cleanup_done', meta: {
+        'release': release,
+        'hadEngine': false,
+        'engineGeneration': generation,
+      });
       return;
     }
 
-    _engine = null;
-    _eventHandler = null;
+    var channelLeft = false;
+    var engineReleased = !release;
+    var irisDisposed = false;
     try {
       if (handler != null) {
         engine.unregisterEventHandler(handler);
       }
+      _eventHandler = null;
+      _updateCallV2LifecycleStatus(handlerRegistered: false);
       await _diagCall('unregister_handler_done',
           meta: {'hadHandler': handler != null});
     } catch (e) {
@@ -1795,6 +2100,8 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     }
     try {
       await engine.leaveChannel().timeout(const Duration(seconds: 2));
+      channelLeft = true;
+      _updateCallV2LifecycleStatus(channelLeft: true);
       await _diagCall('leave_channel_done');
     } catch (e) {
       await _diagCall('leave_channel_error', meta: {'error': '$e'});
@@ -1809,15 +2116,57 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     }
     if (release) {
       try {
-        await engine.release(sync: true).timeout(const Duration(seconds: 2));
+        await engine.release(sync: true).timeout(const Duration(seconds: 4));
+        engineReleased = true;
+        _updateCallV2LifecycleStatus(engineReleased: true);
         await _diagCall('release_done');
       } catch (e) {
         await _diagCall('release_error', meta: {'error': '$e'});
+        irisDisposed = await _forceDisposeEngine(
+          engine,
+          reason: 'release_failed',
+          error: e,
+        );
       }
     }
-    await Future<void>.delayed(const Duration(milliseconds: 250));
-    await _diagCall('cleanup_done',
-        meta: {'release': release, 'hadEngine': true});
+
+    final disposalConfirmed = engineReleased || irisDisposed || !release;
+    if (!disposalConfirmed) {
+      _updateCallV2LifecycleStatus(
+        cleanupInProgress: false,
+        blockerCode: 'cleanup_failed',
+      );
+      await _diagCall('cleanup_failed', meta: {
+        'release': release,
+        'hadEngine': true,
+        'channelLeft': channelLeft,
+        'engineReleased': engineReleased,
+        'irisDisposed': irisDisposed,
+        'engineGeneration': generation,
+      });
+      throw StateError('Agora engine cleanup failed');
+    }
+
+    _engine = null;
+    _eventHandler = null;
+    _updateCallV2LifecycleStatus(
+      previousCleanupCompleted: true,
+      cleanupInProgress: false,
+      engineCreated: false,
+      handlerRegistered: false,
+      channelLeft: channelLeft || !release,
+      engineReleased: engineReleased,
+      irisDisposed: irisDisposed,
+      blockerCode: 'none',
+    );
+    await _diagCall('cleanup_done', meta: {
+      'release': release,
+      'hadEngine': true,
+      'channelLeft': channelLeft,
+      'engineReleased': engineReleased,
+      'irisDisposed': irisDisposed,
+      'engineGeneration': generation,
+    });
   }
 
   void _returnToAppAfterCall() {
@@ -1865,7 +2214,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     _ringTimeout?.cancel();
     _joinWatchdog?.cancel();
     _autoCloseTimer?.cancel();
+    _cancelGenerationTimers();
     _lastEngineShutdown = _cleanupEngine();
+    unawaited(_lastEngineShutdown.catchError((_) {}));
     super.dispose();
   }
 
@@ -2298,10 +2649,43 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   Widget _callV2SafeStatusPanel({bool dark = false}) {
     if (!_showCallV2SafeStatus) return const SizedBox.shrink();
     final config = _callV2RealFlowConfig;
+    final managerDebug = CallSessionManager.instance.debugResourceCounts();
+    final incomingListenerCount = managerDebug['incomingInviteListenerCount'] ??
+        managerDebug['activeListeners'] ??
+        0;
+    final activeInviteListenerCount =
+        managerDebug['activeInviteListenerCount'] ?? 0;
+    final activeTimerCount =
+        (managerDebug['activeTimers'] ?? 0) + _activeScreenTimerCount();
+    final nativeCallCount =
+        CallSessionManager.instance.debugSnapshot()['nativeCallCount'] ?? 0;
+    final resourceBaselineRestored =
+        CallSessionManager.instance.isIdleForDebug &&
+            incomingListenerCount == 1 &&
+            activeInviteListenerCount == 0 &&
+            activeTimerCount == 0 &&
+            !_cleanupInProgress;
     final text = 'buildCommitPresent=${config.buildCommitPresent} '
         'realFlowEnabled=${config.enabled} '
         'devCallableEnabled=${config.devCallableEnabled} '
         'callV2Selected=$_callV2Selected '
+        'callSequenceNumber=$_callSequenceNumber '
+        'engineGeneration=$_engineGeneration '
+        'previousCleanupCompleted=$_previousCleanupCompleted '
+        'cleanupInProgress=$_cleanupInProgress '
+        'engineCreated=$_engineCreated '
+        'handlerRegistered=$_handlerRegistered '
+        'channelLeft=$_channelLeft '
+        'engineReleased=$_engineReleased '
+        'irisDisposed=$_irisDisposed '
+        'staleCallbackIgnoredCount=$_staleCallbackIgnoredCount '
+        'incomingListenerCount=$incomingListenerCount '
+        'activeInviteListenerCount=$activeInviteListenerCount '
+        'activeTimerCount=$activeTimerCount '
+        'nativeCallCount=$nativeCallCount '
+        'sessionIdle=${CallSessionManager.instance.isIdleForDebug} '
+        'resourceBaselineRestored=$resourceBaselineRestored '
+        'stage=$_callV2Stage '
         'callableAttempted=$_callV2CallableAttempted '
         'callableReached=$_callV2CallableReached '
         'tokenReady=$_callV2TokenReady '
