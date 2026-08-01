@@ -44,6 +44,34 @@ class CallV2EngineCleanupResult {
   final String errorCode;
 }
 
+enum CallV2NextEngineBlocker {
+  none,
+  cleanupInProgress,
+  cleanupFailed,
+}
+
+class CallV2NextEngineDecision {
+  const CallV2NextEngineDecision({
+    required this.nextEngineAllowed,
+    required this.blocker,
+    required this.previousCleanupResult,
+    required this.retryAttempted,
+  });
+
+  final bool nextEngineAllowed;
+  final CallV2NextEngineBlocker blocker;
+  final CallV2EngineCleanupResult? previousCleanupResult;
+  final bool retryAttempted;
+
+  String get blockerCode {
+    return switch (blocker) {
+      CallV2NextEngineBlocker.none => 'none',
+      CallV2NextEngineBlocker.cleanupInProgress => 'cleanup_in_progress',
+      CallV2NextEngineBlocker.cleanupFailed => 'cleanup_failed',
+    };
+  }
+}
+
 class CallV2EngineCleanupCoordinator {
   Future<CallV2EngineCleanupResult>? _inFlight;
   int _attemptNumber = 0;
@@ -133,6 +161,106 @@ class CallV2EngineCleanupCoordinator {
       forcedDisposalAttempted: forcedDisposalAttempted,
       irisDisposed: irisDisposed,
       errorCode: errorCode,
+    );
+  }
+}
+
+class CallV2ProcessEngineCleanupGate {
+  CallV2ProcessEngineCleanupGate({
+    CallV2EngineCleanupCoordinator? coordinator,
+  }) : _coordinator = coordinator ?? CallV2EngineCleanupCoordinator();
+
+  final CallV2EngineCleanupCoordinator _coordinator;
+  CallV2EngineCleanupOperations? _retainedOperations;
+  Future<CallV2EngineCleanupResult>? _currentCleanup;
+  CallV2EngineCleanupResult? _previousResult;
+
+  Future<CallV2EngineCleanupResult>? get currentCleanup => _currentCleanup;
+  CallV2EngineCleanupResult? get previousResult => _previousResult;
+  int get previousEngineGeneration => _previousResult?.generation ?? 0;
+  bool get cleanupInProgress => _currentCleanup != null;
+  bool get previousCleanupSucceeded => _previousResult?.succeeded ?? true;
+  bool get previousCleanupFailed => _previousResult?.succeeded == false;
+  bool get retryPossible =>
+      previousCleanupFailed &&
+      _retainedOperations != null &&
+      !cleanupInProgress;
+  bool get nextEngineAllowed => !cleanupInProgress && !previousCleanupFailed;
+  int get attemptNumber => _coordinator.attemptNumber;
+  int get failureCount => _coordinator.failureCount;
+
+  Future<CallV2EngineCleanupResult> cleanup(
+    CallV2EngineCleanupOperations operations,
+  ) {
+    final active = _currentCleanup;
+    if (active != null) return active;
+
+    _retainedOperations = operations;
+    final cleanup = _coordinator.cleanup(operations);
+    _currentCleanup = cleanup;
+    cleanup.then((result) {
+      _previousResult = result;
+      if (result.succeeded) {
+        _retainedOperations = null;
+      }
+      return result;
+    }, onError: (_) {
+      _previousResult = CallV2EngineCleanupResult(
+        generation: operations.generation,
+        attemptNumber: _coordinator.attemptNumber,
+        succeeded: false,
+        handlerUnregistered: false,
+        channelLeft: false,
+        engineReleased: false,
+        forcedDisposalAttempted: false,
+        irisDisposed: false,
+        errorCode: 'cleanup_failed',
+      );
+    }).whenComplete(() {
+      if (identical(_currentCleanup, cleanup)) {
+        _currentCleanup = null;
+      }
+    });
+    return cleanup;
+  }
+
+  Future<CallV2NextEngineDecision> prepareNextEngine() async {
+    if (cleanupInProgress) {
+      return CallV2NextEngineDecision(
+        nextEngineAllowed: false,
+        blocker: CallV2NextEngineBlocker.cleanupInProgress,
+        previousCleanupResult: _previousResult,
+        retryAttempted: false,
+      );
+    }
+
+    if (!previousCleanupFailed) {
+      return CallV2NextEngineDecision(
+        nextEngineAllowed: true,
+        blocker: CallV2NextEngineBlocker.none,
+        previousCleanupResult: _previousResult,
+        retryAttempted: false,
+      );
+    }
+
+    final retained = _retainedOperations;
+    if (retained == null) {
+      return CallV2NextEngineDecision(
+        nextEngineAllowed: false,
+        blocker: CallV2NextEngineBlocker.cleanupFailed,
+        previousCleanupResult: _previousResult,
+        retryAttempted: false,
+      );
+    }
+
+    final retryResult = await cleanup(retained);
+    return CallV2NextEngineDecision(
+      nextEngineAllowed: retryResult.succeeded,
+      blocker: retryResult.succeeded
+          ? CallV2NextEngineBlocker.none
+          : CallV2NextEngineBlocker.cleanupFailed,
+      previousCleanupResult: retryResult,
+      retryAttempted: true,
     );
   }
 }

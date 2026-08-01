@@ -172,19 +172,18 @@ class AgoraCallScreen extends StatefulWidget {
 class _AgoraCallScreenState extends State<AgoraCallScreen> {
   static const MethodChannel _pushTokenChannel =
       MethodChannel('connectapp/pushTokens');
-  static Future<CallV2EngineCleanupResult?> _lastEngineShutdown =
-      Future<CallV2EngineCleanupResult?>.value();
+  static final CallV2ProcessEngineCleanupGate _engineCleanupGate =
+      CallV2ProcessEngineCleanupGate();
   static int _nextCallSequenceNumber = 0;
   static int _nextEngineGeneration = 0;
   static const bool _testMode =
       bool.fromEnvironment('HELPERLY_TEST_MODE', defaultValue: false);
   static const Duration _engineInitializeTimeout = Duration(seconds: 30);
   static const Duration _joinWatchdogTimeout = Duration(seconds: 35);
+  static const Duration _cleanupUiWait = Duration(seconds: 2);
   late final int _callSequenceNumber;
   RtcEngine? _engine;
   RtcEngineEventHandler? _eventHandler;
-  final CallV2EngineCleanupCoordinator _cleanupCoordinator =
-      CallV2EngineCleanupCoordinator();
   int _engineGeneration = 0;
   bool _acceptEngineCallbacks = false;
   String? _token;
@@ -252,6 +251,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   bool _cleanupRetryPossible = false;
   bool _routeCleanupCompleted = false;
   bool _sessionResetCompleted = false;
+  bool _previousCleanupSucceeded = true;
+  bool _nextEngineAllowed = true;
+  bool _nativeCleanupStillRunning = false;
 
   bool get _useFlutterTextureRenderer =>
       Platform.isIOS && _preferFlutterTextureRendererOnIOS;
@@ -525,16 +527,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         await _beginInTestMode();
         return;
       }
-      await _lastEngineShutdown;
-      if (_engine != null && !_cleanupCoordinator.lastCleanupSucceeded) {
-        await _diagCall('engine_recovery_cleanup_start', meta: {
-          'cleanupRetryPossible': _cleanupCoordinator.retryPossible,
-        });
-        final recovery = await _cleanupEngine();
-        if (!recovery.succeeded) {
-          _setCallV2BlockerCode('cleanup_failed');
-          throw StateError('Previous call cleanup has not completed.');
-        }
+      final readiness = await _prepareNextEngineCreation();
+      if (!readiness.nextEngineAllowed) {
+        _setCallV2BlockerCode(readiness.blockerCode);
+        throw StateError('Previous call cleanup has not completed.');
       }
       await _diagCall('engine_wait_previous_shutdown');
       await _diagCall('engine_precleanup_done');
@@ -1317,11 +1313,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       await _diagCall('begin_done');
     } catch (e) {
       if (_engine != null) {
-        try {
-          _lastEngineShutdown = _cleanupEngine();
-          await _lastEngineShutdown;
-        } catch (cleanupError) {
-          await _diagCall('cleanup_failed', meta: {'error': '$cleanupError'});
+        final cleanupResult = await _awaitCleanupForUi(_cleanupEngine());
+        if (cleanupResult == null) {
+          _setCallV2BlockerCode('cleanup_in_progress');
+        } else if (!cleanupResult.succeeded) {
           _setCallV2BlockerCode('cleanup_failed');
         }
       }
@@ -1437,6 +1432,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     bool? cleanupRetryPossible,
     bool? routeCleanupCompleted,
     bool? sessionResetCompleted,
+    bool? previousCleanupSucceeded,
+    bool? nextEngineAllowed,
+    bool? nativeCleanupStillRunning,
   }) {
     void apply() {
       if (previousCleanupCompleted != null) {
@@ -1477,6 +1475,15 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       }
       if (sessionResetCompleted != null) {
         _sessionResetCompleted = sessionResetCompleted;
+      }
+      if (previousCleanupSucceeded != null) {
+        _previousCleanupSucceeded = previousCleanupSucceeded;
+      }
+      if (nextEngineAllowed != null) {
+        _nextEngineAllowed = nextEngineAllowed;
+      }
+      if (nativeCleanupStillRunning != null) {
+        _nativeCleanupStillRunning = nativeCleanupStillRunning;
       }
     }
 
@@ -1641,6 +1648,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       'agora_error',
       'connection_failed',
       'remote_audio_failed',
+      'cleanup_in_progress',
       'cleanup_failed',
     };
     return allowed.contains(value) ? value : 'setup_failed';
@@ -1796,6 +1804,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       channelLeft: false,
       engineReleased: false,
       irisDisposed: false,
+      previousCleanupSucceeded: true,
+      nextEngineAllowed: true,
+      nativeCleanupStillRunning: false,
     );
     await _diagCall('engine_factory_selected', meta: {
       'attempt': attempt,
@@ -2072,6 +2083,50 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     }
   }
 
+  Future<CallV2NextEngineDecision> _prepareNextEngineCreation() async {
+    _syncProcessCleanupStatus();
+    final decision = await _engineCleanupGate.prepareNextEngine();
+    final previous = decision.previousCleanupResult;
+    final nextAllowed = decision.nextEngineAllowed;
+    _updateCallV2LifecycleStatus(
+      previousCleanupCompleted: _engineCleanupGate.previousCleanupSucceeded,
+      previousCleanupSucceeded: _engineCleanupGate.previousCleanupSucceeded,
+      cleanupInProgress: _engineCleanupGate.cleanupInProgress,
+      cleanupAttemptNumber: _engineCleanupGate.attemptNumber,
+      cleanupFailureCount: _engineCleanupGate.failureCount,
+      cleanupRetryPossible: _engineCleanupGate.retryPossible,
+      engineReleased: previous?.engineReleased,
+      irisDisposed: previous?.irisDisposed,
+      nextEngineAllowed: nextAllowed,
+      nativeCleanupStillRunning: _engineCleanupGate.cleanupInProgress,
+      blockerCode: nextAllowed ? 'none' : decision.blockerCode,
+    );
+    await _diagCall('engine_process_gate_checked', meta: {
+      'nextEngineAllowed': nextAllowed,
+      'cleanupInProgress': _engineCleanupGate.cleanupInProgress,
+      'previousCleanupSucceeded': _engineCleanupGate.previousCleanupSucceeded,
+      'retryAttempted': decision.retryAttempted,
+      'previousEngineGeneration': _engineCleanupGate.previousEngineGeneration,
+    });
+    return decision;
+  }
+
+  void _syncProcessCleanupStatus() {
+    final previous = _engineCleanupGate.previousResult;
+    _updateCallV2LifecycleStatus(
+      previousCleanupCompleted: _engineCleanupGate.previousCleanupSucceeded,
+      previousCleanupSucceeded: _engineCleanupGate.previousCleanupSucceeded,
+      cleanupInProgress: _engineCleanupGate.cleanupInProgress,
+      cleanupAttemptNumber: _engineCleanupGate.attemptNumber,
+      cleanupFailureCount: _engineCleanupGate.failureCount,
+      cleanupRetryPossible: _engineCleanupGate.retryPossible,
+      engineReleased: previous?.engineReleased,
+      irisDisposed: previous?.irisDisposed,
+      nextEngineAllowed: _engineCleanupGate.nextEngineAllowed,
+      nativeCleanupStillRunning: _engineCleanupGate.cleanupInProgress,
+    );
+  }
+
   Future<CallV2EngineCleanupResult> _cleanupEngine({bool release = true}) {
     _joinWatchdog?.cancel();
     _joinWatchdog = null;
@@ -2088,12 +2143,15 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       irisDisposed: false,
       routeCleanupCompleted: false,
       sessionResetCompleted: false,
+      previousCleanupSucceeded: false,
+      nextEngineAllowed: false,
+      nativeCleanupStillRunning: true,
     );
 
     if (engine == null) {
       final result = CallV2EngineCleanupResult(
         generation: generation,
-        attemptNumber: _cleanupCoordinator.attemptNumber,
+        attemptNumber: _engineCleanupGate.attemptNumber,
         succeeded: true,
         handlerUnregistered: true,
         channelLeft: true,
@@ -2110,11 +2168,13 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         handlerRegistered: false,
         channelLeft: true,
         engineReleased: true,
-        cleanupAttemptNumber: _cleanupCoordinator.attemptNumber,
-        cleanupFailureCount: _cleanupCoordinator.failureCount,
+        cleanupAttemptNumber: _engineCleanupGate.attemptNumber,
+        cleanupFailureCount: _engineCleanupGate.failureCount,
         cleanupRetryPossible: false,
+        previousCleanupSucceeded: _engineCleanupGate.previousCleanupSucceeded,
+        nextEngineAllowed: _engineCleanupGate.nextEngineAllowed,
+        nativeCleanupStillRunning: _engineCleanupGate.cleanupInProgress,
       );
-      _lastEngineShutdown = Future<CallV2EngineCleanupResult?>.value(result);
       unawaited(_diagCall('cleanup_done', meta: {
         'release': release,
         'hadEngine': false,
@@ -2124,7 +2184,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     }
 
     late final Future<CallV2EngineCleanupResult> attempt;
-    attempt = _cleanupCoordinator.cleanup(
+    attempt = _engineCleanupGate.cleanup(
       CallV2EngineCleanupOperations(
         generation: generation,
         release: release,
@@ -2176,11 +2236,6 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       ),
     );
 
-    _lastEngineShutdown = attempt.then<CallV2EngineCleanupResult?>(
-      (result) => result,
-      onError: (_) => null,
-    );
-
     return attempt.then((result) async {
       final succeeded = result.succeeded;
       if (succeeded) {
@@ -2197,8 +2252,11 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         irisDisposed: result.irisDisposed,
         blockerCode: succeeded ? 'none' : 'cleanup_failed',
         cleanupAttemptNumber: result.attemptNumber,
-        cleanupFailureCount: _cleanupCoordinator.failureCount,
-        cleanupRetryPossible: _cleanupCoordinator.retryPossible,
+        cleanupFailureCount: _engineCleanupGate.failureCount,
+        cleanupRetryPossible: !succeeded && _engineCleanupGate.retryPossible,
+        previousCleanupSucceeded: succeeded,
+        nextEngineAllowed: succeeded,
+        nativeCleanupStillRunning: false,
       );
       await _diagCall(succeeded ? 'cleanup_done' : 'cleanup_failed', meta: {
         'release': release,
@@ -2209,11 +2267,54 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         'forcedDisposalAttempted': result.forcedDisposalAttempted,
         'engineGeneration': generation,
         'attemptNumber': result.attemptNumber,
-        'failureCount': _cleanupCoordinator.failureCount,
+        'failureCount': _engineCleanupGate.failureCount,
         'errorCode': result.errorCode,
       });
       return result;
     });
+  }
+
+  Future<CallV2EngineCleanupResult?> _awaitCleanupForUi(
+    Future<CallV2EngineCleanupResult> cleanup,
+  ) async {
+    final completer = Completer<CallV2EngineCleanupResult?>();
+    Timer? timer;
+    cleanup.then((result) {
+      if (!completer.isCompleted) {
+        completer.complete(result);
+      }
+      return result;
+    }, onError: (_) {
+      if (!completer.isCompleted) {
+        completer.complete(null);
+      }
+    });
+    timer = Timer(_cleanupUiWait, () {
+      if (!completer.isCompleted) {
+        completer.complete(null);
+      }
+    });
+
+    final result = await completer.future;
+    timer.cancel();
+    if (result == null) {
+      _updateCallV2LifecycleStatus(
+        cleanupInProgress: true,
+        previousCleanupCompleted: false,
+        previousCleanupSucceeded: false,
+        cleanupAttemptNumber: _engineCleanupGate.attemptNumber,
+        cleanupFailureCount: _engineCleanupGate.failureCount,
+        cleanupRetryPossible: false,
+        nextEngineAllowed: false,
+        nativeCleanupStillRunning: true,
+        blockerCode: 'cleanup_in_progress',
+      );
+      await _diagCall('cleanup_ui_wait_elapsed', meta: {
+        'nativeCleanupStillRunning': true,
+        'cleanupInProgress': _engineCleanupGate.cleanupInProgress,
+      });
+    }
+    return result;
   }
 
   void _returnToAppAfterCall() {
@@ -2232,7 +2333,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     _autoCloseTimer?.cancel();
     await _diagCall('screen_auto_close', meta: {'reason': reason});
     try {
-      final cleanupResult = await _cleanupEngine();
+      final cleanupResult = await _awaitCleanupForUi(_cleanupEngine());
       await _clearStoredAcceptedCallRecovery();
       await _cleanupCallkitUi(reason: 'screen_terminal_hard_reset');
       _updateCallV2LifecycleStatus(routeCleanupCompleted: true);
@@ -2241,7 +2342,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       );
       _updateCallV2LifecycleStatus(sessionResetCompleted: true);
       _returnToAppAfterCall();
-      if (!cleanupResult.succeeded) {
+      if (cleanupResult == null) {
+        _setCallV2BlockerCode('cleanup_in_progress');
+      } else if (!cleanupResult.succeeded) {
         _setCallV2BlockerCode('cleanup_failed');
       }
     } finally {
@@ -2267,8 +2370,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     _joinWatchdog?.cancel();
     _autoCloseTimer?.cancel();
     _cancelGenerationTimers();
-    _lastEngineShutdown = _cleanupEngine();
-    unawaited(_lastEngineShutdown.catchError((_) => null));
+    unawaited(_cleanupEngine().then<void>((_) {}, onError: (_) {}));
     super.dispose();
   }
 
@@ -2304,7 +2406,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           source: 'end_button',
         );
       }
-      final cleanupResult = await _cleanupEngine();
+      final cleanupResult = await _awaitCleanupForUi(_cleanupEngine());
       await _clearStoredAcceptedCallRecovery();
       await _cleanupCallkitUi(reason: 'manual_end_hard_reset');
       _updateCallV2LifecycleStatus(routeCleanupCompleted: true);
@@ -2313,7 +2415,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       );
       _updateCallV2LifecycleStatus(sessionResetCompleted: true);
       _returnToAppAfterCall();
-      if (!cleanupResult.succeeded) {
+      if (cleanupResult == null) {
+        _setCallV2BlockerCode('cleanup_in_progress');
+      } else if (!cleanupResult.succeeded) {
         _setCallV2BlockerCode('cleanup_failed');
       }
     } finally {
@@ -2729,6 +2833,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         'callSequenceNumber=$_callSequenceNumber '
         'engineGeneration=$_engineGeneration '
         'previousCleanupCompleted=$_previousCleanupCompleted '
+        'previousCleanupSucceeded=$_previousCleanupSucceeded '
+        'nextEngineAllowed=$_nextEngineAllowed '
+        'nativeCleanupStillRunning=$_nativeCleanupStillRunning '
         'cleanupInProgress=$_cleanupInProgress '
         'cleanupAttemptNumber=$_cleanupAttemptNumber '
         'cleanupFailureCount=$_cleanupFailureCount '
