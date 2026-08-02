@@ -954,7 +954,8 @@ class CallSessionManager {
     required bool isCaller,
   }) async {
     final session = _current;
-    if (session == null || session.inviteId != inviteId) return;
+    if (!_canApplyMediaProgress(session, inviteId: inviteId)) return;
+    final generation = session!.lifecycleGeneration;
 
     // The caller opens the call screen while the invite is still ringing.
     // Do not advance the session into the accepted/joining timeout path until
@@ -964,18 +965,30 @@ class CallSessionManager {
       return;
     }
 
-    _callLifecycleArbiter.markJoining(session.lifecycleGeneration);
+    if (!_callLifecycleArbiter.markJoining(generation)) return;
     session.phase = CallSessionPhase.joining;
     _touchSession(session);
-    await _updateInviteForActor(
+    final updated = await _updateInviteForActor(
       inviteId: inviteId,
       isCaller: isCaller,
       stage: 'joining',
+      expectedStatuses: const <CallInviteStatus>{
+        CallInviteStatus.ringing,
+        CallInviteStatus.accepted,
+        CallInviteStatus.joining,
+      },
       extra: <String, dynamic>{
         if (!isCaller) 'status': CallInviteStatus.joining.name,
         if (!isCaller) 'joiningAt': FieldValue.serverTimestamp(),
       },
     );
+    if (!updated ||
+        !_canApplyMediaProgressForGeneration(
+          inviteId: inviteId,
+          generation: generation,
+        )) {
+      return;
+    }
     await _diagManager('joining', meta: {
       'inviteId': inviteId,
       'isCaller': isCaller,
@@ -988,19 +1001,33 @@ class CallSessionManager {
     required bool isCaller,
   }) async {
     final session = _current;
-    if (session == null || session.inviteId != inviteId) return;
+    if (!_canApplyMediaProgress(session, inviteId: inviteId)) return;
+    final generation = session!.lifecycleGeneration;
     session.localJoined = true;
     if (session.phase != CallSessionPhase.connected &&
         (!isCaller || session.status != CallInviteStatus.ringing)) {
-      _callLifecycleArbiter.markJoining(session.lifecycleGeneration);
+      if (!_callLifecycleArbiter.markJoining(generation)) return;
       session.phase = CallSessionPhase.joining;
     }
     _touchSession(session);
-    await _updateInviteForActor(
+    final updated = await _updateInviteForActor(
       inviteId: inviteId,
       isCaller: isCaller,
       stage: 'joined_local',
+      expectedStatuses: const <CallInviteStatus>{
+        CallInviteStatus.ringing,
+        CallInviteStatus.accepted,
+        CallInviteStatus.joining,
+        CallInviteStatus.connected,
+      },
     );
+    if (!updated ||
+        !_canApplyMediaProgressForGeneration(
+          inviteId: inviteId,
+          generation: generation,
+        )) {
+      return;
+    }
 
     // Same rule as reportCallScreenBegan: the caller may join Agora locally
     // before the callee accepts. Only arm the accepted/joining timeout once
@@ -1015,22 +1042,36 @@ class CallSessionManager {
     required bool isCaller,
   }) async {
     final session = _current;
-    if (session == null || session.inviteId != inviteId) return;
+    if (!_canApplyMediaProgress(session, inviteId: inviteId)) return;
+    final generation = session!.lifecycleGeneration;
     session.remoteJoined = true;
-    _callLifecycleArbiter.markConnected(session.lifecycleGeneration);
+    if (!_callLifecycleArbiter.markConnected(generation)) return;
     session.phase = CallSessionPhase.connected;
     session.status = CallInviteStatus.connected;
     _touchSession(session);
     _cancelSessionTimers();
-    await _updateInviteForActor(
+    final updated = await _updateInviteForActor(
       inviteId: inviteId,
       isCaller: isCaller,
       stage: 'connected',
+      expectedStatuses: const <CallInviteStatus>{
+        CallInviteStatus.ringing,
+        CallInviteStatus.accepted,
+        CallInviteStatus.joining,
+        CallInviteStatus.connected,
+      },
       extra: <String, dynamic>{
         'status': CallInviteStatus.connected.name,
         'connectedAt': FieldValue.serverTimestamp(),
       },
     );
+    if (!updated ||
+        !_canApplyMediaProgressForGeneration(
+          inviteId: inviteId,
+          generation: generation,
+        )) {
+      return;
+    }
     await _diagManager('connected', meta: {
       'inviteId': inviteId,
       'isCaller': isCaller,
@@ -1738,24 +1779,6 @@ class CallSessionManager {
       final status = _parseStatus(data['status']);
       final session = _current;
       if (session == null || session.inviteId != inviteId) return;
-      session.status = status;
-      _touchSession(session);
-      _restartTimeoutsForStatus(status);
-
-      if (status == CallInviteStatus.connected) {
-        _callLifecycleArbiter.markConnected(session.lifecycleGeneration);
-        session.phase = CallSessionPhase.connected;
-        return;
-      }
-
-      if (status == CallInviteStatus.accepted ||
-          status == CallInviteStatus.joining) {
-        if (session.phase != CallSessionPhase.connected) {
-          _callLifecycleArbiter.markJoining(session.lifecycleGeneration);
-          session.phase = CallSessionPhase.joining;
-        }
-        return;
-      }
 
       if (_isTerminalStatus(status)) {
         await _emitTerminalSignal(
@@ -1764,6 +1787,45 @@ class CallSessionManager {
           message: _terminalMessageForStatus(status, data: data),
           isError: status == CallInviteStatus.failed,
         );
+        return;
+      }
+
+      if (_isProgressStatus(status) &&
+          !_canApplyMediaProgress(session, inviteId: inviteId)) {
+        return;
+      }
+
+      if (status == CallInviteStatus.connected) {
+        if (!_callLifecycleArbiter.markConnected(session.lifecycleGeneration)) {
+          return;
+        }
+        session.status = status;
+        session.phase = CallSessionPhase.connected;
+        _touchSession(session);
+        _restartTimeoutsForStatus(status);
+        return;
+      }
+
+      if (status == CallInviteStatus.accepted ||
+          status == CallInviteStatus.joining) {
+        if (session.phase != CallSessionPhase.connected) {
+          if (!_callLifecycleArbiter.markJoining(
+            session.lifecycleGeneration,
+          )) {
+            return;
+          }
+          session.status = status;
+          session.phase = CallSessionPhase.joining;
+          _touchSession(session);
+          _restartTimeoutsForStatus(status);
+        }
+        return;
+      }
+
+      if (status == CallInviteStatus.ringing) {
+        session.status = status;
+        _touchSession(session);
+        _restartTimeoutsForStatus(status);
       }
     });
   }
@@ -2237,23 +2299,33 @@ class CallSessionManager {
     );
   }
 
-  Future<void> _updateInviteForActor({
+  Future<bool> _updateInviteForActor({
     required String inviteId,
     required bool isCaller,
     required String stage,
+    required Set<CallInviteStatus> expectedStatuses,
     Map<String, dynamic>? extra,
   }) async {
+    if (inviteId.trim().isEmpty) return false;
     final prefix = isCaller ? 'caller' : 'callee';
     final update = <String, dynamic>{
       '${prefix}Stage': stage,
       ...?extra,
     };
     try {
-      await _db
-          .collection('callInvites')
-          .doc(inviteId)
-          .set(update, SetOptions(merge: true));
-    } catch (_) {}
+      return await _db.runTransaction<bool>((tx) async {
+        final ref = _db.collection('callInvites').doc(inviteId);
+        final snap = await tx.get(ref);
+        if (!snap.exists) return false;
+        final data = snap.data() ?? const <String, dynamic>{};
+        final status = _parseStatus(data['status']);
+        if (!expectedStatuses.contains(status)) return false;
+        tx.set(ref, update, SetOptions(merge: true));
+        return true;
+      });
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> _declineInviteTransaction(
@@ -2403,6 +2475,38 @@ class CallSessionManager {
     final current = _current;
     if (current == null) return false;
     return !current.isTerminal;
+  }
+
+  bool _canApplyMediaProgress(
+    _CallSession? session, {
+    required String inviteId,
+  }) {
+    if (session == null || session.inviteId != inviteId) return false;
+    return _canApplyMediaProgressForGeneration(
+      inviteId: inviteId,
+      generation: session.lifecycleGeneration,
+    );
+  }
+
+  bool _canApplyMediaProgressForGeneration({
+    required String inviteId,
+    required int generation,
+  }) {
+    final session = _current;
+    if (session == null || session.inviteId != inviteId) return false;
+    if (session.lifecycleGeneration != generation) return false;
+    if (session.isTerminal || _isTerminalStatus(session.status)) return false;
+    if (!_callLifecycleArbiter.ownsGeneration(generation)) return false;
+    final lifecycleState = _callLifecycleArbiter.state;
+    return lifecycleState != CallV2CallLifecycleState.ending &&
+        lifecycleState != CallV2CallLifecycleState.teardown;
+  }
+
+  static bool _isProgressStatus(CallInviteStatus status) {
+    return status == CallInviteStatus.ringing ||
+        status == CallInviteStatus.accepted ||
+        status == CallInviteStatus.joining ||
+        status == CallInviteStatus.connected;
   }
 
   void _cancelSessionTimers() {

@@ -510,6 +510,82 @@ void main() {
     expect(arbiter.generation, second.generation);
   });
 
+  test('ending suppresses same-generation late connected transition', () {
+    final arbiter = CallV2CallLifecycleArbiter();
+
+    final active = arbiter.reserveOutgoing();
+    arbiter.outgoingInviteCreated(
+      generation: active.generation,
+      inviteId: 'invite_a',
+    );
+    arbiter.markJoining(active.generation);
+    arbiter.markConnected(active.generation);
+    arbiter.beginEnding(active.generation);
+
+    final accepted = arbiter.markConnected(active.generation);
+
+    expect(accepted, isFalse);
+    expect(arbiter.state, CallV2CallLifecycleState.ending);
+    expect(arbiter.lifecycleRegressionSuppressedCount, 1);
+  });
+
+  test('teardown suppresses same-generation late joining transition', () {
+    final arbiter = CallV2CallLifecycleArbiter();
+
+    final active = arbiter.reserveOutgoing();
+    arbiter.outgoingInviteCreated(
+      generation: active.generation,
+      inviteId: 'invite_a',
+    );
+    arbiter.markJoining(active.generation);
+    arbiter.markConnected(active.generation);
+    arbiter.beginTeardown(active.generation);
+
+    final accepted = arbiter.markJoining(active.generation);
+
+    expect(accepted, isFalse);
+    expect(arbiter.state, CallV2CallLifecycleState.teardown);
+    expect(arbiter.lifecycleRegressionSuppressedCount, 1);
+  });
+
+  test('teardown cannot regress back to ending', () {
+    final arbiter = CallV2CallLifecycleArbiter();
+
+    final active = arbiter.reserveOutgoing();
+    arbiter.outgoingInviteCreated(
+      generation: active.generation,
+      inviteId: 'invite_a',
+    );
+    arbiter.markJoining(active.generation);
+    arbiter.markConnected(active.generation);
+    arbiter.beginEnding(active.generation);
+    arbiter.beginTeardown(active.generation);
+
+    final accepted = arbiter.beginEnding(active.generation);
+
+    expect(accepted, isFalse);
+    expect(arbiter.state, CallV2CallLifecycleState.teardown);
+    expect(arbiter.lifecycleRegressionSuppressedCount, 1);
+  });
+
+  test('connected suppresses same-generation late joining transition', () {
+    final arbiter = CallV2CallLifecycleArbiter();
+
+    final active = arbiter.reserveOutgoing();
+    arbiter.outgoingInviteCreated(
+      generation: active.generation,
+      inviteId: 'invite_a',
+    );
+    arbiter.markJoining(active.generation);
+    arbiter.markConnected(active.generation);
+
+    final accepted = arbiter.markJoining(active.generation);
+
+    expect(accepted, isFalse);
+    expect(arbiter.state, CallV2CallLifecycleState.connected);
+    expect(arbiter.lifecycleRegressionSuppressedCount, 1);
+  });
+
   test('old pending cannot win after newer pending is atomically claimed', () {
     final arbiter = CallV2CallLifecycleArbiter();
 

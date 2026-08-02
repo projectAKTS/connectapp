@@ -351,8 +351,8 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       return;
     }
     _seenTerminalInviteStatus = signal.status;
+    _quiesceEngineCallbacksForTerminal();
     _ringTimeout?.cancel();
-    _joinWatchdog?.cancel();
     setState(() {
       _isLoading = false;
       _ended = true;
@@ -1142,6 +1142,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           if (widget.isVideo) {
             await _forceVideoAudioState(engine, source: 'join_success');
           }
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onJoinChannelSuccess_after_await',
+          )) {
+            return;
+          }
           if (mounted) {
             setState(() {
               _joined = true;
@@ -1159,6 +1165,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
             'callV2Selected': _callV2Selected,
             'elapsedMs': elapsed,
           });
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onUserJoined_after_diag',
+          )) {
+            return;
+          }
           _ringTimeout?.cancel();
           _remoteEverJoined = true;
           if (mounted) {
@@ -1190,6 +1202,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
           if (widget.isVideo) {
             await _forceVideoAudioState(engine, source: 'remote_joined');
+          }
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onUserJoined_after_await',
+          )) {
+            return;
           }
 
           final inviteId = (widget.inviteId ?? '').trim();
@@ -1527,6 +1545,13 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       timer.cancel();
     }
     _generationTimers.clear();
+  }
+
+  void _quiesceEngineCallbacksForTerminal() {
+    _acceptEngineCallbacks = false;
+    _joinWatchdog?.cancel();
+    _joinWatchdog = null;
+    _cancelGenerationTimers();
   }
 
   int _activeScreenTimerCount() {
@@ -2330,6 +2355,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   Future<void> _closeScreenAfterTerminalState(String reason) async {
     if (_endingCall) return;
     _endingCall = true;
+    _quiesceEngineCallbacksForTerminal();
     _autoCloseTimer?.cancel();
     await _diagCall('screen_auto_close', meta: {'reason': reason});
     try {
@@ -2396,9 +2422,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   Future<void> _endCall() async {
     if (_endingCall) return;
     _endingCall = true;
+    _quiesceEngineCallbacksForTerminal();
     try {
       await _diagCall('end_pressed');
-      _joinWatchdog?.cancel();
       final id = (widget.inviteId ?? '').trim();
       if (id.isNotEmpty) {
         await CallSessionManager.instance.endCallFromLocalUser(

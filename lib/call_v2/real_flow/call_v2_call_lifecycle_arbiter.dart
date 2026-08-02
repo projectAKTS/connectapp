@@ -78,6 +78,7 @@ class CallV2CallLifecycleArbiter {
   int _displacedPendingSupersededCount = 0;
   int _preflightLifecycleMutationBlockedCount = 0;
   int _orphanInviteCancelledCount = 0;
+  int _lifecycleRegressionSuppressedCount = 0;
 
   CallV2CallLifecycleState get state => _state;
   int get generation => _generation;
@@ -106,6 +107,8 @@ class CallV2CallLifecycleArbiter {
   int get preflightLifecycleMutationBlockedCount =>
       _preflightLifecycleMutationBlockedCount;
   int get orphanInviteCancelledCount => _orphanInviteCancelledCount;
+  int get lifecycleRegressionSuppressedCount =>
+      _lifecycleRegressionSuppressedCount;
 
   bool get isIdle => _state == CallV2CallLifecycleState.idle;
 
@@ -235,15 +238,16 @@ class CallV2CallLifecycleArbiter {
     _claimedInviteId = null;
   }
 
-  void incomingAccepted({
+  bool incomingAccepted({
     required int generation,
     required String inviteId,
   }) {
     if (!ownsIncoming(generation: generation, inviteId: inviteId)) {
       _staleCandidateDroppedCount += 1;
-      return;
+      return false;
     }
     _state = CallV2CallLifecycleState.joining;
+    return true;
   }
 
   void incomingDeclined({
@@ -257,28 +261,72 @@ class CallV2CallLifecycleArbiter {
     _claimedInviteId = null;
   }
 
-  void markJoining(int generation) {
-    if (_generation == generation) {
+  bool markJoining(int generation) {
+    if (_generation != generation) {
+      _staleCandidateDroppedCount += 1;
+      return false;
+    }
+    if (_state == CallV2CallLifecycleState.outgoingRinging ||
+        _state == CallV2CallLifecycleState.joining) {
       _state = CallV2CallLifecycleState.joining;
+      return true;
     }
+    _lifecycleRegressionSuppressedCount += 1;
+    return false;
   }
 
-  void markConnected(int generation) {
-    if (_generation == generation) {
+  bool markConnected(int generation) {
+    if (_generation != generation) {
+      _staleCandidateDroppedCount += 1;
+      return false;
+    }
+    if (_state == CallV2CallLifecycleState.outgoingRinging ||
+        _state == CallV2CallLifecycleState.joining ||
+        _state == CallV2CallLifecycleState.connected) {
       _state = CallV2CallLifecycleState.connected;
+      return true;
     }
+    _lifecycleRegressionSuppressedCount += 1;
+    return false;
   }
 
-  void beginEnding(int generation) {
-    if (_generation == generation) {
+  bool beginEnding(int generation) {
+    if (_generation != generation) {
+      _staleCandidateDroppedCount += 1;
+      return false;
+    }
+    if (_state == CallV2CallLifecycleState.teardown) {
+      _lifecycleRegressionSuppressedCount += 1;
+      return false;
+    }
+    if (_state == CallV2CallLifecycleState.outgoingRinging ||
+        _state == CallV2CallLifecycleState.joining ||
+        _state == CallV2CallLifecycleState.connected ||
+        _state == CallV2CallLifecycleState.incomingPrompt ||
+        _state == CallV2CallLifecycleState.ending) {
       _state = CallV2CallLifecycleState.ending;
+      return true;
     }
+    _lifecycleRegressionSuppressedCount += 1;
+    return false;
   }
 
-  void beginTeardown(int generation) {
-    if (_generation == generation) {
-      _state = CallV2CallLifecycleState.teardown;
+  bool beginTeardown(int generation) {
+    if (_generation != generation) {
+      _staleCandidateDroppedCount += 1;
+      return false;
     }
+    if (_state == CallV2CallLifecycleState.outgoingRinging ||
+        _state == CallV2CallLifecycleState.joining ||
+        _state == CallV2CallLifecycleState.connected ||
+        _state == CallV2CallLifecycleState.incomingPrompt ||
+        _state == CallV2CallLifecycleState.ending ||
+        _state == CallV2CallLifecycleState.teardown) {
+      _state = CallV2CallLifecycleState.teardown;
+      return true;
+    }
+    _lifecycleRegressionSuppressedCount += 1;
+    return false;
   }
 
   CallV2PendingClaim completeTeardownAndClaimPending(int generation) {
@@ -353,6 +401,7 @@ class CallV2CallLifecycleArbiter {
     _displacedPendingSupersededCount = 0;
     _preflightLifecycleMutationBlockedCount = 0;
     _orphanInviteCancelledCount = 0;
+    _lifecycleRegressionSuppressedCount = 0;
   }
 
   Map<String, Object?> toSafeDebugMap() {
@@ -384,6 +433,7 @@ class CallV2CallLifecycleArbiter {
       'preflightLifecycleMutationBlockedCount':
           preflightLifecycleMutationBlockedCount,
       'orphanInviteCancelledCount': orphanInviteCancelledCount,
+      'lifecycleRegressionSuppressedCount': lifecycleRegressionSuppressedCount,
     };
   }
 }
