@@ -156,6 +156,7 @@ class CallSessionManager {
   NativeCallEnder? _endNativeCall;
   StoredAcceptedCallRecoveryClearer? _clearStoredAcceptedCallRecovery;
   AppForegroundProvider? _appForegroundProvider;
+  Future<void> Function()? _afterOutgoingInviteWriteForTest;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _incomingInviteSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _activeInviteSub;
   Timer? _ringingTimeoutTimer;
@@ -188,6 +189,15 @@ class CallSessionManager {
   String get debugLastDiagStage => _lastDiagStage;
   String get debugLastDiagMeta => _lastDiagMeta;
   Map<String, dynamic> debugSnapshot() => _sessionSnapshot();
+  bool get _debugTestAccessEnabled {
+    var enabled = HelperlyTestRuntime.isEnabled;
+    assert(() {
+      enabled = true;
+      return true;
+    }());
+    return enabled;
+  }
+
   Map<String, int> debugResourceCounts() {
     final incomingInviteListenerCount = _incomingInviteSub == null ? 0 : 1;
     final activeInviteListenerCount = _activeInviteSub == null ? 0 : 1;
@@ -243,6 +253,7 @@ class CallSessionManager {
     _pendingIncomingPromptRetryTimer = null;
     _pendingIncomingPromptPayload = null;
     _pendingIncomingPromptSource = null;
+    _afterOutgoingInviteWriteForTest = null;
     _callLifecycleArbiter.forceIdleForTest();
   }
 
@@ -270,6 +281,7 @@ class CallSessionManager {
     NativeCallEnder? endNativeCall,
     StoredAcceptedCallRecoveryClearer? clearStoredAcceptedCallRecovery,
     AppForegroundProvider? appForegroundProvider,
+    Future<void> Function()? afterOutgoingInviteWriteForTest,
   }) {
     if (navigatorKey != null) {
       _navigatorKey = navigatorKey;
@@ -286,6 +298,80 @@ class CallSessionManager {
     if (appForegroundProvider != null) {
       _appForegroundProvider = appForegroundProvider;
     }
+    if (afterOutgoingInviteWriteForTest != null) {
+      _afterOutgoingInviteWriteForTest = afterOutgoingInviteWriteForTest;
+    }
+  }
+
+  Future<int> debugCreateHeldCallRouteForTest({
+    required String inviteId,
+    required String channel,
+    CallInviteStatus status = CallInviteStatus.connected,
+  }) async {
+    if (!_debugTestAccessEnabled) {
+      throw StateError('debugCreateHeldCallRouteForTest is test-mode only');
+    }
+    final reservation = _callLifecycleArbiter.reserveOutgoing();
+    if (!reservation.reserved) {
+      throw StateError('Unable to reserve test lifecycle');
+    }
+    final owned = _callLifecycleArbiter.outgoingInviteCreated(
+      generation: reservation.generation,
+      inviteId: inviteId,
+    );
+    if (!owned) throw StateError('Unable to own test lifecycle');
+    _callLifecycleArbiter.markConnected(reservation.generation);
+    _current = _CallSession(
+      inviteId: inviteId,
+      channel: channel,
+      isVideo: false,
+      isCaller: true,
+      otherUserId: 'test_remote',
+      otherUserName: 'Test Remote',
+      phase: CallSessionPhase.connected,
+      status: status,
+      lifecycleGeneration: reservation.generation,
+    );
+    _callRouteActive = true;
+    return reservation.generation;
+  }
+
+  Future<void> debugMarkHeldRouteTerminalForTest(String inviteId) async {
+    if (!_debugTestAccessEnabled) {
+      throw StateError('debugMarkHeldRouteTerminalForTest is test-mode only');
+    }
+    final session = _current;
+    if (session == null || session.inviteId != inviteId) return;
+    _callLifecycleArbiter.beginEnding(session.lifecycleGeneration);
+    session.phase = CallSessionPhase.terminal;
+    session.status = CallInviteStatus.ended;
+  }
+
+  Future<void> debugRunPreflightForTest(String reason) async {
+    if (!_debugTestAccessEnabled) {
+      throw StateError('debugRunPreflightForTest is test-mode only');
+    }
+    await _runPreflightSweepSafely(reason: reason);
+  }
+
+  Future<void> debugCloseHeldRouteForTest(String inviteId) async {
+    if (!_debugTestAccessEnabled) {
+      throw StateError('debugCloseHeldRouteForTest is test-mode only');
+    }
+    _callRouteActive = false;
+    _openingCallRoute = false;
+    await _finalizeTerminalSessionCleanup(
+      inviteId: inviteId,
+      reason: 'debug_route_closed',
+      forceClearUiFlags: true,
+    );
+  }
+
+  void debugInvalidateLifecycleForTest() {
+    if (!_debugTestAccessEnabled) {
+      throw StateError('debugInvalidateLifecycleForTest is test-mode only');
+    }
+    _callLifecycleArbiter.invalidateForProductionReset();
   }
 
   void clearStaleUiFlags() {
@@ -294,6 +380,7 @@ class CallSessionManager {
     _callRouteActive = false;
     _incomingPromptActive = false;
     _incomingPromptInviteId = null;
+    _callLifecycleArbiter.invalidateForProductionReset();
   }
 
   Future<void> bindIncomingInviteListener() async {
@@ -407,6 +494,7 @@ class CallSessionManager {
   }
 
   Future<void> clearForSignedOut() async {
+    _afterOutgoingInviteWriteForTest = null;
     await _incomingInviteSub?.cancel();
     _incomingInviteSub = null;
     _incomingListenerRebindTimer?.cancel();
@@ -422,7 +510,7 @@ class CallSessionManager {
       clearHandledInvites: true,
       forceClearUiFlags: true,
     );
-    _callLifecycleArbiter.forceIdleForTest();
+    _callLifecycleArbiter.invalidateForProductionReset();
   }
 
   Future<void> hardResetForNewCall({
@@ -538,6 +626,16 @@ class CallSessionManager {
       'blockerCode': callV2Decision.blockerCode,
     });
     await FirestoreReadHelper.recoverNetwork(reason: 'outgoing_call_start');
+    if (!_callLifecycleArbiter.ownsOutgoingReservation(
+      outgoingReservation.generation,
+    )) {
+      await _diagManager('start_blocked', meta: {
+        ..._sessionSnapshot(),
+        'requestedIsVideo': isVideo,
+        'reason': 'reservation_lost_before_preflight',
+      });
+      return false;
+    }
 
     final channel = generateChannelName(meUid, toUid);
     final inviteRef = _db.collection('callInvites').doc();
@@ -550,6 +648,16 @@ class CallSessionManager {
       reason: isVideo ? 'outgoing_video_preflight' : 'outgoing_audio_preflight',
       endUnownedNativeCalls: true,
     );
+    if (!_callLifecycleArbiter.ownsOutgoingReservation(
+      outgoingReservation.generation,
+    )) {
+      await _diagManager('start_blocked', meta: {
+        ..._sessionSnapshot(),
+        'requestedIsVideo': isVideo,
+        'reason': 'reservation_lost_during_preflight',
+      });
+      return false;
+    }
     await _diagManager('preflight_done', meta: {
       'isVideo': isVideo,
       'callV2Selected': callV2Decision.callV2Selected,
@@ -578,6 +686,16 @@ class CallSessionManager {
       'isVideo': isVideo,
       'callV2Selected': callV2Decision.callV2Selected,
     });
+    if (!_callLifecycleArbiter.ownsOutgoingReservation(
+      outgoingReservation.generation,
+    )) {
+      await _diagManager('start_blocked', meta: {
+        ..._sessionSnapshot(),
+        'requestedIsVideo': isVideo,
+        'reason': 'reservation_lost_before_invite_write',
+      });
+      return false;
+    }
     try {
       final inviteData = <String, dynamic>{
         'fromUid': meUid,
@@ -605,6 +723,21 @@ class CallSessionManager {
       await inviteRef.set({
         ...inviteData,
       }).timeout(const Duration(seconds: 8));
+      if (_debugTestAccessEnabled) {
+        await _afterOutgoingInviteWriteForTest?.call();
+      }
+      if (!_callLifecycleArbiter.ownsOutgoingReservation(
+        outgoingReservation.generation,
+      )) {
+        await _cancelOrphanOutgoingInvite(inviteRef.id);
+        _callLifecycleArbiter.recordOrphanInviteCancelled();
+        await _diagManager('start_blocked', meta: {
+          ..._sessionSnapshot(),
+          'requestedIsVideo': isVideo,
+          'reason': 'reservation_lost_after_invite_write',
+        });
+        return false;
+      }
     } catch (error) {
       await _diagManager('failed', meta: {
         'source': 'invite_write',
@@ -628,10 +761,19 @@ class CallSessionManager {
       'isVideo': isVideo,
       'callV2Selected': callV2Decision.callV2Selected,
     });
-    _callLifecycleArbiter.outgoingInviteCreated(
+    final inviteOwned = _callLifecycleArbiter.outgoingInviteCreated(
       generation: outgoingReservation.generation,
       inviteId: inviteRef.id,
     );
+    if (!inviteOwned) {
+      await _cancelOrphanOutgoingInvite(inviteRef.id);
+      await _diagManager('start_blocked', meta: {
+        ..._sessionSnapshot(),
+        'requestedIsVideo': isVideo,
+        'reason': 'reservation_lost_before_session_activation',
+      });
+      return false;
+    }
 
     final session = _CallSession(
       inviteId: inviteRef.id,
@@ -716,7 +858,6 @@ class CallSessionManager {
     bool autoAccept = false,
     required String source,
   }) async {
-    await _runPreflightSweepSafely(reason: 'incoming_tap:$source');
     final payload = await _loadInvitePayload(
       inviteId: inviteId,
       fallbackChannel: channel,
@@ -740,7 +881,6 @@ class CallSessionManager {
     required String fromName,
     String? fromUid,
   }) async {
-    await _runPreflightSweepSafely(reason: 'recovered_accept_preflight');
     final payload = await _loadInvitePayload(
       inviteId: inviteId,
       fallbackChannel: channel,
@@ -1075,6 +1215,18 @@ class CallSessionManager {
       return;
     }
     if (reservation.action == CallV2CallReservationAction.pending) {
+      final displacedInviteId = reservation.displacedInviteId;
+      if (displacedInviteId != null) {
+        await _declineInviteTransaction(
+          displacedInviteId,
+          source: 'superseded_pending_invite',
+        );
+        _markInviteHandled(displacedInviteId);
+        await _diagManager('incoming_pending_superseded', meta: {
+          'source': source,
+          'via': via,
+        });
+      }
       _schedulePendingIncomingPrompt(
         payload,
         source: source,
@@ -1323,8 +1475,7 @@ class CallSessionManager {
       await _declineInviteTransaction(payload.inviteId,
           source: 'busy_active_call');
       if (lifecycleGeneration != null) {
-        _callLifecycleArbiter.beginTeardown(lifecycleGeneration);
-        _callLifecycleArbiter.completeTeardown(lifecycleGeneration);
+        _releaseFailedIncomingGeneration(lifecycleGeneration);
       }
       return;
     }
@@ -1340,8 +1491,7 @@ class CallSessionManager {
     if (acceptResult != _AcceptInviteResult.accepted &&
         acceptResult != _AcceptInviteResult.alreadyAccepted) {
       if (lifecycleGeneration != null) {
-        _callLifecycleArbiter.beginTeardown(lifecycleGeneration);
-        _callLifecycleArbiter.completeTeardown(lifecycleGeneration);
+        _releaseFailedIncomingGeneration(lifecycleGeneration);
       }
       return;
     }
@@ -1375,8 +1525,7 @@ class CallSessionManager {
         latestStatus == CallInviteStatus.connected ||
         latestStatus == CallInviteStatus.ringing)) {
       if (lifecycleGeneration != null) {
-        _callLifecycleArbiter.beginTeardown(lifecycleGeneration);
-        _callLifecycleArbiter.completeTeardown(lifecycleGeneration);
+        _releaseFailedIncomingGeneration(lifecycleGeneration);
       }
       return;
     }
@@ -1399,6 +1548,20 @@ class CallSessionManager {
 
     _callLifecycleArbiter.markJoining(generation);
     await _activateSession(session, openScreen: true, source: source);
+  }
+
+  void _releaseFailedIncomingGeneration(int lifecycleGeneration) {
+    _callLifecycleArbiter.beginTeardown(lifecycleGeneration);
+    final claim = _callLifecycleArbiter.completeTeardownAndClaimPending(
+      lifecycleGeneration,
+    );
+    final claimedInviteId = claim.inviteId;
+    if (claim.claimed && claimedInviteId != null) {
+      _callLifecycleArbiter.dropIncoming(
+        generation: claim.generation,
+        inviteId: claimedInviteId,
+      );
+    }
   }
 
   Future<_AcceptInviteResult> _acceptInviteTransactionWithRetry(
@@ -1717,6 +1880,23 @@ class CallSessionManager {
         ..._sessionSnapshot(nativeCalls: nativeCalls),
         'reason': reason,
       });
+      if (_callRouteActive || _openingCallRoute) {
+        _callLifecycleArbiter.beginTeardown(session.lifecycleGeneration);
+        _callLifecycleArbiter.recordPreflightLifecycleMutationBlocked();
+        await _diagManager('stale_session_reset_deferred_route_active', meta: {
+          ..._sessionSnapshot(nativeCalls: nativeCalls),
+          'reason': reason,
+        });
+        return;
+      }
+      if (session.isTerminal || _isTerminalStatus(session.status)) {
+        await _finalizeTerminalSessionCleanup(
+          inviteId: session.inviteId,
+          reason: reason,
+          forceClearUiFlags: true,
+        );
+        return;
+      }
       _callLifecycleArbiter.beginTeardown(session.lifecycleGeneration);
       await _resetSessionState(
         reason: reason,
@@ -1725,7 +1905,7 @@ class CallSessionManager {
         clearStoredAcceptedRecovery: true,
         forceClearUiFlags: true,
       );
-      _callLifecycleArbiter.completeTeardown(session.lifecycleGeneration);
+      _callLifecycleArbiter.invalidateForProductionReset();
       return;
     }
 
@@ -1742,7 +1922,7 @@ class CallSessionManager {
           clearStoredAcceptedRecovery: true,
           forceClearUiFlags: true,
         );
-        _callLifecycleArbiter.forceIdleForTest();
+        _callLifecycleArbiter.invalidateForProductionReset();
         if (endUnownedNativeCalls && nativeCalls.isNotEmpty) {
           await _endStaleNativeCalls(keepCallkitId: null, reason: reason);
         }
@@ -1812,18 +1992,33 @@ class CallSessionManager {
       forceClearUiFlags:
           forceClearUiFlags || (!_callRouteActive && !_openingCallRoute),
     );
-    final pendingInviteId =
-        _callLifecycleArbiter.completeTeardown(session.lifecycleGeneration);
-    if (pendingInviteId != null &&
-        pendingPayload != null &&
-        pendingPayload.inviteId == pendingInviteId &&
-        pendingSource != null) {
-      _schedulePendingIncomingPrompt(
-        pendingPayload,
-        source: pendingSource,
-        reason: 'teardown_complete',
-      );
+    final pendingClaim = _callLifecycleArbiter.completeTeardownAndClaimPending(
+      session.lifecycleGeneration,
+    );
+    if (!pendingClaim.claimed) return;
+    final claimedInviteId = pendingClaim.inviteId;
+    if (claimedInviteId == null ||
+        pendingPayload == null ||
+        pendingPayload.inviteId != claimedInviteId ||
+        pendingSource == null) {
+      if (claimedInviteId != null) {
+        _callLifecycleArbiter.dropIncoming(
+          generation: pendingClaim.generation,
+          inviteId: claimedInviteId,
+        );
+      }
+      return;
     }
+    _incomingPromptActive = true;
+    _incomingPromptInviteId = pendingPayload.inviteId;
+    await _diagManager('incoming_pending_claimed_after_teardown', meta: {
+      'source': pendingSource,
+    });
+    unawaited(_presentIncomingPrompt(
+      pendingPayload,
+      source: '$pendingSource:teardown_complete',
+      lifecycleGeneration: pendingClaim.generation,
+    ));
   }
 
   Future<void> _resetSessionState({
@@ -2086,6 +2281,22 @@ class CallSessionManager {
             SetOptions(merge: true));
       });
     } catch (_) {}
+  }
+
+  Future<void> _cancelOrphanOutgoingInvite(String inviteId) async {
+    if (inviteId.trim().isEmpty) return;
+    await _setInviteStatusIfCurrent(
+      inviteId: inviteId,
+      expectedStatuses: const <CallInviteStatus>{CallInviteStatus.ringing},
+      updates: <String, dynamic>{
+        'status': CallInviteStatus.cancelled.name,
+        'cancelledAt': FieldValue.serverTimestamp(),
+        'endedAt': FieldValue.serverTimestamp(),
+        'endedBy': _currentUid,
+        'endReason': 'orphan_outgoing_reservation_lost',
+        'callerStage': 'cancelled',
+      },
+    );
   }
 
   Future<void> _setInviteStatusIfCurrent({

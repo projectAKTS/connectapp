@@ -330,7 +330,7 @@ void main() {
     expect(arbiter.busyInviteDeclinedCount, 1);
   });
 
-  test('invite during teardown waits and presents once after idle', () {
+  test('invite during teardown transfers directly into one prompt claim', () {
     final arbiter = CallV2CallLifecycleArbiter();
 
     final outgoing = arbiter.reserveOutgoing();
@@ -348,11 +348,19 @@ void main() {
     expect(arbiter.pendingIncomingCount, 1);
     expect(arbiter.activePromptCount, 0);
 
-    final pendingInvite = arbiter.completeTeardown(outgoing.generation);
-    final claimed = arbiter.reserveIncoming(pendingInvite!);
+    final claimed = arbiter.completeTeardownAndClaimPending(
+      outgoing.generation,
+    );
 
-    expect(pendingInvite, 'invite_b');
-    expect(claimed.action, CallV2CallReservationAction.reserved);
+    expect(claimed.claimed, isTrue);
+    expect(claimed.inviteId, 'invite_b');
+    expect(claimed.generation, greaterThan(outgoing.generation));
+    expect(
+        arbiter.ownsIncoming(
+          generation: claimed.generation,
+          inviteId: 'invite_b',
+        ),
+        isTrue);
     expect(arbiter.activePromptCount, 1);
   });
 
@@ -367,16 +375,18 @@ void main() {
     arbiter.markConnected(outgoing.generation);
     arbiter.beginTeardown(outgoing.generation);
 
-    expect(
-      arbiter.reserveIncoming('invite_b').action,
-      CallV2CallReservationAction.pending,
-    );
+    final pendingB = arbiter.reserveIncoming('invite_b');
+    expect(pendingB.action, CallV2CallReservationAction.pending);
     expect(
       arbiter.reserveIncoming('invite_c').action,
       CallV2CallReservationAction.pending,
     );
 
-    expect(arbiter.completeTeardown(outgoing.generation), 'invite_c');
+    final claim = arbiter.completeTeardownAndClaimPending(outgoing.generation);
+    expect(claim.claimed, isTrue);
+    expect(claim.inviteId, 'invite_c');
+    expect(arbiter.pendingIncomingCount, 0);
+    expect(arbiter.displacedPendingSupersededCount, 1);
   });
 
   test('rapid outgoing redial during ending does not clear active generation',
@@ -413,7 +423,10 @@ void main() {
       arbiter.markConnected(reservation.generation);
       arbiter.beginEnding(reservation.generation);
       arbiter.beginTeardown(reservation.generation);
-      expect(arbiter.completeTeardown(reservation.generation), isNull);
+      expect(
+        arbiter.completeTeardownAndClaimPending(reservation.generation).claimed,
+        isFalse,
+      );
       expect(arbiter.isIdle, isTrue, reason: 'call $i');
       expect(arbiter.pendingIncomingCount, 0, reason: 'call $i');
       expect(arbiter.activePromptCount, 0, reason: 'call $i');
@@ -469,6 +482,95 @@ void main() {
     expect(arbiter.generation, outgoing.generation);
     expect(arbiter.state, CallV2CallLifecycleState.outgoingRinging);
     expect(arbiter.staleCandidateDroppedCount, 1);
+  });
+
+  test('production lifecycle reset is monotonic and prevents ABA reuse', () {
+    final arbiter = CallV2CallLifecycleArbiter();
+
+    final first = arbiter.reserveOutgoing();
+    arbiter.outgoingInviteCreated(
+      generation: first.generation,
+      inviteId: 'invite_a',
+    );
+    arbiter.markConnected(first.generation);
+
+    arbiter.invalidateForProductionReset();
+    final second = arbiter.reserveOutgoing();
+    arbiter.outgoingInviteCreated(
+      generation: second.generation,
+      inviteId: 'invite_b',
+    );
+    arbiter.incomingAccepted(
+      generation: first.generation,
+      inviteId: 'invite_a',
+    );
+
+    expect(second.generation, greaterThan(first.generation));
+    expect(arbiter.state, CallV2CallLifecycleState.outgoingRinging);
+    expect(arbiter.generation, second.generation);
+  });
+
+  test('old pending cannot win after newer pending is atomically claimed', () {
+    final arbiter = CallV2CallLifecycleArbiter();
+
+    final active = arbiter.reserveOutgoing();
+    arbiter.outgoingInviteCreated(
+      generation: active.generation,
+      inviteId: 'invite_a',
+    );
+    arbiter.markConnected(active.generation);
+    arbiter.beginTeardown(active.generation);
+    arbiter.reserveIncoming('invite_b');
+    arbiter.reserveIncoming('invite_c');
+
+    final claim = arbiter.completeTeardownAndClaimPending(active.generation);
+    final old = arbiter.reserveIncoming('invite_b');
+
+    expect(claim.claimed, isTrue);
+    expect(claim.inviteId, 'invite_c');
+    expect(old.action, CallV2CallReservationAction.busyDecline);
+    expect(
+        arbiter.ownsIncoming(
+          generation: claim.generation,
+          inviteId: 'invite_c',
+        ),
+        isTrue);
+    expect(arbiter.pendingIncomingCount, 0);
+  });
+
+  test('fifteen rapid lifecycles keep one owner through handoff points', () {
+    final arbiter = CallV2CallLifecycleArbiter();
+
+    for (var i = 1; i <= 15; i += 1) {
+      final active = arbiter.reserveOutgoing();
+      arbiter.outgoingInviteCreated(
+        generation: active.generation,
+        inviteId: 'active_$i',
+      );
+      arbiter.markConnected(active.generation);
+      arbiter.beginEnding(active.generation);
+
+      expect(
+        arbiter.reserveIncoming('ending_next_$i').action,
+        CallV2CallReservationAction.pending,
+      );
+      arbiter.beginTeardown(active.generation);
+      expect(
+        arbiter.reserveIncoming('teardown_next_$i').action,
+        CallV2CallReservationAction.pending,
+      );
+
+      final claim = arbiter.completeTeardownAndClaimPending(active.generation);
+      expect(claim.claimed, isTrue, reason: 'handoff $i');
+      expect(claim.inviteId, 'teardown_next_$i');
+      expect(arbiter.activePromptCount, 1, reason: 'handoff $i');
+      expect(arbiter.pendingIncomingCount, 0, reason: 'handoff $i');
+      arbiter.incomingDeclined(
+        generation: claim.generation,
+        inviteId: claim.inviteId!,
+      );
+      expect(arbiter.isIdle, isTrue, reason: 'after handoff $i');
+    }
   });
 
   test('arbiter diagnostics contain no unsafe invite/session identifiers', () {

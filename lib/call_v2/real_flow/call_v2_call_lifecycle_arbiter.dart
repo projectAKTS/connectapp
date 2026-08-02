@@ -22,13 +22,48 @@ class CallV2CallReservation {
     required this.action,
     required this.generation,
     required this.lifecycleState,
+    this.displacedInviteId,
   });
 
   final CallV2CallReservationAction action;
   final int generation;
   final CallV2CallLifecycleState lifecycleState;
+  final String? displacedInviteId;
 
   bool get reserved => action == CallV2CallReservationAction.reserved;
+}
+
+class CallV2PendingClaim {
+  const CallV2PendingClaim._({
+    required this.claimed,
+    required this.generation,
+    required this.lifecycleState,
+    this.inviteId,
+  });
+
+  const CallV2PendingClaim.none({
+    required int generation,
+    required CallV2CallLifecycleState lifecycleState,
+  }) : this._(
+          claimed: false,
+          generation: generation,
+          lifecycleState: lifecycleState,
+        );
+
+  const CallV2PendingClaim.claimed({
+    required int generation,
+    required String inviteId,
+  }) : this._(
+          claimed: true,
+          generation: generation,
+          lifecycleState: CallV2CallLifecycleState.incomingPrompt,
+          inviteId: inviteId,
+        );
+
+  final bool claimed;
+  final int generation;
+  final CallV2CallLifecycleState lifecycleState;
+  final String? inviteId;
 }
 
 class CallV2CallLifecycleArbiter {
@@ -40,6 +75,9 @@ class CallV2CallLifecycleArbiter {
   int _busyInviteDeclinedCount = 0;
   int _staleCandidateDroppedCount = 0;
   int _rapidRedialBlockedCount = 0;
+  int _displacedPendingSupersededCount = 0;
+  int _preflightLifecycleMutationBlockedCount = 0;
+  int _orphanInviteCancelledCount = 0;
 
   CallV2CallLifecycleState get state => _state;
   int get generation => _generation;
@@ -64,6 +102,10 @@ class CallV2CallLifecycleArbiter {
   int get busyInviteDeclinedCount => _busyInviteDeclinedCount;
   int get staleCandidateDroppedCount => _staleCandidateDroppedCount;
   int get rapidRedialBlockedCount => _rapidRedialBlockedCount;
+  int get displacedPendingSupersededCount => _displacedPendingSupersededCount;
+  int get preflightLifecycleMutationBlockedCount =>
+      _preflightLifecycleMutationBlockedCount;
+  int get orphanInviteCancelledCount => _orphanInviteCancelledCount;
 
   bool get isIdle => _state == CallV2CallLifecycleState.idle;
 
@@ -118,14 +160,31 @@ class CallV2CallLifecycleArbiter {
       );
     }
 
+    if (_pendingInviteId == normalized &&
+        (_state == CallV2CallLifecycleState.ending ||
+            _state == CallV2CallLifecycleState.teardown ||
+            _state == CallV2CallLifecycleState.reserving)) {
+      _duplicateInviteSuppressedCount += 1;
+      return CallV2CallReservation(
+        action: CallV2CallReservationAction.duplicate,
+        generation: _generation,
+        lifecycleState: _state,
+      );
+    }
+
     if (_state == CallV2CallLifecycleState.ending ||
         _state == CallV2CallLifecycleState.teardown ||
         _state == CallV2CallLifecycleState.reserving) {
+      final displaced = _pendingInviteId;
+      if (displaced != null && displaced != normalized) {
+        _displacedPendingSupersededCount += 1;
+      }
       _pendingInviteId = normalized;
       return CallV2CallReservation(
         action: CallV2CallReservationAction.pending,
         generation: _generation,
         lifecycleState: _state,
+        displacedInviteId: displaced == normalized ? null : displaced,
       );
     }
 
@@ -147,18 +206,24 @@ class CallV2CallLifecycleArbiter {
   }
 
   bool ownsGeneration(int generation) => _generation == generation;
+  bool ownsOutgoingReservation(int generation) {
+    return _generation == generation &&
+        _state == CallV2CallLifecycleState.reserving;
+  }
 
-  void outgoingInviteCreated({
+  bool outgoingInviteCreated({
     required int generation,
     required String inviteId,
   }) {
     if (_generation != generation ||
         _state != CallV2CallLifecycleState.reserving) {
       _staleCandidateDroppedCount += 1;
-      return;
+      _orphanInviteCancelledCount += 1;
+      return false;
     }
     _claimedInviteId = inviteId.trim();
     _state = CallV2CallLifecycleState.outgoingRinging;
+    return true;
   }
 
   void releaseOutgoingReservation(int generation) {
@@ -216,13 +281,53 @@ class CallV2CallLifecycleArbiter {
     }
   }
 
-  String? completeTeardown(int generation) {
-    if (_generation != generation) return null;
+  CallV2PendingClaim completeTeardownAndClaimPending(int generation) {
+    if (_generation != generation) {
+      _staleCandidateDroppedCount += 1;
+      return CallV2PendingClaim.none(
+        generation: _generation,
+        lifecycleState: _state,
+      );
+    }
     final pending = _pendingInviteId;
     _claimedInviteId = null;
     _pendingInviteId = null;
-    _state = CallV2CallLifecycleState.idle;
-    return pending;
+    if (pending == null) {
+      _state = CallV2CallLifecycleState.idle;
+      return CallV2PendingClaim.none(
+        generation: _generation,
+        lifecycleState: _state,
+      );
+    }
+    _generation += 1;
+    _claimedInviteId = pending;
+    _state = CallV2CallLifecycleState.incomingPrompt;
+    return CallV2PendingClaim.claimed(
+      generation: _generation,
+      inviteId: pending,
+    );
+  }
+
+  void invalidateForProductionReset({bool publishIdle = true}) {
+    _generation += 1;
+    _claimedInviteId = null;
+    _pendingInviteId = null;
+    if (publishIdle) {
+      _state = CallV2CallLifecycleState.idle;
+    } else {
+      _preflightLifecycleMutationBlockedCount += 1;
+      if (_state != CallV2CallLifecycleState.teardown) {
+        _state = CallV2CallLifecycleState.teardown;
+      }
+    }
+  }
+
+  void recordPreflightLifecycleMutationBlocked() {
+    _preflightLifecycleMutationBlockedCount += 1;
+  }
+
+  void recordOrphanInviteCancelled() {
+    _orphanInviteCancelledCount += 1;
   }
 
   void dropIncoming({
@@ -245,6 +350,9 @@ class CallV2CallLifecycleArbiter {
     _busyInviteDeclinedCount = 0;
     _staleCandidateDroppedCount = 0;
     _rapidRedialBlockedCount = 0;
+    _displacedPendingSupersededCount = 0;
+    _preflightLifecycleMutationBlockedCount = 0;
+    _orphanInviteCancelledCount = 0;
   }
 
   Map<String, Object?> toSafeDebugMap() {
@@ -263,6 +371,19 @@ class CallV2CallLifecycleArbiter {
       'busyInviteDeclinedCount': busyInviteDeclinedCount,
       'staleCandidateDroppedCount': staleCandidateDroppedCount,
       'rapidRedialBlockedCount': rapidRedialBlockedCount,
+      'generationMonotonic': true,
+      'reservationStillOwned': _state == CallV2CallLifecycleState.reserving ||
+          _state == CallV2CallLifecycleState.incomingPrompt ||
+          _state == CallV2CallLifecycleState.outgoingRinging ||
+          _state == CallV2CallLifecycleState.joining ||
+          _state == CallV2CallLifecycleState.connected,
+      'pendingClaimTransferredAtomically':
+          _state == CallV2CallLifecycleState.incomingPrompt &&
+              _pendingInviteId == null,
+      'displacedPendingSupersededCount': displacedPendingSupersededCount,
+      'preflightLifecycleMutationBlockedCount':
+          preflightLifecycleMutationBlockedCount,
+      'orphanInviteCancelledCount': orphanInviteCancelledCount,
     };
   }
 }
