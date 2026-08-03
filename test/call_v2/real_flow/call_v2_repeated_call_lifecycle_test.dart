@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:connect_app/call_v2/real_flow/call_v2_call_lifecycle_arbiter.dart';
 import 'package:connect_app/call_v2/real_flow/call_v2_engine_cleanup_coordinator.dart';
 import 'package:connect_app/call_v2/real_flow/call_v2_incoming_listener_backoff.dart';
+import 'package:connect_app/screens/call/agora_call_screen.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -240,6 +241,152 @@ void main() {
 
     expect(guard.state, 'joined_second');
     expect(guard.staleIgnoredCount, 1);
+  });
+
+  test('terminal during token fetch prevents engine creation and join',
+      () async {
+    final harness = _SetupCancellationHarness();
+    final token = Completer<void>();
+
+    final setup = harness.runTokenThenJoin(token.future);
+    harness.end();
+    token.complete();
+    await setup;
+
+    expect(harness.engineCreateCount, 0);
+    expect(harness.joinCount, 0);
+    expect(harness.callbackAcceptance, isFalse);
+    expect(harness.owner.setupCancelledCount, 1);
+    expect(harness.owner.cancelledBeforeEngineCount, 1);
+  });
+
+  test('terminal immediately before engine creation blocks factory use',
+      () async {
+    final harness = _SetupCancellationHarness();
+    final epoch = harness.begin();
+
+    harness.end();
+    expect(
+      () => harness.cancelIfStale(
+        epoch,
+        CallV2ScreenSetupCancellationStage.beforeEngineCreation,
+      ),
+      throwsA(isA<_SetupCancelled>()),
+    );
+
+    expect(harness.engineCreateCount, 0);
+    expect(harness.joinCount, 0);
+    expect(harness.owner.cancelledBeforeEngineCount, 1);
+  });
+
+  test('terminal immediately after engine creation never enables callbacks',
+      () async {
+    final harness = _SetupCancellationHarness();
+    final epoch = harness.begin();
+
+    harness.createEngine();
+    harness.end();
+    expect(
+      () => harness.cancelIfStale(
+        epoch,
+        CallV2ScreenSetupCancellationStage.afterEngineCreation,
+      ),
+      throwsA(isA<_SetupCancelled>()),
+    );
+    await harness.cleanup();
+
+    expect(harness.engineCreateCount, 1);
+    expect(harness.callbackAcceptance, isFalse);
+    expect(harness.cleanupCount, 1);
+    expect(harness.owner.terminalShutdownStarted, isTrue);
+  });
+
+  test('terminal while initialize is pending cleans once and never joins',
+      () async {
+    final harness = _SetupCancellationHarness();
+    final initialize = Completer<void>();
+
+    final setup = harness.runInitializeThenJoin(initialize.future);
+    harness.end();
+    initialize.complete();
+    await setup;
+
+    expect(harness.initializeCount, 1);
+    expect(harness.joinCount, 0);
+    expect(harness.cleanupCount, 1);
+    expect(harness.callbackAcceptance, isFalse);
+  });
+
+  test('terminal while media setup is pending prevents join', () async {
+    final harness = _SetupCancellationHarness();
+    final media = Completer<void>();
+
+    final setup = harness.runMediaThenJoin(media.future);
+    harness.end();
+    media.complete();
+    await setup;
+
+    expect(harness.mediaSetupCount, 1);
+    expect(harness.joinCount, 0);
+    expect(harness.cleanupCount, 1);
+    expect(harness.owner.cancelledBeforeJoinCount, 1);
+  });
+
+  test('terminal while join is pending ignores late completion', () async {
+    final harness = _SetupCancellationHarness();
+    final join = Completer<void>();
+
+    final setup = harness.runJoin(join.future);
+    harness.end();
+    join.complete();
+    await setup;
+
+    expect(harness.joinCount, 1);
+    expect(harness.watchdogStartCount, 0);
+    expect(harness.connectionPollCount, 0);
+    expect(harness.managerProgressCount, 0);
+    expect(harness.cleanupCount, 1);
+    expect(harness.owner.lateSetupCompletionIgnoredCount, 1);
+  });
+
+  test('terminal callback quiesce cannot later be undone by engine attempt',
+      () {
+    final harness = _SetupCancellationHarness();
+    final epoch = harness.begin();
+
+    harness.end();
+    harness.tryEnableCallbacks(epoch);
+
+    expect(harness.callbackAcceptance, isFalse);
+    expect(
+      harness.owner.terminalShutdownStarted && harness.callbackAcceptance,
+      isFalse,
+    );
+  });
+
+  test('fifteen mixed setup cancellations keep next generation available',
+      () async {
+    for (var i = 0; i < 15; i += 1) {
+      final harness = _SetupCancellationHarness();
+      final held = Completer<void>();
+      final setup = switch (i % 5) {
+        0 => harness.runTokenThenJoin(held.future),
+        1 => harness.runInitializeThenJoin(held.future),
+        2 => harness.runMediaThenJoin(held.future),
+        3 => harness.runJoin(held.future),
+        _ => harness.runConnectedThenEnd(),
+      };
+      harness.end();
+      if (!held.isCompleted) {
+        held.complete();
+      }
+      await setup;
+
+      expect(harness.callbackAcceptance, isFalse, reason: 'call $i');
+      expect(harness.cleanupCount, lessThanOrEqualTo(1), reason: 'call $i');
+      expect(harness.duplicateIncomingPromptCount, 0, reason: 'call $i');
+      expect(harness.nextGenerationAvailable, isTrue, reason: 'call $i');
+    }
   });
 
   test('ten actual lifecycle executions restore resource baseline', () async {
@@ -759,6 +906,150 @@ class _GenerationGuard {
     }
     mutate();
   }
+}
+
+class _SetupCancellationHarness {
+  final owner = CallV2ScreenSetupCancellationOwner();
+  var callbackAcceptance = false;
+  var engineCreateCount = 0;
+  var initializeCount = 0;
+  var mediaSetupCount = 0;
+  var joinCount = 0;
+  var cleanupCount = 0;
+  var watchdogStartCount = 0;
+  var connectionPollCount = 0;
+  var managerProgressCount = 0;
+  var duplicateIncomingPromptCount = 0;
+  var nextGenerationAvailable = false;
+  var _enginePresent = false;
+
+  int begin() => owner.beginSetup();
+
+  void end() {
+    owner.beginTerminalShutdown();
+    callbackAcceptance = false;
+  }
+
+  void cancelIfStale(
+    int epoch,
+    CallV2ScreenSetupCancellationStage stage,
+  ) {
+    if (owner.cancelIfStale(epoch, stage)) {
+      throw const _SetupCancelled();
+    }
+  }
+
+  Future<void> runTokenThenJoin(Future<void> token) async {
+    final epoch = begin();
+    try {
+      await token;
+      cancelIfStale(epoch, CallV2ScreenSetupCancellationStage.tokenFetch);
+      createEngine();
+      tryEnableCallbacks(epoch);
+      await _joinIfCurrent(epoch, Future<void>.value());
+    } on _SetupCancelled {
+      await cleanup();
+    }
+  }
+
+  Future<void> runInitializeThenJoin(Future<void> initialize) async {
+    final epoch = begin();
+    try {
+      createEngine();
+      tryEnableCallbacks(epoch);
+      initializeCount += 1;
+      await initialize;
+      cancelIfStale(
+        epoch,
+        CallV2ScreenSetupCancellationStage.engineInitialize,
+      );
+      await _joinIfCurrent(epoch, Future<void>.value());
+    } on _SetupCancelled {
+      await cleanup();
+    }
+  }
+
+  Future<void> runMediaThenJoin(Future<void> mediaSetup) async {
+    final epoch = begin();
+    try {
+      createEngine();
+      tryEnableCallbacks(epoch);
+      mediaSetupCount += 1;
+      await mediaSetup;
+      cancelIfStale(epoch, CallV2ScreenSetupCancellationStage.mediaSetup);
+      await _joinIfCurrent(epoch, Future<void>.value());
+    } on _SetupCancelled {
+      await cleanup();
+    }
+  }
+
+  Future<void> runJoin(Future<void> join) async {
+    final epoch = begin();
+    try {
+      createEngine();
+      tryEnableCallbacks(epoch);
+      cancelIfStale(epoch, CallV2ScreenSetupCancellationStage.beforeJoin);
+      await _joinIfCurrent(epoch, join);
+      cancelIfStale(epoch, CallV2ScreenSetupCancellationStage.afterJoin);
+      connectionPollCount += 1;
+      watchdogStartCount += 1;
+      managerProgressCount += 1;
+    } on _SetupCancelled {
+      await cleanup();
+    }
+  }
+
+  Future<void> runConnectedThenEnd() async {
+    final epoch = begin();
+    try {
+      createEngine();
+      tryEnableCallbacks(epoch);
+      await _joinIfCurrent(epoch, Future<void>.value());
+      managerProgressCount += 1;
+      cancelIfStale(epoch, CallV2ScreenSetupCancellationStage.postJoin);
+    } on _SetupCancelled {
+      await cleanup();
+    }
+  }
+
+  void createEngine() {
+    engineCreateCount += 1;
+    _enginePresent = true;
+  }
+
+  void tryEnableCallbacks(int epoch) {
+    if (!owner.setupStillCurrent(epoch)) {
+      owner.cancelIfStale(
+        epoch,
+        CallV2ScreenSetupCancellationStage.afterEngineCreation,
+      );
+      callbackAcceptance = false;
+      return;
+    }
+    callbackAcceptance = true;
+  }
+
+  Future<void> _joinIfCurrent(int epoch, Future<void> join) async {
+    cancelIfStale(epoch, CallV2ScreenSetupCancellationStage.beforeJoin);
+    joinCount += 1;
+    await join;
+  }
+
+  Future<void> cleanup() async {
+    if (!_enginePresent) {
+      nextGenerationAvailable = true;
+      return;
+    }
+    if (cleanupCount == 0) {
+      cleanupCount += 1;
+      _enginePresent = false;
+    }
+    nextGenerationAvailable = true;
+  }
+}
+
+class _SetupCancelled implements Exception {
+  const _SetupCancelled();
 }
 
 class _LifecycleHarness {

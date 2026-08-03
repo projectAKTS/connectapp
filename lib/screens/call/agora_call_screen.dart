@@ -60,6 +60,104 @@ const int _videoCallMinBitrate = defaultMinBitrate;
 // local preview and remote video on real devices. Prefer the native view path.
 const bool _preferFlutterTextureRendererOnIOS = false;
 
+enum CallV2ScreenSetupCancellationStage {
+  processCleanupGate,
+  microphonePermission,
+  cameraPermission,
+  callScreenBegan,
+  callkitSetup,
+  tokenFetch,
+  beforeEngineCreation,
+  afterEngineCreation,
+  engineInitialize,
+  mediaSetup,
+  beforeJoin,
+  afterJoin,
+  postJoin,
+}
+
+class CallV2ScreenSetupCancellationOwner {
+  bool _terminalShutdownStarted = false;
+  int _setupEpoch = 0;
+  int _setupCancelledCount = 0;
+  int _cancelledBeforeEngineCount = 0;
+  int _cancelledBeforeJoinCount = 0;
+  int _lateSetupCompletionIgnoredCount = 0;
+  final Set<int> _cancelledEpochs = <int>{};
+
+  bool get terminalShutdownStarted => _terminalShutdownStarted;
+  int get setupEpoch => _setupEpoch;
+  int get setupCancelledCount => _setupCancelledCount;
+  int get cancelledBeforeEngineCount => _cancelledBeforeEngineCount;
+  int get cancelledBeforeJoinCount => _cancelledBeforeJoinCount;
+  int get lateSetupCompletionIgnoredCount => _lateSetupCompletionIgnoredCount;
+
+  int beginSetup() {
+    if (!_terminalShutdownStarted) {
+      _setupEpoch += 1;
+    }
+    return _setupEpoch;
+  }
+
+  void beginTerminalShutdown() {
+    if (!_terminalShutdownStarted) {
+      _terminalShutdownStarted = true;
+    }
+    _setupEpoch += 1;
+  }
+
+  bool setupStillCurrent(int epoch) {
+    return !_terminalShutdownStarted && epoch == _setupEpoch;
+  }
+
+  bool cancelIfStale(
+    int epoch,
+    CallV2ScreenSetupCancellationStage stage,
+  ) {
+    if (setupStillCurrent(epoch)) return false;
+    if (_cancelledEpochs.add(epoch)) {
+      _setupCancelledCount += 1;
+    }
+    if (stage == CallV2ScreenSetupCancellationStage.processCleanupGate ||
+        stage == CallV2ScreenSetupCancellationStage.microphonePermission ||
+        stage == CallV2ScreenSetupCancellationStage.cameraPermission ||
+        stage == CallV2ScreenSetupCancellationStage.callScreenBegan ||
+        stage == CallV2ScreenSetupCancellationStage.callkitSetup ||
+        stage == CallV2ScreenSetupCancellationStage.tokenFetch ||
+        stage == CallV2ScreenSetupCancellationStage.beforeEngineCreation ||
+        stage == CallV2ScreenSetupCancellationStage.afterEngineCreation ||
+        stage == CallV2ScreenSetupCancellationStage.engineInitialize) {
+      _cancelledBeforeEngineCount += 1;
+    } else if (stage == CallV2ScreenSetupCancellationStage.mediaSetup ||
+        stage == CallV2ScreenSetupCancellationStage.beforeJoin) {
+      _cancelledBeforeJoinCount += 1;
+    } else {
+      _lateSetupCompletionIgnoredCount += 1;
+    }
+    return true;
+  }
+
+  Map<String, Object> toSafeDebugMap() {
+    return <String, Object>{
+      'terminalShutdownStarted': _terminalShutdownStarted,
+      'setupEpoch': _setupEpoch,
+      'setupCancelledCount': _setupCancelledCount,
+      'cancelledBeforeEngineCount': _cancelledBeforeEngineCount,
+      'cancelledBeforeJoinCount': _cancelledBeforeJoinCount,
+      'lateSetupCompletionIgnoredCount': _lateSetupCompletionIgnoredCount,
+    };
+  }
+}
+
+final class _CallV2TerminalSetupCancelled implements Exception {
+  const _CallV2TerminalSetupCancelled(this.stage);
+
+  final CallV2ScreenSetupCancellationStage stage;
+
+  @override
+  String toString() => 'terminal_setup_cancelled';
+}
+
 /// ---- TOKEN + APPID FETCH ----
 Future<AgoraJoinAuth> fetchAgoraToken({
   required String channelName,
@@ -254,6 +352,8 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   bool _previousCleanupSucceeded = true;
   bool _nextEngineAllowed = true;
   bool _nativeCleanupStillRunning = false;
+  final CallV2ScreenSetupCancellationOwner _setupCancellation =
+      CallV2ScreenSetupCancellationOwner();
 
   bool get _useFlutterTextureRenderer =>
       Platform.isIOS && _preferFlutterTextureRendererOnIOS;
@@ -520,14 +620,23 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   }
 
   Future<void> _begin() async {
+    final setupEpoch = _setupCancellation.beginSetup();
     final channel = widget.channelName;
     try {
       await _diagCall('begin_start', meta: {'isVideo': widget.isVideo});
+      _cancelSetupIfStale(
+        setupEpoch,
+        CallV2ScreenSetupCancellationStage.processCleanupGate,
+      );
       if (_testMode) {
-        await _beginInTestMode();
+        await _beginInTestMode(setupEpoch: setupEpoch);
         return;
       }
       final readiness = await _prepareNextEngineCreation();
+      _cancelSetupIfStale(
+        setupEpoch,
+        CallV2ScreenSetupCancellationStage.processCleanupGate,
+      );
       if (!readiness.nextEngineAllowed) {
         _setCallV2BlockerCode(readiness.blockerCode);
         throw StateError('Previous call cleanup has not completed.');
@@ -536,9 +645,17 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       await _diagCall('engine_precleanup_done');
 
       await _ensurePermission(Permission.microphone, 'Microphone');
+      _cancelSetupIfStale(
+        setupEpoch,
+        CallV2ScreenSetupCancellationStage.microphonePermission,
+      );
       await _diagCall('mic_permission_ok');
       if (widget.isVideo) {
         await _ensurePermission(Permission.camera, 'Camera');
+        _cancelSetupIfStale(
+          setupEpoch,
+          CallV2ScreenSetupCancellationStage.cameraPermission,
+        );
         await _diagCall('camera_permission_ok');
       }
 
@@ -548,8 +665,16 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           inviteId: inviteId,
           isCaller: widget.isCaller,
         );
+        _cancelSetupIfStale(
+          setupEpoch,
+          CallV2ScreenSetupCancellationStage.callScreenBegan,
+        );
       }
       await _markCallkitConnectedForAcceptedCall();
+      _cancelSetupIfStale(
+        setupEpoch,
+        CallV2ScreenSetupCancellationStage.callkitSetup,
+      );
 
       final currentUserUid = HelperlyTestRuntime.currentUid ??
           FirebaseAuth.instance.currentUser?.uid;
@@ -586,6 +711,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           identityMode: 'uid',
         );
       }
+      _cancelSetupIfStale(
+        setupEpoch,
+        CallV2ScreenSetupCancellationStage.tokenFetch,
+      );
       _token = auth.token;
       _agoraAppId = auth.appId;
       _joinedChannelName = auth.channelName;
@@ -608,40 +737,96 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
             : (_callV2Selected ? 'call_v2_dev_config' : 'server'),
       });
 
-      final engine = await _createAndInitializeEngine();
+      final engine = await _createAndInitializeEngine(setupEpoch: setupEpoch);
+      _cancelSetupIfStale(
+        setupEpoch,
+        CallV2ScreenSetupCancellationStage.engineInitialize,
+      );
       if (_callV2Selected) {
         _callV2RtcInitialized = true;
       }
       await _diagCall('engine_initialized');
 
       await engine.enableAudio();
+      _cancelSetupIfStale(
+        setupEpoch,
+        CallV2ScreenSetupCancellationStage.mediaSetup,
+      );
       await engine.enableLocalAudio(true);
+      _cancelSetupIfStale(
+        setupEpoch,
+        CallV2ScreenSetupCancellationStage.mediaSetup,
+      );
       await engine.muteLocalAudioStream(false);
+      _cancelSetupIfStale(
+        setupEpoch,
+        CallV2ScreenSetupCancellationStage.mediaSetup,
+      );
       await engine.setAudioProfile(
         profile: AudioProfileType.audioProfileDefault,
         scenario: AudioScenarioType.audioScenarioDefault,
+      );
+      _cancelSetupIfStale(
+        setupEpoch,
+        CallV2ScreenSetupCancellationStage.mediaSetup,
       );
       await _diagCall('audio_enabled');
 
       if (widget.isVideo) {
         await engine.enableVideo();
+        _cancelSetupIfStale(
+          setupEpoch,
+          CallV2ScreenSetupCancellationStage.mediaSetup,
+        );
         await engine.enableLocalVideo(true);
+        _cancelSetupIfStale(
+          setupEpoch,
+          CallV2ScreenSetupCancellationStage.mediaSetup,
+        );
         await engine.muteLocalVideoStream(false);
+        _cancelSetupIfStale(
+          setupEpoch,
+          CallV2ScreenSetupCancellationStage.mediaSetup,
+        );
         await _configureVideoPipeline(engine);
+        _cancelSetupIfStale(
+          setupEpoch,
+          CallV2ScreenSetupCancellationStage.mediaSetup,
+        );
         await _diagCall('video_enabled');
       } else {
         await engine.disableVideo();
+        _cancelSetupIfStale(
+          setupEpoch,
+          CallV2ScreenSetupCancellationStage.mediaSetup,
+        );
       }
 
       await engine.setChannelProfile(
         ChannelProfileType.channelProfileCommunication,
       );
+      _cancelSetupIfStale(
+        setupEpoch,
+        CallV2ScreenSetupCancellationStage.mediaSetup,
+      );
       await engine.setClientRole(
         role: ClientRoleType.clientRoleBroadcaster,
       );
+      _cancelSetupIfStale(
+        setupEpoch,
+        CallV2ScreenSetupCancellationStage.mediaSetup,
+      );
       await engine.setDefaultAudioRouteToSpeakerphone(true);
+      _cancelSetupIfStale(
+        setupEpoch,
+        CallV2ScreenSetupCancellationStage.mediaSetup,
+      );
       if (widget.isVideo) {
         await _forceVideoAudioState(engine, source: 'begin');
+        _cancelSetupIfStale(
+          setupEpoch,
+          CallV2ScreenSetupCancellationStage.mediaSetup,
+        );
       }
       await _diagCall('channel_profile_set', meta: {
         'profile': 'communication',
@@ -1278,9 +1463,17 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       engine.registerEventHandler(handler);
       _updateCallV2LifecycleStatus(handlerRegistered: true);
       await _diagCall('handler_registered');
+      _cancelSetupIfStale(
+        setupEpoch,
+        CallV2ScreenSetupCancellationStage.mediaSetup,
+      );
 
       if (widget.isVideo) {
         await engine.startPreview();
+        _cancelSetupIfStale(
+          setupEpoch,
+          CallV2ScreenSetupCancellationStage.mediaSetup,
+        );
         await _diagCall('preview_started');
       }
 
@@ -1314,11 +1507,19 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       } else if (_callV2Selected) {
         _callV2JoinAttempted = true;
       }
+      _cancelSetupIfStale(
+        setupEpoch,
+        CallV2ScreenSetupCancellationStage.beforeJoin,
+      );
       await engine.joinChannel(
         token: _token ?? '',
         channelId: auth.channelName,
         uid: _rtcUid,
         options: joinOptions,
+      );
+      _cancelSetupIfStale(
+        setupEpoch,
+        CallV2ScreenSetupCancellationStage.afterJoin,
       );
       await _diagCall('join_returned', meta: {
         'callV2Selected': _callV2Selected,
@@ -1326,9 +1527,27 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         'tokenIdentityMode': auth.identityMode,
       });
       await _pollConnectionState('join_returned', generation: generation);
+      _cancelSetupIfStale(
+        setupEpoch,
+        CallV2ScreenSetupCancellationStage.postJoin,
+      );
       _scheduleConnectionStatePolls(generation);
       _startJoinWatchdog(auth.channelName, generation: generation);
       await _diagCall('begin_done');
+    } on _CallV2TerminalSetupCancelled catch (e) {
+      if (_engine != null) {
+        final cleanupResult = await _awaitCleanupForUi(_cleanupEngine());
+        if (cleanupResult == null) {
+          _setCallV2BlockerCode('cleanup_in_progress');
+        } else if (!cleanupResult.succeeded) {
+          _setCallV2BlockerCode('cleanup_failed');
+        }
+      }
+      await _diagCall('terminal_setup_cancelled', meta: {
+        'stage': e.stage.name,
+        'setupEpoch': setupEpoch,
+        'terminalShutdownStarted': _terminalShutdownStarted,
+      });
     } catch (e) {
       if (_engine != null) {
         final cleanupResult = await _awaitCleanupForUi(_cleanupEngine());
@@ -1369,13 +1588,14 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       }
       _scheduleAutoClose('begin_error');
     } finally {
-      if (mounted) {
+      if (mounted &&
+          (_terminalShutdownStarted || _setupStillCurrent(setupEpoch))) {
         setState(() => _isLoading = false);
       }
     }
   }
 
-  Future<void> _beginInTestMode() async {
+  Future<void> _beginInTestMode({required int setupEpoch}) async {
     await _diagCall('engine_wait_previous_shutdown', meta: {'testMode': true});
     await _diagCall('engine_precleanup_done', meta: {'testMode': true});
     await _diagCall('mic_permission_ok', meta: {'testMode': true});
@@ -1398,6 +1618,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     }
 
     await Future<void>.delayed(const Duration(milliseconds: 10));
+    _cancelSetupIfStale(
+      setupEpoch,
+      CallV2ScreenSetupCancellationStage.afterJoin,
+    );
     if (mounted) {
       setState(() {
         _joined = true;
@@ -1432,8 +1656,13 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     await _diagCall('begin_done', meta: {'testMode': true});
   }
 
-  Future<RtcEngine> _createAndInitializeEngine() async {
-    return _createAndInitializeEngineAttempt(attempt: 1);
+  Future<RtcEngine> _createAndInitializeEngine({
+    required int setupEpoch,
+  }) async {
+    return _createAndInitializeEngineAttempt(
+      attempt: 1,
+      setupEpoch: setupEpoch,
+    );
   }
 
   void _updateCallV2LifecycleStatus({
@@ -1513,7 +1742,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   }
 
   bool _acceptCallbackForGeneration(int generation, String stage) {
-    if (_acceptEngineCallbacks && generation == _engineGeneration) {
+    if (!_terminalShutdownStarted &&
+        _acceptEngineCallbacks &&
+        generation == _engineGeneration) {
       return true;
     }
     _staleCallbackIgnoredCount += 1;
@@ -1548,10 +1779,28 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   }
 
   void _quiesceEngineCallbacksForTerminal() {
+    _setupCancellation.beginTerminalShutdown();
     _acceptEngineCallbacks = false;
     _joinWatchdog?.cancel();
     _joinWatchdog = null;
     _cancelGenerationTimers();
+    assert(!_terminalShutdownStarted || !_acceptEngineCallbacks);
+  }
+
+  bool get _terminalShutdownStarted =>
+      _setupCancellation.terminalShutdownStarted;
+
+  bool _setupStillCurrent(int setupEpoch) {
+    return mounted && _setupCancellation.setupStillCurrent(setupEpoch);
+  }
+
+  void _cancelSetupIfStale(
+    int setupEpoch,
+    CallV2ScreenSetupCancellationStage stage,
+  ) {
+    if (_setupStillCurrent(setupEpoch)) return;
+    _setupCancellation.cancelIfStale(setupEpoch, stage);
+    throw _CallV2TerminalSetupCancelled(stage);
   }
 
   int _activeScreenTimerCount() {
@@ -1812,15 +2061,33 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
   Future<RtcEngine> _createAndInitializeEngineAttempt({
     required int attempt,
+    required int setupEpoch,
   }) async {
+    _cancelSetupIfStale(
+      setupEpoch,
+      CallV2ScreenSetupCancellationStage.beforeEngineCreation,
+    );
     final agoraLogPath = await _prepareAgoraLogPath(attempt: attempt);
+    _cancelSetupIfStale(
+      setupEpoch,
+      CallV2ScreenSetupCancellationStage.beforeEngineCreation,
+    );
     await _diagCall('engine_create_start', meta: {
       'attempt': attempt,
     });
+    _cancelSetupIfStale(
+      setupEpoch,
+      CallV2ScreenSetupCancellationStage.beforeEngineCreation,
+    );
     final engine = _createFreshAgoraEngine();
     _engine = engine;
     _engineGeneration = ++_nextEngineGeneration;
+    _cancelSetupIfStale(
+      setupEpoch,
+      CallV2ScreenSetupCancellationStage.afterEngineCreation,
+    );
     _acceptEngineCallbacks = true;
+    assert(!_terminalShutdownStarted || !_acceptEngineCallbacks);
     _updateCallV2LifecycleStatus(
       previousCleanupCompleted: true,
       cleanupInProgress: false,
@@ -1838,13 +2105,25 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       'factory': 'create_agora_rtc_engine_public',
       'engineGeneration': _engineGeneration,
     });
+    _cancelSetupIfStale(
+      setupEpoch,
+      CallV2ScreenSetupCancellationStage.afterEngineCreation,
+    );
     await _diagCall('engine_create_done', meta: {
       'attempt': attempt,
     });
+    _cancelSetupIfStale(
+      setupEpoch,
+      CallV2ScreenSetupCancellationStage.afterEngineCreation,
+    );
     await _diagCall('engine_initialize_start', meta: {
       'attempt': attempt,
       'appIdReady': _agoraAppId!.trim().isNotEmpty,
     });
+    _cancelSetupIfStale(
+      setupEpoch,
+      CallV2ScreenSetupCancellationStage.engineInitialize,
+    );
 
     var initialized = false;
     final slowLog = Timer(const Duration(seconds: 20), () {
@@ -1873,6 +2152,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           'path': agoraLogPath,
           'fileSizeInKB': _agoraLogFileSizeInKB,
         });
+        _cancelSetupIfStale(
+          setupEpoch,
+          CallV2ScreenSetupCancellationStage.engineInitialize,
+        );
       }
       await engine
           .initialize(RtcEngineContext(
@@ -1898,7 +2181,13 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         );
       });
       initialized = true;
+      _cancelSetupIfStale(
+        setupEpoch,
+        CallV2ScreenSetupCancellationStage.engineInitialize,
+      );
       return engine;
+    } on _CallV2TerminalSetupCancelled {
+      rethrow;
     } on TimeoutException catch (e) {
       await _forceDisposeEngine(
         engine,
@@ -1919,7 +2208,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           'reason': 'timeout_after_force_dispose',
         });
         await Future<void>.delayed(const Duration(milliseconds: 600));
-        return _createAndInitializeEngineAttempt(attempt: attempt + 1);
+        return _createAndInitializeEngineAttempt(
+          attempt: attempt + 1,
+          setupEpoch: setupEpoch,
+        );
       }
       await _diagCall('engine_initialize_error', meta: {
         'attempt': attempt,
@@ -2392,10 +2684,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   void dispose() {
     CallSessionManager.instance.terminalSignal
         .removeListener(_handleManagerTerminalSignal);
+    _quiesceEngineCallbacksForTerminal();
     _ringTimeout?.cancel();
-    _joinWatchdog?.cancel();
     _autoCloseTimer?.cancel();
-    _cancelGenerationTimers();
     unawaited(_cleanupEngine().then<void>((_) {}, onError: (_) {}));
     super.dispose();
   }
@@ -2862,6 +3153,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         'previousCleanupSucceeded=$_previousCleanupSucceeded '
         'nextEngineAllowed=$_nextEngineAllowed '
         'nativeCleanupStillRunning=$_nativeCleanupStillRunning '
+        'terminalShutdownStarted=$_terminalShutdownStarted '
+        'setupEpoch=${_setupCancellation.setupEpoch} '
+        'setupCancelledCount=${_setupCancellation.setupCancelledCount} '
+        'cancelledBeforeEngineCount=${_setupCancellation.cancelledBeforeEngineCount} '
+        'cancelledBeforeJoinCount=${_setupCancellation.cancelledBeforeJoinCount} '
+        'lateSetupCompletionIgnoredCount=${_setupCancellation.lateSetupCompletionIgnoredCount} '
         'cleanupInProgress=$_cleanupInProgress '
         'cleanupAttemptNumber=$_cleanupAttemptNumber '
         'cleanupFailureCount=$_cleanupFailureCount '
