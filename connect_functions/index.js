@@ -256,6 +256,101 @@ function uniqueNonEmpty(values) {
   );
 }
 
+function emptyPushTokenSets() {
+  return {
+    fcmAll: [],
+    fcmForFallback: [],
+    apns: [],
+    voip: [],
+  };
+}
+
+function mergeUserPushTokenSets({ installationDocs = [], userData = {} } = {}) {
+  const active = emptyPushTokenSets();
+  const activeAll = new Set();
+  const inactiveAll = new Set();
+
+  for (const raw of Array.isArray(installationDocs) ? installationDocs : []) {
+    const installation = raw || {};
+    const platform = `${installation.platform || ""}`.trim().toLowerCase();
+    const isActive = installation.active === true;
+    const tokens = [
+      `${installation.fcmToken || ""}`.trim(),
+      `${installation.apnsToken || ""}`.trim(),
+      `${installation.voipToken || ""}`.trim(),
+    ].filter(Boolean);
+    for (const token of tokens) {
+      if (isActive) activeAll.add(token);
+      else inactiveAll.add(token);
+    }
+    if (!isActive) continue;
+    const fcmToken = `${installation.fcmToken || ""}`.trim();
+    const apnsToken = `${installation.apnsToken || ""}`.trim();
+    const voipToken = `${installation.voipToken || ""}`.trim();
+    if (fcmToken) {
+      active.fcmAll.push(fcmToken);
+      if (platform !== "ios") active.fcmForFallback.push(fcmToken);
+    }
+    if (apnsToken) active.apns.push(apnsToken);
+    if (voipToken) active.voip.push(voipToken);
+  }
+
+  const data = userData || {};
+  const fcmAllLegacy = data.fcmToken
+    ? normalizeTokenList([], data.fcmToken)
+    : normalizeTokenList(data.fcmTokens, data.fcmToken);
+  const fcmIos = data.fcmTokenIos
+    ? normalizeTokenList([], data.fcmTokenIos)
+    : normalizeTokenList(data.fcmTokensIos, data.fcmTokenIos);
+  const fcmAndroid = data.fcmTokenAndroid
+    ? normalizeTokenList([], data.fcmTokenAndroid)
+    : normalizeTokenList(data.fcmTokensAndroid, data.fcmTokenAndroid);
+  const apnsLegacy = data.apnsToken
+    ? normalizeTokenList([], data.apnsToken)
+    : normalizeTokenList(data.apnsTokens, data.apnsToken);
+  const voipLegacy = data.voipToken
+    ? normalizeTokenList([], data.voipToken)
+    : normalizeTokenList(data.voipTokens, data.voipToken);
+
+  let fcmFallbackLegacy = fcmAndroid;
+  if (!fcmFallbackLegacy.length) {
+    if (fcmIos.length) {
+      const iosSet = new Set(fcmIos);
+      fcmFallbackLegacy = fcmAllLegacy.filter((token) => !iosSet.has(token));
+    } else {
+      fcmFallbackLegacy = fcmAllLegacy;
+    }
+  }
+
+  const suppressInactiveOnly = (tokens) => uniqueNonEmpty(tokens).filter((token) => (
+    !inactiveAll.has(token) || activeAll.has(token)
+  ));
+
+  return {
+    fcmAll: uniqueNonEmpty([
+      ...active.fcmAll,
+      ...suppressInactiveOnly(fcmAllLegacy),
+    ]),
+    fcmForFallback: uniqueNonEmpty([
+      ...active.fcmForFallback,
+      ...suppressInactiveOnly(fcmFallbackLegacy),
+    ]),
+    apns: uniqueNonEmpty([
+      ...active.apns,
+      ...suppressInactiveOnly(apnsLegacy),
+    ]),
+    voip: uniqueNonEmpty([
+      ...active.voip,
+      ...suppressInactiveOnly(voipLegacy),
+    ]),
+  };
+}
+
+Object.defineProperty(exports, "__testOnlyMergeUserPushTokenSets", {
+  value: mergeUserPushTokenSets,
+  enumerable: false,
+});
+
 function terminalCallInviteRecipients(before, after, status) {
   const fromUid = `${after.fromUid || before.fromUid || ""}`.trim();
   const toUid = `${after.toUid || before.toUid || ""}`.trim();
@@ -295,88 +390,24 @@ async function getUserPushTokenSets(uid) {
     .collection("users")
     .doc(uid)
     .collection("pushInstallations")
-    .where("active", "==", true)
     .get()
     .catch(() => null);
-  const installationTokens = {
-    fcmAll: [],
-    fcmForFallback: [],
-    apns: [],
-    voip: [],
-  };
-  if (installationSnap && !installationSnap.empty) {
-    for (const doc of installationSnap.docs) {
-      const installation = doc.data() || {};
-      const platform = `${installation.platform || ""}`.trim().toLowerCase();
-      const fcmToken = `${installation.fcmToken || ""}`.trim();
-      const apnsToken = `${installation.apnsToken || ""}`.trim();
-      const voipToken = `${installation.voipToken || ""}`.trim();
-      if (fcmToken) {
-        installationTokens.fcmAll.push(fcmToken);
-        if (platform !== "ios") installationTokens.fcmForFallback.push(fcmToken);
-      }
-      if (apnsToken) installationTokens.apns.push(apnsToken);
-      if (voipToken) installationTokens.voip.push(voipToken);
-    }
-    installationTokens.fcmAll = uniqueNonEmpty(installationTokens.fcmAll);
-    installationTokens.fcmForFallback = uniqueNonEmpty(installationTokens.fcmForFallback);
-    installationTokens.apns = uniqueNonEmpty(installationTokens.apns);
-    installationTokens.voip = uniqueNonEmpty(installationTokens.voip);
-    if (
-      installationTokens.fcmAll.length ||
-      installationTokens.apns.length ||
-      installationTokens.voip.length
-    ) {
-      return installationTokens;
-    }
-  }
 
   const snap = await db.collection("users").doc(uid).get();
   if (!snap.exists) {
-    return {
-      fcmAll: [],
-      fcmForFallback: [],
-      apns: [],
-      voip: [],
-    };
+    return mergeUserPushTokenSets({
+      installationDocs: installationSnap
+        ? installationSnap.docs.map((doc) => doc.data() || {})
+        : [],
+      userData: {},
+    });
   }
-  const data = snap.data() || {};
-  // Prefer the latest scalar token fields over historical arrays. Reinstalls
-  // were growing these arrays and causing duplicate notifications.
-  const fcmAll = data.fcmToken
-    ? normalizeTokenList([], data.fcmToken)
-    : normalizeTokenList(data.fcmTokens, data.fcmToken);
-  const fcmIos = data.fcmTokenIos
-    ? normalizeTokenList([], data.fcmTokenIos)
-    : normalizeTokenList(data.fcmTokensIos, data.fcmTokenIos);
-  const fcmAndroid = data.fcmTokenAndroid
-    ? normalizeTokenList([], data.fcmTokenAndroid)
-    : normalizeTokenList(data.fcmTokensAndroid, data.fcmTokenAndroid);
-  const apns = data.apnsToken
-    ? normalizeTokenList([], data.apnsToken)
-    : normalizeTokenList(data.apnsTokens, data.apnsToken);
-  const voip = data.voipToken
-    ? normalizeTokenList([], data.voipToken)
-    : normalizeTokenList(data.voipTokens, data.voipToken);
-
-  // Prefer explicit Android tokens for FCM fallback.
-  // If only iOS tokens exist, skip FCM and rely on APNS direct paths.
-  let fcmForFallback = fcmAndroid;
-  if (!fcmForFallback.length) {
-    if (fcmIos.length) {
-      const iosSet = new Set(fcmIos);
-      fcmForFallback = fcmAll.filter((token) => !iosSet.has(token));
-    } else {
-      fcmForFallback = fcmAll;
-    }
-  }
-
-  return {
-    fcmAll,
-    fcmForFallback: Array.from(new Set(fcmForFallback)),
-    apns,
-    voip,
-  };
+  return mergeUserPushTokenSets({
+    installationDocs: installationSnap
+      ? installationSnap.docs.map((doc) => doc.data() || {})
+      : [],
+    userData: snap.data() || {},
+  });
 }
 
 async function getUserTokens(uid) {

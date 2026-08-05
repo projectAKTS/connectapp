@@ -135,6 +135,75 @@ test("representative V1 call-invite access remains unchanged", async () => {
   }));
 });
 
+test("push installation owner can create and update only expected metadata", async () => {
+  const ownerInstallation = doc(
+    testEnv.authenticatedContext("caller").firestore(),
+    "users/caller/pushInstallations/install_owner_1",
+  );
+  await assertSucceeds(setDoc(ownerInstallation, {
+    installationId: "install_owner_1",
+    ownerUid: "caller",
+    active: true,
+    platform: "ios",
+    fcmToken: "fcm_owner",
+    apnsToken: "apns_owner",
+    voipToken: "voip_owner",
+    lastSeenAt: new Date(),
+    updatedAt: new Date(),
+  }));
+  await assertSucceeds(updateDoc(ownerInstallation, {
+    active: false,
+    updatedAt: new Date(),
+  }));
+  await assertFails(updateDoc(ownerInstallation, {
+    active: true,
+    unexpected: true,
+  }));
+});
+
+test("push installation rejects cross-user and malformed writes", async () => {
+  const otherWrite = doc(
+    testEnv.authenticatedContext("other").firestore(),
+    "users/caller/pushInstallations/install_owner_2",
+  );
+  await assertFails(setDoc(otherWrite, {
+    installationId: "install_owner_2",
+    ownerUid: "caller",
+    active: true,
+    platform: "ios",
+  }));
+
+  const ownerDb = testEnv.authenticatedContext("caller").firestore();
+  await assertFails(setDoc(
+    doc(ownerDb, "users/caller/pushInstallations/install_owner_3"),
+    {
+      installationId: "wrong_installation",
+      ownerUid: "caller",
+      active: true,
+      platform: "ios",
+    },
+  ));
+  await assertFails(setDoc(
+    doc(ownerDb, "users/caller/pushInstallations/install_owner_4"),
+    {
+      installationId: "install_owner_4",
+      ownerUid: "caller",
+      active: true,
+      platform: "web",
+    },
+  ));
+  await assertFails(setDoc(
+    doc(ownerDb, "users/caller/pushInstallations/install_owner_5"),
+    {
+      installationId: "install_owner_5",
+      ownerUid: "caller",
+      active: true,
+      platform: "ios",
+      voipToken: 42,
+    },
+  ));
+});
+
 async function seedV2Call() {
   await testEnv.withSecurityRulesDisabled(async (context) => {
     const db = context.firestore();

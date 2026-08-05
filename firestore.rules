@@ -51,6 +51,44 @@ service cloud.firestore {
         isV2CallParticipant(call, request.auth.uid) &&
         isV2CallParticipant(call, participantUid);
     }
+
+    function optionalString(data, key) {
+      return !(data.keys().hasAny([key])) || data[key] is string;
+    }
+
+    function validPushInstallationData(userId, installationId) {
+      return request.resource.data.keys().hasOnly([
+          'installationId',
+          'ownerUid',
+          'active',
+          'platform',
+          'fcmToken',
+          'apnsToken',
+          'voipToken',
+          'lastSeenAt',
+          'updatedAt'
+        ]) &&
+        request.resource.data.keys().hasAll([
+          'installationId',
+          'ownerUid',
+          'active',
+          'platform'
+        ]) &&
+        request.resource.data.installationId is string &&
+        request.resource.data.installationId == installationId &&
+        request.resource.data.ownerUid is string &&
+        request.resource.data.ownerUid == userId &&
+        request.resource.data.active is bool &&
+        request.resource.data.platform is string &&
+        (
+          request.resource.data.platform == 'ios' ||
+          request.resource.data.platform == 'android' ||
+          request.resource.data.platform == 'other'
+        ) &&
+        optionalString(request.resource.data, 'fcmToken') &&
+        optionalString(request.resource.data, 'apnsToken') &&
+        optionalString(request.resource.data, 'voipToken');
+    }
     
     // ✅ Users Collection
     match /users/{userId} {
@@ -59,6 +97,14 @@ service cloud.firestore {
       allow update: if request.auth != null
         && request.auth.uid == userId;
       allow delete: if false;
+
+      match /pushInstallations/{installationId} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow create, update: if request.auth != null
+          && request.auth.uid == userId
+          && validPushInstallationData(userId, installationId);
+        allow delete: if false;
+      }
     }
     
     // ✅ Posts Collection

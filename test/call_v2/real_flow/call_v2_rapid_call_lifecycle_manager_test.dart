@@ -46,6 +46,75 @@ void main() {
     });
   }
 
+  NativeCallSnapshot nativeForInvite(String inviteId) {
+    return NativeCallSnapshot(
+      callkitId: 'native_$inviteId',
+      inviteId: inviteId,
+      channel: 'channel_$inviteId',
+    );
+  }
+
+  Future<void> claimCallkitOwnedInvite(
+    WidgetTester tester,
+    String inviteId,
+    List<NativeCallSnapshot> nativeCalls,
+  ) async {
+    await seedInvite(inviteId);
+    manager.configure(
+      navigatorKey: navigatorKey,
+      appForegroundProvider: () async => true,
+      listNativeCalls: () async => List<NativeCallSnapshot>.from(nativeCalls),
+      endNativeCall: (callkitId) async {
+        nativeCalls.removeWhere((call) => call.callkitId == callkitId);
+      },
+    );
+    await manager.handleNotificationInviteTap(
+      inviteId: inviteId,
+      channel: 'channel_$inviteId',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'callkit_owned_test',
+    );
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(manager.debugSnapshot()['incomingUiOwner'], 'callkit');
+    expect(manager.debugSnapshot()['activePromptCount'], 1);
+  }
+
+  Future<void> expectIdleAfterCallkitTerminal(
+    WidgetTester tester,
+    String nextInviteId,
+    List<NativeCallSnapshot> nativeCalls,
+  ) async {
+    final snapshot = manager.debugSnapshot();
+    expect(snapshot['sessionIdle'], isTrue);
+    expect(snapshot['incomingUiOwner'], IncomingUiOwner.none.name);
+    expect(snapshot['activePromptCount'], 0);
+    expect(snapshot['activeCallRouteCount'], 0);
+    expect(nativeCalls, isEmpty);
+
+    nativeCalls.add(nativeForInvite(nextInviteId));
+    await seedInvite(nextInviteId);
+    await manager.handleNotificationInviteTap(
+      inviteId: nextInviteId,
+      channel: 'channel_$nextInviteId',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'next_after_terminal',
+    );
+    for (var i = 0; i < 20; i += 1) {
+      await tester.pump(const Duration(milliseconds: 100));
+      if (manager.debugSnapshot()['incomingUiOwner'] ==
+          IncomingUiOwner.callkit.name) {
+        break;
+      }
+    }
+    final nextSnapshot = manager.debugSnapshot();
+    expect(nextSnapshot['incomingUiOwner'], IncomingUiOwner.callkit.name);
+    expect(nextSnapshot['activePromptCount'], 1);
+  }
+
   setUp(() async {
     firestore = FakeFirebaseFirestore();
     navigatorKey = GlobalKey<NavigatorState>();
@@ -233,6 +302,78 @@ void main() {
     expect(snapshot['incomingUiOwner'], IncomingUiOwner.callkit.name);
     expect(snapshot['activePromptCount'], 1);
     expect(find.text('Incoming Audio Call'), findsNothing);
+  });
+
+  testWidgets('CallKit-owned decline releases pre-session lifecycle',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[nativeForInvite('invite_decline')];
+    await claimCallkitOwnedInvite(tester, 'invite_decline', nativeCalls);
+
+    await manager.declineInvite(
+      inviteId: 'invite_decline',
+      source: 'callkit_decline',
+    );
+    await tester.pump();
+
+    await expectIdleAfterCallkitTerminal(
+        tester, 'invite_after_decline', nativeCalls);
+  });
+
+  testWidgets('CallKit-owned caller cancel snapshot releases lifecycle',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[nativeForInvite('invite_cancel')];
+    await manager.bindIncomingInviteListener();
+    await claimCallkitOwnedInvite(tester, 'invite_cancel', nativeCalls);
+
+    await firestore.collection('callInvites').doc('invite_cancel').set({
+      'status': CallInviteStatus.cancelled.name,
+      'endedAt': Timestamp.now(),
+    }, SetOptions(merge: true));
+    for (var i = 0; i < 20; i += 1) {
+      await tester.pump(const Duration(milliseconds: 100));
+      if (manager.debugSnapshot()['sessionIdle'] == true) break;
+    }
+
+    await expectIdleAfterCallkitTerminal(
+        tester, 'invite_after_cancel', nativeCalls);
+  });
+
+  testWidgets('CallKit-owned timeout releases pre-session lifecycle',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[nativeForInvite('invite_timeout')];
+    await claimCallkitOwnedInvite(tester, 'invite_timeout', nativeCalls);
+
+    await manager.handleSystemTimeoutInvite(
+      inviteId: 'invite_timeout',
+      source: 'callkit_timeout',
+    );
+    await tester.pump();
+
+    await expectIdleAfterCallkitTerminal(
+        tester, 'invite_after_timeout', nativeCalls);
+  });
+
+  testWidgets('CallKit-owned failed snapshot releases lifecycle',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[nativeForInvite('invite_failed')];
+    await manager.bindIncomingInviteListener();
+    await claimCallkitOwnedInvite(tester, 'invite_failed', nativeCalls);
+
+    await firestore.collection('callInvites').doc('invite_failed').set({
+      'status': CallInviteStatus.failed.name,
+      'endedAt': Timestamp.now(),
+    }, SetOptions(merge: true));
+    for (var i = 0; i < 20; i += 1) {
+      await tester.pump(const Duration(milliseconds: 100));
+      if (manager.debugSnapshot()['sessionIdle'] == true) break;
+    }
+
+    await expectIdleAfterCallkitTerminal(
+        tester, 'invite_after_failed', nativeCalls);
   });
 
   testWidgets(

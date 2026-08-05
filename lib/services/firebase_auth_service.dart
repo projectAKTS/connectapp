@@ -9,6 +9,8 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:crypto/crypto.dart' as crypto;
 
+import 'notification_service.dart';
+
 class FirebaseAuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
@@ -217,7 +219,8 @@ class FirebaseAuthService {
         ].where((n) => n.isNotEmpty).join(' ').trim();
 
         final email = user.email ?? appleCred.email ?? '';
-        var resolvedName = fullName.isNotEmpty ? fullName : (user.displayName ?? '').trim();
+        var resolvedName =
+            fullName.isNotEmpty ? fullName : (user.displayName ?? '').trim();
         if (resolvedName.isEmpty) {
           resolvedName = _fallbackNameFromEmail(email);
         }
@@ -255,6 +258,7 @@ class FirebaseAuthService {
   // Sign-out
   // -------------------------
   Future<void> signOut() async {
+    await NotificationService.prepareCurrentUserForSignOut();
     try {
       await _googleSignIn.signOut();
     } catch (_) {}
@@ -270,7 +274,8 @@ class FirebaseAuthService {
     const charset =
         '0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._';
     final rand = Random.secure();
-    return List.generate(length, (_) => charset[rand.nextInt(charset.length)]).join();
+    return List.generate(length, (_) => charset[rand.nextInt(charset.length)])
+        .join();
   }
 
   String _sha256(String input) =>
@@ -281,9 +286,13 @@ class FirebaseAuthService {
     final base = email.split('@').first;
     final cleaned = base.replaceAll(RegExp(r'[^A-Za-z0-9]+'), ' ').trim();
     if (cleaned.isEmpty) return '';
-    return cleaned.split(' ').map((p) {
-      if (p.isEmpty) return '';
-      return p[0].toUpperCase() + p.substring(1);
-    }).join(' ').trim();
+    return cleaned
+        .split(' ')
+        .map((p) {
+          if (p.isEmpty) return '';
+          return p[0].toUpperCase() + p.substring(1);
+        })
+        .join(' ')
+        .trim();
   }
 }

@@ -16,6 +16,7 @@ import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 import 'package:connect_app/screens/profile/follow_list_screen.dart';
 import 'package:connect_app/screens/messages/messages_screen.dart';
 import 'package:connect_app/services/firestore_read_helper.dart';
+import 'package:connect_app/services/notification_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String userID;
@@ -210,6 +211,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _signOut() async {
+    await NotificationService.prepareCurrentUserForSignOut();
     await FirebaseAuth.instance.signOut();
     if (!mounted) return;
 

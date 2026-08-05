@@ -139,6 +139,28 @@ void main() {
     },
   );
 
+  test('safe push diagnostics strip CallKit and identifier fields', () {
+    final safe = notificationService.debugSafePushDiagMetaForTest(
+      const <String, dynamic>{
+        'callkitId': 'unsafe-native-id',
+        'inviteId': 'unsafe-invite-id',
+        'channel': 'unsafe-channel',
+        'uid': 'unsafe-user',
+        'safeFlag': true,
+      },
+    );
+    final text = safe.toString().toLowerCase();
+
+    expect(text, isNot(contains('callkitid')));
+    expect(text, isNot(contains('unsafe-native-id')));
+    expect(text, isNot(contains('inviteid')));
+    expect(text, isNot(contains('unsafe-invite-id')));
+    expect(text, isNot(contains('unsafe-channel')));
+    expect(text, isNot(contains('unsafe-user')));
+    expect(safe['identifierFieldPresent'], isTrue);
+    expect(safe['safeFlag'], isTrue);
+  });
+
   testWidgets(
     'chat tap while paused reopens the correct chat instead of leaving a stale one',
     (tester) async {

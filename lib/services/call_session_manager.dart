@@ -490,15 +490,20 @@ class CallSessionManager {
       return;
     }
 
-    final subscription = _db
+    late final StreamSubscription<QuerySnapshot<Map<String, dynamic>>>
+        subscription;
+    subscription = _db
         .collection('callInvites')
         .where('toUid', isEqualTo: uid)
         .snapshots()
         .listen((snapshot) async {
       if (_currentUid.trim() != uid ||
           generation != _incomingListenerGeneration) {
-        await _incomingInviteSub?.cancel();
-        _incomingInviteSub = null;
+        await subscription.cancel();
+        if (identical(_incomingInviteSub, subscription)) {
+          _incomingInviteSub = null;
+          _incomingListenerBoundUid = null;
+        }
         return;
       }
       _incomingListenerBackoff.recordHealthySnapshot();
@@ -520,6 +525,11 @@ class CallSessionManager {
             source: 'firestore_listener');
       }
     }, onError: (Object error) {
+      if (_currentUid.trim() != uid ||
+          generation != _incomingListenerGeneration) {
+        unawaited(subscription.cancel());
+        return;
+      }
       _incomingListenerErrorCount += 1;
       unawaited(_diagManager('incoming_listener_error', meta: {
         'authReady': _currentUid.trim().isNotEmpty,
@@ -530,7 +540,11 @@ class CallSessionManager {
         reason: 'incoming_listener_error',
         force: true,
       ));
-      unawaited(_recoverIncomingInviteListenerAfterError(uid, generation));
+      unawaited(_recoverIncomingInviteListenerAfterError(
+        uid,
+        generation,
+        subscription,
+      ));
     });
     if (_currentUid.trim() != uid ||
         generation != _incomingListenerGeneration) {
@@ -546,13 +560,18 @@ class CallSessionManager {
   Future<void> _recoverIncomingInviteListenerAfterError(
     String uid,
     int generation,
+    StreamSubscription<QuerySnapshot<Map<String, dynamic>>> subscription,
   ) async {
     if (_currentUid.trim() != uid.trim() ||
         generation != _incomingListenerGeneration) {
       return;
     }
-    await _incomingInviteSub?.cancel();
+    await subscription.cancel();
+    if (!identical(_incomingInviteSub, subscription)) {
+      return;
+    }
     _incomingInviteSub = null;
+    _incomingListenerBoundUid = null;
     _scheduleIncomingInviteListenerRebind(uid, generation);
     await _diagResourceCounts('incoming_listener_rebind_scheduled');
   }
@@ -1064,7 +1083,20 @@ class CallSessionManager {
       await _clearStoredAcceptedCallRecoverySafely('accepted_recovery_invalid');
       return AcceptedCallRecoveryResult.invalid;
     }
-    final latest = await _readInviteData(payload.inviteId);
+    Map<String, dynamic>? latest;
+    try {
+      latest = await _readInviteData(payload.inviteId);
+    } catch (error) {
+      await _diagManager('accepted_recovery_read_pending_network', meta: {
+        'acceptedRecoveryAttemptCount': _acceptedRecoveryAttemptCount,
+        'error': '$error',
+      });
+      unawaited(FirestoreReadHelper.recoverNetwork(
+        reason: 'accepted_recovery_read',
+        force: FirestoreReadHelper.isRecoverableError(error),
+      ));
+      return AcceptedCallRecoveryResult.pendingNetwork;
+    }
     final status = _parseStatus(latest?['status']);
     if (latest == null || _isTerminalStatus(status)) {
       await _endNativeCallForInvite(
@@ -1108,10 +1140,10 @@ class CallSessionManager {
     String source = 'manual_decline',
   }) async {
     await _declineInviteTransaction(inviteId, source: source);
-    await _endNativeCallForInvite(
+    await _terminalizeUnacceptedIncomingInvite(
       inviteId: inviteId,
-      channel: '',
-      reason: source,
+      status: CallInviteStatus.declined,
+      source: source,
     );
   }
 
@@ -1141,10 +1173,10 @@ class CallSessionManager {
         'endedBy': _currentUid,
       },
     );
-    await _endNativeCallForInvite(
+    await _terminalizeUnacceptedIncomingInvite(
       inviteId: inviteId,
-      channel: '',
-      reason: source,
+      status: CallInviteStatus.ended,
+      source: source,
     );
   }
 
@@ -1163,11 +1195,89 @@ class CallSessionManager {
         'endedBy': _currentUid,
       },
     );
-    await _endNativeCallForInvite(
+    await _terminalizeUnacceptedIncomingInvite(
       inviteId: inviteId,
-      channel: '',
+      status: CallInviteStatus.missed,
+      source: source,
+    );
+  }
+
+  Future<void> _terminalizeUnacceptedIncomingInvite({
+    required String inviteId,
+    required CallInviteStatus status,
+    required String source,
+    String channel = '',
+  }) async {
+    final normalizedInviteId = inviteId.trim();
+    if (normalizedInviteId.isEmpty) return;
+    final session = _current;
+    if (session != null &&
+        session.inviteId == normalizedInviteId &&
+        !session.isTerminal) {
+      return;
+    }
+
+    final ownsPrompt = _incomingPromptInviteId == normalizedInviteId &&
+        _incomingUiOwner != IncomingUiOwner.none;
+    if (!ownsPrompt) {
+      await _endNativeCallForInvite(
+        inviteId: normalizedInviteId,
+        channel: channel,
+        reason: source,
+      );
+      return;
+    }
+
+    final generation = _callLifecycleArbiter.generation;
+    _callLifecycleArbiter.beginEnding(generation);
+    _callLifecycleArbiter.beginTeardown(generation);
+    final pendingPayload = _pendingIncomingPromptPayload;
+    final pendingSource = _pendingIncomingPromptSource;
+    _incomingPromptActive = false;
+    _incomingPromptInviteId = null;
+    _incomingUiOwner = IncomingUiOwner.none;
+    _clearPendingIncomingPrompt(normalizedInviteId);
+    _markInviteHandled(normalizedInviteId);
+    await _endNativeCallForInvite(
+      inviteId: normalizedInviteId,
+      channel: channel,
       reason: source,
     );
+
+    final pendingClaim =
+        _callLifecycleArbiter.completeTeardownAndClaimPending(generation);
+    if (!pendingClaim.claimed) {
+      await _diagManager('incoming_terminalized_idle', meta: {
+        'source': source,
+        'status': status.name,
+      });
+      return;
+    }
+    final claimedInviteId = pendingClaim.inviteId;
+    if (claimedInviteId == null ||
+        pendingPayload == null ||
+        pendingPayload.inviteId != claimedInviteId ||
+        pendingSource == null) {
+      if (claimedInviteId != null) {
+        _callLifecycleArbiter.dropIncoming(
+          generation: pendingClaim.generation,
+          inviteId: claimedInviteId,
+        );
+      }
+      return;
+    }
+    _incomingPromptActive = true;
+    _incomingPromptInviteId = pendingPayload.inviteId;
+    _incomingUiOwner = IncomingUiOwner.flutter;
+    await _diagManager('incoming_pending_claimed_after_terminal', meta: {
+      'source': pendingSource,
+      'status': status.name,
+    });
+    unawaited(_presentIncomingPrompt(
+      pendingPayload,
+      source: '$pendingSource:terminal_complete',
+      lifecycleGeneration: pendingClaim.generation,
+    ));
   }
 
   Future<void> reportCallScreenBegan({
@@ -1419,7 +1529,17 @@ class CallSessionManager {
     if (inviteId.isEmpty) return;
 
     final status = _parseStatus(data['status']);
-    if (status != CallInviteStatus.ringing) return;
+    if (status != CallInviteStatus.ringing) {
+      if (_isTerminalStatus(status) && _incomingPromptInviteId == inviteId) {
+        await _terminalizeUnacceptedIncomingInvite(
+          inviteId: inviteId,
+          status: status,
+          source: source,
+          channel: (data['channel'] ?? '').toString().trim(),
+        );
+      }
+      return;
+    }
 
     final created = (data['createdAt'] as Timestamp?)?.toDate();
     if (created != null &&

@@ -21,6 +21,7 @@ import 'firestore_read_helper.dart';
 
 class NotificationService with WidgetsBindingObserver {
   NotificationService({this.navigatorKey}) {
+    _activeInstance = this;
     CallSessionManager.instance.configure(
       navigatorKey: navigatorKey,
       listNativeCalls: _listActiveCallkitCalls,
@@ -31,6 +32,8 @@ class NotificationService with WidgetsBindingObserver {
   }
 
   final GlobalKey<NavigatorState>? navigatorKey;
+
+  static NotificationService? _activeInstance;
 
   final FirebaseMessaging _fcm = FirebaseMessaging.instance;
   final FlutterLocalNotificationsPlugin _local =
@@ -73,6 +76,8 @@ class NotificationService with WidgetsBindingObserver {
   DateTime? _lastResumeSyncAt;
   bool _callPermissionsPrimed = false;
   bool _recoveringAcceptedCall = false;
+  Timer? _acceptedRecoveryRetryTimer;
+  int _acceptedRecoveryRetryAttempts = 0;
   String? _pushInstallationId;
   String? _pendingChatOpenOtherUserId;
   String? _pendingChatOpenChatId;
@@ -82,6 +87,11 @@ class NotificationService with WidgetsBindingObserver {
   static const bool _diagEnabled =
       bool.fromEnvironment('ENABLE_RUNTIME_DIAG', defaultValue: false);
   static const int _maxAppleTokenRetryAttempts = 8;
+  static const int _maxAcceptedRecoveryRetryAttempts = 8;
+
+  static Future<void> prepareCurrentUserForSignOut() async {
+    await _activeInstance?.prepareForSignOut();
+  }
 
   int _notificationIdFrom(String seed) {
     final hash = seed.hashCode & 0x7fffffff;
@@ -421,11 +431,13 @@ class NotificationService with WidgetsBindingObserver {
     for (final entry in meta.entries) {
       final key = entry.key;
       final lower = key.toLowerCase();
-      if (lower.contains('uid') ||
+      if (lower.contains('callkit') ||
+          lower.contains('invite') ||
+          lower.contains('channel') ||
+          lower.contains('uid') ||
           lower.contains('userid') ||
-          lower.contains('inviteid') ||
+          lower.contains('user') ||
           lower.contains('callid') ||
-          lower == 'channel' ||
           lower.contains('token') ||
           lower.contains('device') ||
           lower == 'ids' ||
@@ -450,6 +462,15 @@ class NotificationService with WidgetsBindingObserver {
       }
     }
     return safe;
+  }
+
+  Map<String, dynamic> debugSafePushDiagMetaForTest(
+    Map<String, dynamic>? meta,
+  ) {
+    assert(() {
+      return true;
+    }());
+    return _safePushDiagMeta(meta);
   }
 
   String _safePushString(String value) {
@@ -773,6 +794,10 @@ class NotificationService with WidgetsBindingObserver {
     final previousUid = _boundUid;
     await _diagResourceCounts('clear_user_bindings_start');
     if (previousUid != null && previousUid.isNotEmpty) {
+      await _diagPush('post_auth_deactivation_attempt', meta: {
+        'authorizedForPreviousOwner':
+            FirebaseAuth.instance.currentUser?.uid == previousUid,
+      });
       await _deactivatePushInstallationForUser(previousUid);
     }
     await CallSessionManager.instance.clearForSignedOut();
@@ -791,6 +816,21 @@ class NotificationService with WidgetsBindingObserver {
     _appleTokenRetryAttempts = 0;
     _boundUid = null;
     await _diagResourceCounts('clear_user_bindings_done');
+  }
+
+  Future<void> prepareForSignOut() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? _boundUid ?? '';
+    await _diagResourceCounts('prepare_for_sign_out_start');
+    _acceptedRecoveryRetryTimer?.cancel();
+    _acceptedRecoveryRetryTimer = null;
+    _acceptedRecoveryRetryAttempts = 0;
+    await _tokenSub?.cancel();
+    _tokenSub = null;
+    if (uid.trim().isNotEmpty) {
+      await _deactivatePushInstallationForUser(uid);
+    }
+    await _clearStoredAcceptedCallRecovery();
+    await _diagResourceCounts('prepare_for_sign_out_done');
   }
 
   Future<void> onSignedOut() async {
@@ -832,6 +872,8 @@ class NotificationService with WidgetsBindingObserver {
 
   Future<void> dispose() async {
     await _diagResourceCounts('notification_dispose_start');
+    _acceptedRecoveryRetryTimer?.cancel();
+    _acceptedRecoveryRetryTimer = null;
     if (_observerBound) {
       WidgetsBinding.instance.removeObserver(this);
       _observerBound = false;
@@ -863,6 +905,9 @@ class NotificationService with WidgetsBindingObserver {
     }
     _boundUid = null;
     _initialized = false;
+    if (identical(_activeInstance, this)) {
+      _activeInstance = null;
+    }
   }
 
   Future<dynamic> _handleNativePushMethodCall(MethodCall call) async {
@@ -1668,6 +1713,8 @@ class NotificationService with WidgetsBindingObserver {
           .collection('pushInstallations')
           .doc(installationId)
           .set({
+        'installationId': installationId,
+        'ownerUid': userId,
         'active': false,
         'lastSeenAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
@@ -1886,12 +1933,9 @@ class NotificationService with WidgetsBindingObserver {
     return navigatorKey?.currentState;
   }
 
-  Future<void> _recoverAcceptedCallkitCall() async {
+  Future<void> _recoverAcceptedCallkitCall({String trigger = 'manual'}) async {
     if (!Platform.isIOS || !_enableIosCallKit) return;
     if (_recoveringAcceptedCall) return;
-    if (_hasActiveIncomingUi && !(await _resetStaleIncomingUiIfNeeded())) {
-      return;
-    }
 
     _recoveringAcceptedCall = true;
     try {
@@ -1955,6 +1999,11 @@ class NotificationService with WidgetsBindingObserver {
         return;
       }
 
+      if (_hasActiveIncomingUi && !(await _resetStaleIncomingUiIfNeeded())) {
+        _handleAcceptedRecoveryResult(AcceptedCallRecoveryResult.busy);
+        return;
+      }
+
       final activeCalls = await FlutterCallkitIncoming.activeCalls();
       if (activeCalls is! List) return;
 
@@ -2006,7 +2055,11 @@ class NotificationService with WidgetsBindingObserver {
         return;
       }
     } catch (e) {
-      debugPrint('⚠️ accepted CallKit recovery failed: $e');
+      await _diagPush('accepted_call_recovery_error', meta: {
+        'trigger': trigger,
+        'error': '$e',
+      });
+      _handleAcceptedRecoveryResult(AcceptedCallRecoveryResult.pendingNetwork);
     } finally {
       _recoveringAcceptedCall = false;
     }
@@ -2018,14 +2071,42 @@ class NotificationService with WidgetsBindingObserver {
       case AcceptedCallRecoveryResult.alreadyOpen:
       case AcceptedCallRecoveryResult.terminal:
       case AcceptedCallRecoveryResult.invalid:
+        _acceptedRecoveryRetryTimer?.cancel();
+        _acceptedRecoveryRetryTimer = null;
+        _acceptedRecoveryRetryAttempts = 0;
         return;
       case AcceptedCallRecoveryResult.pendingAuth:
       case AcceptedCallRecoveryResult.pendingNavigator:
       case AcceptedCallRecoveryResult.pendingNetwork:
       case AcceptedCallRecoveryResult.busy:
       case AcceptedCallRecoveryResult.failed:
+        _scheduleAcceptedRecoveryRetry(result);
         return;
     }
+  }
+
+  void _scheduleAcceptedRecoveryRetry(AcceptedCallRecoveryResult result) {
+    if (!Platform.isIOS || !_enableIosCallKit) return;
+    if (_acceptedRecoveryRetryAttempts >= _maxAcceptedRecoveryRetryAttempts) {
+      unawaited(_diagPush('accepted_call_recovery_retry_exhausted', meta: {
+        'result': result.name,
+      }));
+      return;
+    }
+    _acceptedRecoveryRetryTimer?.cancel();
+    _acceptedRecoveryRetryAttempts += 1;
+    final attempt = _acceptedRecoveryRetryAttempts;
+    final delay = result == AcceptedCallRecoveryResult.pendingAuth
+        ? const Duration(milliseconds: 500)
+        : Duration(milliseconds: 500 * attempt.clamp(1, 6));
+    _acceptedRecoveryRetryTimer = Timer(delay, () {
+      _acceptedRecoveryRetryTimer = null;
+      unawaited(_recoverAcceptedCallkitCall(trigger: 'retry_${result.name}'));
+    });
+    unawaited(_diagPush('accepted_call_recovery_retry_scheduled', meta: {
+      'result': result.name,
+      'attempt': attempt,
+    }));
   }
 
   void _openChat(String otherUserId, {String? chatId}) {
