@@ -56,6 +56,7 @@ void main() {
       currentDisplayName: calleeName,
     );
     await manager.clearForSignedOut();
+    await manager.forceIdleForTest();
     HelperlyTestRuntime.configureForTest(
       firestore: firestore,
       currentUid: calleeUid,
@@ -186,7 +187,11 @@ void main() {
       fromUid: callerUid,
       source: 'old_b_between_handoff',
     );
-    await tester.pump(const Duration(seconds: 1));
+    for (var attempt = 0;
+        attempt < 20 && find.text('Incoming Audio Call').evaluate().isEmpty;
+        attempt += 1) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
 
     expect(find.text('Incoming Audio Call'), findsOneWidget);
     expect(manager.debugSnapshot()['callLifecycleState'], 'incomingPrompt');
@@ -196,6 +201,170 @@ void main() {
     await tester.pump();
     await closeFuture.timeout(const Duration(seconds: 5));
     expect(manager.debugSnapshot()['pendingIncomingCount'], 0);
+  });
+
+  testWidgets('matching native CallKit call owns foreground incoming UI',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    await seedInvite('invite_callkit');
+    manager.configure(
+      navigatorKey: navigatorKey,
+      appForegroundProvider: () async => true,
+      listNativeCalls: () async => const <NativeCallSnapshot>[
+        NativeCallSnapshot(
+          callkitId: '696e7669-7465-4c61-ac6c-6b6974696e76',
+          inviteId: 'invite_callkit',
+          channel: 'channel_invite_callkit',
+        ),
+      ],
+    );
+
+    await manager.handleNotificationInviteTap(
+      inviteId: 'invite_callkit',
+      channel: 'channel_invite_callkit',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'foreground_test',
+    );
+    await tester.pump(const Duration(milliseconds: 350));
+
+    final snapshot = manager.debugSnapshot();
+    expect(snapshot['incomingUiOwner'], IncomingUiOwner.callkit.name);
+    expect(snapshot['activePromptCount'], 1);
+    expect(find.text('Incoming Audio Call'), findsNothing);
+  });
+
+  testWidgets(
+      'foreground incoming without native CallKit uses Flutter fallback',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    await seedInvite('invite_flutter');
+    manager.configure(
+      navigatorKey: navigatorKey,
+      appForegroundProvider: () async => true,
+      listNativeCalls: () async => const <NativeCallSnapshot>[],
+    );
+
+    final promptFuture = manager.handleNotificationInviteTap(
+      inviteId: 'invite_flutter',
+      channel: 'channel_invite_flutter',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'foreground_test',
+    );
+    for (var attempt = 0;
+        attempt < 20 && !(navigatorKey.currentState?.canPop() ?? false);
+        attempt += 1) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    expect(
+      manager.debugSnapshot()['incomingUiOwner'],
+      IncomingUiOwner.flutter.name,
+    );
+    expect(manager.debugSnapshot()['activePromptCount'], 1);
+    expect(navigatorKey.currentState?.canPop(), isTrue);
+    navigatorKey.currentState!.pop(false);
+    await tester.pump();
+    await tester.runAsync(
+      () => promptFuture.timeout(const Duration(seconds: 5)),
+    );
+  });
+
+  testWidgets('Flutter decline closes matching native CallKit call',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    await seedInvite('invite_decline');
+    final ended = <String>[];
+    manager.configure(
+      navigatorKey: navigatorKey,
+      appForegroundProvider: () async => true,
+      listNativeCalls: () async => const <NativeCallSnapshot>[
+        NativeCallSnapshot(
+          callkitId: '696e7669-7465-4465-a36c-696e65696e76',
+          inviteId: 'invite_decline',
+          channel: 'channel_invite_decline',
+        ),
+      ],
+      endNativeCall: (callkitId) async {
+        ended.add(callkitId);
+      },
+    );
+
+    await manager.declineInvite(
+      inviteId: 'invite_decline',
+      source: 'flutter_decline_test',
+    );
+
+    final invite =
+        await firestore.collection('callInvites').doc('invite_decline').get();
+    expect(invite.data()?['status'], CallInviteStatus.declined.name);
+    expect(ended, isNotEmpty);
+  });
+
+  testWidgets('accepted recovery without navigator remains pending',
+      (tester) async {
+    var cleared = 0;
+    manager.configure(
+      clearStoredAcceptedCallRecovery: () async {
+        cleared += 1;
+      },
+    );
+    await seedInvite('invite_pending', status: CallInviteStatus.accepted);
+
+    final result = await manager.handleRecoveredAcceptedInvite(
+      inviteId: 'invite_pending',
+      channel: 'channel_invite_pending',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+    );
+
+    expect(result, AcceptedCallRecoveryResult.pendingNavigator);
+    expect(cleared, 0);
+    expect(manager.debugSnapshot()['acceptedRecoveryPending'], isTrue);
+    expect(manager.debugSnapshot()['hiddenSessionDetected'], isFalse);
+  });
+
+  testWidgets('terminal accepted recovery closes native call and clears record',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    await seedInvite('invite_terminal', status: CallInviteStatus.cancelled);
+    var cleared = 0;
+    final ended = <String>[];
+    manager.configure(
+      navigatorKey: navigatorKey,
+      appForegroundProvider: () async => true,
+      clearStoredAcceptedCallRecovery: () async {
+        cleared += 1;
+      },
+      listNativeCalls: () async => const <NativeCallSnapshot>[
+        NativeCallSnapshot(
+          callkitId: '696e7669-7465-5465-bd69-6e616c696e76',
+          inviteId: 'invite_terminal',
+          channel: 'channel_invite_terminal',
+        ),
+      ],
+      endNativeCall: (callkitId) async {
+        ended.add(callkitId);
+      },
+    );
+
+    final result = await manager.handleRecoveredAcceptedInvite(
+      inviteId: 'invite_terminal',
+      channel: 'channel_invite_terminal',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+    );
+
+    expect(result, AcceptedCallRecoveryResult.terminal);
+    expect(cleared, 1);
+    expect(ended, isNotEmpty);
+    expect(manager.debugSnapshot()['acceptedRecoveryAcknowledged'], isTrue);
+    expect(find.text('Incoming Audio Call'), findsNothing);
   });
 
   testWidgets('outgoing reservation lost during preflight writes no invite',

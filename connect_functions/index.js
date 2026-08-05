@@ -243,6 +243,7 @@ const TERMINAL_CALL_INVITE_STATUSES = new Set([
   "declined",
   "cancelled",
   "missed",
+  "failed",
 ]);
 
 function normalizeStatus(value) {
@@ -290,6 +291,46 @@ function isInviteStillUnhandled(data) {
 }
 
 async function getUserPushTokenSets(uid) {
+  const installationSnap = await db
+    .collection("users")
+    .doc(uid)
+    .collection("pushInstallations")
+    .where("active", "==", true)
+    .get()
+    .catch(() => null);
+  const installationTokens = {
+    fcmAll: [],
+    fcmForFallback: [],
+    apns: [],
+    voip: [],
+  };
+  if (installationSnap && !installationSnap.empty) {
+    for (const doc of installationSnap.docs) {
+      const installation = doc.data() || {};
+      const platform = `${installation.platform || ""}`.trim().toLowerCase();
+      const fcmToken = `${installation.fcmToken || ""}`.trim();
+      const apnsToken = `${installation.apnsToken || ""}`.trim();
+      const voipToken = `${installation.voipToken || ""}`.trim();
+      if (fcmToken) {
+        installationTokens.fcmAll.push(fcmToken);
+        if (platform !== "ios") installationTokens.fcmForFallback.push(fcmToken);
+      }
+      if (apnsToken) installationTokens.apns.push(apnsToken);
+      if (voipToken) installationTokens.voip.push(voipToken);
+    }
+    installationTokens.fcmAll = uniqueNonEmpty(installationTokens.fcmAll);
+    installationTokens.fcmForFallback = uniqueNonEmpty(installationTokens.fcmForFallback);
+    installationTokens.apns = uniqueNonEmpty(installationTokens.apns);
+    installationTokens.voip = uniqueNonEmpty(installationTokens.voip);
+    if (
+      installationTokens.fcmAll.length ||
+      installationTokens.apns.length ||
+      installationTokens.voip.length
+    ) {
+      return installationTokens;
+    }
+  }
+
   const snap = await db.collection("users").doc(uid).get();
   if (!snap.exists) {
     return {
@@ -1017,14 +1058,14 @@ exports.onCallInviteCreated = onDocumentCreated(
         serverDiag.serverVoipFailed = voipRes.failed || 0;
         serverDiag.serverVoipEnvironment = voipRes.environment || "";
         console.log("APNS VoIP result:", {
-          inviteId,
-          toUid,
-          channel,
-          tokenSuffixes: tokenSuffixes(voipTokens),
+          identifierPresent: Boolean(inviteId && toUid && channel),
+          tokenCount: voipTokens.length,
           ...voipRes,
         });
       } else {
-        console.log("APNS VoIP skipped: no tokens", { inviteId, toUid, channel });
+        console.log("APNS VoIP skipped: no tokens", {
+          identifierPresent: Boolean(inviteId && toUid && channel),
+        });
       }
     } catch (e) {
       serverDiag.serverNotifyLastError = `voip:${e}`;
@@ -1057,9 +1098,7 @@ exports.onCallInviteCreated = onDocumentCreated(
           if (!shouldSendAlert) {
             serverDiag.serverApnsAlertSkippedReason = "invite_already_handled";
             console.log("APNS alert skipped: invite already handled", {
-              inviteId,
-              toUid,
-              channel,
+              identifierPresent: Boolean(inviteId && toUid && channel),
               status: normalizeStatus(latestData.status || "ringing"),
               calleeStage: `${latestData.calleeStage || ""}`,
             });
@@ -1080,16 +1119,16 @@ exports.onCallInviteCreated = onDocumentCreated(
           serverDiag.serverApnsAlertFailed = apnsRes.failed || 0;
           serverDiag.serverApnsAlertEnvironment = apnsRes.environment || "";
           console.log("APNS alert result:", {
-            inviteId,
-            toUid,
-            channel,
-            tokenSuffixes: tokenSuffixes(apnsTokens),
+            identifierPresent: Boolean(inviteId && toUid && channel),
+            tokenCount: apnsTokens.length,
             ...apnsRes,
           });
         }
       } else {
         serverDiag.serverApnsAlertSkippedReason = "no_apns_tokens";
-        console.log("APNS alert skipped: no tokens", { inviteId, toUid, channel });
+        console.log("APNS alert skipped: no tokens", {
+          identifierPresent: Boolean(inviteId && toUid && channel),
+        });
       }
     } catch (e) {
       serverDiag.serverNotifyLastError = `${serverDiag.serverNotifyLastError || ""} apns_alert:${e}`.trim();
@@ -1136,14 +1175,14 @@ exports.onCallInviteCreated = onDocumentCreated(
       } catch (e) {
         serverDiag.serverNotifyLastError = `${serverDiag.serverNotifyLastError || ""} fcm:${e}`.trim();
         console.error("FCM call invite send failed:", {
-          inviteId,
-          toUid,
-          channel,
+          identifierPresent: Boolean(inviteId && toUid && channel),
           error: `${e}`,
         });
       }
     } else {
-      console.log("FCM skipped: no tokens", { inviteId, toUid, channel });
+      console.log("FCM skipped: no tokens", {
+        identifierPresent: Boolean(inviteId && toUid && channel),
+      });
     }
     serverDiag.serverNotifyStage =
       voipDelivered || apnsAlertDelivered || fcmDelivered
@@ -1192,9 +1231,8 @@ exports.onCallInviteUpdated = onDocumentUpdated(
     const recipients = terminalCallInviteRecipients(before, after, afterStatus);
     if (!recipients.length) {
       console.log("call invite terminal push skipped: no recipients", {
-        inviteId,
+        identifierPresent: Boolean(inviteId && channel),
         status: afterStatus,
-        channel,
       });
       return;
     }
@@ -1206,26 +1244,20 @@ exports.onCallInviteUpdated = onDocumentUpdated(
         if (voipTokens.length) {
           const voipRes = await sendVoipPushToTokens(voipTokens, payloadData);
           console.log("APNS VoIP terminal result:", {
-            inviteId,
-            toUid: uid,
-            channel,
+            identifierPresent: Boolean(inviteId && uid && channel),
             status: afterStatus,
-            tokenSuffixes: tokenSuffixes(voipTokens),
+            tokenCount: voipTokens.length,
             ...voipRes,
           });
         } else {
           console.log("APNS VoIP terminal skipped: no tokens", {
-            inviteId,
-            toUid: uid,
-            channel,
+            identifierPresent: Boolean(inviteId && uid && channel),
             status: afterStatus,
           });
         }
       } catch (e) {
         console.error("APNS VoIP terminal send failed:", {
-          inviteId,
-          toUid: uid,
-          channel,
+          identifierPresent: Boolean(inviteId && uid && channel),
           status: afterStatus,
           error: `${e}`,
         });
@@ -1252,9 +1284,7 @@ exports.onCallInviteUpdated = onDocumentUpdated(
           });
         } catch (e) {
           console.error("FCM terminal send failed:", {
-            inviteId,
-            toUid: uid,
-            channel,
+            identifierPresent: Boolean(inviteId && uid && channel),
             status: afterStatus,
             error: `${e}`,
           });

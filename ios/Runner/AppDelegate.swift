@@ -233,7 +233,7 @@ import CallKit
         storePushkitState(
           "incoming_fallback_decline_received",
           payloadType: "call_invite",
-          detail: "inviteId=\(inviteId) callkitId=\(callkitId)"
+          detail: "identifier_present=true"
         )
         completionHandler()
         return
@@ -243,7 +243,7 @@ import CallKit
         storePushkitState(
           "incoming_fallback_dismissed",
           payloadType: "call_invite",
-          detail: "inviteId=\(inviteId) callkitId=\(callkitId)"
+          detail: "identifier_present=true"
         )
         completionHandler()
         return
@@ -271,7 +271,7 @@ import CallKit
       storePushkitState(
         "incoming_fallback_accept_received",
         payloadType: "call_invite",
-        detail: "inviteId=\(inviteId) callkitId=\(callkitId) actionId=\(actionId)"
+        detail: "identifier_present=true action_present=\(!actionId.isEmpty)"
       )
       completionHandler()
       return
@@ -293,7 +293,7 @@ import CallKit
     let defaults = UserDefaults.standard
     defaults.set(token, forKey: apnsTokenStoreKey)
     defaults.removeObject(forKey: apnsErrorStoreKey)
-    NSLog("Helperly APNS token updated suffix=%@", tokenSuffix(token))
+    NSLog("Helperly APNS token updated")
     super.application(application, didRegisterForRemoteNotificationsWithDeviceToken: deviceToken)
   }
 
@@ -413,31 +413,62 @@ import CallKit
       payload[key] = value
     }
 
-    Firestore.firestore().collection("callInvites").document(trimmedInviteId)
-      .setData(payload, merge: true) { error in
+    Firestore.firestore().runTransaction({ transaction, errorPointer -> Any? in
+      let ref = Firestore.firestore().collection("callInvites").document(trimmedInviteId)
+      let snapshot: DocumentSnapshot
+      do {
+        snapshot = try transaction.getDocument(ref)
+      } catch let error as NSError {
+        errorPointer?.pointee = error
+        return nil
+      }
+      guard snapshot.exists else { return false }
+      let data = snapshot.data() ?? [:]
+      let currentStatus = ((data["status"] as? String) ?? "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased()
+      let terminalStatuses: Set<String> = ["declined", "missed", "cancelled", "ended", "failed"]
+      if terminalStatuses.contains(currentStatus) {
+        return false
+      }
+      let allowed: Bool
+      switch trimmedStatus {
+      case "accepted":
+        allowed = currentStatus == "ringing"
+      case "declined", "missed":
+        allowed = currentStatus == "ringing"
+      case "ended":
+        allowed = ["ringing", "accepted", "joining", "connected"].contains(currentStatus)
+      default:
+        allowed = false
+      }
+      if !allowed { return false }
+      transaction.setData(payload, forDocument: ref, merge: true)
+      return true
+    }) { result, error in
         if let error {
           self.storePushkitState(
             "invite_status_sync_error",
             payloadType: trimmedStatus,
-            detail: "inviteId=\(trimmedInviteId) error=\(error.localizedDescription)"
+            detail: "identifier_present=true error=true"
           )
           NSLog(
-            "Helperly CallKit invite status sync failed inviteId=%@ status=%@ error=%@",
-            trimmedInviteId,
+            "Helperly CallKit invite status sync failed status=%@ error=true",
             trimmedStatus,
-            error.localizedDescription
+            ""
           )
           return
         }
+        let updated = (result as? Bool) == true
         self.storePushkitState(
-          "invite_status_synced",
+          updated ? "invite_status_synced" : "invite_status_sync_blocked",
           payloadType: trimmedStatus,
-          detail: "inviteId=\(trimmedInviteId)"
+          detail: "identifier_present=true"
         )
         NSLog(
-          "Helperly CallKit invite status synced inviteId=%@ status=%@",
-          trimmedInviteId,
-          trimmedStatus
+          "Helperly CallKit invite status sync completed status=%@ updated=%@",
+          trimmedStatus,
+          updated ? "true" : "false"
         )
       }
   }
@@ -509,7 +540,7 @@ import CallKit
     storePushkitState(
       "incoming_fallback_notification_scheduled",
       payloadType: "call_invite",
-      detail: "callkitId=\(callkitId)"
+      detail: "identifier_present=true"
     )
   }
 
@@ -542,7 +573,7 @@ import CallKit
     storePushkitState(
       "terminal_push_end_requested",
       payloadType: payloadType,
-      detail: detail.isEmpty ? "callkitId=\(trimmedCallkitId)" : detail
+      detail: detail.isEmpty ? "identifier_present=true" : detail
     )
   }
 
@@ -627,8 +658,7 @@ import CallKit
   ) {
     let deviceToken = credentials.token.map { String(format: "%02x", $0) }.joined()
     UserDefaults.standard.set(deviceToken, forKey: voipTokenStoreKey)
-    let tokenSuffix = String(deviceToken.suffix(12))
-    NSLog("Helperly PushKit token updated suffix=%@", tokenSuffix)
+    NSLog("Helperly PushKit token updated")
     SwiftFlutterCallkitIncomingPlugin.sharedInstance?.setDevicePushTokenVoIP(deviceToken)
   }
 
@@ -675,26 +705,24 @@ import CallKit
     storePushkitState(
       "incoming_received",
       payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
-      detail: "callId=\(rawCallId) channel=\(channel)"
+      detail: "identifier_present=true"
     )
     NSLog(
-      "Helperly PushKit incoming push type=%@ status=%@ callId=%@ channel=%@ callkitId=%@",
+      "Helperly PushKit incoming push type=%@ status=%@ identifier_present=true",
       payloadType,
-      payloadStatus,
-      rawCallId,
-      channel,
-      callkitId
+      payloadStatus
     )
 
     if payloadType == "call_end" || payloadType == "call_cancel" ||
         payloadStatus == "ended" || payloadStatus == "declined" ||
-        payloadStatus == "missed" || payloadStatus == "cancelled" {
+        payloadStatus == "missed" || payloadStatus == "cancelled" ||
+        payloadStatus == "failed" {
       endDisplayedCall(
         callkitId: callkitId,
         rawCallId: rawCallId,
         channel: channel,
         payloadType: payloadType.isEmpty ? payloadStatus : payloadType,
-        detail: "status=\(payloadStatus) callId=\(rawCallId)"
+        detail: "status=\(payloadStatus) identifier_present=true"
       )
       finish()
       return
@@ -735,7 +763,7 @@ import CallKit
       storePushkitState(
         "incoming_foreground_handoff",
         payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
-        detail: "state=\(stateLabel) callId=\(rawCallId) channel=\(channel)"
+        detail: "state=\(stateLabel) identifier_present=true"
       )
       notifyFlutterOfForegroundVoip(
         method: "incomingVoipForeground",
@@ -751,10 +779,8 @@ import CallKit
         ]
       )
       NSLog(
-        "Helperly PushKit skipping native CallKit in foreground state=%@ callId=%@ channel=%@",
-        stateLabel,
-        rawCallId,
-        channel
+        "Helperly PushKit skipping native CallKit in foreground state=%@ identifier_present=true",
+        stateLabel
       )
       finish()
       return
@@ -767,7 +793,7 @@ import CallKit
     storePushkitState(
       "incoming_report_requested",
       payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
-      detail: "callkitId=\(callkitId)"
+      detail: "identifier_present=true"
     )
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
@@ -782,13 +808,13 @@ import CallKit
         self.storePushkitState(
           "incoming_reported",
           payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
-          detail: "callkitId=\(callkitId)"
+          detail: "identifier_present=true"
         )
       } else {
         self.storePushkitState(
           "incoming_report_missing",
           payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
-          detail: "callkitId=\(callkitId)"
+          detail: "identifier_present=true"
         )
         self.showIncomingFallbackNotification(
           callkitId: callkitId,
@@ -816,7 +842,7 @@ import CallKit
         "acceptedBy": Auth.auth().currentUser?.uid ?? "",
       ])
     }
-    NSLog("Helperly CallKit onAccept callkitId=%@", call.data.uuid)
+    NSLog("Helperly CallKit onAccept identifier_present=true")
     action.fulfill()
   }
 
@@ -829,7 +855,7 @@ import CallKit
         "declinedBy": Auth.auth().currentUser?.uid ?? "",
       ])
     }
-    NSLog("Helperly CallKit onDecline callkitId=%@", call.data.uuid)
+    NSLog("Helperly CallKit onDecline identifier_present=true")
     action.fulfill()
   }
 
@@ -842,7 +868,7 @@ import CallKit
         "endedBy": Auth.auth().currentUser?.uid ?? "",
       ])
     }
-    NSLog("Helperly CallKit onEnd callkitId=%@", call.data.uuid)
+    NSLog("Helperly CallKit onEnd identifier_present=true")
     action.fulfill()
   }
 
@@ -853,7 +879,7 @@ import CallKit
     if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
       syncInviteStatus(inviteId: inviteId, status: "missed")
     }
-    NSLog("Helperly CallKit onTimeOut callkitId=%@", call.data.uuid)
+    NSLog("Helperly CallKit onTimeOut identifier_present=true")
   }
 
   func didActivateAudioSession(_ audioSession: AVAudioSession) {

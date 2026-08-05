@@ -9,7 +9,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:uuid/uuid.dart';
 
 import 'call_session_manager.dart';
 import 'callkit_id.dart';
@@ -71,7 +73,7 @@ class NotificationService with WidgetsBindingObserver {
   DateTime? _lastResumeSyncAt;
   bool _callPermissionsPrimed = false;
   bool _recoveringAcceptedCall = false;
-  String? _lastRecoveredAcceptedAt;
+  String? _pushInstallationId;
   String? _pendingChatOpenOtherUserId;
   String? _pendingChatOpenChatId;
   bool _chatNavigationInFlight = false;
@@ -186,7 +188,7 @@ class NotificationService with WidgetsBindingObserver {
 
   Future<void> _endActiveCallkitCall(
     String callkitId, {
-    bool aggressive = true,
+    bool aggressive = false,
     String source = 'notification_service',
   }) async {
     if (!Platform.isIOS || !_enableIosCallKit) return;
@@ -200,7 +202,6 @@ class NotificationService with WidgetsBindingObserver {
     await _diagPush('callkit_active_before', meta: {
       'callkitId': normalized,
       'count': before.length,
-      'ids': before.map((call) => call.callkitId).join(','),
       'source': source,
       'aggressive': aggressive,
     });
@@ -231,7 +232,6 @@ class NotificationService with WidgetsBindingObserver {
       await _diagPush('callkit_active_after', meta: {
         'callkitId': normalized,
         'count': after.length,
-        'ids': after.map((call) => call.callkitId).join(','),
         'source': source,
         'aggressive': aggressive,
       });
@@ -256,7 +256,6 @@ class NotificationService with WidgetsBindingObserver {
       if (hasActiveCalls) return false;
       final staleInviteId = CallSessionManager.instance.activeInviteId ?? '';
       CallSessionManager.instance.clearStaleUiFlags();
-      _lastRecoveredAcceptedAt = null;
       await _clearStoredAcceptedCallRecovery();
       await _diagPush('stale_incoming_ui_reset', meta: {
         'inviteId': staleInviteId,
@@ -313,12 +312,6 @@ class NotificationService with WidgetsBindingObserver {
       'boundUid': _boundUid ?? '',
       'initialized': _initialized,
     });
-  }
-
-  String _tokenSuffix(String token) {
-    final value = token.trim();
-    if (value.isEmpty) return '';
-    return value.length <= 12 ? value : value.substring(value.length - 12);
   }
 
   bool _shouldProcessCallkitTerminalEvent(
@@ -413,12 +406,80 @@ class NotificationService with WidgetsBindingObserver {
     String stage, {
     Map<String, dynamic>? meta,
   }) async {
-    debugPrint('[DIAG][push] $stage meta=${meta ?? const {}}');
+    final safeMeta = _safePushDiagMeta(meta);
+    debugPrint('[DIAG][push] $stage meta=$safeMeta');
     DiagnosticService.logPush(
       stage,
       uid: FirebaseAuth.instance.currentUser?.uid,
-      meta: meta,
+      meta: safeMeta,
     );
+  }
+
+  Map<String, dynamic> _safePushDiagMeta(Map<String, dynamic>? meta) {
+    if (meta == null || meta.isEmpty) return const <String, dynamic>{};
+    final safe = <String, dynamic>{};
+    for (final entry in meta.entries) {
+      final key = entry.key;
+      final lower = key.toLowerCase();
+      if (lower.contains('uid') ||
+          lower.contains('userid') ||
+          lower.contains('inviteid') ||
+          lower.contains('callid') ||
+          lower == 'channel' ||
+          lower.contains('token') ||
+          lower.contains('device') ||
+          lower == 'ids' ||
+          lower.contains('payload')) {
+        safe['identifierFieldPresent'] =
+            entry.value.toString().trim().isNotEmpty;
+        continue;
+      }
+      if (lower.contains('error') || lower.contains('message')) {
+        safe['errorCategory'] = _safePushErrorCategory(entry.value);
+        continue;
+      }
+      final value = entry.value;
+      if (value == null || value is bool || value is num) {
+        safe[key] = value;
+      } else if (value is String) {
+        safe[key] = _safePushString(value);
+      } else if (value is Map || value is Iterable) {
+        safe[key] = 'structured';
+      } else {
+        safe[key] = value.runtimeType.toString();
+      }
+    }
+    return safe;
+  }
+
+  String _safePushString(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return '';
+    const allowed = <String>{
+      'none',
+      'notification_service',
+      'callkit_decline',
+      'callkit_end',
+      'callkit_timeout',
+      'call_end_message',
+      'manual_decline',
+      'local_end',
+      'resume_sync',
+    };
+    if (allowed.contains(trimmed)) return trimmed;
+    if (RegExp(r'^[A-Za-z_]+:[A-Za-z_]+$').hasMatch(trimmed)) return trimmed;
+    return trimmed.length > 64 ? 'text' : trimmed;
+  }
+
+  String _safePushErrorCategory(Object? value) {
+    final text = (value ?? '').toString().toLowerCase();
+    if (text.contains('permission')) return 'permission';
+    if (text.contains('network') || text.contains('unavailable')) {
+      return 'network';
+    }
+    if (text.contains('timeout')) return 'timeout';
+    if (text.trim().isEmpty) return 'none';
+    return 'error';
   }
 
   Future<void> _pruneLegacyDiagTrailIfNeeded() async {
@@ -709,7 +770,11 @@ class NotificationService with WidgetsBindingObserver {
   }
 
   Future<void> _clearUserBindings() async {
+    final previousUid = _boundUid;
     await _diagResourceCounts('clear_user_bindings_start');
+    if (previousUid != null && previousUid.isNotEmpty) {
+      await _deactivatePushInstallationForUser(previousUid);
+    }
     await CallSessionManager.instance.clearForSignedOut();
     await _chatSubParticipants?.cancel();
     _chatSubParticipants = null;
@@ -1182,8 +1247,9 @@ class NotificationService with WidgetsBindingObserver {
         },
         SetOptions(merge: true),
       );
+      await _upsertPushInstallationForUser(user.uid, fcmToken: token);
 
-      debugPrint('✅ FCM token saved uid=${user.uid}');
+      debugPrint('✅ FCM token saved for current installation');
       await _diagPush('fcm_token_saved');
     } on FirebaseException catch (e) {
       if (e.code == 'permission-denied') {
@@ -1403,16 +1469,14 @@ class NotificationService with WidgetsBindingObserver {
     if (nativeApns.isNotEmpty) {
       await _registerApnsToken(nativeApns);
       hasApns = true;
-      debugPrint(
-          'Helperly APNS native token seen suffix=${_tokenSuffix(nativeApns)}');
+      debugPrint('Helperly APNS native token available');
       await _diagPush('apns_token_saved_native');
     }
     final nativeVoip = _normalizeTokenLikeValue(nativeTokens['voipToken']);
     if (nativeVoip.isNotEmpty) {
       await _registerVoipToken(nativeVoip);
       hasVoip = true;
-      debugPrint(
-          'Helperly VoIP native token seen suffix=${_tokenSuffix(nativeVoip)}');
+      debugPrint('Helperly VoIP native token available');
       await _diagPush('voip_token_saved_native');
     }
     final nativeApnsError = _normalizeTokenLikeValue(nativeTokens['apnsError']);
@@ -1463,7 +1527,7 @@ class NotificationService with WidgetsBindingObserver {
         await FlutterCallkitIncoming.getDevicePushTokenVoIP(),
       );
       if (voipToken.isNotEmpty) {
-        debugPrint('📲 VoIP token: $voipToken');
+        debugPrint('📲 VoIP token available');
         await _registerVoipToken(voipToken);
         hasVoip = true;
       } else {
@@ -1494,13 +1558,12 @@ class NotificationService with WidgetsBindingObserver {
         {
           'apnsToken': token,
           'apnsTokens': [token],
-          'diag.push.apnsTokenSuffix': _tokenSuffix(token),
           'diag.push.apnsTokenSavedAt': FieldValue.serverTimestamp(),
         },
         SetOptions(merge: true),
       );
-      debugPrint(
-          'Helperly APNS token saved uid=${user.uid} suffix=${_tokenSuffix(token)}');
+      await _upsertPushInstallationForUser(user.uid, apnsToken: token);
+      debugPrint('Helperly APNS token saved for current installation');
       await _diagPush('apns_token_saved');
     } on FirebaseException catch (e) {
       debugPrint(
@@ -1521,17 +1584,95 @@ class NotificationService with WidgetsBindingObserver {
         {
           'voipToken': token,
           'voipTokens': [token],
-          'diag.push.voipTokenSuffix': _tokenSuffix(token),
           'diag.push.voipTokenSavedAt': FieldValue.serverTimestamp(),
         },
         SetOptions(merge: true),
       );
-      debugPrint(
-          'Helperly VoIP token saved uid=${user.uid} suffix=${_tokenSuffix(token)}');
+      await _upsertPushInstallationForUser(user.uid, voipToken: token);
+      debugPrint('Helperly VoIP token saved for current installation');
     } on FirebaseException catch (e) {
       debugPrint(
           '⚠️ VoIP token write failed: code=${e.code} message=${e.message}');
     }
+  }
+
+  Future<String> _getPushInstallationId() async {
+    final cached = _pushInstallationId?.trim();
+    if (cached != null && cached.isNotEmpty) return cached;
+    try {
+      final dir = await getApplicationSupportDirectory();
+      final file = File('${dir.path}/helperly_push_installation_id');
+      if (await file.exists()) {
+        final existing = (await file.readAsString()).trim();
+        if (_validInstallationId(existing)) {
+          _pushInstallationId = existing;
+          return existing;
+        }
+      }
+      final generated = const Uuid().v4();
+      await file.writeAsString(generated, flush: true);
+      _pushInstallationId = generated;
+      return generated;
+    } catch (_) {
+      final generated = const Uuid().v4();
+      _pushInstallationId = generated;
+      return generated;
+    }
+  }
+
+  bool _validInstallationId(String value) {
+    return RegExp(r'^[A-Za-z0-9_-]{8,80}$').hasMatch(value.trim());
+  }
+
+  Future<void> _upsertPushInstallationForUser(
+    String uid, {
+    String? fcmToken,
+    String? apnsToken,
+    String? voipToken,
+  }) async {
+    final userId = uid.trim();
+    if (userId.isEmpty) return;
+    final installationId = await _getPushInstallationId();
+    final platform = Platform.isIOS
+        ? 'ios'
+        : Platform.isAndroid
+            ? 'android'
+            : 'other';
+    final updates = <String, dynamic>{
+      'installationId': installationId,
+      'ownerUid': userId,
+      'platform': platform,
+      'active': true,
+      'lastSeenAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+      if (fcmToken != null && fcmToken.isNotEmpty) 'fcmToken': fcmToken,
+      if (apnsToken != null && apnsToken.isNotEmpty) 'apnsToken': apnsToken,
+      if (voipToken != null && voipToken.isNotEmpty) 'voipToken': voipToken,
+    };
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .collection('pushInstallations')
+        .doc(installationId)
+        .set(updates, SetOptions(merge: true));
+  }
+
+  Future<void> _deactivatePushInstallationForUser(String uid) async {
+    final userId = uid.trim();
+    if (userId.isEmpty) return;
+    try {
+      final installationId = await _getPushInstallationId();
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('pushInstallations')
+          .doc(installationId)
+          .set({
+        'active': false,
+        'lastSeenAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (_) {}
   }
 
   /// Central handler for all incoming FCMs.
@@ -1793,10 +1934,8 @@ class NotificationService with WidgetsBindingObserver {
         return;
       }
       if (acceptedAt.isNotEmpty &&
-          acceptedAt != _lastRecoveredAcceptedAt &&
           acceptedChannel.isNotEmpty &&
           !(hasTerminalCallkitEvent && terminalMatchesAcceptedCall)) {
-        _lastRecoveredAcceptedAt = acceptedAt;
         final fromName = _normalizeTokenLikeValue(
             nativeTokens['lastCallkitAcceptedFromName']);
         final fromUid = _normalizeTokenLikeValue(
@@ -1804,14 +1943,15 @@ class NotificationService with WidgetsBindingObserver {
         final isVideo = _truthyValue(
           _normalizeTokenLikeValue(nativeTokens['lastCallkitAcceptedIsVideo']),
         );
-        await _clearStoredAcceptedCallRecovery();
-        await CallSessionManager.instance.handleRecoveredAcceptedInvite(
+        final result =
+            await CallSessionManager.instance.handleRecoveredAcceptedInvite(
           inviteId: acceptedInviteId,
           channel: acceptedChannel,
           isVideo: isVideo,
           fromName: fromName.isEmpty ? 'Caller' : fromName,
           fromUid: fromUid,
         );
+        _handleAcceptedRecoveryResult(result);
         return;
       }
 
@@ -1854,19 +1994,37 @@ class NotificationService with WidgetsBindingObserver {
         );
         final isVideo = _videoField(extra, body);
 
-        await CallSessionManager.instance.handleRecoveredAcceptedInvite(
+        final result =
+            await CallSessionManager.instance.handleRecoveredAcceptedInvite(
           inviteId: inviteId,
           channel: channel,
           isVideo: isVideo,
           fromName: fromName,
           fromUid: fromUid,
         );
+        _handleAcceptedRecoveryResult(result);
         return;
       }
     } catch (e) {
       debugPrint('⚠️ accepted CallKit recovery failed: $e');
     } finally {
       _recoveringAcceptedCall = false;
+    }
+  }
+
+  void _handleAcceptedRecoveryResult(AcceptedCallRecoveryResult result) {
+    switch (result) {
+      case AcceptedCallRecoveryResult.opened:
+      case AcceptedCallRecoveryResult.alreadyOpen:
+      case AcceptedCallRecoveryResult.terminal:
+      case AcceptedCallRecoveryResult.invalid:
+        return;
+      case AcceptedCallRecoveryResult.pendingAuth:
+      case AcceptedCallRecoveryResult.pendingNavigator:
+      case AcceptedCallRecoveryResult.pendingNetwork:
+      case AcceptedCallRecoveryResult.busy:
+      case AcceptedCallRecoveryResult.failed:
+        return;
     }
   }
 
