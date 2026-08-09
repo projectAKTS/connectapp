@@ -194,6 +194,8 @@ class CallSessionManager {
   StoredAcceptedCallRecoveryClearer? _clearStoredAcceptedCallRecovery;
   AppForegroundProvider? _appForegroundProvider;
   Future<void> Function()? _afterOutgoingInviteWriteForTest;
+  Future<Map<String, dynamic>?> Function(String inviteId)?
+      _readInviteDataForTest;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _incomingInviteSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _activeInviteSub;
   Timer? _ringingTimeoutTimer;
@@ -309,6 +311,7 @@ class CallSessionManager {
     _acceptedRecoveryAcknowledged = false;
     _acceptedRecoveryAttemptCount = 0;
     _afterOutgoingInviteWriteForTest = null;
+    _readInviteDataForTest = null;
     _callLifecycleArbiter.forceIdleForTest();
   }
 
@@ -337,6 +340,8 @@ class CallSessionManager {
     StoredAcceptedCallRecoveryClearer? clearStoredAcceptedCallRecovery,
     AppForegroundProvider? appForegroundProvider,
     Future<void> Function()? afterOutgoingInviteWriteForTest,
+    Future<Map<String, dynamic>?> Function(String inviteId)?
+        readInviteDataForTest,
   }) {
     if (navigatorKey != null) {
       _navigatorKey = navigatorKey;
@@ -355,6 +360,9 @@ class CallSessionManager {
     }
     if (afterOutgoingInviteWriteForTest != null) {
       _afterOutgoingInviteWriteForTest = afterOutgoingInviteWriteForTest;
+    }
+    if (readInviteDataForTest != null) {
+      _readInviteDataForTest = readInviteDataForTest;
     }
   }
 
@@ -1229,6 +1237,12 @@ class CallSessionManager {
     }
 
     final generation = _callLifecycleArbiter.generation;
+    if (!_callLifecycleArbiter.ownsIncoming(
+      generation: generation,
+      inviteId: normalizedInviteId,
+    )) {
+      return;
+    }
     _callLifecycleArbiter.beginEnding(generation);
     _callLifecycleArbiter.beginTeardown(generation);
     final pendingPayload = _pendingIncomingPromptPayload;
@@ -1253,31 +1267,12 @@ class CallSessionManager {
       });
       return;
     }
-    final claimedInviteId = pendingClaim.inviteId;
-    if (claimedInviteId == null ||
-        pendingPayload == null ||
-        pendingPayload.inviteId != claimedInviteId ||
-        pendingSource == null) {
-      if (claimedInviteId != null) {
-        _callLifecycleArbiter.dropIncoming(
-          generation: pendingClaim.generation,
-          inviteId: claimedInviteId,
-        );
-      }
-      return;
-    }
-    _incomingPromptActive = true;
-    _incomingPromptInviteId = pendingPayload.inviteId;
-    _incomingUiOwner = IncomingUiOwner.flutter;
-    await _diagManager('incoming_pending_claimed_after_terminal', meta: {
-      'source': pendingSource,
-      'status': status.name,
-    });
-    unawaited(_presentIncomingPrompt(
-      pendingPayload,
-      source: '$pendingSource:terminal_complete',
-      lifecycleGeneration: pendingClaim.generation,
-    ));
+    await _continueClaimedPendingIncoming(
+      pendingClaim: pendingClaim,
+      pendingPayload: pendingPayload,
+      pendingSource: pendingSource,
+      source: '$source:terminal_complete',
+    );
   }
 
   Future<void> reportCallScreenBegan({
@@ -2532,12 +2527,30 @@ class CallSessionManager {
     final pendingClaim = _callLifecycleArbiter.completeTeardownAndClaimPending(
       session.lifecycleGeneration,
     );
+    await _continueClaimedPendingIncoming(
+      pendingClaim: pendingClaim,
+      pendingPayload: pendingPayload,
+      pendingSource: pendingSource,
+      source: '$reason:teardown_complete',
+    );
+  }
+
+  Future<void> _continueClaimedPendingIncoming({
+    required CallV2PendingClaim pendingClaim,
+    required CallInvitePayload? pendingPayload,
+    required String? pendingSource,
+    required String source,
+  }) async {
     if (!pendingClaim.claimed) return;
     final claimedInviteId = pendingClaim.inviteId;
     if (claimedInviteId == null ||
         pendingPayload == null ||
         pendingPayload.inviteId != claimedInviteId ||
-        pendingSource == null) {
+        pendingSource == null ||
+        !_callLifecycleArbiter.ownsIncoming(
+          generation: pendingClaim.generation,
+          inviteId: claimedInviteId,
+        )) {
       if (claimedInviteId != null) {
         _callLifecycleArbiter.dropIncoming(
           generation: pendingClaim.generation,
@@ -2546,13 +2559,94 @@ class CallSessionManager {
       }
       return;
     }
+
+    Map<String, dynamic>? latest;
+    try {
+      latest = await _readInviteData(claimedInviteId);
+    } catch (error) {
+      await _diagManager('incoming_pending_verify_error', meta: {
+        'source': source,
+        'errorType': error.runtimeType.toString(),
+      });
+      _schedulePendingIncomingPrompt(
+        pendingPayload,
+        source: pendingSource,
+        reason: 'claimed_verify_error',
+      );
+      return;
+    }
+    if (!_callLifecycleArbiter.ownsIncoming(
+      generation: pendingClaim.generation,
+      inviteId: claimedInviteId,
+    )) {
+      return;
+    }
+    final latestStatus = _parseStatus(latest?['status']);
+    if (latest == null || latestStatus != CallInviteStatus.ringing) {
+      _incomingPromptActive = false;
+      _incomingPromptInviteId = null;
+      _incomingUiOwner = IncomingUiOwner.none;
+      _clearPendingIncomingPrompt(claimedInviteId);
+      _markInviteHandled(claimedInviteId);
+      await _endNativeCallForInvite(
+        inviteId: claimedInviteId,
+        channel: pendingPayload.channel,
+        reason: source,
+      );
+      _callLifecycleArbiter.beginEnding(pendingClaim.generation);
+      _callLifecycleArbiter.beginTeardown(pendingClaim.generation);
+      final nextPendingPayload = _pendingIncomingPromptPayload;
+      final nextPendingSource = _pendingIncomingPromptSource;
+      final nextClaim = _callLifecycleArbiter.completeTeardownAndClaimPending(
+        pendingClaim.generation,
+      );
+      await _continueClaimedPendingIncoming(
+        pendingClaim: nextClaim,
+        pendingPayload: nextPendingPayload,
+        pendingSource: nextPendingSource,
+        source: '$source:terminal_claimed_pending',
+      );
+      return;
+    }
+
+    final payload = CallInvitePayload(
+      inviteId: claimedInviteId,
+      channel: (latest['channel'] ?? pendingPayload.channel).toString().trim(),
+      isVideo: _truthy(latest['isVideo']),
+      fromName: (latest['fromName'] ?? pendingPayload.fromName).toString(),
+      fromUid: (latest['fromUid'] ?? pendingPayload.fromUid).toString().trim(),
+      toUid: (latest['toUid'] ?? pendingPayload.toUid).toString().trim(),
+      connectionSystem: callConnectionSystemFromInviteValue(
+        latest['callSystem'],
+      ),
+    );
+    if (payload.channel.isEmpty) {
+      _callLifecycleArbiter.dropIncoming(
+        generation: pendingClaim.generation,
+        inviteId: claimedInviteId,
+      );
+      return;
+    }
+
+    final owner = await _resolveIncomingUiOwner(payload);
+    if (!_callLifecycleArbiter.ownsIncoming(
+      generation: pendingClaim.generation,
+      inviteId: claimedInviteId,
+    )) {
+      return;
+    }
+    _clearPendingIncomingPrompt(claimedInviteId);
     _incomingPromptActive = true;
-    _incomingPromptInviteId = pendingPayload.inviteId;
+    _incomingPromptInviteId = claimedInviteId;
+    _incomingUiOwner = owner;
     await _diagManager('incoming_pending_claimed_after_teardown', meta: {
-      'source': pendingSource,
+      'source': source,
+      'incomingUiOwner': owner.name,
+      'callkitMatchFound': owner == IncomingUiOwner.callkit,
     });
+    if (owner == IncomingUiOwner.callkit) return;
     unawaited(_presentIncomingPrompt(
-      pendingPayload,
+      payload,
       source: '$pendingSource:teardown_complete',
       lifecycleGeneration: pendingClaim.generation,
     ));
@@ -2981,6 +3075,10 @@ class CallSessionManager {
 
   Future<Map<String, dynamic>?> _readInviteData(String inviteId) async {
     if (inviteId.trim().isEmpty) return null;
+    final override = _readInviteDataForTest;
+    if (override != null) {
+      return override(inviteId);
+    }
     final snap = await FirestoreReadHelper.getDoc(
       _db.collection('callInvites').doc(inviteId),
       timeout: const Duration(seconds: 5),

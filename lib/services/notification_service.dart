@@ -18,6 +18,7 @@ import 'callkit_id.dart';
 import 'current_chat.dart';
 import 'diagnostic_service.dart';
 import 'firestore_read_helper.dart';
+import 'helperly_test_runtime.dart';
 
 class NotificationService with WidgetsBindingObserver {
   NotificationService({this.navigatorKey}) {
@@ -35,7 +36,7 @@ class NotificationService with WidgetsBindingObserver {
 
   static NotificationService? _activeInstance;
 
-  final FirebaseMessaging _fcm = FirebaseMessaging.instance;
+  FirebaseMessaging get _fcm => FirebaseMessaging.instance;
   final FlutterLocalNotificationsPlugin _local =
       FlutterLocalNotificationsPlugin();
   static const MethodChannel _pushTokenChannel =
@@ -78,6 +79,9 @@ class NotificationService with WidgetsBindingObserver {
   bool _recoveringAcceptedCall = false;
   Timer? _acceptedRecoveryRetryTimer;
   int _acceptedRecoveryRetryAttempts = 0;
+  bool _acceptedRecoveryRetryScheduledForTest = false;
+  int _pushBindingGeneration = 0;
+  bool _signOutPreparationInProgress = false;
   String? _pushInstallationId;
   String? _pendingChatOpenOtherUserId;
   String? _pendingChatOpenChatId;
@@ -89,8 +93,61 @@ class NotificationService with WidgetsBindingObserver {
   static const int _maxAppleTokenRetryAttempts = 8;
   static const int _maxAcceptedRecoveryRetryAttempts = 8;
 
+  bool get _debugTestAccessEnabled {
+    var enabled = HelperlyTestRuntime.isEnabled;
+    assert(() {
+      enabled = true;
+      return true;
+    }());
+    return enabled;
+  }
+
   static Future<void> prepareCurrentUserForSignOut() async {
     await _activeInstance?.prepareForSignOut();
+  }
+
+  FirebaseFirestore get _pushDb => HelperlyTestRuntime.firestore;
+
+  String? get _currentPushAuthUid {
+    final uid = HelperlyTestRuntime.currentUid?.trim();
+    return uid == null || uid.isEmpty ? null : uid;
+  }
+
+  int _beginPushBindingForUser(String uid) {
+    final userId = uid.trim();
+    if (userId.isEmpty) return _pushBindingGeneration;
+    _pushBindingGeneration += 1;
+    _boundUid = userId;
+    _signOutPreparationInProgress = false;
+    return _pushBindingGeneration;
+  }
+
+  int? _capturePushBindingGeneration(String uid) {
+    final userId = uid.trim();
+    if (userId.isEmpty ||
+        _signOutPreparationInProgress ||
+        _boundUid != userId ||
+        _currentPushAuthUid != userId) {
+      return null;
+    }
+    return _pushBindingGeneration;
+  }
+
+  bool _canWriteForPushBinding({
+    required String uid,
+    required int generation,
+  }) {
+    final userId = uid.trim();
+    return userId.isNotEmpty &&
+        !_signOutPreparationInProgress &&
+        _boundUid == userId &&
+        _currentPushAuthUid == userId &&
+        _pushBindingGeneration == generation;
+  }
+
+  void _invalidatePushBinding() {
+    _signOutPreparationInProgress = true;
+    _pushBindingGeneration += 1;
   }
 
   int _notificationIdFrom(String seed) {
@@ -315,7 +372,7 @@ class NotificationService with WidgetsBindingObserver {
     };
     DiagnosticService.updateCounters(
       counters,
-      uid: FirebaseAuth.instance.currentUser?.uid,
+      uid: _currentPushAuthUid,
     );
     await _diagPush(stage, meta: {
       ...counters,
@@ -420,7 +477,7 @@ class NotificationService with WidgetsBindingObserver {
     debugPrint('[DIAG][push] $stage meta=$safeMeta');
     DiagnosticService.logPush(
       stage,
-      uid: FirebaseAuth.instance.currentUser?.uid,
+      uid: _currentPushAuthUid,
       meta: safeMeta,
     );
   }
@@ -505,10 +562,10 @@ class NotificationService with WidgetsBindingObserver {
 
   Future<void> _pruneLegacyDiagTrailIfNeeded() async {
     if (_diagEnabled) return;
-    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final uid = _currentPushAuthUid;
     if (uid == null || uid.isEmpty) return;
     try {
-      await FirebaseFirestore.instance.collection('users').doc(uid).set({
+      await _pushDb.collection('users').doc(uid).set({
         'diag.callTrail': FieldValue.delete(),
         'diag.pushTrail': FieldValue.delete(),
       }, SetOptions(merge: true));
@@ -533,7 +590,7 @@ class NotificationService with WidgetsBindingObserver {
     if (_initialized) {
       DiagnosticService.logLifecycle(
         WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed,
-        uid: FirebaseAuth.instance.currentUser?.uid,
+        uid: _currentPushAuthUid,
         counters: <String, int>{
           'activeListeners': [
             _tokenSub,
@@ -563,7 +620,7 @@ class NotificationService with WidgetsBindingObserver {
     await _pruneLegacyDiagTrailIfNeeded();
     DiagnosticService.logLifecycle(
       WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed,
-      uid: FirebaseAuth.instance.currentUser?.uid,
+      uid: _currentPushAuthUid,
       counters: <String, int>{
         'activeListeners': [
           _tokenSub,
@@ -772,11 +829,14 @@ class NotificationService with WidgetsBindingObserver {
 
     // Token registration should run regardless of local notification permission,
     // otherwise closed-app push delivery can silently break.
+    final currentUid = _currentPushAuthUid;
+    if (currentUid != null) {
+      _beginPushBindingForUser(currentUid);
+    }
     if (Platform.isIOS) {
       await _registerApplePushTokens(force: true);
     }
     await _registerFcmToken();
-    _boundUid = FirebaseAuth.instance.currentUser?.uid;
 
     // Keep user doc in sync on token refresh
     _tokenSub?.cancel();
@@ -792,11 +852,11 @@ class NotificationService with WidgetsBindingObserver {
 
   Future<void> _clearUserBindings() async {
     final previousUid = _boundUid;
+    _invalidatePushBinding();
     await _diagResourceCounts('clear_user_bindings_start');
     if (previousUid != null && previousUid.isNotEmpty) {
       await _diagPush('post_auth_deactivation_attempt', meta: {
-        'authorizedForPreviousOwner':
-            FirebaseAuth.instance.currentUser?.uid == previousUid,
+        'authorizedForPreviousOwner': _currentPushAuthUid == previousUid,
       });
       await _deactivatePushInstallationForUser(previousUid);
     }
@@ -819,11 +879,13 @@ class NotificationService with WidgetsBindingObserver {
   }
 
   Future<void> prepareForSignOut() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid ?? _boundUid ?? '';
+    final uid = _currentPushAuthUid ?? _boundUid ?? '';
+    _invalidatePushBinding();
     await _diagResourceCounts('prepare_for_sign_out_start');
     _acceptedRecoveryRetryTimer?.cancel();
     _acceptedRecoveryRetryTimer = null;
     _acceptedRecoveryRetryAttempts = 0;
+    _acceptedRecoveryRetryScheduledForTest = false;
     await _tokenSub?.cancel();
     _tokenSub = null;
     if (uid.trim().isNotEmpty) {
@@ -838,7 +900,7 @@ class NotificationService with WidgetsBindingObserver {
   }
 
   Future<void> _rebindForCurrentUser() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final uid = _currentPushAuthUid;
     if (uid == null || uid.isEmpty) {
       await _clearUserBindings();
       return;
@@ -850,6 +912,7 @@ class NotificationService with WidgetsBindingObserver {
       await _bindChatListener();
       await _pruneLegacyDiagTrailIfNeeded();
       await _diagResourceCounts('rebind_same_user');
+      _signOutPreparationInProgress = false;
       if (Platform.isIOS) {
         await _registerApplePushTokens(force: true);
       }
@@ -858,7 +921,7 @@ class NotificationService with WidgetsBindingObserver {
     }
 
     await _clearUserBindings();
-    _boundUid = uid;
+    _beginPushBindingForUser(uid);
     await _refreshNativePushRegistrations();
     await CallSessionManager.instance.bindIncomingInviteListener();
     await _bindChatListener();
@@ -874,6 +937,7 @@ class NotificationService with WidgetsBindingObserver {
     await _diagResourceCounts('notification_dispose_start');
     _acceptedRecoveryRetryTimer?.cancel();
     _acceptedRecoveryRetryTimer = null;
+    _acceptedRecoveryRetryScheduledForTest = false;
     if (_observerBound) {
       WidgetsBinding.instance.removeObserver(this);
       _observerBound = false;
@@ -966,7 +1030,7 @@ class NotificationService with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     DiagnosticService.logLifecycle(
       state,
-      uid: FirebaseAuth.instance.currentUser?.uid,
+      uid: _currentPushAuthUid,
       counters: <String, int>{
         'activeListeners': [
           _tokenSub,
@@ -1059,7 +1123,7 @@ class NotificationService with WidgetsBindingObserver {
       _chatSubParticipants = null;
       await _chatSubUsers?.cancel();
       _chatSubUsers = null;
-      final uid = FirebaseAuth.instance.currentUser?.uid;
+      final uid = _currentPushAuthUid;
       if (uid == null || uid.isEmpty) {
         return;
       }
@@ -1187,14 +1251,13 @@ class NotificationService with WidgetsBindingObserver {
           'callkitId': id,
           'channel': channel,
         });
-        await CallSessionManager.instance.handleNotificationInviteTap(
+        await _recoverAcceptedCallkitEvent(
           inviteId: inviteId,
           channel: channel,
           isVideo: isVideo,
           fromName: fromName,
           fromUid: fromUid,
-          autoAccept: true,
-          source: 'callkit_accept',
+          trigger: 'callkit_accept',
         );
         return;
       }
@@ -1259,10 +1322,15 @@ class NotificationService with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _registerFcmToken({String? forceToken}) async {
+  Future<void> _registerFcmToken({
+    String? forceToken,
+    Future<void> Function()? beforeWriteForTest,
+  }) async {
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
+      final uid = _currentPushAuthUid;
+      if (uid == null) return;
+      final generation = _capturePushBindingGeneration(uid);
+      if (generation == null) return;
 
       if (Platform.isIOS && (forceToken == null || forceToken.isEmpty)) {
         final apnsReady = await _hasApnsTokenReady();
@@ -1279,11 +1347,17 @@ class NotificationService with WidgetsBindingObserver {
       }
       if (token == null || token.isEmpty) return;
 
-      final app = FirebaseFirestore.instance.app;
+      final app = _pushDb.app;
       debugPrint(
           '📡 registerFcmToken() project=${app.options.projectId}, appId=${app.options.appId}');
 
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
+      if (beforeWriteForTest != null) {
+        await beforeWriteForTest();
+      }
+      if (!_canWriteForPushBinding(uid: uid, generation: generation)) {
+        return;
+      }
+      await _pushDb.collection('users').doc(uid).set(
         {
           'fcmToken': token,
           'fcmTokens': [token],
@@ -1292,7 +1366,14 @@ class NotificationService with WidgetsBindingObserver {
         },
         SetOptions(merge: true),
       );
-      await _upsertPushInstallationForUser(user.uid, fcmToken: token);
+      if (!_canWriteForPushBinding(uid: uid, generation: generation)) {
+        return;
+      }
+      await _upsertPushInstallationForUser(
+        uid,
+        generation: generation,
+        fcmToken: token,
+      );
 
       debugPrint('✅ FCM token saved for current installation');
       await _diagPush('fcm_token_saved');
@@ -1416,10 +1497,10 @@ class NotificationService with WidgetsBindingObserver {
   Future<void> _syncNativePushDiagnostics(
       Map<String, String> nativeTokens) async {
     if (!Platform.isIOS) return;
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null || user.uid.isEmpty) return;
+    final uid = _currentPushAuthUid;
+    if (uid == null || uid.isEmpty) return;
     try {
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
+      await _pushDb.collection('users').doc(uid).set(
         {
           'diag.push.apnsTokenSuffix':
               _normalizeTokenLikeValue(nativeTokens['apnsTokenSuffix']),
@@ -1594,12 +1675,23 @@ class NotificationService with WidgetsBindingObserver {
     _scheduleAppleTokenRetry();
   }
 
-  Future<void> _registerApnsToken(String token) async {
+  Future<void> _registerApnsToken(
+    String token, {
+    Future<void> Function()? beforeWriteForTest,
+  }) async {
     if (!Platform.isIOS) return;
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null || token.isEmpty) return;
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
+      final uid = _currentPushAuthUid;
+      if (uid == null || token.isEmpty) return;
+      final generation = _capturePushBindingGeneration(uid);
+      if (generation == null) return;
+      if (beforeWriteForTest != null) {
+        await beforeWriteForTest();
+      }
+      if (!_canWriteForPushBinding(uid: uid, generation: generation)) {
+        return;
+      }
+      await _pushDb.collection('users').doc(uid).set(
         {
           'apnsToken': token,
           'apnsTokens': [token],
@@ -1607,7 +1699,14 @@ class NotificationService with WidgetsBindingObserver {
         },
         SetOptions(merge: true),
       );
-      await _upsertPushInstallationForUser(user.uid, apnsToken: token);
+      if (!_canWriteForPushBinding(uid: uid, generation: generation)) {
+        return;
+      }
+      await _upsertPushInstallationForUser(
+        uid,
+        generation: generation,
+        apnsToken: token,
+      );
       debugPrint('Helperly APNS token saved for current installation');
       await _diagPush('apns_token_saved');
     } on FirebaseException catch (e) {
@@ -1620,12 +1719,23 @@ class NotificationService with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _registerVoipToken(String token) async {
+  Future<void> _registerVoipToken(
+    String token, {
+    Future<void> Function()? beforeWriteForTest,
+  }) async {
     if (!Platform.isIOS) return;
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null || token.isEmpty) return;
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
+      final uid = _currentPushAuthUid;
+      if (uid == null || token.isEmpty) return;
+      final generation = _capturePushBindingGeneration(uid);
+      if (generation == null) return;
+      if (beforeWriteForTest != null) {
+        await beforeWriteForTest();
+      }
+      if (!_canWriteForPushBinding(uid: uid, generation: generation)) {
+        return;
+      }
+      await _pushDb.collection('users').doc(uid).set(
         {
           'voipToken': token,
           'voipTokens': [token],
@@ -1633,7 +1743,14 @@ class NotificationService with WidgetsBindingObserver {
         },
         SetOptions(merge: true),
       );
-      await _upsertPushInstallationForUser(user.uid, voipToken: token);
+      if (!_canWriteForPushBinding(uid: uid, generation: generation)) {
+        return;
+      }
+      await _upsertPushInstallationForUser(
+        uid,
+        generation: generation,
+        voipToken: token,
+      );
       debugPrint('Helperly VoIP token saved for current installation');
     } on FirebaseException catch (e) {
       debugPrint(
@@ -1671,13 +1788,20 @@ class NotificationService with WidgetsBindingObserver {
 
   Future<void> _upsertPushInstallationForUser(
     String uid, {
+    required int generation,
     String? fcmToken,
     String? apnsToken,
     String? voipToken,
   }) async {
     final userId = uid.trim();
     if (userId.isEmpty) return;
+    if (!_canWriteForPushBinding(uid: userId, generation: generation)) {
+      return;
+    }
     final installationId = await _getPushInstallationId();
+    if (!_canWriteForPushBinding(uid: userId, generation: generation)) {
+      return;
+    }
     final platform = Platform.isIOS
         ? 'ios'
         : Platform.isAndroid
@@ -1694,7 +1818,7 @@ class NotificationService with WidgetsBindingObserver {
       if (apnsToken != null && apnsToken.isNotEmpty) 'apnsToken': apnsToken,
       if (voipToken != null && voipToken.isNotEmpty) 'voipToken': voipToken,
     };
-    await FirebaseFirestore.instance
+    await _pushDb
         .collection('users')
         .doc(userId)
         .collection('pushInstallations')
@@ -1707,7 +1831,7 @@ class NotificationService with WidgetsBindingObserver {
     if (userId.isEmpty) return;
     try {
       final installationId = await _getPushInstallationId();
-      await FirebaseFirestore.instance
+      await _pushDb
           .collection('users')
           .doc(userId)
           .collection('pushInstallations')
@@ -2065,6 +2189,42 @@ class NotificationService with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _recoverAcceptedCallkitEvent({
+    required String inviteId,
+    required String channel,
+    required bool isVideo,
+    required String fromName,
+    required String fromUid,
+    required String trigger,
+  }) async {
+    if (_recoveringAcceptedCall) {
+      _handleAcceptedRecoveryResult(
+        AcceptedCallRecoveryResult.pendingNetwork,
+      );
+      return;
+    }
+    _recoveringAcceptedCall = true;
+    try {
+      final result =
+          await CallSessionManager.instance.handleRecoveredAcceptedInvite(
+        inviteId: inviteId,
+        channel: channel,
+        isVideo: isVideo,
+        fromName: fromName.isEmpty ? 'Caller' : fromName,
+        fromUid: fromUid,
+      );
+      _handleAcceptedRecoveryResult(result);
+    } catch (error) {
+      await _diagPush('accepted_call_recovery_error', meta: {
+        'trigger': trigger,
+        'error': '$error',
+      });
+      _handleAcceptedRecoveryResult(AcceptedCallRecoveryResult.pendingNetwork);
+    } finally {
+      _recoveringAcceptedCall = false;
+    }
+  }
+
   void _handleAcceptedRecoveryResult(AcceptedCallRecoveryResult result) {
     switch (result) {
       case AcceptedCallRecoveryResult.opened:
@@ -2074,6 +2234,7 @@ class NotificationService with WidgetsBindingObserver {
         _acceptedRecoveryRetryTimer?.cancel();
         _acceptedRecoveryRetryTimer = null;
         _acceptedRecoveryRetryAttempts = 0;
+        _acceptedRecoveryRetryScheduledForTest = false;
         return;
       case AcceptedCallRecoveryResult.pendingAuth:
       case AcceptedCallRecoveryResult.pendingNavigator:
@@ -2086,7 +2247,9 @@ class NotificationService with WidgetsBindingObserver {
   }
 
   void _scheduleAcceptedRecoveryRetry(AcceptedCallRecoveryResult result) {
-    if (!Platform.isIOS || !_enableIosCallKit) return;
+    if ((!Platform.isIOS && !_debugTestAccessEnabled) || !_enableIosCallKit) {
+      return;
+    }
     if (_acceptedRecoveryRetryAttempts >= _maxAcceptedRecoveryRetryAttempts) {
       unawaited(_diagPush('accepted_call_recovery_retry_exhausted', meta: {
         'result': result.name,
@@ -2096,6 +2259,14 @@ class NotificationService with WidgetsBindingObserver {
     _acceptedRecoveryRetryTimer?.cancel();
     _acceptedRecoveryRetryAttempts += 1;
     final attempt = _acceptedRecoveryRetryAttempts;
+    if (!Platform.isIOS && _debugTestAccessEnabled) {
+      _acceptedRecoveryRetryScheduledForTest = true;
+      unawaited(_diagPush('accepted_call_recovery_retry_scheduled', meta: {
+        'result': result.name,
+        'attempt': attempt,
+      }));
+      return;
+    }
     final delay = result == AcceptedCallRecoveryResult.pendingAuth
         ? const Duration(milliseconds: 500)
         : Duration(milliseconds: 500 * attempt.clamp(1, 6));
@@ -2139,12 +2310,125 @@ class NotificationService with WidgetsBindingObserver {
     );
   }
 
+  Future<void> debugSimulateAcceptedCallkitEventForTest({
+    required String inviteId,
+    required String channel,
+    required bool isVideo,
+    required String fromName,
+    required String fromUid,
+  }) async {
+    _rememberAcceptedCallkitCall(
+        inviteId,
+        normalizeCallkitId(
+          rawId: inviteId,
+          fallback: channel,
+        ));
+    await _recoverAcceptedCallkitEvent(
+      inviteId: inviteId,
+      channel: channel,
+      isVideo: isVideo,
+      fromName: fromName,
+      fromUid: fromUid,
+      trigger: 'debug_callkit_accept',
+    );
+  }
+
   Future<void> debugOpenChatFromTapForTest({
     required String otherUserId,
     String? chatId,
   }) async {
     _openChat(otherUserId, chatId: chatId);
     await Future<void>.delayed(Duration.zero);
+  }
+
+  void debugBeginPushBindingForTest(String uid) {
+    _beginPushBindingForUser(uid);
+  }
+
+  Map<String, dynamic> debugSnapshotForTest() {
+    return <String, dynamic>{
+      'acceptedRecoveryRetryScheduled':
+          _acceptedRecoveryRetryScheduledForTest ||
+              _acceptedRecoveryRetryTimer?.isActive == true,
+      'acceptedRecoveryRetryAttempts': _acceptedRecoveryRetryAttempts,
+      'boundUid': _boundUid,
+      'pushBindingGeneration': _pushBindingGeneration,
+      'signOutPreparationInProgress': _signOutPreparationInProgress,
+    };
+  }
+
+  Future<void> debugPreparePushBindingSignOutForTest() async {
+    await prepareForSignOut();
+  }
+
+  Future<void> debugRegisterFcmTokenForTest({
+    required String token,
+    Future<void> Function()? beforeWrite,
+  }) async {
+    await _debugRegisterPushTokenForTest(
+      token: token,
+      fcm: true,
+      beforeWrite: beforeWrite,
+    );
+  }
+
+  Future<void> debugRegisterApnsTokenForTest({
+    required String token,
+    Future<void> Function()? beforeWrite,
+  }) async {
+    await _debugRegisterPushTokenForTest(
+      token: token,
+      apns: true,
+      beforeWrite: beforeWrite,
+    );
+  }
+
+  Future<void> debugRegisterVoipTokenForTest({
+    required String token,
+    Future<void> Function()? beforeWrite,
+  }) async {
+    await _debugRegisterPushTokenForTest(
+      token: token,
+      voip: true,
+      beforeWrite: beforeWrite,
+    );
+  }
+
+  Future<void> _debugRegisterPushTokenForTest({
+    required String token,
+    bool fcm = false,
+    bool apns = false,
+    bool voip = false,
+    Future<void> Function()? beforeWrite,
+  }) async {
+    final uid = _currentPushAuthUid;
+    if (uid == null || token.trim().isEmpty) return;
+    final generation = _capturePushBindingGeneration(uid);
+    if (generation == null) return;
+    if (beforeWrite != null) {
+      await beforeWrite();
+    }
+    if (!_canWriteForPushBinding(uid: uid, generation: generation)) {
+      return;
+    }
+    await _pushDb.collection('users').doc(uid).set({
+      if (fcm) 'fcmToken': token,
+      if (fcm) 'fcmTokens': [token],
+      if (apns) 'apnsToken': token,
+      if (apns) 'apnsTokens': [token],
+      if (voip) 'voipToken': token,
+      if (voip) 'voipTokens': [token],
+    }, SetOptions(merge: true));
+    if (!_canWriteForPushBinding(uid: uid, generation: generation)) {
+      return;
+    }
+    await _upsertPushInstallationForUser(
+      uid,
+      generation: generation,
+      fcmToken: fcm ? token : null,
+      apnsToken: apns ? token : null,
+      voipToken: voip ? token : null,
+    );
   }
 
   Future<void> _flushPendingChatOpen() async {

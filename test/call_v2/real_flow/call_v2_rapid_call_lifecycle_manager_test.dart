@@ -414,6 +414,136 @@ void main() {
     );
   });
 
+  testWidgets('pending invite re-resolves to CallKit owner after teardown',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[];
+    manager.configure(
+      navigatorKey: navigatorKey,
+      appForegroundProvider: () async => true,
+      listNativeCalls: () async => List<NativeCallSnapshot>.from(nativeCalls),
+    );
+    await seedInvite('invite_b');
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'invite_a',
+      channel: 'channel_invite_a',
+    );
+    await manager.debugMarkHeldRouteTerminalForTest('invite_a');
+    await manager.debugRunPreflightForTest('pending_callkit_preflight');
+
+    nativeCalls.add(nativeForInvite('invite_b'));
+    await manager.handleNotificationInviteTap(
+      inviteId: 'invite_b',
+      channel: 'channel_invite_b',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'pending_callkit',
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(manager.debugSnapshot()['pendingIncomingPresent'], isTrue);
+    expect(find.text('Incoming Audio Call'), findsNothing);
+
+    final closeFuture = manager.debugCloseHeldRouteForTest('invite_a');
+    await tester.pump(const Duration(milliseconds: 300));
+    await closeFuture;
+    await tester.pump(const Duration(milliseconds: 350));
+
+    final snapshot = manager.debugSnapshot();
+    expect(snapshot['incomingUiOwner'], IncomingUiOwner.callkit.name);
+    expect(snapshot['activePromptCount'], 1);
+    expect(find.text('Incoming Audio Call'), findsNothing);
+  });
+
+  testWidgets('pending invite falls back to Flutter when no CallKit owner',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    manager.configure(
+      navigatorKey: navigatorKey,
+      appForegroundProvider: () async => true,
+      listNativeCalls: () async => const <NativeCallSnapshot>[],
+    );
+    await seedInvite('invite_b');
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'invite_a',
+      channel: 'channel_invite_a',
+    );
+    await manager.debugMarkHeldRouteTerminalForTest('invite_a');
+    await manager.debugRunPreflightForTest('pending_flutter_preflight');
+
+    await manager.handleNotificationInviteTap(
+      inviteId: 'invite_b',
+      channel: 'channel_invite_b',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'pending_flutter',
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(manager.debugSnapshot()['pendingIncomingPresent'], isTrue);
+
+    final closeFuture = manager.debugCloseHeldRouteForTest('invite_a');
+    await tester.pump(const Duration(milliseconds: 300));
+    await closeFuture;
+    for (var attempt = 0;
+        attempt < 20 && find.text('Incoming Audio Call').evaluate().isEmpty;
+        attempt += 1) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    final snapshot = manager.debugSnapshot();
+    expect(snapshot['incomingUiOwner'], IncomingUiOwner.flutter.name);
+    expect(find.text('Incoming Audio Call'), findsOneWidget);
+    navigatorKey.currentState!.pop(false);
+    await tester.pump();
+  });
+
+  testWidgets('old terminal callback cannot clear newer pending owner',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    manager.configure(
+      navigatorKey: navigatorKey,
+      appForegroundProvider: () async => true,
+      listNativeCalls: () async => const <NativeCallSnapshot>[],
+    );
+    await seedInvite('invite_b');
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'invite_a',
+      channel: 'channel_invite_a',
+    );
+    await manager.debugMarkHeldRouteTerminalForTest('invite_a');
+    await manager.debugRunPreflightForTest('stale_terminal_preflight');
+
+    await manager.handleNotificationInviteTap(
+      inviteId: 'invite_b',
+      channel: 'channel_invite_b',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'stale_terminal',
+    );
+    final closeFuture = manager.debugCloseHeldRouteForTest('invite_a');
+    await tester.pump(const Duration(milliseconds: 300));
+    await closeFuture;
+    for (var attempt = 0;
+        attempt < 20 && find.text('Incoming Audio Call').evaluate().isEmpty;
+        attempt += 1) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await manager.debugCloseHeldRouteForTest('invite_a');
+    await manager.debugRunPreflightForTest('old_terminal_callback');
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(
+      manager.debugSnapshot()['incomingUiOwner'],
+      IncomingUiOwner.flutter.name,
+    );
+    expect(find.text('Incoming Audio Call'), findsOneWidget);
+    navigatorKey.currentState!.pop(false);
+    await tester.pump();
+  });
+
   testWidgets('Flutter decline closes matching native CallKit call',
       (tester) async {
     await tester.pumpWidget(buildHarness());
