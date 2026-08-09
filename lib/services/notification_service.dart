@@ -20,6 +20,22 @@ import 'diagnostic_service.dart';
 import 'firestore_read_helper.dart';
 import 'helperly_test_runtime.dart';
 
+class _AcceptedCallkitRecoveryPayload {
+  const _AcceptedCallkitRecoveryPayload({
+    required this.inviteId,
+    required this.channel,
+    required this.isVideo,
+    required this.fromName,
+    required this.fromUid,
+  });
+
+  final String inviteId;
+  final String channel;
+  final bool isVideo;
+  final String fromName;
+  final String fromUid;
+}
+
 class NotificationService with WidgetsBindingObserver {
   NotificationService({this.navigatorKey}) {
     _activeInstance = this;
@@ -80,8 +96,12 @@ class NotificationService with WidgetsBindingObserver {
   Timer? _acceptedRecoveryRetryTimer;
   int _acceptedRecoveryRetryAttempts = 0;
   bool _acceptedRecoveryRetryScheduledForTest = false;
+  AcceptedCallRecoveryResult? _acceptedRecoveryRetryResultForTest;
+  _AcceptedCallkitRecoveryPayload? _pendingAcceptedCallkitRecoveryPayload;
   int _pushBindingGeneration = 0;
   bool _signOutPreparationInProgress = false;
+  String? _signOutPreparingUid;
+  Future<void> Function()? _afterSignOutDeactivationForTest;
   String? _pushInstallationId;
   String? _pendingChatOpenOtherUserId;
   String? _pendingChatOpenChatId;
@@ -116,9 +136,13 @@ class NotificationService with WidgetsBindingObserver {
   int _beginPushBindingForUser(String uid) {
     final userId = uid.trim();
     if (userId.isEmpty) return _pushBindingGeneration;
+    if (_signOutBarrierBlocksUid(userId)) {
+      return _pushBindingGeneration;
+    }
     _pushBindingGeneration += 1;
     _boundUid = userId;
     _signOutPreparationInProgress = false;
+    _signOutPreparingUid = null;
     return _pushBindingGeneration;
   }
 
@@ -147,7 +171,27 @@ class NotificationService with WidgetsBindingObserver {
 
   void _invalidatePushBinding() {
     _signOutPreparationInProgress = true;
+    _signOutPreparingUid = (_currentPushAuthUid ?? _boundUid)?.trim();
     _pushBindingGeneration += 1;
+  }
+
+  bool _signOutBarrierBlocksUid(String? uid) {
+    final userId = uid?.trim() ?? '';
+    final preparingUid = _signOutPreparingUid?.trim() ?? '';
+    return _signOutPreparationInProgress &&
+        userId.isNotEmpty &&
+        preparingUid.isNotEmpty &&
+        userId == preparingUid;
+  }
+
+  void _clearSignOutBarrierAfterAuthTransition(String? uid) {
+    if (!_signOutPreparationInProgress) return;
+    final userId = uid?.trim() ?? '';
+    final preparingUid = _signOutPreparingUid?.trim() ?? '';
+    if (userId.isEmpty || (preparingUid.isNotEmpty && userId != preparingUid)) {
+      _signOutPreparationInProgress = false;
+      _signOutPreparingUid = null;
+    }
   }
 
   int _notificationIdFrom(String seed) {
@@ -850,9 +894,17 @@ class NotificationService with WidgetsBindingObserver {
     await _diagPush('initialize_done');
   }
 
-  Future<void> _clearUserBindings() async {
+  Future<void> _clearUserBindings({
+    bool markSignOutPreparation = true,
+  }) async {
     final previousUid = _boundUid;
-    _invalidatePushBinding();
+    if (markSignOutPreparation) {
+      _invalidatePushBinding();
+    } else {
+      _pushBindingGeneration += 1;
+      _signOutPreparationInProgress = false;
+      _signOutPreparingUid = null;
+    }
     await _diagResourceCounts('clear_user_bindings_start');
     if (previousUid != null && previousUid.isNotEmpty) {
       await _diagPush('post_auth_deactivation_attempt', meta: {
@@ -868,6 +920,7 @@ class NotificationService with WidgetsBindingObserver {
     _chatListenerBindingInFlight = false;
     _recentCallkitTerminalEvents.clear();
     _recentAcceptedCallkitCalls.clear();
+    _pendingAcceptedCallkitRecoveryPayload = null;
     _chatLastNotifiedAt.clear();
     _appleTokensRegisteredForSession = false;
     _apnsRetryScheduled = false;
@@ -881,55 +934,75 @@ class NotificationService with WidgetsBindingObserver {
   Future<void> prepareForSignOut() async {
     final uid = _currentPushAuthUid ?? _boundUid ?? '';
     _invalidatePushBinding();
-    await _diagResourceCounts('prepare_for_sign_out_start');
+    final tokenSub = _tokenSub;
+    _tokenSub = null;
     _acceptedRecoveryRetryTimer?.cancel();
     _acceptedRecoveryRetryTimer = null;
     _acceptedRecoveryRetryAttempts = 0;
     _acceptedRecoveryRetryScheduledForTest = false;
-    await _tokenSub?.cancel();
-    _tokenSub = null;
+    _acceptedRecoveryRetryResultForTest = null;
+    _pendingAcceptedCallkitRecoveryPayload = null;
+    _appleTokenRetryTimer?.cancel();
+    _appleTokenRetryTimer = null;
+    _apnsRetryScheduled = false;
+    _appleTokenRetryAttempts = 0;
+    await _diagResourceCounts('prepare_for_sign_out_start');
+    await tokenSub?.cancel();
     if (uid.trim().isNotEmpty) {
       await _deactivatePushInstallationForUser(uid);
+      await _afterSignOutDeactivationForTest?.call();
     }
     await _clearStoredAcceptedCallRecovery();
     await _diagResourceCounts('prepare_for_sign_out_done');
   }
 
   Future<void> onSignedOut() async {
-    await _clearUserBindings();
+    await _clearUserBindings(markSignOutPreparation: false);
   }
 
-  Future<void> _rebindForCurrentUser() async {
+  Future<void> _rebindForCurrentUser({
+    String? forceFcmTokenForTest,
+    bool skipRealtimeBindingsForTest = false,
+  }) async {
     final uid = _currentPushAuthUid;
+    _clearSignOutBarrierAfterAuthTransition(uid);
     if (uid == null || uid.isEmpty) {
-      await _clearUserBindings();
+      await _clearUserBindings(markSignOutPreparation: false);
+      return;
+    }
+
+    if (_signOutBarrierBlocksUid(uid)) {
+      await _diagResourceCounts('rebind_same_user_blocked_for_sign_out');
       return;
     }
 
     if (_boundUid == uid &&
         (_chatSubParticipants != null || _chatSubUsers != null)) {
-      await CallSessionManager.instance.bindIncomingInviteListener();
-      await _bindChatListener();
+      if (!skipRealtimeBindingsForTest) {
+        await CallSessionManager.instance.bindIncomingInviteListener();
+        await _bindChatListener();
+      }
       await _pruneLegacyDiagTrailIfNeeded();
       await _diagResourceCounts('rebind_same_user');
-      _signOutPreparationInProgress = false;
       if (Platform.isIOS) {
         await _registerApplePushTokens(force: true);
       }
-      await _registerFcmToken();
+      await _registerFcmToken(forceToken: forceFcmTokenForTest);
       return;
     }
 
-    await _clearUserBindings();
+    await _clearUserBindings(markSignOutPreparation: false);
     _beginPushBindingForUser(uid);
-    await _refreshNativePushRegistrations();
-    await CallSessionManager.instance.bindIncomingInviteListener();
-    await _bindChatListener();
+    if (!skipRealtimeBindingsForTest) {
+      await _refreshNativePushRegistrations();
+      await CallSessionManager.instance.bindIncomingInviteListener();
+      await _bindChatListener();
+    }
     if (Platform.isIOS) {
       await _registerApplePushTokens(force: true);
     }
     await _pruneLegacyDiagTrailIfNeeded();
-    await _registerFcmToken();
+    await _registerFcmToken(forceToken: forceFcmTokenForTest);
     await _diagPush('rebind_done', meta: {'uid': uid});
   }
 
@@ -938,6 +1011,8 @@ class NotificationService with WidgetsBindingObserver {
     _acceptedRecoveryRetryTimer?.cancel();
     _acceptedRecoveryRetryTimer = null;
     _acceptedRecoveryRetryScheduledForTest = false;
+    _acceptedRecoveryRetryResultForTest = null;
+    _pendingAcceptedCallkitRecoveryPayload = null;
     if (_observerBound) {
       WidgetsBinding.instance.removeObserver(this);
       _observerBound = false;
@@ -968,6 +1043,9 @@ class NotificationService with WidgetsBindingObserver {
       _nativePushHandlerBound = false;
     }
     _boundUid = null;
+    _signOutPreparationInProgress = false;
+    _signOutPreparingUid = null;
+    _afterSignOutDeactivationForTest = null;
     _initialized = false;
     if (identical(_activeInstance, this)) {
       _activeInstance = null;
@@ -1347,9 +1425,13 @@ class NotificationService with WidgetsBindingObserver {
       }
       if (token == null || token.isEmpty) return;
 
-      final app = _pushDb.app;
-      debugPrint(
-          '📡 registerFcmToken() project=${app.options.projectId}, appId=${app.options.appId}');
+      if (!_debugTestAccessEnabled || forceToken == null) {
+        final app = _pushDb.app;
+        debugPrint(
+            '📡 registerFcmToken() project=${app.options.projectId}, appId=${app.options.appId}');
+      } else {
+        debugPrint('📡 registerFcmToken() test override');
+      }
 
       if (beforeWriteForTest != null) {
         await beforeWriteForTest();
@@ -1402,9 +1484,11 @@ class NotificationService with WidgetsBindingObserver {
 
   void _scheduleAppleTokenRetry() {
     if (!Platform.isIOS) return;
+    if (_signOutBarrierBlocksUid(_currentPushAuthUid)) return;
     if (_appleTokenRetryAttempts >= _maxAppleTokenRetryAttempts) return;
     _appleTokenRetryTimer?.cancel();
     _appleTokenRetryTimer = Timer(const Duration(seconds: 8), () async {
+      if (_signOutBarrierBlocksUid(_currentPushAuthUid)) return;
       _appleTokenRetryAttempts++;
       await _diagPush('apple_token_retry_attempt', meta: {
         'attempt': _appleTokenRetryAttempts,
@@ -1580,6 +1664,7 @@ class NotificationService with WidgetsBindingObserver {
 
   Future<void> _registerApplePushTokens({bool force = false}) async {
     if (!Platform.isIOS) return;
+    if (_signOutBarrierBlocksUid(_currentPushAuthUid)) return;
     if (_appleTokensRegisteredForSession && !force) return;
     _appleTokensRegisteredForSession = true;
     var hasApns = false;
@@ -1621,8 +1706,10 @@ class NotificationService with WidgetsBindingObserver {
         await _diagPush('apns_token_missing');
         if (!_apnsRetryScheduled) {
           _apnsRetryScheduled = true;
-          Future<void>.delayed(const Duration(seconds: 5), () async {
+          _appleTokenRetryTimer?.cancel();
+          _appleTokenRetryTimer = Timer(const Duration(seconds: 5), () async {
             try {
+              if (_signOutBarrierBlocksUid(_currentPushAuthUid)) return;
               final retryToken =
                   _normalizeTokenLikeValue(await _fcm.getAPNSToken());
               if (retryToken.isNotEmpty) {
@@ -2197,6 +2284,13 @@ class NotificationService with WidgetsBindingObserver {
     required String fromUid,
     required String trigger,
   }) async {
+    _pendingAcceptedCallkitRecoveryPayload = _AcceptedCallkitRecoveryPayload(
+      inviteId: inviteId,
+      channel: channel,
+      isVideo: isVideo,
+      fromName: fromName,
+      fromUid: fromUid,
+    );
     if (_recoveringAcceptedCall) {
       _handleAcceptedRecoveryResult(
         AcceptedCallRecoveryResult.pendingNetwork,
@@ -2235,6 +2329,8 @@ class NotificationService with WidgetsBindingObserver {
         _acceptedRecoveryRetryTimer = null;
         _acceptedRecoveryRetryAttempts = 0;
         _acceptedRecoveryRetryScheduledForTest = false;
+        _acceptedRecoveryRetryResultForTest = null;
+        _pendingAcceptedCallkitRecoveryPayload = null;
         return;
       case AcceptedCallRecoveryResult.pendingAuth:
       case AcceptedCallRecoveryResult.pendingNavigator:
@@ -2261,6 +2357,7 @@ class NotificationService with WidgetsBindingObserver {
     final attempt = _acceptedRecoveryRetryAttempts;
     if (!Platform.isIOS && _debugTestAccessEnabled) {
       _acceptedRecoveryRetryScheduledForTest = true;
+      _acceptedRecoveryRetryResultForTest = result;
       unawaited(_diagPush('accepted_call_recovery_retry_scheduled', meta: {
         'result': result.name,
         'attempt': attempt,
@@ -2271,13 +2368,33 @@ class NotificationService with WidgetsBindingObserver {
         ? const Duration(milliseconds: 500)
         : Duration(milliseconds: 500 * attempt.clamp(1, 6));
     _acceptedRecoveryRetryTimer = Timer(delay, () {
-      _acceptedRecoveryRetryTimer = null;
-      unawaited(_recoverAcceptedCallkitCall(trigger: 'retry_${result.name}'));
+      unawaited(_runAcceptedRecoveryRetry(result));
     });
     unawaited(_diagPush('accepted_call_recovery_retry_scheduled', meta: {
       'result': result.name,
       'attempt': attempt,
     }));
+  }
+
+  Future<void> _runAcceptedRecoveryRetry(
+    AcceptedCallRecoveryResult result,
+  ) async {
+    _acceptedRecoveryRetryTimer = null;
+    _acceptedRecoveryRetryScheduledForTest = false;
+    _acceptedRecoveryRetryResultForTest = null;
+    final payload = _pendingAcceptedCallkitRecoveryPayload;
+    if (payload != null) {
+      await _recoverAcceptedCallkitEvent(
+        inviteId: payload.inviteId,
+        channel: payload.channel,
+        isVideo: payload.isVideo,
+        fromName: payload.fromName,
+        fromUid: payload.fromUid,
+        trigger: 'retry_${result.name}',
+      );
+      return;
+    }
+    await _recoverAcceptedCallkitCall(trigger: 'retry_${result.name}');
   }
 
   void _openChat(String otherUserId, {String? chatId}) {
@@ -2345,15 +2462,49 @@ class NotificationService with WidgetsBindingObserver {
     _beginPushBindingForUser(uid);
   }
 
+  Future<void> debugRebindForCurrentUserForTest({
+    String? forceFcmToken,
+    bool skipRealtimeBindings = false,
+  }) async {
+    await _rebindForCurrentUser(
+      forceFcmTokenForTest: forceFcmToken,
+      skipRealtimeBindingsForTest: skipRealtimeBindings,
+    );
+  }
+
+  void debugAfterSignOutDeactivationForTest(
+    Future<void> Function()? callback,
+  ) {
+    _afterSignOutDeactivationForTest = callback;
+  }
+
+  void debugApplyPushAuthTransitionForTest(String? uid) {
+    _clearSignOutBarrierAfterAuthTransition(uid);
+    if ((uid ?? '').trim().isEmpty && !_signOutPreparationInProgress) {
+      _boundUid = null;
+    }
+  }
+
+  Future<void> debugRunAcceptedRecoveryRetryForTest() async {
+    final result = _acceptedRecoveryRetryResultForTest ??
+        AcceptedCallRecoveryResult.pendingNetwork;
+    await _runAcceptedRecoveryRetry(result);
+  }
+
   Map<String, dynamic> debugSnapshotForTest() {
     return <String, dynamic>{
       'acceptedRecoveryRetryScheduled':
           _acceptedRecoveryRetryScheduledForTest ||
               _acceptedRecoveryRetryTimer?.isActive == true,
       'acceptedRecoveryRetryAttempts': _acceptedRecoveryRetryAttempts,
+      'acceptedRecoveryPayloadPending':
+          _pendingAcceptedCallkitRecoveryPayload != null,
       'boundUid': _boundUid,
       'pushBindingGeneration': _pushBindingGeneration,
       'signOutPreparationInProgress': _signOutPreparationInProgress,
+      'signOutPreparingUidPresent': _signOutPreparingUid != null,
+      'signOutBarrierMatchesCurrentUser':
+          _signOutBarrierBlocksUid(_currentPushAuthUid),
     };
   }
 

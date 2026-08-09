@@ -136,6 +136,17 @@ typedef NativeCallListProvider = Future<List<NativeCallSnapshot>> Function();
 typedef NativeCallEnder = Future<void> Function(String callkitId);
 typedef StoredAcceptedCallRecoveryClearer = Future<void> Function();
 typedef AppForegroundProvider = Future<bool> Function();
+typedef CallScreenOpenRecorderForTest = Future<void> Function({
+  required String inviteId,
+  required String channel,
+  required bool isVideo,
+  required String otherUserName,
+  required String? otherUserId,
+  required bool isCaller,
+  required CallV2RealCallConnectionSystem connectionSystem,
+  required bool callV2FallbackUsed,
+  required String callV2BlockerCode,
+});
 
 class _CallSession {
   _CallSession({
@@ -196,6 +207,8 @@ class CallSessionManager {
   Future<void> Function()? _afterOutgoingInviteWriteForTest;
   Future<Map<String, dynamic>?> Function(String inviteId)?
       _readInviteDataForTest;
+  CallScreenOpenRecorderForTest? _callScreenOpenRecorderForTest;
+  bool _skipActiveInviteBindingForTest = false;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _incomingInviteSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _activeInviteSub;
   Timer? _ringingTimeoutTimer;
@@ -312,6 +325,8 @@ class CallSessionManager {
     _acceptedRecoveryAttemptCount = 0;
     _afterOutgoingInviteWriteForTest = null;
     _readInviteDataForTest = null;
+    _callScreenOpenRecorderForTest = null;
+    _skipActiveInviteBindingForTest = false;
     _callLifecycleArbiter.forceIdleForTest();
   }
 
@@ -342,6 +357,8 @@ class CallSessionManager {
     Future<void> Function()? afterOutgoingInviteWriteForTest,
     Future<Map<String, dynamic>?> Function(String inviteId)?
         readInviteDataForTest,
+    CallScreenOpenRecorderForTest? callScreenOpenRecorderForTest,
+    bool? skipActiveInviteBindingForTest,
   }) {
     if (navigatorKey != null) {
       _navigatorKey = navigatorKey;
@@ -363,6 +380,12 @@ class CallSessionManager {
     }
     if (readInviteDataForTest != null) {
       _readInviteDataForTest = readInviteDataForTest;
+    }
+    if (callScreenOpenRecorderForTest != null) {
+      _callScreenOpenRecorderForTest = callScreenOpenRecorderForTest;
+    }
+    if (skipActiveInviteBindingForTest != null) {
+      _skipActiveInviteBindingForTest = skipActiveInviteBindingForTest;
     }
   }
 
@@ -2127,7 +2150,9 @@ class CallSessionManager {
     _current = session;
     _touchSession(session);
     _markInviteHandled(session.inviteId);
-    await _bindActiveInvite(session.inviteId);
+    if (!_debugTestAccessEnabled || !_skipActiveInviteBindingForTest) {
+      await _bindActiveInvite(session.inviteId);
+    }
     _restartTimeoutsForStatus(session.status);
 
     if (!openScreen) return _RouteOpenResult.opened;
@@ -2165,6 +2190,22 @@ class CallSessionManager {
         'callV2Selected': session.connectionSystem ==
             CallV2RealCallConnectionSystem.callV2Dev,
       });
+      final testOpenRecorder =
+          _debugTestAccessEnabled ? _callScreenOpenRecorderForTest : null;
+      if (testOpenRecorder != null) {
+        await testOpenRecorder(
+          inviteId: session.inviteId,
+          channel: session.channel,
+          isVideo: session.isVideo,
+          otherUserName: session.otherUserName,
+          otherUserId: session.otherUserId.isEmpty ? null : session.otherUserId,
+          isCaller: session.isCaller,
+          connectionSystem: session.connectionSystem,
+          callV2FallbackUsed: session.callV2FallbackUsed,
+          callV2BlockerCode: session.callV2BlockerCode,
+        );
+        return _RouteOpenResult.opened;
+      }
       final routeFuture = nav.push(
         MaterialPageRoute(
           fullscreenDialog: true,

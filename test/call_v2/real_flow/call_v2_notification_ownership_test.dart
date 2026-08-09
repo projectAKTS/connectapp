@@ -50,6 +50,20 @@ void main() {
     return snapshot.docs.map((doc) => doc.data()).toList();
   }
 
+  CallScreenOpenRecorderForTest placeholderCallOpenRecorder() {
+    return ({
+      required String inviteId,
+      required String channel,
+      required bool isVideo,
+      required String otherUserName,
+      required String? otherUserId,
+      required bool isCaller,
+      required connectionSystem,
+      required bool callV2FallbackUsed,
+      required String callV2BlockerCode,
+    }) async {};
+  }
+
   setUp(() async {
     firestore = FakeFirebaseFirestore();
     HelperlyTestRuntime.configureForTest(
@@ -96,6 +110,32 @@ void main() {
       notifications.debugSnapshotForTest()['acceptedRecoveryRetryAttempts'],
       1,
     );
+
+    final navigatorKey = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navigatorKey,
+      home: const Scaffold(body: Text('home')),
+    ));
+    manager.configure(
+      navigatorKey: navigatorKey,
+      listNativeCalls: () async => const <NativeCallSnapshot>[],
+      endNativeCall: (_) async {},
+      appForegroundProvider: () async => true,
+      callScreenOpenRecorderForTest: placeholderCallOpenRecorder(),
+      skipActiveInviteBindingForTest: true,
+    );
+    await notifications.debugRunAcceptedRecoveryRetryForTest();
+    await tester.pump();
+
+    final snapshot = manager.debugSnapshot();
+    expect(snapshot['activeCallRouteCount'], 1);
+    expect(snapshot['acceptedRecoveryPending'], isFalse);
+    expect(snapshot['acceptedRecoveryAcknowledged'], isTrue);
+    expect(
+      notifications.debugSnapshotForTest()['acceptedRecoveryRetryScheduled'],
+      isFalse,
+    );
+    await manager.forceIdleForTest();
   });
 
   testWidgets('CallKit accept uses recovery coordinator for network retry',
@@ -106,10 +146,30 @@ void main() {
       home: const Scaffold(body: Text('home')),
     ));
     await seedInvite('invite_network_retry');
+    var failRead = true;
     manager.configure(
       navigatorKey: navigatorKey,
+      listNativeCalls: () async => const <NativeCallSnapshot>[],
+      endNativeCall: (_) async {},
+      appForegroundProvider: () async => true,
+      callScreenOpenRecorderForTest: placeholderCallOpenRecorder(),
+      skipActiveInviteBindingForTest: true,
       readInviteDataForTest: (inviteId) async {
-        throw FirebaseException(plugin: 'cloud_firestore', code: 'unavailable');
+        if (failRead) {
+          throw FirebaseException(
+            plugin: 'cloud_firestore',
+            code: 'unavailable',
+          );
+        }
+        return <String, dynamic>{
+          'fromUid': callerUid,
+          'fromName': 'Notify Caller',
+          'toUid': calleeUid,
+          'toName': calleeName,
+          'channel': 'channel_invite_network_retry',
+          'isVideo': false,
+          'status': CallInviteStatus.accepted.name,
+        };
       },
     );
 
@@ -130,6 +190,16 @@ void main() {
       notifications.debugSnapshotForTest()['acceptedRecoveryRetryAttempts'],
       1,
     );
+
+    failRead = false;
+    await notifications.debugRunAcceptedRecoveryRetryForTest();
+    await tester.pump();
+
+    final snapshot = manager.debugSnapshot();
+    expect(snapshot['activeCallRouteCount'], 1);
+    expect(snapshot['acceptedRecoveryPending'], isFalse);
+    expect(snapshot['acceptedRecoveryAcknowledged'], isTrue);
+    await manager.forceIdleForTest();
   });
 
   testWidgets('simultaneous CallKit accept recoveries keep one route',
@@ -140,17 +210,16 @@ void main() {
       home: const Scaffold(body: Text('home')),
     ));
     await seedInvite('invite_concurrent_recovery');
-    await manager.debugCreateHeldCallRouteForTest(
-      inviteId: 'invite_concurrent_recovery',
-      channel: 'channel_invite_concurrent_recovery',
-      status: CallInviteStatus.accepted,
-    );
     final firstReadStarted = Completer<void>();
     final releaseFirstRead = Completer<void>();
     var readCount = 0;
     manager.configure(
       navigatorKey: navigatorKey,
+      listNativeCalls: () async => const <NativeCallSnapshot>[],
+      endNativeCall: (_) async {},
       appForegroundProvider: () async => true,
+      callScreenOpenRecorderForTest: placeholderCallOpenRecorder(),
+      skipActiveInviteBindingForTest: true,
       readInviteDataForTest: (inviteId) async {
         readCount += 1;
         if (readCount == 1) {
@@ -192,13 +261,99 @@ void main() {
     );
     releaseFirstRead.complete();
     await firstRecovery;
+    await notifications.debugRunAcceptedRecoveryRetryForTest();
     await tester.pump();
 
     final snapshot = manager.debugSnapshot();
     expect(snapshot['activeCallRouteCount'], 1);
     expect(snapshot['acceptedRecoveryPending'], isFalse);
     expect(snapshot['acceptedRecoveryAcknowledged'], isTrue);
-    await manager.clearForSignedOut();
+    await manager.forceIdleForTest();
+  });
+
+  test('signout barrier blocks same-user rebind and late token callbacks',
+      () async {
+    HelperlyTestRuntime.configureForTest(
+      firestore: firestore,
+      currentUid: 'venus',
+      currentDisplayName: 'Venus',
+    );
+    notifications.debugBeginPushBindingForTest('venus');
+    await notifications.debugRegisterFcmTokenForTest(token: 'venus_initial');
+    final releaseLateVenusCompletion = Completer<void>();
+    final lateVenusRegistration = notifications.debugRegisterFcmTokenForTest(
+      token: 'venus_late',
+      beforeWrite: () => releaseLateVenusCompletion.future,
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    final initialVenusInstallations = await installations('venus');
+    expect(initialVenusInstallations.single['active'], isTrue);
+
+    final deactivationReached = Completer<void>();
+    final releaseCleanup = Completer<void>();
+    notifications.debugAfterSignOutDeactivationForTest(() async {
+      deactivationReached.complete();
+      await releaseCleanup.future;
+    });
+    final signOut = notifications.debugPreparePushBindingSignOutForTest();
+    await deactivationReached.future;
+
+    final afterDeactivationInstallations = await installations('venus');
+    expect(afterDeactivationInstallations.single['active'], isFalse);
+    final generationDuringBarrier =
+        notifications.debugSnapshotForTest()['pushBindingGeneration'] as int;
+
+    await notifications.debugRebindForCurrentUserForTest(
+      forceFcmToken: 'venus_rebind',
+    );
+    await notifications.debugRegisterFcmTokenForTest(token: 'venus_refresh');
+    await notifications.debugRegisterApnsTokenForTest(token: 'venus_apns');
+    await notifications.debugRegisterVoipTokenForTest(token: 'venus_voip');
+
+    final barrierSnapshot = notifications.debugSnapshotForTest();
+    expect(barrierSnapshot['signOutPreparationInProgress'], isTrue);
+    expect(barrierSnapshot['signOutBarrierMatchesCurrentUser'], isTrue);
+    expect(barrierSnapshot['pushBindingGeneration'], generationDuringBarrier);
+    expect((await userData('venus'))?['fcmToken'], 'venus_initial');
+    final duringBarrierInstallations = await installations('venus');
+    expect(duringBarrierInstallations.single['active'], isFalse);
+    expect(duringBarrierInstallations.single['fcmToken'], 'venus_initial');
+    expect(duringBarrierInstallations.single['apnsToken'], isNull);
+    expect(duringBarrierInstallations.single['voipToken'], isNull);
+
+    releaseCleanup.complete();
+    await signOut;
+    final afterSignOutSnapshot = notifications.debugSnapshotForTest();
+    expect(afterSignOutSnapshot['signOutPreparationInProgress'], isTrue);
+    expect(afterSignOutSnapshot['signOutBarrierMatchesCurrentUser'], isTrue);
+
+    notifications.debugApplyPushAuthTransitionForTest(null);
+    expect(
+      notifications.debugSnapshotForTest()['signOutPreparationInProgress'],
+      isFalse,
+    );
+
+    HelperlyTestRuntime.configureForTest(
+      firestore: firestore,
+      currentUid: 'baris',
+      currentDisplayName: 'Baris',
+    );
+    await notifications.debugRebindForCurrentUserForTest(
+      forceFcmToken: 'baris_fcm',
+      skipRealtimeBindings: true,
+    );
+    releaseLateVenusCompletion.complete();
+    await lateVenusRegistration;
+
+    final venusInstallations = await installations('venus');
+    final barisInstallations = await installations('baris');
+    expect(venusInstallations.single['active'], isFalse);
+    expect(venusInstallations.single['fcmToken'], 'venus_initial');
+    expect(barisInstallations.single['ownerUid'], 'baris');
+    expect(barisInstallations.single['active'], isTrue);
+    expect(barisInstallations.single['fcmToken'], 'baris_fcm');
+    expect((await userData('baris'))?['fcmToken'], 'baris_fcm');
   });
 
   test('signout suppresses late FCM token completion', () async {
