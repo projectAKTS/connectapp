@@ -54,6 +54,37 @@ void main() {
     );
   }
 
+  void configureIosCallkitOnly({
+    required List<NativeCallSnapshot> nativeCalls,
+    List<String>? presentedInvites,
+    List<String>? markedStates,
+    CallScreenOpenRecorderForTest? routeRecorder,
+  }) {
+    manager.configure(
+      navigatorKey: navigatorKey,
+      appForegroundProvider: () async => true,
+      listNativeCalls: () async => List<NativeCallSnapshot>.from(nativeCalls),
+      endNativeCall: (callkitId) async {
+        nativeCalls.removeWhere((call) => call.callkitId == callkitId);
+      },
+      presentNativeIncomingCall: (payload) async {
+        presentedInvites?.add(payload.inviteId);
+        nativeCalls.add(nativeForInvite(payload.inviteId));
+        return true;
+      },
+      markNativeInviteState: ({
+        required String inviteId,
+        required String channel,
+        required String state,
+      }) async {
+        markedStates?.add(state);
+      },
+      iosCallkitOnlyIncomingUiForTest: true,
+      callScreenOpenRecorderForTest: routeRecorder,
+      skipActiveInviteBindingForTest: routeRecorder != null,
+    );
+  }
+
   Future<void> claimCallkitOwnedInvite(
     WidgetTester tester,
     String inviteId,
@@ -301,6 +332,335 @@ void main() {
     final snapshot = manager.debugSnapshot();
     expect(snapshot['incomingUiOwner'], IncomingUiOwner.callkit.name);
     expect(snapshot['activePromptCount'], 1);
+    expect(find.text('Incoming Audio Call'), findsNothing);
+  });
+
+  testWidgets('Firestore first waits for delayed PushKit CallKit owner',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[];
+    final presented = <String>[];
+    configureIosCallkitOnly(
+      nativeCalls: nativeCalls,
+      presentedInvites: presented,
+    );
+    await seedInvite('invite_delayed_pushkit');
+
+    final handling = manager.handleNotificationInviteTap(
+      inviteId: 'invite_delayed_pushkit',
+      channel: 'channel_invite_delayed_pushkit',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'firestore_first',
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    nativeCalls.add(nativeForInvite('invite_delayed_pushkit'));
+    await tester.pump(const Duration(milliseconds: 700));
+    await handling;
+
+    final snapshot = manager.debugSnapshot();
+    expect(snapshot['incomingUiOwner'], IncomingUiOwner.callkit.name);
+    expect(snapshot['flutterIncomingPromptCount'], 0);
+    expect(snapshot['callkitFallbackRequestedCount'], 0);
+    expect(presented, isEmpty);
+    expect(find.text('Incoming Audio Call'), findsNothing);
+  });
+
+  testWidgets(
+      'Firestore first without PushKit requests native CallKit fallback',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[];
+    final presented = <String>[];
+    configureIosCallkitOnly(
+      nativeCalls: nativeCalls,
+      presentedInvites: presented,
+    );
+    await seedInvite('invite_no_pushkit');
+
+    final handling = manager.handleNotificationInviteTap(
+      inviteId: 'invite_no_pushkit',
+      channel: 'channel_invite_no_pushkit',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'firestore_first_no_pushkit',
+    );
+    await tester.pump(const Duration(seconds: 1));
+    await handling;
+
+    final snapshot = manager.debugSnapshot();
+    expect(snapshot['incomingUiOwner'], IncomingUiOwner.callkit.name);
+    expect(snapshot['flutterIncomingPromptCount'], 0);
+    expect(snapshot['callkitFallbackRequestedCount'], 1);
+    expect(snapshot['callkitPresentationCount'], 1);
+    expect(presented, ['invite_no_pushkit']);
+    expect(nativeCalls, hasLength(1));
+    expect(find.text('Incoming Audio Call'), findsNothing);
+  });
+
+  testWidgets('PushKit first keeps one CallKit owner and no Flutter prompt',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[
+      nativeForInvite('invite_push_first')
+    ];
+    final presented = <String>[];
+    configureIosCallkitOnly(
+      nativeCalls: nativeCalls,
+      presentedInvites: presented,
+    );
+    await seedInvite('invite_push_first');
+
+    await manager.handleNotificationInviteTap(
+      inviteId: 'invite_push_first',
+      channel: 'channel_invite_push_first',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'pushkit_first',
+    );
+    await tester.pump();
+
+    final snapshot = manager.debugSnapshot();
+    expect(snapshot['incomingUiOwner'], IncomingUiOwner.callkit.name);
+    expect(snapshot['flutterIncomingPromptCount'], 0);
+    expect(snapshot['callkitFallbackRequestedCount'], 0);
+    expect(presented, isEmpty);
+  });
+
+  testWidgets('Dart CallKit fallback then late PushKit stays single-owner',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[];
+    final presented = <String>[];
+    configureIosCallkitOnly(
+      nativeCalls: nativeCalls,
+      presentedInvites: presented,
+    );
+    await seedInvite('invite_late_pushkit');
+
+    final first = manager.handleNotificationInviteTap(
+      inviteId: 'invite_late_pushkit',
+      channel: 'channel_invite_late_pushkit',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'firestore_fallback',
+    );
+    await tester.pump(const Duration(seconds: 1));
+    await first;
+    await manager.handleNotificationInviteTap(
+      inviteId: 'invite_late_pushkit',
+      channel: 'channel_invite_late_pushkit',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'late_pushkit',
+    );
+
+    final snapshot = manager.debugSnapshot();
+    expect(snapshot['incomingUiOwner'], IncomingUiOwner.callkit.name);
+    expect(snapshot['flutterIncomingPromptCount'], 0);
+    expect(snapshot['callkitFallbackRequestedCount'], 1);
+    expect(presented, ['invite_late_pushkit']);
+    expect(nativeCalls, hasLength(1));
+  });
+
+  testWidgets('CallKit accept then late PushKit opens one route',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[
+      nativeForInvite('invite_accept_late')
+    ];
+    final openedRoutes = <String>[];
+    configureIosCallkitOnly(
+      nativeCalls: nativeCalls,
+      routeRecorder: ({
+        required String inviteId,
+        required String channel,
+        required bool isVideo,
+        required String otherUserName,
+        required String? otherUserId,
+        required bool isCaller,
+        required connectionSystem,
+        required bool callV2FallbackUsed,
+        required String callV2BlockerCode,
+      }) async {
+        openedRoutes.add(inviteId);
+      },
+    );
+    await seedInvite('invite_accept_late');
+
+    await manager.handleNotificationInviteTap(
+      inviteId: 'invite_accept_late',
+      channel: 'channel_invite_accept_late',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'firestore_first',
+    );
+    final accepted = await manager.handleRecoveredAcceptedInvite(
+      inviteId: 'invite_accept_late',
+      channel: 'channel_invite_accept_late',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+    );
+    await manager.handleNotificationInviteTap(
+      inviteId: 'invite_accept_late',
+      channel: 'channel_invite_accept_late',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'late_pushkit_after_accept',
+    );
+
+    final snapshot = manager.debugSnapshot();
+    expect(accepted, AcceptedCallRecoveryResult.opened);
+    expect(openedRoutes, ['invite_accept_late']);
+    expect(snapshot['routeOpenCount'], 1);
+    expect(snapshot['rtcSetupOwnerCount'], 1);
+    expect(snapshot['flutterIncomingPromptCount'], 0);
+    manager.forceIdleForTest();
+  });
+
+  testWidgets('terminal invite suppresses late PushKit resurrection',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[
+      nativeForInvite('invite_terminal_late')
+    ];
+    final presented = <String>[];
+    configureIosCallkitOnly(
+      nativeCalls: nativeCalls,
+      presentedInvites: presented,
+    );
+    await seedInvite('invite_terminal_late');
+
+    await manager.handleNotificationInviteTap(
+      inviteId: 'invite_terminal_late',
+      channel: 'channel_invite_terminal_late',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'firestore_first',
+    );
+    await manager.declineInvite(
+      inviteId: 'invite_terminal_late',
+      source: 'callkit_decline',
+    );
+    final latePush = manager.handleNotificationInviteTap(
+      inviteId: 'invite_terminal_late',
+      channel: 'channel_invite_terminal_late',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'late_pushkit_after_terminal',
+    );
+    await tester.pump(const Duration(seconds: 1));
+    await latePush;
+
+    final snapshot = manager.debugSnapshot();
+    expect(snapshot['sessionIdle'], isTrue);
+    expect(snapshot['incomingUiOwner'], IncomingUiOwner.none.name);
+    expect(snapshot['flutterIncomingPromptCount'], 0);
+    expect(presented, isEmpty);
+  });
+
+  testWidgets('duplicate CallKit accept is idempotent', (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[
+      nativeForInvite('invite_double_accept')
+    ];
+    final openedRoutes = <String>[];
+    configureIosCallkitOnly(
+      nativeCalls: nativeCalls,
+      routeRecorder: ({
+        required String inviteId,
+        required String channel,
+        required bool isVideo,
+        required String otherUserName,
+        required String? otherUserId,
+        required bool isCaller,
+        required connectionSystem,
+        required bool callV2FallbackUsed,
+        required String callV2BlockerCode,
+      }) async {
+        openedRoutes.add(inviteId);
+      },
+    );
+    await seedInvite('invite_double_accept');
+
+    await manager.handleNotificationInviteTap(
+      inviteId: 'invite_double_accept',
+      channel: 'channel_invite_double_accept',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'firestore_first',
+    );
+    final first = await manager.handleRecoveredAcceptedInvite(
+      inviteId: 'invite_double_accept',
+      channel: 'channel_invite_double_accept',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+    );
+    final second = await manager.handleRecoveredAcceptedInvite(
+      inviteId: 'invite_double_accept',
+      channel: 'channel_invite_double_accept',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+    );
+
+    final snapshot = manager.debugSnapshot();
+    expect(first, AcceptedCallRecoveryResult.opened);
+    expect(second, AcceptedCallRecoveryResult.alreadyOpen);
+    expect(openedRoutes, ['invite_double_accept']);
+    expect(snapshot['routeOpenCount'], 1);
+    expect(snapshot['rtcSetupOwnerCount'], 1);
+    manager.forceIdleForTest();
+  });
+
+  testWidgets('pending rapid next call uses CallKit fallback not Flutter',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[];
+    final presented = <String>[];
+    configureIosCallkitOnly(
+      nativeCalls: nativeCalls,
+      presentedInvites: presented,
+    );
+    await seedInvite('invite_b');
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'invite_a',
+      channel: 'channel_invite_a',
+    );
+    await manager.debugMarkHeldRouteTerminalForTest('invite_a');
+    await manager.debugRunPreflightForTest('pending_rapid_preflight');
+
+    await manager.handleNotificationInviteTap(
+      inviteId: 'invite_b',
+      channel: 'channel_invite_b',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'pending_rapid_b',
+    );
+    expect(manager.debugSnapshot()['pendingIncomingPresent'], isTrue);
+    final closeFuture = manager.debugCloseHeldRouteForTest('invite_a');
+    await tester.pump(const Duration(seconds: 1));
+    await closeFuture;
+    await tester.pump(const Duration(seconds: 1));
+
+    final snapshot = manager.debugSnapshot();
+    expect(snapshot['incomingUiOwner'], IncomingUiOwner.callkit.name);
+    expect(snapshot['flutterIncomingPromptCount'], 0);
+    expect(snapshot['callkitFallbackRequestedCount'], 1);
+    expect(presented, ['invite_b']);
     expect(find.text('Incoming Audio Call'), findsNothing);
   });
 

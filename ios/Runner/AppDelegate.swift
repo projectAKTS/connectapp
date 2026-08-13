@@ -35,6 +35,8 @@ import CallKit
   private let lastCallkitEventCallkitIdStoreKey = "connectapp.lastCallkitEventCallkitId"
   private let lastCallkitEventInviteIdStoreKey = "connectapp.lastCallkitEventInviteId"
   private let lastCallkitEventChannelStoreKey = "connectapp.lastCallkitEventChannel"
+  private let callkitPresentationLedgerStoreKey = "connectapp.callkitPresentationLedger"
+  private let callkitPresentationLedgerTtlSeconds: TimeInterval = 120
   private var voipRegistry: PKPushRegistry?
   private var pushTokenChannel: FlutterMethodChannel?
 
@@ -129,6 +131,27 @@ import CallKit
 
         if call.method == "clearStoredAcceptedCall" {
           self.clearStoredAcceptedCall()
+          result(true)
+          return
+        }
+
+        if call.method == "markCallkitInviteState" {
+          guard let args = call.arguments as? [String: Any] else {
+            result(false)
+            return
+          }
+          let inviteId = ((args["inviteId"] as? String) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+          let channel = ((args["channel"] as? String) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+          let state = ((args["state"] as? String) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+          let callkitId = self.normalizedCallkitId(
+            raw: inviteId.isEmpty ? nil : inviteId,
+            fallback: channel
+          )
+          self.markCallkitPresentationState(callkitId: callkitId, state: state)
           result(true)
           return
         }
@@ -375,6 +398,62 @@ import CallKit
     defaults.set(detail, forKey: lastPushkitDetailStoreKey)
   }
 
+  private func callkitPresentationLedger() -> [String: [String: Any]] {
+    return (UserDefaults.standard.dictionary(forKey: callkitPresentationLedgerStoreKey)
+      as? [String: [String: Any]]) ?? [:]
+  }
+
+  private func writeCallkitPresentationLedger(_ ledger: [String: [String: Any]]) {
+    UserDefaults.standard.set(ledger, forKey: callkitPresentationLedgerStoreKey)
+  }
+
+  private func pruneCallkitPresentationLedger(_ ledger: [String: [String: Any]])
+    -> [String: [String: Any]]
+  {
+    let now = Date().timeIntervalSince1970
+    return ledger.filter { _, value in
+      let timestamp = value["timestamp"] as? TimeInterval ?? 0
+      return timestamp > 0 && now - timestamp <= callkitPresentationLedgerTtlSeconds
+    }
+  }
+
+  private func markCallkitPresentationState(callkitId: String, state: String) {
+    let key = callkitId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let normalizedState = state.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !key.isEmpty, ["presented", "accepted", "active", "terminal"].contains(normalizedState)
+    else { return }
+    var ledger = pruneCallkitPresentationLedger(callkitPresentationLedger())
+    ledger[key] = [
+      "state": normalizedState,
+      "timestamp": Date().timeIntervalSince1970,
+    ]
+    writeCallkitPresentationLedger(ledger)
+  }
+
+  private func callkitPresentationState(callkitId: String) -> String {
+    let key = callkitId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !key.isEmpty else { return "" }
+    let ledger = pruneCallkitPresentationLedger(callkitPresentationLedger())
+    writeCallkitPresentationLedger(ledger)
+    return (ledger[key]?["state"] as? String) ?? ""
+  }
+
+  private func activeCallkitContains(callkitId: String) -> Bool {
+    let expected = callkitId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !expected.isEmpty else { return false }
+    let activeCalls = SwiftFlutterCallkitIncomingPlugin.sharedInstance?.activeCalls() ?? []
+    return activeCalls.contains { raw in
+      let id = ((raw["id"] as? String) ?? (raw["uuid"] as? String) ?? "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased()
+      let extra = raw["extra"] as? [String: Any]
+      let extraId = ((extra?["callkitId"] as? String) ?? (extra?["id"] as? String) ?? "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased()
+      return id == expected || extraId == expected
+    }
+  }
+
   private func ensureFirebaseConfigured() {
     if FirebaseApp.app() == nil {
       FirebaseApp.configure()
@@ -553,6 +632,7 @@ import CallKit
   ) {
     let trimmedCallkitId = callkitId.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmedCallkitId.isEmpty { return }
+    markCallkitPresentationState(callkitId: trimmedCallkitId, state: "terminal")
 
     SwiftFlutterCallkitIncomingPlugin.sharedInstance?.saveEndCall(trimmedCallkitId, 2)
     let data = flutter_callkit_incoming.Data(
@@ -717,6 +797,7 @@ import CallKit
         payloadStatus == "ended" || payloadStatus == "declined" ||
         payloadStatus == "missed" || payloadStatus == "cancelled" ||
         payloadStatus == "failed" {
+      markCallkitPresentationState(callkitId: callkitId, state: "terminal")
       endDisplayedCall(
         callkitId: callkitId,
         rawCallId: rawCallId,
@@ -724,6 +805,41 @@ import CallKit
         payloadType: payloadType.isEmpty ? payloadStatus : payloadType,
         detail: "status=\(payloadStatus) identifier_present=true"
       )
+      finish()
+      return
+    }
+
+    let presentationState = callkitPresentationState(callkitId: callkitId)
+    if presentationState == "accepted" || presentationState == "active" ||
+        presentationState == "terminal" {
+      if presentationState == "terminal" {
+        endDisplayedCall(
+          callkitId: callkitId,
+          rawCallId: rawCallId,
+          channel: channel,
+          payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
+          detail: "late_push_suppressed=true terminal=true identifier_present=true"
+        )
+      } else {
+        storePushkitState(
+          "late_push_suppressed",
+          payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
+          detail: "late_push_suppressed=true identifier_present=true"
+        )
+      }
+      NSLog("Helperly PushKit late incoming suppressed identifier_present=true")
+      finish()
+      return
+    }
+
+    if activeCallkitContains(callkitId: callkitId) {
+      markCallkitPresentationState(callkitId: callkitId, state: "presented")
+      storePushkitState(
+        "duplicate_callkit_suppressed",
+        payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
+        detail: "duplicate_callkit_suppressed=true identifier_present=true"
+      )
+      NSLog("Helperly PushKit duplicate CallKit suppressed identifier_present=true")
       finish()
       return
     }
@@ -790,6 +906,7 @@ import CallKit
       callData,
       fromPushKit: true
     )
+    markCallkitPresentationState(callkitId: callkitId, state: "presented")
     storePushkitState(
       "incoming_report_requested",
       payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
@@ -816,14 +933,6 @@ import CallKit
           payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
           detail: "identifier_present=true"
         )
-        self.showIncomingFallbackNotification(
-          callkitId: callkitId,
-          channel: channel,
-          fromName: fromName,
-          fromUid: fromUid,
-          isVideo: isVideo,
-          inviteId: rawCallId.isEmpty ? channel : rawCallId
-        )
       }
     }
 
@@ -836,6 +945,7 @@ import CallKit
   func onAccept(_ call: Call, _ action: CXAnswerCallAction) {
     storeAcceptedCall(call)
     storeCallkitEvent("accept", call: call)
+    markCallkitPresentationState(callkitId: call.data.uuid, state: "accepted")
     let inviteId = inviteIdFromCall(call)
     if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
       syncInviteStatus(inviteId: inviteId, status: "accepted", additional: [
@@ -849,6 +959,7 @@ import CallKit
   func onDecline(_ call: Call, _ action: CXEndCallAction) {
     storeCallkitEvent("decline", call: call)
     clearStoredAcceptedCall()
+    markCallkitPresentationState(callkitId: call.data.uuid, state: "terminal")
     let inviteId = inviteIdFromCall(call)
     if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
       syncInviteStatus(inviteId: inviteId, status: "declined", additional: [
@@ -862,6 +973,7 @@ import CallKit
   func onEnd(_ call: Call, _ action: CXEndCallAction) {
     storeCallkitEvent("end", call: call)
     clearStoredAcceptedCall()
+    markCallkitPresentationState(callkitId: call.data.uuid, state: "terminal")
     let inviteId = inviteIdFromCall(call)
     if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
       syncInviteStatus(inviteId: inviteId, status: "ended", additional: [
@@ -875,6 +987,7 @@ import CallKit
   func onTimeOut(_ call: Call) {
     storeCallkitEvent("timeout", call: call)
     clearStoredAcceptedCall()
+    markCallkitPresentationState(callkitId: call.data.uuid, state: "terminal")
     let inviteId = inviteIdFromCall(call)
     if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
       syncInviteStatus(inviteId: inviteId, status: "missed")

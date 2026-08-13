@@ -43,6 +43,8 @@ class NotificationService with WidgetsBindingObserver {
       navigatorKey: navigatorKey,
       listNativeCalls: _listActiveCallkitCalls,
       endNativeCall: _endActiveCallkitCall,
+      presentNativeIncomingCall: _presentIncomingCallkitFromManager,
+      markNativeInviteState: _markNativeCallkitInviteState,
       clearStoredAcceptedCallRecovery: _clearStoredAcceptedCallRecovery,
       appForegroundProvider: _isAppActuallyForeground,
     );
@@ -237,6 +239,42 @@ class NotificationService with WidgetsBindingObserver {
     try {
       await _pushTokenChannel.invokeMethod('clearStoredAcceptedCall');
     } catch (_) {}
+  }
+
+  Future<void> _markNativeCallkitInviteState({
+    required String inviteId,
+    required String channel,
+    required String state,
+  }) async {
+    if (!Platform.isIOS || !_enableIosCallKit) return;
+    try {
+      await _pushTokenChannel.invokeMethod('markCallkitInviteState', {
+        'inviteId': inviteId,
+        'channel': channel,
+        'state': state,
+      });
+      await _diagPush('callkit_invite_state_marked', meta: {
+        'state': state,
+      });
+    } catch (_) {
+      await _diagPush('callkit_invite_state_mark_error', meta: {
+        'state': state,
+        'blockerCode': 'native_state_mark_failed',
+      });
+    }
+  }
+
+  Future<bool> _presentIncomingCallkitFromManager(
+    CallInvitePayload payload,
+  ) async {
+    if (!Platform.isIOS || !_enableIosCallKit) return false;
+    return _showIncomingCallKit(
+      channel: payload.channel,
+      isVideo: payload.isVideo,
+      fromName: payload.fromName,
+      fromUid: payload.fromUid,
+      inviteId: payload.inviteId,
+    );
   }
 
   Future<List<NativeCallSnapshot>> _listActiveCallkitCalls() async {
@@ -2627,7 +2665,7 @@ class NotificationService with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _showIncomingCallKit({
+  Future<bool> _showIncomingCallKit({
     required String channel,
     required bool isVideo,
     required String fromName,
@@ -2677,20 +2715,22 @@ class NotificationService with WidgetsBindingObserver {
       ),
     );
     try {
-      await FlutterCallkitIncoming.showCallkitIncoming(params);
-    } catch (e) {
-      debugPrint('⚠️ CallKit incoming failed, fallback to local notif: $e');
-      final notifId = _notificationIdFrom('callkit_fallback_$callkitId');
-      await _local.show(
-        notifId,
-        isVideo ? 'Incoming Video Call' : 'Incoming Audio Call',
-        'From $fromName',
-        const NotificationDetails(
-          iOS: DarwinNotificationDetails(categoryIdentifier: 'INCOMING_CALL'),
-        ),
-        payload:
-            'incoming_call2|$channel|$isVideo|$fromName|${fromUid ?? ''}|$rawInviteId',
+      await _markNativeCallkitInviteState(
+        inviteId: rawInviteId.isEmpty ? rawCallId : rawInviteId,
+        channel: channel,
+        state: 'presented',
       );
+      await FlutterCallkitIncoming.showCallkitIncoming(params);
+      await _diagPush('callkit_fallback_requested', meta: {
+        'callkitPresentationCount': 1,
+      });
+      return true;
+    } catch (_) {
+      debugPrint('⚠️ CallKit incoming failed');
+      await _diagPush('callkit_fallback_failed', meta: {
+        'blockerCode': 'callkit_present_failed',
+      });
+      return false;
     }
   }
 

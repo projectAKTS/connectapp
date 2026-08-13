@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../call_v2/real_flow/call_v2_call_lifecycle_arbiter.dart';
@@ -16,6 +17,9 @@ import 'helperly_test_runtime.dart';
 const Duration _callInviteHandledTtl = Duration(minutes: 2);
 const Duration _ringingTimeout = Duration(seconds: 45);
 const Duration _acceptedJoiningTimeout = Duration(seconds: 35);
+const Duration _iosCallkitFallbackGrace = Duration(milliseconds: 900);
+const bool _enableIosCallKit =
+    bool.fromEnvironment('ENABLE_IOS_CALLKIT', defaultValue: true);
 
 enum CallInviteStatus {
   ringing,
@@ -134,6 +138,14 @@ class NativeCallSnapshot {
 
 typedef NativeCallListProvider = Future<List<NativeCallSnapshot>> Function();
 typedef NativeCallEnder = Future<void> Function(String callkitId);
+typedef NativeIncomingCallPresenter = Future<bool> Function(
+  CallInvitePayload payload,
+);
+typedef NativeInviteStateMarker = Future<void> Function({
+  required String inviteId,
+  required String channel,
+  required String state,
+});
 typedef StoredAcceptedCallRecoveryClearer = Future<void> Function();
 typedef AppForegroundProvider = Future<bool> Function();
 typedef CallScreenOpenRecorderForTest = Future<void> Function({
@@ -202,6 +214,8 @@ class CallSessionManager {
   GlobalKey<NavigatorState>? _navigatorKey;
   NativeCallListProvider? _listNativeCalls;
   NativeCallEnder? _endNativeCall;
+  NativeIncomingCallPresenter? _presentNativeIncomingCall;
+  NativeInviteStateMarker? _markNativeInviteState;
   StoredAcceptedCallRecoveryClearer? _clearStoredAcceptedCallRecovery;
   AppForegroundProvider? _appForegroundProvider;
   Future<void> Function()? _afterOutgoingInviteWriteForTest;
@@ -238,6 +252,15 @@ class CallSessionManager {
   int _acceptedRecoveryAttemptCount = 0;
   bool _acceptedRecoveryPending = false;
   bool _acceptedRecoveryAcknowledged = false;
+  bool? _iosCallkitOnlyIncomingUiForTest;
+  int _callkitFallbackRequestedCount = 0;
+  int _callkitPresentationCount = 0;
+  int _flutterIncomingPromptCount = 0;
+  int _iosFlutterIncomingPromptViolationCount = 0;
+  int _callkitAcceptCount = 0;
+  int _routeOpenCount = 0;
+  int _rtcSetupOwnerCount = 0;
+  bool _awaitingPushkit = false;
 
   ValueNotifier<CallTerminalSignal?> get terminalSignal => _terminalSignal;
 
@@ -323,10 +346,19 @@ class CallSessionManager {
     _acceptedRecoveryPending = false;
     _acceptedRecoveryAcknowledged = false;
     _acceptedRecoveryAttemptCount = 0;
+    _awaitingPushkit = false;
+    _callkitFallbackRequestedCount = 0;
+    _callkitPresentationCount = 0;
+    _flutterIncomingPromptCount = 0;
+    _iosFlutterIncomingPromptViolationCount = 0;
+    _callkitAcceptCount = 0;
+    _routeOpenCount = 0;
+    _rtcSetupOwnerCount = 0;
     _afterOutgoingInviteWriteForTest = null;
     _readInviteDataForTest = null;
     _callScreenOpenRecorderForTest = null;
     _skipActiveInviteBindingForTest = false;
+    _iosCallkitOnlyIncomingUiForTest = null;
     _callLifecycleArbiter.forceIdleForTest();
   }
 
@@ -338,6 +370,11 @@ class CallSessionManager {
       _openingCallRoute || _callRouteActive || _incomingPromptActive;
   bool get hasActiveSession => _current != null && !_current!.isTerminal;
   bool get hasActiveUiOrSession => hasActiveUi || hasActiveSession;
+  bool get _iosCallkitOnlyIncomingUi {
+    final override = _iosCallkitOnlyIncomingUiForTest;
+    if (override != null) return override;
+    return _enableIosCallKit && defaultTargetPlatform == TargetPlatform.iOS;
+  }
 
   Future<void> _diagResourceCounts(String stage) async {
     final counters = debugResourceCounts();
@@ -352,6 +389,8 @@ class CallSessionManager {
     GlobalKey<NavigatorState>? navigatorKey,
     NativeCallListProvider? listNativeCalls,
     NativeCallEnder? endNativeCall,
+    NativeIncomingCallPresenter? presentNativeIncomingCall,
+    NativeInviteStateMarker? markNativeInviteState,
     StoredAcceptedCallRecoveryClearer? clearStoredAcceptedCallRecovery,
     AppForegroundProvider? appForegroundProvider,
     Future<void> Function()? afterOutgoingInviteWriteForTest,
@@ -359,6 +398,7 @@ class CallSessionManager {
         readInviteDataForTest,
     CallScreenOpenRecorderForTest? callScreenOpenRecorderForTest,
     bool? skipActiveInviteBindingForTest,
+    bool? iosCallkitOnlyIncomingUiForTest,
   }) {
     if (navigatorKey != null) {
       _navigatorKey = navigatorKey;
@@ -368,6 +408,12 @@ class CallSessionManager {
     }
     if (endNativeCall != null) {
       _endNativeCall = endNativeCall;
+    }
+    if (presentNativeIncomingCall != null) {
+      _presentNativeIncomingCall = presentNativeIncomingCall;
+    }
+    if (markNativeInviteState != null) {
+      _markNativeInviteState = markNativeInviteState;
     }
     if (clearStoredAcceptedCallRecovery != null) {
       _clearStoredAcceptedCallRecovery = clearStoredAcceptedCallRecovery;
@@ -386,6 +432,9 @@ class CallSessionManager {
     }
     if (skipActiveInviteBindingForTest != null) {
       _skipActiveInviteBindingForTest = skipActiveInviteBindingForTest;
+    }
+    if (iosCallkitOnlyIncomingUiForTest != null) {
+      _iosCallkitOnlyIncomingUiForTest = iosCallkitOnlyIncomingUiForTest;
     }
   }
 
@@ -1130,6 +1179,11 @@ class CallSessionManager {
     }
     final status = _parseStatus(latest?['status']);
     if (latest == null || _isTerminalStatus(status)) {
+      await _markNativeInviteStateSafely(
+        payload,
+        state: 'terminal',
+        reason: 'accepted_recovery_terminal',
+      );
       await _endNativeCallForInvite(
         inviteId: payload.inviteId,
         channel: payload.channel,
@@ -1171,6 +1225,12 @@ class CallSessionManager {
     String source = 'manual_decline',
   }) async {
     await _declineInviteTransaction(inviteId, source: source);
+    await _markNativeInviteStateByIdsSafely(
+      inviteId: inviteId,
+      channel: '',
+      state: 'terminal',
+      reason: source,
+    );
     await _terminalizeUnacceptedIncomingInvite(
       inviteId: inviteId,
       status: CallInviteStatus.declined,
@@ -1189,6 +1249,12 @@ class CallSessionManager {
       await endCallFromLocalUser(inviteId: inviteId, source: source);
       return;
     }
+    await _markNativeInviteStateByIdsSafely(
+      inviteId: inviteId,
+      channel: '',
+      state: 'terminal',
+      reason: source,
+    );
     await _setInviteStatusIfCurrent(
       inviteId: inviteId,
       expectedStatuses: const <CallInviteStatus>{
@@ -1215,6 +1281,12 @@ class CallSessionManager {
     required String inviteId,
     String source = 'system_timeout',
   }) async {
+    await _markNativeInviteStateByIdsSafely(
+      inviteId: inviteId,
+      channel: '',
+      state: 'terminal',
+      reason: source,
+    );
     await _setInviteStatusIfCurrent(
       inviteId: inviteId,
       expectedStatuses: const <CallInviteStatus>{CallInviteStatus.ringing},
@@ -1738,6 +1810,21 @@ class CallSessionManager {
       });
       return _IncomingCandidateResult.callkitOwned;
     }
+    if (owner == IncomingUiOwner.none) {
+      _callLifecycleArbiter.dropIncoming(
+        generation: reservation.generation,
+        inviteId: payload.inviteId,
+      );
+      _incomingPromptActive = false;
+      _incomingPromptInviteId = null;
+      _incomingUiOwner = IncomingUiOwner.none;
+      await _diagManager('incoming_callkit_owner_unavailable', meta: {
+        'source': source,
+        'iosCallkitOnlyPolicy': _iosCallkitOnlyIncomingUi,
+        'blockerCode': 'callkit_owner_unavailable',
+      });
+      return _IncomingCandidateResult.ignored;
+    }
     _incomingPromptActive = true;
     _incomingPromptInviteId = payload.inviteId;
     _incomingUiOwner = IncomingUiOwner.flutter;
@@ -1754,6 +1841,22 @@ class CallSessionManager {
     required String source,
     required int lifecycleGeneration,
   }) async {
+    if (_iosCallkitOnlyIncomingUi) {
+      _iosFlutterIncomingPromptViolationCount += 1;
+      _incomingPromptActive = false;
+      _incomingPromptInviteId = null;
+      _incomingUiOwner = IncomingUiOwner.none;
+      _callLifecycleArbiter.dropIncoming(
+        generation: lifecycleGeneration,
+        inviteId: payload.inviteId,
+      );
+      await _diagManager('ios_flutter_incoming_prompt_violation', meta: {
+        'iosFlutterIncomingPromptViolation': true,
+        'iosCallkitOnlyPolicy': true,
+        'source': source,
+      });
+      return;
+    }
     if (!_callLifecycleArbiter.ownsIncoming(
       generation: lifecycleGeneration,
       inviteId: payload.inviteId,
@@ -1831,6 +1934,7 @@ class CallSessionManager {
 
     _clearPendingIncomingPrompt(payload.inviteId);
     _markInviteHandled(payload.inviteId);
+    _flutterIncomingPromptCount += 1;
     StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? promptSub;
     var routeClosed = false;
     try {
@@ -1965,6 +2069,14 @@ class CallSessionManager {
       'source': source,
       'result': acceptResult.name,
     });
+    if (source.contains('callkit')) {
+      _callkitAcceptCount += 1;
+    }
+    await _markNativeInviteStateSafely(
+      payload,
+      state: 'accepted',
+      reason: 'accept_invite_and_open',
+    );
 
     Map<String, dynamic>? latest;
     try {
@@ -2022,9 +2134,19 @@ class CallSessionManager {
       source: source,
     );
     if (routeResult == _RouteOpenResult.opened) {
+      await _markNativeInviteStateSafely(
+        payload,
+        state: 'active',
+        reason: 'route_opened',
+      );
       return _IncomingCandidateResult.opened;
     }
     if (routeResult == _RouteOpenResult.alreadyOpenSameInvite) {
+      await _markNativeInviteStateSafely(
+        payload,
+        state: 'active',
+        reason: 'route_already_open',
+      );
       return _IncomingCandidateResult.alreadyOpen;
     }
     _releaseFailedIncomingGeneration(generation);
@@ -2204,6 +2326,8 @@ class CallSessionManager {
           callV2FallbackUsed: session.callV2FallbackUsed,
           callV2BlockerCode: session.callV2BlockerCode,
         );
+        _routeOpenCount += 1;
+        _rtcSetupOwnerCount += 1;
         return _RouteOpenResult.opened;
       }
       final routeFuture = nav.push(
@@ -2234,6 +2358,8 @@ class CallSessionManager {
           await handleCallScreenClosed(session.inviteId);
         }
       }));
+      _routeOpenCount += 1;
+      _rtcSetupOwnerCount += 1;
       return _RouteOpenResult.opened;
     } catch (error) {
       await _diagManager('route_push_failed', meta: {
@@ -2396,6 +2522,12 @@ class CallSessionManager {
         'endReason': endReason,
         if (error != null && error.isNotEmpty) 'error': error,
       },
+    );
+    await _markNativeInviteStateByIdsSafely(
+      inviteId: inviteId,
+      channel: session.channel,
+      state: 'terminal',
+      reason: endReason,
     );
     await _endNativeCallForInvite(
       inviteId: inviteId,
@@ -2686,6 +2818,16 @@ class CallSessionManager {
       'callkitMatchFound': owner == IncomingUiOwner.callkit,
     });
     if (owner == IncomingUiOwner.callkit) return;
+    if (owner == IncomingUiOwner.none) {
+      _incomingPromptActive = false;
+      _incomingPromptInviteId = null;
+      _incomingUiOwner = IncomingUiOwner.none;
+      _callLifecycleArbiter.dropIncoming(
+        generation: pendingClaim.generation,
+        inviteId: claimedInviteId,
+      );
+      return;
+    }
     unawaited(_presentIncomingPrompt(
       payload,
       source: '$pendingSource:teardown_complete',
@@ -2815,12 +2957,119 @@ class CallSessionManager {
       channel: payload.channel,
     );
     if (match != null) return IncomingUiOwner.callkit;
+    if (_iosCallkitOnlyIncomingUi) {
+      _awaitingPushkit = true;
+      await _diagManager('incoming_awaiting_pushkit', meta: {
+        'iosCallkitOnlyPolicy': true,
+        'awaitingPushkit': true,
+      });
+      await Future<void>.delayed(_iosCallkitFallbackGrace);
+      _awaitingPushkit = false;
+      match = await _matchingNativeCallForInvite(
+        inviteId: payload.inviteId,
+        channel: payload.channel,
+      );
+      if (match != null) return IncomingUiOwner.callkit;
+      final stillRinging = await _inviteStillRingingForCurrentUser(payload);
+      if (!stillRinging) {
+        _markInviteHandled(payload.inviteId);
+        await _markNativeInviteStateSafely(
+          payload,
+          state: 'terminal',
+          reason: 'callkit_fallback_not_ringing',
+        );
+        await _endNativeCallForInvite(
+          inviteId: payload.inviteId,
+          channel: payload.channel,
+          reason: 'callkit_fallback_not_ringing',
+        );
+        return IncomingUiOwner.none;
+      }
+      final presenter = _presentNativeIncomingCall;
+      if (presenter == null) {
+        await _diagManager('incoming_callkit_fallback_missing', meta: {
+          'iosCallkitOnlyPolicy': true,
+          'blockerCode': 'native_presenter_unavailable',
+        });
+        return IncomingUiOwner.none;
+      }
+      _callkitFallbackRequestedCount += 1;
+      final presented = await presenter(payload);
+      if (!presented) {
+        await _diagManager('incoming_callkit_fallback_failed', meta: {
+          'iosCallkitOnlyPolicy': true,
+          'blockerCode': 'native_presenter_failed',
+        });
+        return IncomingUiOwner.none;
+      }
+      _callkitPresentationCount += 1;
+      await _markNativeInviteStateSafely(
+        payload,
+        state: 'presented',
+        reason: 'callkit_fallback_presented',
+      );
+      return IncomingUiOwner.callkit;
+    }
     await Future<void>.delayed(const Duration(milliseconds: 250));
     match = await _matchingNativeCallForInvite(
       inviteId: payload.inviteId,
       channel: payload.channel,
     );
     return match == null ? IncomingUiOwner.flutter : IncomingUiOwner.callkit;
+  }
+
+  Future<bool> _inviteStillRingingForCurrentUser(
+      CallInvitePayload payload) async {
+    Map<String, dynamic>? latest;
+    try {
+      latest = await _readInviteData(payload.inviteId);
+    } catch (error) {
+      await _diagManager('incoming_callkit_fallback_verify_error', meta: {
+        'blockerCode': 'callkit_fallback_verify_failed',
+      });
+      return false;
+    }
+    if (latest == null) return false;
+    final status = _parseStatus(latest['status']);
+    if (status != CallInviteStatus.ringing) return false;
+    final toUid = (latest['toUid'] ?? payload.toUid).toString().trim();
+    return toUid.isNotEmpty && toUid == _currentUid.trim();
+  }
+
+  Future<void> _markNativeInviteStateSafely(
+    CallInvitePayload payload, {
+    required String state,
+    required String reason,
+  }) async {
+    await _markNativeInviteStateByIdsSafely(
+      inviteId: payload.inviteId,
+      channel: payload.channel,
+      state: state,
+      reason: reason,
+    );
+  }
+
+  Future<void> _markNativeInviteStateByIdsSafely({
+    required String inviteId,
+    required String channel,
+    required String state,
+    required String reason,
+  }) async {
+    final marker = _markNativeInviteState;
+    if (marker == null) return;
+    try {
+      await marker(
+        inviteId: inviteId,
+        channel: channel,
+        state: state,
+      );
+    } catch (error) {
+      await _diagManager('native_invite_state_mark_error', meta: {
+        'state': state,
+        'reason': reason,
+        'blockerCode': 'native_state_mark_failed',
+      });
+    }
   }
 
   Future<void> _endNativeCallForInvite({
@@ -2958,6 +3207,20 @@ class CallSessionManager {
       'callRouteActive': _callRouteActive,
       'incomingPromptActive': _incomingPromptActive,
       'incomingUiOwner': _incomingUiOwner.name,
+      'iosCallkitOnlyPolicy': _iosCallkitOnlyIncomingUi,
+      'awaitingPushkit': _awaitingPushkit,
+      'callkitFallbackRequested': _callkitFallbackRequestedCount > 0,
+      'callkitFallbackRequestedCount': _callkitFallbackRequestedCount,
+      'callkitPresentationCount': _callkitPresentationCount,
+      'flutterIncomingPromptCount': _flutterIncomingPromptCount,
+      'iosFlutterIncomingPromptViolation':
+          _iosFlutterIncomingPromptViolationCount > 0,
+      'iosFlutterIncomingPromptViolationCount':
+          _iosFlutterIncomingPromptViolationCount,
+      'callkitAcceptCount': _callkitAcceptCount,
+      'acceptedRecoverySingleFlight': _routeOpenCount <= 1,
+      'routeOpenCount': _routeOpenCount,
+      'rtcSetupOwnerCount': _rtcSetupOwnerCount,
       'terminalSignal': _terminalSignal.value?.status ?? '',
       'nativeCallCount': nativeCalls?.length ?? 0,
       'matchingNativeCallCount': session == null || nativeCalls == null
