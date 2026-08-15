@@ -156,6 +156,35 @@ import CallKit
           return
         }
 
+        if call.method == "ensureIncomingCallkit" {
+          guard let args = call.arguments as? [String: Any] else {
+            result(["outcome": "failed"])
+            return
+          }
+          let inviteId = ((args["inviteId"] as? String) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+          let channel = ((args["channel"] as? String) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+          let fromName = ((args["fromName"] as? String) ?? "Caller")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+          let fromUid = ((args["fromUid"] as? String) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+          let isVideo = args["isVideo"] as? Bool ?? false
+          DispatchQueue.main.async {
+            let outcome = self.ensureIncomingCallkit(
+              rawCallId: inviteId,
+              channel: channel,
+              fromName: fromName.isEmpty ? "Caller" : fromName,
+              fromUid: fromUid,
+              isVideo: isVideo,
+              payloadType: "call_invite",
+              fromPushKit: false
+            )
+            result(["outcome": outcome])
+          }
+          return
+        }
+
         if call.method == "refreshPushRegistrations" {
           DispatchQueue.main.async {
             UIApplication.shared.registerForRemoteNotifications()
@@ -242,6 +271,7 @@ import CallKit
       let actionId = response.actionIdentifier
 
       if actionId == "DECLINE_CALL" {
+        markCallkitPresentationState(callkitId: callkitId, state: "terminal")
         storeCallkitEvent(
           "decline",
           inviteId: inviteId,
@@ -272,6 +302,7 @@ import CallKit
         return
       }
 
+      markCallkitPresentationState(callkitId: callkitId, state: "accepted")
       storeAcceptedCallData(
         inviteId: inviteId,
         channel: channel,
@@ -731,6 +762,112 @@ import CallKit
     defaults.set(channel, forKey: lastCallkitEventChannelStoreKey)
   }
 
+  private func incomingCallkitData(
+    callkitId: String,
+    rawCallId: String,
+    channel: String,
+    fromName: String,
+    fromUid: String,
+    isVideo: Bool
+  ) -> flutter_callkit_incoming.Data {
+    let callData = flutter_callkit_incoming.Data(
+      id: callkitId,
+      nameCaller: fromName,
+      handle: fromName,
+      type: isVideo ? 1 : 0
+    )
+    callData.appName = "Helperly"
+    callData.iconName = "LaunchImage"
+    callData.handleType = "generic"
+    callData.supportsVideo = isVideo
+    callData.supportsDTMF = false
+    callData.supportsHolding = false
+    callData.supportsGrouping = false
+    callData.supportsUngrouping = false
+    callData.configureAudioSession = true
+    callData.audioSessionMode = "voiceChat"
+    callData.audioSessionActive = true
+    callData.isShowMissedCallNotification = false
+    callData.extra = [
+      "id": callkitId,
+      "callkitId": callkitId,
+      "callId": rawCallId,
+      "inviteId": rawCallId,
+      "channel": channel,
+      "fromUid": fromUid,
+      "fromName": fromName,
+      "isVideo": isVideo ? "true" : "false",
+    ]
+    return callData
+  }
+
+  private func ensureIncomingCallkit(
+    rawCallId: String,
+    channel: String,
+    fromName: String,
+    fromUid: String,
+    isVideo: Bool,
+    payloadType: String,
+    fromPushKit: Bool
+  ) -> String {
+    let callkitId = normalizedCallkitId(raw: rawCallId, fallback: channel)
+    let presentationState = callkitPresentationState(callkitId: callkitId)
+    if presentationState == "accepted" {
+      storePushkitState(
+        "late_push_suppressed",
+        payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
+        detail: "late_push_suppressed=true state=accepted identifier_present=true"
+      )
+      return "suppressedAccepted"
+    }
+    if presentationState == "active" {
+      storePushkitState(
+        "late_push_suppressed",
+        payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
+        detail: "late_push_suppressed=true state=active identifier_present=true"
+      )
+      return "suppressedActive"
+    }
+    if presentationState == "terminal" {
+      storePushkitState(
+        "late_push_suppressed",
+        payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
+        detail: "late_push_suppressed=true terminal=true identifier_present=true"
+      )
+      return "suppressedTerminal"
+    }
+
+    if activeCallkitContains(callkitId: callkitId) {
+      markCallkitPresentationState(callkitId: callkitId, state: "presented")
+      storePushkitState(
+        "duplicate_callkit_suppressed",
+        payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
+        detail: "duplicate_callkit_suppressed=true identifier_present=true"
+      )
+      return "existing"
+    }
+
+    let callData = incomingCallkitData(
+      callkitId: callkitId,
+      rawCallId: rawCallId,
+      channel: channel,
+      fromName: fromName,
+      fromUid: fromUid,
+      isVideo: isVideo
+    )
+    SwiftFlutterCallkitIncomingPlugin.sharedInstance?.showCallkitIncoming(
+      callData,
+      fromPushKit: fromPushKit
+    )
+    markCallkitPresentationState(callkitId: callkitId, state: "presented")
+    storePushkitState(
+      "incoming_report_requested",
+      payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
+      detail: "identifier_present=true"
+    )
+    return "presented"
+  }
+
   func pushRegistry(
     _ registry: PKPushRegistry,
     didUpdate credentials: PKPushCredentials,
@@ -809,109 +946,20 @@ import CallKit
       return
     }
 
-    let presentationState = callkitPresentationState(callkitId: callkitId)
-    if presentationState == "accepted" || presentationState == "active" ||
-        presentationState == "terminal" {
-      if presentationState == "terminal" {
-        endDisplayedCall(
-          callkitId: callkitId,
-          rawCallId: rawCallId,
-          channel: channel,
-          payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
-          detail: "late_push_suppressed=true terminal=true identifier_present=true"
-        )
-      } else {
-        storePushkitState(
-          "late_push_suppressed",
-          payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
-          detail: "late_push_suppressed=true identifier_present=true"
-        )
-      }
+    let ensureOutcome = ensureIncomingCallkit(
+      rawCallId: rawCallId,
+      channel: channel,
+      fromName: fromName,
+      fromUid: fromUid,
+      isVideo: isVideo,
+      payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
+      fromPushKit: true
+    )
+    if ensureOutcome != "presented" && ensureOutcome != "existing" {
       NSLog("Helperly PushKit late incoming suppressed identifier_present=true")
       finish()
       return
     }
-
-    if activeCallkitContains(callkitId: callkitId) {
-      markCallkitPresentationState(callkitId: callkitId, state: "presented")
-      storePushkitState(
-        "duplicate_callkit_suppressed",
-        payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
-        detail: "duplicate_callkit_suppressed=true identifier_present=true"
-      )
-      NSLog("Helperly PushKit duplicate CallKit suppressed identifier_present=true")
-      finish()
-      return
-    }
-
-    let callData = flutter_callkit_incoming.Data(
-      id: callkitId,
-      nameCaller: fromName,
-      handle: fromName,
-      type: isVideo ? 1 : 0
-    )
-    callData.appName = "Helperly"
-    callData.iconName = "LaunchImage"
-    callData.handleType = "generic"
-    callData.supportsVideo = isVideo
-    callData.supportsDTMF = false
-    callData.supportsHolding = false
-    callData.supportsGrouping = false
-    callData.supportsUngrouping = false
-    callData.configureAudioSession = true
-    callData.audioSessionMode = "voiceChat"
-    callData.audioSessionActive = true
-    callData.isShowMissedCallNotification = false
-    callData.extra = [
-      "id": callkitId,
-      "callkitId": callkitId,
-      "callId": rawCallId,
-      "inviteId": rawCallId,
-      "channel": channel,
-      "fromUid": fromUid,
-      "fromName": fromName,
-      "isVideo": isVideo ? "true" : "false",
-    ]
-
-    let appState = UIApplication.shared.applicationState
-    if !shouldPresentIncomingCallkitFromNative() {
-      let stateLabel = appStateLabel(appState)
-      storePushkitState(
-        "incoming_foreground_handoff",
-        payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
-        detail: "state=\(stateLabel) identifier_present=true"
-      )
-      notifyFlutterOfForegroundVoip(
-        method: "incomingVoipForeground",
-        payload: [
-          "type": payloadType.isEmpty ? "call_invite" : payloadType,
-          "callId": rawCallId,
-          "inviteId": rawCallId,
-          "channel": channel,
-          "fromName": fromName,
-          "fromUid": fromUid,
-          "isVideo": isVideo ? "true" : "false",
-          "appState": stateLabel,
-        ]
-      )
-      NSLog(
-        "Helperly PushKit skipping native CallKit in foreground state=%@ identifier_present=true",
-        stateLabel
-      )
-      finish()
-      return
-    }
-
-    SwiftFlutterCallkitIncomingPlugin.sharedInstance?.showCallkitIncoming(
-      callData,
-      fromPushKit: true
-    )
-    markCallkitPresentationState(callkitId: callkitId, state: "presented")
-    storePushkitState(
-      "incoming_report_requested",
-      payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
-      detail: "identifier_present=true"
-    )
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
       let activeCalls =

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
@@ -59,6 +60,7 @@ void main() {
     List<String>? presentedInvites,
     List<String>? markedStates,
     CallScreenOpenRecorderForTest? routeRecorder,
+    NativeIncomingCallPresenter? presenter,
   }) {
     manager.configure(
       navigatorKey: navigatorKey,
@@ -67,11 +69,12 @@ void main() {
       endNativeCall: (callkitId) async {
         nativeCalls.removeWhere((call) => call.callkitId == callkitId);
       },
-      presentNativeIncomingCall: (payload) async {
-        presentedInvites?.add(payload.inviteId);
-        nativeCalls.add(nativeForInvite(payload.inviteId));
-        return true;
-      },
+      presentNativeIncomingCall: presenter ??
+          (payload) async {
+            presentedInvites?.add(payload.inviteId);
+            nativeCalls.add(nativeForInvite(payload.inviteId));
+            return true;
+          },
       markNativeInviteState: ({
         required String inviteId,
         required String channel,
@@ -734,6 +737,224 @@ void main() {
 
     await expectIdleAfterCallkitTerminal(
         tester, 'invite_after_failed', nativeCalls);
+  });
+
+  testWidgets('Firestore cancel marks terminal ledger before late push',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[
+      nativeForInvite('invite_cancel_ledger'),
+    ];
+    final markedStates = <String>[];
+    final presented = <String>[];
+    configureIosCallkitOnly(
+      nativeCalls: nativeCalls,
+      markedStates: markedStates,
+      presentedInvites: presented,
+    );
+    await manager.bindIncomingInviteListener();
+    await seedInvite('invite_cancel_ledger');
+
+    await manager.handleNotificationInviteTap(
+      inviteId: 'invite_cancel_ledger',
+      channel: 'channel_invite_cancel_ledger',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'firestore_first',
+    );
+    await firestore.collection('callInvites').doc('invite_cancel_ledger').set({
+      'status': CallInviteStatus.cancelled.name,
+      'endedAt': Timestamp.now(),
+      'channel': 'channel_invite_cancel_ledger',
+    }, SetOptions(merge: true));
+    for (var i = 0; i < 20; i += 1) {
+      await tester.pump(const Duration(milliseconds: 100));
+      if (manager.debugSnapshot()['sessionIdle'] == true) break;
+    }
+
+    final latePush = manager.handleNotificationInviteTap(
+      inviteId: 'invite_cancel_ledger',
+      channel: 'channel_invite_cancel_ledger',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'late_push_after_cancel',
+    );
+    await tester.pump(const Duration(seconds: 1));
+    await latePush;
+
+    expect(markedStates, contains('terminal'));
+    expect(nativeCalls, isEmpty);
+    expect(presented, isEmpty);
+    expect(manager.debugSnapshot()['sessionIdle'], isTrue);
+    expect(manager.debugSnapshot()['flutterIncomingPromptCount'], 0);
+  });
+
+  testWidgets('Firestore failed marks terminal ledger before late push',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[
+      nativeForInvite('invite_failed_ledger'),
+    ];
+    final markedStates = <String>[];
+    final presented = <String>[];
+    configureIosCallkitOnly(
+      nativeCalls: nativeCalls,
+      markedStates: markedStates,
+      presentedInvites: presented,
+    );
+    await manager.bindIncomingInviteListener();
+    await seedInvite('invite_failed_ledger');
+
+    await manager.handleNotificationInviteTap(
+      inviteId: 'invite_failed_ledger',
+      channel: 'channel_invite_failed_ledger',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'firestore_first',
+    );
+    await firestore.collection('callInvites').doc('invite_failed_ledger').set({
+      'status': CallInviteStatus.failed.name,
+      'endedAt': Timestamp.now(),
+      'channel': 'channel_invite_failed_ledger',
+    }, SetOptions(merge: true));
+    for (var i = 0; i < 20; i += 1) {
+      await tester.pump(const Duration(milliseconds: 100));
+      if (manager.debugSnapshot()['sessionIdle'] == true) break;
+    }
+
+    final latePush = manager.handleNotificationInviteTap(
+      inviteId: 'invite_failed_ledger',
+      channel: 'channel_invite_failed_ledger',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'late_push_after_failed',
+    );
+    await tester.pump(const Duration(seconds: 1));
+    await latePush;
+
+    expect(markedStates, contains('terminal'));
+    expect(nativeCalls, isEmpty);
+    expect(presented, isEmpty);
+    expect(manager.debugSnapshot()['sessionIdle'], isTrue);
+    expect(manager.debugSnapshot()['flutterIncomingPromptCount'], 0);
+  });
+
+  testWidgets('native PushKit wins fallback race through existing outcome',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[];
+    var nativePresentationTotal = 0;
+    configureIosCallkitOnly(
+      nativeCalls: nativeCalls,
+      presenter: (payload) async {
+        if (nativeCalls.isEmpty) {
+          nativeCalls.add(nativeForInvite(payload.inviteId));
+          nativePresentationTotal += 1;
+        }
+        return true;
+      },
+    );
+    await seedInvite('invite_push_wins_race');
+
+    final handling = manager.handleNotificationInviteTap(
+      inviteId: 'invite_push_wins_race',
+      channel: 'channel_invite_push_wins_race',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'firestore_first_race',
+    );
+    await tester.pump(const Duration(seconds: 1));
+    await handling;
+
+    expect(nativePresentationTotal, 1);
+    expect(nativeCalls, hasLength(1));
+    expect(manager.debugSnapshot()['incomingUiOwner'],
+        IncomingUiOwner.callkit.name);
+    expect(manager.debugSnapshot()['flutterIncomingPromptCount'], 0);
+  });
+
+  testWidgets('Dart fallback wins then PushKit uses existing native owner',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[];
+    var nativePresentationTotal = 0;
+    configureIosCallkitOnly(
+      nativeCalls: nativeCalls,
+      presenter: (payload) async {
+        if (nativeCalls.isEmpty) {
+          nativeCalls.add(nativeForInvite(payload.inviteId));
+          nativePresentationTotal += 1;
+        }
+        return true;
+      },
+    );
+    await seedInvite('invite_dart_wins_race');
+
+    final first = manager.handleNotificationInviteTap(
+      inviteId: 'invite_dart_wins_race',
+      channel: 'channel_invite_dart_wins_race',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'firestore_fallback_first',
+    );
+    await tester.pump(const Duration(seconds: 1));
+    await first;
+    await manager.handleNotificationInviteTap(
+      inviteId: 'invite_dart_wins_race',
+      channel: 'channel_invite_dart_wins_race',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'pushkit_after_dart_fallback',
+    );
+
+    expect(nativePresentationTotal, 1);
+    expect(nativeCalls, hasLength(1));
+    expect(manager.debugSnapshot()['incomingUiOwner'],
+        IncomingUiOwner.callkit.name);
+    expect(manager.debugSnapshot()['flutterIncomingPromptCount'], 0);
+  });
+
+  test('native source coordinates APNS fallback and PushKit presentation', () {
+    final source = File('ios/Runner/AppDelegate.swift').readAsStringSync();
+    expect(source, contains('ensureIncomingCallkit('));
+    expect(source, contains('call.method == "ensureIncomingCallkit"'));
+    expect(source, contains('let ensureOutcome = ensureIncomingCallkit('));
+    expect(source, contains('return "suppressedAccepted"'));
+    expect(source, contains('return "suppressedActive"'));
+    expect(source, contains('return "suppressedTerminal"'));
+
+    final declineIndex = source.indexOf('if actionId == "DECLINE_CALL"');
+    final declineMarkIndex = source.indexOf(
+      'markCallkitPresentationState(callkitId: callkitId, state: "terminal")',
+      declineIndex,
+    );
+    final declineStoreIndex =
+        source.indexOf('storeCallkitEvent(', declineIndex);
+    expect(declineMarkIndex, greaterThan(declineIndex));
+    expect(declineMarkIndex, lessThan(declineStoreIndex));
+
+    final acceptStoreIndex = source.indexOf('storeAcceptedCallData(');
+    final acceptMarkIndex = source.lastIndexOf(
+      'markCallkitPresentationState(callkitId: callkitId, state: "accepted")',
+      acceptStoreIndex,
+    );
+    expect(acceptMarkIndex, greaterThan(declineStoreIndex));
+    expect(acceptMarkIndex, lessThan(acceptStoreIndex));
+  });
+
+  test('Dart iOS fallback does not directly show CallKit', () {
+    final source =
+        File('lib/services/notification_service.dart').readAsStringSync();
+    expect(source, contains("'ensureIncomingCallkit'"));
+    expect(
+        source, isNot(contains('FlutterCallkitIncoming.showCallkitIncoming')));
   });
 
   testWidgets(

@@ -268,13 +268,14 @@ class NotificationService with WidgetsBindingObserver {
     CallInvitePayload payload,
   ) async {
     if (!Platform.isIOS || !_enableIosCallKit) return false;
-    return _showIncomingCallKit(
+    final outcome = await _ensureIncomingCallkit(
       channel: payload.channel,
       isVideo: payload.isVideo,
       fromName: payload.fromName,
       fromUid: payload.fromUid,
       inviteId: payload.inviteId,
     );
+    return outcome == 'presented' || outcome == 'existing';
   }
 
   Future<List<NativeCallSnapshot>> _listActiveCallkitCalls() async {
@@ -570,6 +571,29 @@ class NotificationService with WidgetsBindingObserver {
     for (final entry in meta.entries) {
       final key = entry.key;
       final lower = key.toLowerCase();
+      if (const <String>{
+        'ioscallkitonlypolicy',
+        'callkitensureoutcome',
+        'callkitpresentationrequested',
+        'duplicatecallkitsuppressed',
+        'latepushsuppressed',
+        'terminalledgermarked',
+        'flutterincomingpromptcount',
+        'iosflutterincomingpromptviolation',
+        'routeopencount',
+        'sessionidle',
+        'blockercode',
+      }.contains(lower)) {
+        final value = entry.value;
+        if (value == null || value is bool || value is num) {
+          safe[key] = value;
+        } else if (value is String) {
+          safe[key] = _safePushString(value);
+        } else {
+          safe[key] = value.runtimeType.toString();
+        }
+        continue;
+      }
       if (lower.contains('callkit') ||
           lower.contains('invite') ||
           lower.contains('channel') ||
@@ -2016,7 +2040,7 @@ class NotificationService with WidgetsBindingObserver {
         }
 
         if (Platform.isIOS && _enableIosCallKit) {
-          await _showIncomingCallKit(
+          await _ensureIncomingCallkit(
             channel: channel,
             isVideo: isVideo,
             fromName: fromName,
@@ -2665,7 +2689,7 @@ class NotificationService with WidgetsBindingObserver {
     }
   }
 
-  Future<bool> _showIncomingCallKit({
+  Future<String> _ensureIncomingCallkit({
     required String channel,
     required bool isVideo,
     required String fromName,
@@ -2674,63 +2698,46 @@ class NotificationService with WidgetsBindingObserver {
   }) async {
     final rawInviteId = (inviteId ?? '').trim();
     final rawCallId = rawInviteId.isNotEmpty ? rawInviteId : channel.trim();
-    final callkitId = normalizeCallkitId(
-      rawId: rawCallId,
-      fallback: channel,
-    );
-    final params = CallKitParams(
-      id: callkitId,
-      nameCaller: fromName,
-      appName: 'Helperly',
-      handle: isVideo ? 'Video call' : 'Audio call',
-      type: isVideo ? 1 : 0,
-      duration: 45000,
-      textAccept: 'Accept',
-      textDecline: 'Decline',
-      extra: <String, dynamic>{
-        'id': callkitId,
-        'callkitId': callkitId,
-        'callId': rawCallId,
-        'channel': channel,
-        'isVideo': isVideo,
-        'fromName': fromName,
-        'fromUid': fromUid ?? '',
-        'inviteId': rawInviteId,
-      },
-      ios: IOSParams(
-        // Must be a regular image asset name, not AppIcon appiconset.
-        iconName: 'LaunchImage',
-        handleType: 'generic',
-        supportsVideo: isVideo,
-        supportsDTMF: false,
-        supportsHolding: false,
-        supportsGrouping: false,
-        supportsUngrouping: false,
-      ),
-      android: const AndroidParams(
-        isShowFullLockedScreen: true,
-        isImportant: true,
-        incomingCallNotificationChannelName: 'Incoming Call',
-        missedCallNotificationChannelName: 'Missed Call',
-      ),
-    );
     try {
-      await _markNativeCallkitInviteState(
-        inviteId: rawInviteId.isEmpty ? rawCallId : rawInviteId,
-        channel: channel,
-        state: 'presented',
+      final result = await _pushTokenChannel.invokeMethod(
+        'ensureIncomingCallkit',
+        {
+          'inviteId': rawInviteId.isEmpty ? rawCallId : rawInviteId,
+          'channel': channel,
+          'isVideo': isVideo,
+          'fromName': fromName,
+          'fromUid': fromUid ?? '',
+        },
       );
-      await FlutterCallkitIncoming.showCallkitIncoming(params);
-      await _diagPush('callkit_fallback_requested', meta: {
-        'callkitPresentationCount': 1,
+      final outcome = result is Map
+          ? (result['outcome'] ?? '').toString()
+          : result.toString();
+      final normalized = _safeCallkitEnsureOutcome(outcome);
+      await _diagPush('callkit_ensure_result', meta: {
+        'callkitEnsureOutcome': normalized,
+        'callkitPresentationRequested': true,
       });
-      return true;
+      return normalized;
     } catch (_) {
-      debugPrint('⚠️ CallKit incoming failed');
+      debugPrint('⚠️ CallKit ensure failed');
       await _diagPush('callkit_fallback_failed', meta: {
         'blockerCode': 'callkit_present_failed',
       });
-      return false;
+      return 'failed';
+    }
+  }
+
+  String _safeCallkitEnsureOutcome(String outcome) {
+    switch (outcome.trim()) {
+      case 'presented':
+      case 'existing':
+      case 'suppressedAccepted':
+      case 'suppressedActive':
+      case 'suppressedTerminal':
+      case 'failed':
+        return outcome.trim();
+      default:
+        return 'failed';
     }
   }
 

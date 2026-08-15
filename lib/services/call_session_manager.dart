@@ -1323,6 +1323,12 @@ class CallSessionManager {
     final ownsPrompt = _incomingPromptInviteId == normalizedInviteId &&
         _incomingUiOwner != IncomingUiOwner.none;
     if (!ownsPrompt) {
+      await _markNativeInviteStateByIdsSafely(
+        inviteId: normalizedInviteId,
+        channel: channel,
+        state: 'terminal',
+        reason: source,
+      );
       await _endNativeCallForInvite(
         inviteId: normalizedInviteId,
         channel: channel,
@@ -1347,6 +1353,12 @@ class CallSessionManager {
     _incomingUiOwner = IncomingUiOwner.none;
     _clearPendingIncomingPrompt(normalizedInviteId);
     _markInviteHandled(normalizedInviteId);
+    await _markNativeInviteStateByIdsSafely(
+      inviteId: normalizedInviteId,
+      channel: channel,
+      state: 'terminal',
+      reason: source,
+    );
     await _endNativeCallForInvite(
       inviteId: normalizedInviteId,
       channel: channel,
