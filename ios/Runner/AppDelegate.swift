@@ -37,6 +37,8 @@ import CallKit
   private let lastCallkitEventChannelStoreKey = "connectapp.lastCallkitEventChannel"
   private let callkitPresentationLedgerStoreKey = "connectapp.callkitPresentationLedger"
   private let callkitPresentationLedgerTtlSeconds: TimeInterval = 120
+  private let callkitPresentationLeaseGraceSeconds: TimeInterval = 2
+  private let callkitPresentationMaxAttempts = 2
   private var voipRegistry: PKPushRegistry?
   private var pushTokenChannel: FlutterMethodChannel?
 
@@ -151,7 +153,7 @@ import CallKit
             raw: inviteId.isEmpty ? nil : inviteId,
             fallback: channel
           )
-          self.markCallkitPresentationState(callkitId: callkitId, state: state)
+          _ = self.markCallkitPresentationState(callkitId: callkitId, state: state)
           result(true)
           return
         }
@@ -448,25 +450,108 @@ import CallKit
     }
   }
 
-  private func markCallkitPresentationState(callkitId: String, state: String) {
+  private func callkitPresentationStateRank(_ state: String) -> Int {
+    switch state {
+    case "presenting", "presented":
+      return 1
+    case "accepted":
+      return 2
+    case "active":
+      return 3
+    case "terminal":
+      return 4
+    default:
+      return 0
+    }
+  }
+
+  private func canApplyCallkitPresentationTransition(from current: String, to next: String)
+    -> Bool
+  {
+    let currentRank = callkitPresentationStateRank(current)
+    let nextRank = callkitPresentationStateRank(next)
+    guard nextRank > 0 else { return false }
+    if currentRank == 0 { return true }
+    if next == "terminal" { return true }
+    if current == "terminal" { return next == "terminal" }
+    if nextRank < currentRank { return false }
+    if current == "active" && next == "accepted" { return false }
+    return true
+  }
+
+  @discardableResult
+  private func markCallkitPresentationState(callkitId: String, state: String) -> String {
     let key = callkitId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     let normalizedState = state.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    guard !key.isEmpty, ["presented", "accepted", "active", "terminal"].contains(normalizedState)
-    else { return }
+    guard !key.isEmpty,
+      ["presenting", "presented", "accepted", "active", "terminal"].contains(normalizedState)
+    else { return "" }
     var ledger = pruneCallkitPresentationLedger(callkitPresentationLedger())
-    ledger[key] = [
-      "state": normalizedState,
-      "timestamp": Date().timeIntervalSince1970,
-    ]
+    var current = ledger[key] ?? [:]
+    let currentState = ((current["state"] as? String) ?? "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    guard canApplyCallkitPresentationTransition(from: currentState, to: normalizedState) else {
+      writeCallkitPresentationLedger(ledger)
+      return currentState
+    }
+    current["state"] = normalizedState
+    current["timestamp"] = Date().timeIntervalSince1970
+    ledger[key] = current
     writeCallkitPresentationLedger(ledger)
+    return normalizedState
+  }
+
+  private func callkitPresentationEntry(callkitId: String) -> [String: Any] {
+    let key = callkitId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !key.isEmpty else { return [:] }
+    let ledger = pruneCallkitPresentationLedger(callkitPresentationLedger())
+    writeCallkitPresentationLedger(ledger)
+    return ledger[key] ?? [:]
+  }
+
+  private func beginCallkitPresentationLease(callkitId: String) -> Bool {
+    let key = callkitId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !key.isEmpty else { return false }
+    var ledger = pruneCallkitPresentationLedger(callkitPresentationLedger())
+    var current = ledger[key] ?? [:]
+    let currentState = ((current["state"] as? String) ?? "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    if ["accepted", "active", "terminal"].contains(currentState) {
+      return false
+    }
+    let timestamp = current["timestamp"] as? TimeInterval ?? 0
+    let age = Date().timeIntervalSince1970 - timestamp
+    if (currentState == "presenting" || currentState == "presented") &&
+        timestamp > 0 && age < callkitPresentationLeaseGraceSeconds {
+      return false
+    }
+    let attempts = current["presentationAttempts"] as? Int ?? 0
+    if attempts >= callkitPresentationMaxAttempts {
+      return false
+    }
+    current["state"] = "presenting"
+    current["timestamp"] = Date().timeIntervalSince1970
+    current["presentationAttempts"] = attempts + 1
+    ledger[key] = current
+    writeCallkitPresentationLedger(ledger)
+    return true
   }
 
   private func callkitPresentationState(callkitId: String) -> String {
-    let key = callkitId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    guard !key.isEmpty else { return "" }
-    let ledger = pruneCallkitPresentationLedger(callkitPresentationLedger())
-    writeCallkitPresentationLedger(ledger)
-    return (ledger[key]?["state"] as? String) ?? ""
+    return (callkitPresentationEntry(callkitId: callkitId)["state"] as? String) ?? ""
+  }
+
+  private func callkitPresentationLeaseFresh(callkitId: String) -> Bool {
+    let entry = callkitPresentationEntry(callkitId: callkitId)
+    let state = ((entry["state"] as? String) ?? "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    guard state == "presenting" || state == "presented" else { return false }
+    let timestamp = entry["timestamp"] as? TimeInterval ?? 0
+    return timestamp > 0 &&
+      Date().timeIntervalSince1970 - timestamp < callkitPresentationLeaseGraceSeconds
   }
 
   private func activeCallkitContains(callkitId: String) -> Bool {
@@ -845,6 +930,24 @@ import CallKit
         detail: "duplicate_callkit_suppressed=true identifier_present=true"
       )
       return "existing"
+    }
+
+    if callkitPresentationLeaseFresh(callkitId: callkitId) {
+      storePushkitState(
+        "duplicate_callkit_suppressed",
+        payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
+        detail: "presentation_in_flight=true identifier_present=true"
+      )
+      return "existing"
+    }
+
+    guard beginCallkitPresentationLease(callkitId: callkitId) else {
+      storePushkitState(
+        "incoming_report_missing",
+        payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
+        detail: "presentation_retry_exhausted=true identifier_present=true"
+      )
+      return "failed"
     }
 
     let callData = incomingCallkitData(

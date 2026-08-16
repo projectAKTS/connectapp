@@ -921,6 +921,86 @@ void main() {
     expect(manager.debugSnapshot()['flutterIncomingPromptCount'], 0);
   });
 
+  testWidgets('Dart fallback continuation cannot downgrade accepted ledger',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[];
+    final markedStates = <String>[];
+    final presentationStarted = Completer<void>();
+    final finishPresentation = Completer<bool>();
+    configureIosCallkitOnly(
+      nativeCalls: nativeCalls,
+      markedStates: markedStates,
+      presenter: (payload) {
+        if (!presentationStarted.isCompleted) {
+          presentationStarted.complete();
+        }
+        return finishPresentation.future;
+      },
+    );
+    await seedInvite('invite_accept_during_fallback');
+
+    final handling = manager.handleNotificationInviteTap(
+      inviteId: 'invite_accept_during_fallback',
+      channel: 'channel_invite_accept_during_fallback',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'firestore_fallback_before_accept',
+    );
+    await tester.pump(const Duration(seconds: 1));
+    await presentationStarted.future;
+
+    markedStates.add('accepted');
+    finishPresentation.complete(true);
+    await handling;
+
+    expect(markedStates, ['accepted']);
+    expect(manager.debugSnapshot()['incomingUiOwner'],
+        IncomingUiOwner.callkit.name);
+    expect(manager.debugSnapshot()['flutterIncomingPromptCount'], 0);
+  });
+
+  testWidgets('Dart fallback continuation cannot downgrade terminal ledger',
+      (tester) async {
+    await tester.pumpWidget(buildHarness());
+    final nativeCalls = <NativeCallSnapshot>[];
+    final markedStates = <String>[];
+    final presentationStarted = Completer<void>();
+    final finishPresentation = Completer<bool>();
+    configureIosCallkitOnly(
+      nativeCalls: nativeCalls,
+      markedStates: markedStates,
+      presenter: (payload) {
+        if (!presentationStarted.isCompleted) {
+          presentationStarted.complete();
+        }
+        return finishPresentation.future;
+      },
+    );
+    await seedInvite('invite_terminal_during_fallback');
+
+    final handling = manager.handleNotificationInviteTap(
+      inviteId: 'invite_terminal_during_fallback',
+      channel: 'channel_invite_terminal_during_fallback',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'firestore_fallback_before_terminal',
+    );
+    await tester.pump(const Duration(seconds: 1));
+    await presentationStarted.future;
+
+    markedStates.add('terminal');
+    finishPresentation.complete(true);
+    await handling;
+
+    expect(markedStates, ['terminal']);
+    expect(manager.debugSnapshot()['incomingUiOwner'],
+        IncomingUiOwner.callkit.name);
+    expect(manager.debugSnapshot()['flutterIncomingPromptCount'], 0);
+  });
+
   test('native source coordinates APNS fallback and PushKit presentation', () {
     final source = File('ios/Runner/AppDelegate.swift').readAsStringSync();
     expect(source, contains('ensureIncomingCallkit('));
@@ -949,12 +1029,73 @@ void main() {
     expect(acceptMarkIndex, lessThan(acceptStoreIndex));
   });
 
+  test('native source keeps CallKit ledger transitions monotonic', () {
+    final source = File('ios/Runner/AppDelegate.swift').readAsStringSync();
+
+    expect(source, contains('callkitPresentationStateRank'));
+    expect(source, contains('canApplyCallkitPresentationTransition'));
+    expect(source, contains('case "presenting", "presented":'));
+    expect(source, contains('case "accepted":'));
+    expect(source, contains('case "active":'));
+    expect(source, contains('case "terminal":'));
+    expect(source,
+        contains('if current == "terminal" { return next == "terminal" }'));
+    expect(source, contains('if nextRank < currentRank { return false }'));
+    expect(
+        source,
+        contains(
+            'if current == "active" && next == "accepted" { return false }'));
+
+    final guardIndex = source.indexOf(
+      'guard canApplyCallkitPresentationTransition',
+    );
+    final ledgerWriteIndex =
+        source.indexOf('current["state"] = normalizedState');
+    expect(guardIndex, isNonNegative);
+    expect(ledgerWriteIndex, greaterThan(guardIndex));
+  });
+
+  test('native source leases presentation before showing CallKit', () {
+    final source = File('ios/Runner/AppDelegate.swift').readAsStringSync();
+
+    expect(source, contains('callkitPresentationLeaseGraceSeconds'));
+    expect(source, contains('callkitPresentationMaxAttempts'));
+    expect(source, contains('beginCallkitPresentationLease'));
+    expect(source, contains('callkitPresentationLeaseFresh'));
+    expect(source, contains('current["state"] = "presenting"'));
+    expect(source, contains('current["presentationAttempts"] = attempts + 1'));
+    expect(source, contains('presentation_retry_exhausted=true'));
+
+    final freshLeaseIndex = source.indexOf(
+      'if callkitPresentationLeaseFresh(callkitId: callkitId)',
+    );
+    final beginLeaseIndex = source.indexOf(
+      'guard beginCallkitPresentationLease(callkitId: callkitId)',
+    );
+    final showIndex = source.indexOf('showCallkitIncoming(');
+    final presentedMarkIndex = source.indexOf(
+      'markCallkitPresentationState(callkitId: callkitId, state: "presented")',
+      showIndex,
+    );
+    expect(freshLeaseIndex, isNonNegative);
+    expect(beginLeaseIndex, greaterThan(freshLeaseIndex));
+    expect(showIndex, greaterThan(beginLeaseIndex));
+    expect(presentedMarkIndex, greaterThan(showIndex));
+  });
+
   test('Dart iOS fallback does not directly show CallKit', () {
     final source =
         File('lib/services/notification_service.dart').readAsStringSync();
     expect(source, contains("'ensureIncomingCallkit'"));
     expect(
         source, isNot(contains('FlutterCallkitIncoming.showCallkitIncoming')));
+  });
+
+  test('Dart manager does not mark presented after native ensure', () {
+    final source =
+        File('lib/services/call_session_manager.dart').readAsStringSync();
+    expect(source, isNot(contains("state: 'presented'")));
+    expect(source, isNot(contains('callkit_fallback_presented')));
   });
 
   testWidgets(

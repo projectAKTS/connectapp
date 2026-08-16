@@ -3015,11 +3015,6 @@ class CallSessionManager {
         return IncomingUiOwner.none;
       }
       _callkitPresentationCount += 1;
-      await _markNativeInviteStateSafely(
-        payload,
-        state: 'presented',
-        reason: 'callkit_fallback_presented',
-      );
       return IncomingUiOwner.callkit;
     }
     await Future<void>.delayed(const Duration(milliseconds: 250));
