@@ -1097,7 +1097,30 @@ import CallKit
     storeAcceptedCall(call)
     storeCallkitEvent("accept", call: call)
     markCallkitPresentationState(callkitId: call.data.uuid, state: "accepted")
+    let extra = call.data.extra as? [String: Any]
     let inviteId = inviteIdFromCall(call)
+    let channel = ((extra?["channel"] as? String) ?? "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let fromName = ((extra?["fromName"] as? String) ?? "Caller")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let fromUid = ((extra?["fromUid"] as? String) ?? "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let isVideoRaw = ((extra?["isVideo"] as? String) ?? "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    let isVideo = isVideoRaw == "true" || isVideoRaw == "1"
+    notifyFlutterOfForegroundVoip(
+      method: "callkitAcceptedNative",
+      payload: [
+        "inviteId": inviteId,
+        "callId": inviteId,
+        "channel": channel,
+        "fromName": fromName.isEmpty ? "Caller" : fromName,
+        "fromUid": fromUid,
+        "isVideo": isVideo,
+        "callkitId": call.data.uuid,
+      ]
+    )
     if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
       syncInviteStatus(inviteId: inviteId, status: "accepted", additional: [
         "acceptedBy": Auth.auth().currentUser?.uid ?? "",

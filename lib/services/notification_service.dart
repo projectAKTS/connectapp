@@ -34,6 +34,12 @@ class _AcceptedCallkitRecoveryPayload {
   final bool isVideo;
   final String fromName;
   final String fromUid;
+
+  bool matches(_AcceptedCallkitRecoveryPayload other) {
+    return inviteId == other.inviteId &&
+        channel == other.channel &&
+        isVideo == other.isVideo;
+  }
 }
 
 class NotificationService with WidgetsBindingObserver {
@@ -95,6 +101,8 @@ class NotificationService with WidgetsBindingObserver {
   DateTime? _lastResumeSyncAt;
   bool _callPermissionsPrimed = false;
   bool _recoveringAcceptedCall = false;
+  bool _nativeAcceptBridgeReceivedForTest = false;
+  bool _acceptedRecoveryCoalescedForTest = false;
   Timer? _acceptedRecoveryRetryTimer;
   int _acceptedRecoveryRetryAttempts = 0;
   bool _acceptedRecoveryRetryScheduledForTest = false;
@@ -581,8 +589,18 @@ class NotificationService with WidgetsBindingObserver {
         'flutterincomingpromptcount',
         'iosflutterincomingpromptviolation',
         'routeopencount',
+        'rtcsetupownercount',
         'sessionidle',
         'blockercode',
+        'nativecallkitacceptobserved',
+        'nativeacceptbridgedispatched',
+        'nativeacceptbridgereceived',
+        'pluginaccepteventobserved',
+        'acceptedrecoverysource',
+        'acceptedrecoverycoalesced',
+        'acceptedrecoverypending',
+        'acceptedrecoveryattemptcount',
+        'navigatorready',
       }.contains(lower)) {
         final value = entry.value;
         if (value == null || value is bool || value is num) {
@@ -1004,6 +1022,8 @@ class NotificationService with WidgetsBindingObserver {
     _acceptedRecoveryRetryScheduledForTest = false;
     _acceptedRecoveryRetryResultForTest = null;
     _pendingAcceptedCallkitRecoveryPayload = null;
+    _nativeAcceptBridgeReceivedForTest = false;
+    _acceptedRecoveryCoalescedForTest = false;
     _appleTokenRetryTimer?.cancel();
     _appleTokenRetryTimer = null;
     _apnsRetryScheduled = false;
@@ -1075,6 +1095,8 @@ class NotificationService with WidgetsBindingObserver {
     _acceptedRecoveryRetryScheduledForTest = false;
     _acceptedRecoveryRetryResultForTest = null;
     _pendingAcceptedCallkitRecoveryPayload = null;
+    _nativeAcceptBridgeReceivedForTest = false;
+    _acceptedRecoveryCoalescedForTest = false;
     if (_observerBound) {
       WidgetsBinding.instance.removeObserver(this);
       _observerBound = false;
@@ -1115,6 +1137,44 @@ class NotificationService with WidgetsBindingObserver {
   }
 
   Future<dynamic> _handleNativePushMethodCall(MethodCall call) async {
+    if (call.method == 'callkitAcceptedNative') {
+      final rawArgs = call.arguments;
+      if (rawArgs is! Map) return true;
+      final data = Map<String, dynamic>.from(rawArgs.cast<dynamic, dynamic>());
+      final channel = (data['channel'] ?? '').toString().trim();
+      final inviteId =
+          ((data['inviteId'] ?? data['callId'] ?? channel)).toString().trim();
+      final fromName = (data['fromName'] ?? 'Caller').toString();
+      final fromUid = (data['fromUid'] ?? '').toString().trim();
+      final isVideo = _videoField(data, const <String, dynamic>{});
+      _nativeAcceptBridgeReceivedForTest = true;
+      unawaited(_diagPush('callkit_native_accept_bridge_received', meta: {
+        'nativeAcceptBridgeReceived': true,
+        'nativeCallkitAcceptObserved': true,
+        'acceptedRecoverySource': 'native',
+        'navigatorReady': navigatorKey?.currentState != null,
+      }));
+      if (channel.isEmpty || inviteId.isEmpty) return true;
+
+      unawaited(
+        Future<void>.microtask(() async {
+          await _diagPush('callkit_native_accept_bridge_dispatched', meta: {
+            'nativeAcceptBridgeDispatched': true,
+            'acceptedRecoverySource': 'native',
+          });
+          await _recoverAcceptedCallkitEvent(
+            inviteId: inviteId,
+            channel: channel,
+            isVideo: isVideo,
+            fromName: fromName,
+            fromUid: fromUid,
+            trigger: 'native_callkit_accept',
+          );
+        }),
+      );
+      return true;
+    }
+
     if (call.method == 'incomingVoipForeground') {
       final rawArgs = call.arguments;
       if (rawArgs is! Map) return null;
@@ -1390,6 +1450,8 @@ class NotificationService with WidgetsBindingObserver {
           'inviteId': inviteId,
           'callkitId': id,
           'channel': channel,
+          'pluginAcceptEventObserved': true,
+          'acceptedRecoverySource': 'plugin',
         });
         await _recoverAcceptedCallkitEvent(
           inviteId: inviteId,
@@ -2346,7 +2408,7 @@ class NotificationService with WidgetsBindingObserver {
     required String fromUid,
     required String trigger,
   }) async {
-    _pendingAcceptedCallkitRecoveryPayload = _AcceptedCallkitRecoveryPayload(
+    final nextPayload = _AcceptedCallkitRecoveryPayload(
       inviteId: inviteId,
       channel: channel,
       isVideo: isVideo,
@@ -2354,11 +2416,22 @@ class NotificationService with WidgetsBindingObserver {
       fromUid: fromUid,
     );
     if (_recoveringAcceptedCall) {
-      _handleAcceptedRecoveryResult(
-        AcceptedCallRecoveryResult.pendingNetwork,
-      );
+      final pending = _pendingAcceptedCallkitRecoveryPayload;
+      if (pending != null && pending.matches(nextPayload)) {
+        _acceptedRecoveryCoalescedForTest = true;
+        await _diagPush('accepted_call_recovery_coalesced', meta: {
+          'acceptedRecoveryCoalesced': true,
+          'acceptedRecoverySource': trigger,
+          'acceptedRecoveryPending': true,
+          'navigatorReady': navigatorKey?.currentState != null,
+        });
+        return;
+      }
+      _pendingAcceptedCallkitRecoveryPayload = nextPayload;
+      _handleAcceptedRecoveryResult(AcceptedCallRecoveryResult.pendingNetwork);
       return;
     }
+    _pendingAcceptedCallkitRecoveryPayload = nextPayload;
     _recoveringAcceptedCall = true;
     try {
       final result =
@@ -2432,6 +2505,8 @@ class NotificationService with WidgetsBindingObserver {
     _acceptedRecoveryRetryTimer = Timer(delay, () {
       unawaited(_runAcceptedRecoveryRetry(result));
     });
+    _acceptedRecoveryRetryScheduledForTest = true;
+    _acceptedRecoveryRetryResultForTest = result;
     unawaited(_diagPush('accepted_call_recovery_retry_scheduled', meta: {
       'result': result.name,
       'attempt': attempt,
@@ -2512,6 +2587,32 @@ class NotificationService with WidgetsBindingObserver {
     );
   }
 
+  Future<void> debugSimulateNativeAcceptedCallkitBridgeForTest({
+    required String inviteId,
+    required String channel,
+    required bool isVideo,
+    required String fromName,
+    required String fromUid,
+  }) async {
+    await _handleNativePushMethodCall(
+      MethodCall('callkitAcceptedNative', <String, dynamic>{
+        'inviteId': inviteId,
+        'callId': inviteId,
+        'channel': channel,
+        'fromName': fromName,
+        'fromUid': fromUid,
+        'isVideo': isVideo,
+        'callkitId': normalizeCallkitId(
+          rawId: inviteId,
+          fallback: channel,
+        ),
+      }),
+    );
+    for (var i = 0; i < 8; i += 1) {
+      await Future<void>.microtask(() {});
+    }
+  }
+
   Future<void> debugOpenChatFromTapForTest({
     required String otherUserId,
     String? chatId,
@@ -2561,6 +2662,8 @@ class NotificationService with WidgetsBindingObserver {
       'acceptedRecoveryRetryAttempts': _acceptedRecoveryRetryAttempts,
       'acceptedRecoveryPayloadPending':
           _pendingAcceptedCallkitRecoveryPayload != null,
+      'nativeAcceptBridgeReceived': _nativeAcceptBridgeReceivedForTest,
+      'acceptedRecoveryCoalesced': _acceptedRecoveryCoalescedForTest,
       'boundUid': _boundUid,
       'pushBindingGeneration': _pushBindingGeneration,
       'signOutPreparationInProgress': _signOutPreparationInProgress,

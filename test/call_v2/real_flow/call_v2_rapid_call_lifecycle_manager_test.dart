@@ -1029,6 +1029,28 @@ void main() {
     expect(acceptMarkIndex, lessThan(acceptStoreIndex));
   });
 
+  test('native source bridges CallKit accept to Flutter before fulfilling', () {
+    final source = File('ios/Runner/AppDelegate.swift').readAsStringSync();
+    final onAcceptIndex = source.indexOf('func onAccept(');
+    final storeIndex = source.indexOf('storeAcceptedCall(call)', onAcceptIndex);
+    final eventIndex =
+        source.indexOf('storeCallkitEvent("accept"', onAcceptIndex);
+    final ledgerIndex = source.indexOf(
+      'markCallkitPresentationState(callkitId: call.data.uuid, state: "accepted")',
+      onAcceptIndex,
+    );
+    final bridgeIndex =
+        source.indexOf('method: "callkitAcceptedNative"', onAcceptIndex);
+    final fulfillIndex = source.indexOf('action.fulfill()', onAcceptIndex);
+
+    expect(onAcceptIndex, isNonNegative);
+    expect(storeIndex, greaterThan(onAcceptIndex));
+    expect(eventIndex, greaterThan(storeIndex));
+    expect(ledgerIndex, greaterThan(eventIndex));
+    expect(bridgeIndex, greaterThan(ledgerIndex));
+    expect(fulfillIndex, greaterThan(bridgeIndex));
+  });
+
   test('native source keeps CallKit ledger transitions monotonic', () {
     final source = File('ios/Runner/AppDelegate.swift').readAsStringSync();
 
