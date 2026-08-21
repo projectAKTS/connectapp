@@ -74,6 +74,72 @@ void main() {
     expect(gate.retryPossible, isTrue);
   });
 
+  test('active cleanup failure retries and succeeds in same Call B attempt',
+      () async {
+    final gate = _patientGate();
+    final engine = _FakeEngine(forceDisposeSucceeds: false)
+      ..releaseCompleter = Completer<void>()
+      ..releaseErrors.add(StateError('release_failed'));
+
+    final cleanupA = gate.cleanup(_operations(engine, generation: 1));
+    await Future<void>.delayed(Duration.zero);
+
+    var callBReturned = false;
+    final callB = gate.prepareNextEngine().then((decision) {
+      callBReturned = true;
+      return decision;
+    });
+    await Future<void>.delayed(Duration.zero);
+    expect(callBReturned, isFalse);
+    expect(engine.releaseCount, 1);
+
+    engine.releaseCompleter!.complete();
+    final failedA = await cleanupA;
+    final decision = await callB;
+
+    expect(failedA.succeeded, isFalse);
+    expect(decision.nextEngineAllowed, isTrue);
+    expect(decision.blockerCode, 'none');
+    expect(decision.previousCleanupAwaited, isTrue);
+    expect(decision.previousCleanupWaitCompleted, isTrue);
+    expect(decision.cleanupEscalated, isTrue);
+    expect(decision.retryAttempted, isTrue);
+    expect(engine.releaseCount, 2);
+    expect(engine.forceDisposeCount, 1);
+    expect(gate.cleanupInProgress, isFalse);
+    expect(gate.nextEngineAllowed, isTrue);
+  });
+
+  test('active cleanup failure retries and fails in same Call B attempt',
+      () async {
+    final gate = _patientGate();
+    final engine = _FakeEngine(forceDisposeSucceeds: false)
+      ..releaseCompleter = Completer<void>()
+      ..releaseErrors.addAll([
+        StateError('release_failed'),
+        StateError('release_failed_again'),
+      ]);
+
+    final cleanupA = gate.cleanup(_operations(engine, generation: 1));
+    await Future<void>.delayed(Duration.zero);
+    final callB = gate.prepareNextEngine();
+
+    engine.releaseCompleter!.complete();
+    final failedA = await cleanupA;
+    final decision = await callB.timeout(const Duration(seconds: 1));
+
+    expect(failedA.succeeded, isFalse);
+    expect(decision.nextEngineAllowed, isFalse);
+    expect(decision.blockerCode, 'cleanup_failed');
+    expect(decision.previousCleanupAwaited, isTrue);
+    expect(decision.previousCleanupWaitCompleted, isTrue);
+    expect(decision.cleanupEscalated, isTrue);
+    expect(decision.retryAttempted, isTrue);
+    expect(engine.releaseCount, 2);
+    expect(engine.forceDisposeCount, 2);
+    expect(gate.cleanupInProgress, isFalse);
+  });
+
   test('never-completing release settles through force disposal', () async {
     final gate = _boundedGate();
     final engine = _FakeEngine()..releaseCompleter = Completer<void>();
@@ -99,6 +165,10 @@ void main() {
     expect(gate.cleanupInProgress, isFalse);
     expect(gate.previousResult?.releaseTimedOut, isTrue);
     expect(gate.previousResult?.forcedDisposalAttempted, isTrue);
+    expect(
+      gate.previousResult?.cleanupOwnershipState,
+      CallV2EngineCleanupOwnershipState.forceDisposed,
+    );
     expect(gate.nextEngineAllowed, isTrue);
   });
 
@@ -236,6 +306,60 @@ void main() {
     expect(engineCreations, 1);
     expect(engineA.releaseCount, 1);
     expect(gate.cleanupInProgress, isFalse);
+  });
+
+  test('late release completion after force disposal cannot regress gate',
+      () async {
+    final gate = _boundedGate();
+    final release = Completer<void>();
+    final engine = _FakeEngine()..releaseCompleter = release;
+
+    final cleanup = gate.cleanup(_operations(engine, generation: 1));
+    final decision = await gate.prepareNextEngine();
+    final result = await cleanup;
+
+    expect(result.succeeded, isTrue);
+    expect(result.releaseTimedOut, isTrue);
+    expect(result.cleanupOwnershipState,
+        CallV2EngineCleanupOwnershipState.forceDisposed);
+    expect(decision.nextEngineAllowed, isTrue);
+    expect(gate.previousEngineGeneration, 1);
+    expect(gate.cleanupInProgress, isFalse);
+
+    release.complete();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(gate.previousEngineGeneration, 1);
+    expect(gate.nextEngineAllowed, isTrue);
+    expect(gate.cleanupInProgress, isFalse);
+    expect(engine.releaseCount, 1);
+  });
+
+  test('retry does not reuse abandoned release-timed-out engine', () async {
+    final gate = _boundedGate();
+    final engine = _FakeEngine(forceDisposeSucceeds: false)
+      ..releaseCompleter = Completer<void>();
+
+    final result = await gate.cleanup(_operations(engine, generation: 1));
+    final firstDecision = await gate.prepareNextEngine();
+    final secondDecision = await gate.prepareNextEngine();
+
+    expect(result.succeeded, isFalse);
+    expect(result.releaseTimedOut, isTrue);
+    expect(result.forcedDisposalAttempted, isTrue);
+    expect(
+      result.cleanupOwnershipState,
+      CallV2EngineCleanupOwnershipState.abandoned,
+    );
+    expect(firstDecision.nextEngineAllowed, isFalse);
+    expect(firstDecision.blockerCode, 'cleanup_failed');
+    expect(firstDecision.retryAttempted, isFalse);
+    expect(secondDecision.nextEngineAllowed, isFalse);
+    expect(secondDecision.retryAttempted, isFalse);
+    expect(engine.releaseCount, 1);
+    expect(engine.forceDisposeCount, 1);
+    expect(gate.cleanupInProgress, isFalse);
+    expect(gate.retryPossible, isFalse);
   });
 
   test('ten sequential lifecycles use shared gate before each next call',
@@ -1036,6 +1160,7 @@ class _FakeEngine {
 
   bool forceDisposeSucceeds;
   Object? releaseError;
+  final releaseErrors = <Object>[];
   Completer<void>? leaveCompleter;
   Completer<void>? releaseCompleter;
   Completer<bool>? forceDisposeCompleter;
@@ -1067,7 +1192,8 @@ class _FakeEngine {
     if (completer != null) {
       await completer.future;
     }
-    final error = releaseError;
+    final error =
+        releaseErrors.isNotEmpty ? releaseErrors.removeAt(0) : releaseError;
     if (error != null) {
       events.add('release_error');
       throw error;

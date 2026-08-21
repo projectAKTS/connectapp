@@ -20,6 +20,13 @@ class CallV2EngineCleanupOperations {
   final void Function() invalidateGeneration;
 }
 
+enum CallV2EngineCleanupOwnershipState {
+  normal,
+  releaseTimedOut,
+  forceDisposed,
+  abandoned,
+}
+
 class CallV2EngineCleanupResult {
   const CallV2EngineCleanupResult({
     required this.generation,
@@ -35,6 +42,7 @@ class CallV2EngineCleanupResult {
     this.leaveTimedOut = false,
     this.releaseTimedOut = false,
     this.forceDisposeTimedOut = false,
+    this.cleanupOwnershipState = CallV2EngineCleanupOwnershipState.normal,
   });
 
   final int generation;
@@ -50,6 +58,10 @@ class CallV2EngineCleanupResult {
   final bool leaveTimedOut;
   final bool releaseTimedOut;
   final bool forceDisposeTimedOut;
+  final CallV2EngineCleanupOwnershipState cleanupOwnershipState;
+
+  bool get abandonedAfterReleaseTimeout =>
+      cleanupOwnershipState == CallV2EngineCleanupOwnershipState.abandoned;
 }
 
 enum CallV2NextEngineBlocker {
@@ -142,6 +154,7 @@ class CallV2EngineCleanupCoordinator {
     var errorCode = 'none';
     var releaseTimedOut = false;
     var forceDisposeTimedOut = false;
+    var cleanupOwnershipState = CallV2EngineCleanupOwnershipState.normal;
 
     final unregisterResult = await _runBoundedVoidStep(
       operations.unregisterHandler,
@@ -177,6 +190,14 @@ class CallV2EngineCleanupCoordinator {
       if (!releaseResult.succeeded) {
         errorCode = releaseResult.errorCode;
         forcedDisposalAttempted = true;
+        if (releaseTimedOut) {
+          cleanupOwnershipState =
+              CallV2EngineCleanupOwnershipState.releaseTimedOut;
+        }
+        // Future.timeout cannot cancel the native Agora release Future. Once a
+        // release times out, the old generation has already been invalidated;
+        // Iris disposal is the process escape hatch and the same engine must
+        // not be released again by retained retry operations.
         final forceDisposeResult = await _runBoundedBoolStep(
           operations.forceDispose,
           timeout: _forceDisposeTimeout,
@@ -185,6 +206,12 @@ class CallV2EngineCleanupCoordinator {
         );
         irisDisposed = forceDisposeResult.succeeded;
         forceDisposeTimedOut = forceDisposeResult.timedOut;
+        if (irisDisposed) {
+          cleanupOwnershipState =
+              CallV2EngineCleanupOwnershipState.forceDisposed;
+        } else if (releaseTimedOut) {
+          cleanupOwnershipState = CallV2EngineCleanupOwnershipState.abandoned;
+        }
         if (!irisDisposed) {
           errorCode = forceDisposeResult.errorCode;
         }
@@ -211,6 +238,7 @@ class CallV2EngineCleanupCoordinator {
       leaveTimedOut: leaveResult.timedOut,
       releaseTimedOut: releaseTimedOut,
       forceDisposeTimedOut: forceDisposeTimedOut,
+      cleanupOwnershipState: cleanupOwnershipState,
     );
   }
 
@@ -310,7 +338,7 @@ class CallV2ProcessEngineCleanupGate {
     _currentCleanup = cleanup;
     cleanup.then((result) {
       _previousResult = result;
-      if (result.succeeded) {
+      if (result.succeeded || result.abandonedAfterReleaseTimeout) {
         _retainedOperations = null;
       }
       return result;
@@ -341,16 +369,29 @@ class CallV2ProcessEngineCleanupGate {
         final activeResult = await activeCleanup.timeout(
           _previousCleanupWaitTimeout,
         );
+        _previousResult = activeResult;
+        if (activeResult.succeeded ||
+            activeResult.abandonedAfterReleaseTimeout) {
+          _retainedOperations = null;
+        }
+        if (identical(_currentCleanup, activeCleanup)) {
+          _currentCleanup = null;
+        }
+        if (!activeResult.succeeded) {
+          return _recoverFailedCleanup(
+            previousCleanupAwaited: true,
+            previousCleanupWaitCompleted: true,
+            cleanupEscalated: true,
+          );
+        }
         return CallV2NextEngineDecision(
-          nextEngineAllowed: activeResult.succeeded,
-          blocker: activeResult.succeeded
-              ? CallV2NextEngineBlocker.none
-              : CallV2NextEngineBlocker.cleanupFailed,
+          nextEngineAllowed: true,
+          blocker: CallV2NextEngineBlocker.none,
           previousCleanupResult: activeResult,
           retryAttempted: false,
           previousCleanupAwaited: true,
           previousCleanupWaitCompleted: true,
-          cleanupEscalated: !activeResult.succeeded,
+          cleanupEscalated: false,
         );
       } on TimeoutException {
         return CallV2NextEngineDecision(
@@ -383,6 +424,27 @@ class CallV2ProcessEngineCleanupGate {
       );
     }
 
+    return _recoverFailedCleanup();
+  }
+
+  Future<CallV2NextEngineDecision> _recoverFailedCleanup({
+    bool previousCleanupAwaited = false,
+    bool previousCleanupWaitCompleted = false,
+    bool cleanupEscalated = false,
+  }) async {
+    final previous = _previousResult;
+    if (previous?.abandonedAfterReleaseTimeout ?? false) {
+      return CallV2NextEngineDecision(
+        nextEngineAllowed: false,
+        blocker: CallV2NextEngineBlocker.cleanupFailed,
+        previousCleanupResult: previous,
+        retryAttempted: false,
+        previousCleanupAwaited: previousCleanupAwaited,
+        previousCleanupWaitCompleted: previousCleanupWaitCompleted,
+        cleanupEscalated: cleanupEscalated,
+      );
+    }
+
     final retained = _retainedOperations;
     if (retained == null) {
       return CallV2NextEngineDecision(
@@ -390,6 +452,9 @@ class CallV2ProcessEngineCleanupGate {
         blocker: CallV2NextEngineBlocker.cleanupFailed,
         previousCleanupResult: _previousResult,
         retryAttempted: false,
+        previousCleanupAwaited: previousCleanupAwaited,
+        previousCleanupWaitCompleted: previousCleanupWaitCompleted,
+        cleanupEscalated: cleanupEscalated,
       );
     }
 
@@ -401,6 +466,9 @@ class CallV2ProcessEngineCleanupGate {
           : CallV2NextEngineBlocker.cleanupFailed,
       previousCleanupResult: retryResult,
       retryAttempted: true,
+      previousCleanupAwaited: previousCleanupAwaited,
+      previousCleanupWaitCompleted: previousCleanupWaitCompleted,
+      cleanupEscalated: cleanupEscalated,
     );
   }
 }
