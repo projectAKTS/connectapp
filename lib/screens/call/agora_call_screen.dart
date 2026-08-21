@@ -2424,6 +2424,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       'previousCleanupSucceeded': _engineCleanupGate.previousCleanupSucceeded,
       'retryAttempted': decision.retryAttempted,
       'previousEngineGeneration': _engineCleanupGate.previousEngineGeneration,
+      'previousCleanupAwaited': decision.previousCleanupAwaited,
+      'previousCleanupWaitCompleted': decision.previousCleanupWaitCompleted,
+      'cleanupEscalated': decision.cleanupEscalated,
     });
     return decision;
   }
@@ -2451,6 +2454,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     final engine = _engine;
     final handler = _eventHandler;
     final generation = _engineGeneration;
+    bool cleanupStillOwnsEngine() {
+      return identical(_engine, engine) && _engineGeneration == generation;
+    }
 
     _updateCallV2LifecycleStatus(
       previousCleanupCompleted: false,
@@ -2513,8 +2519,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           if (handler != null) {
             engine.unregisterEventHandler(handler);
           }
-          _eventHandler = null;
-          _updateCallV2LifecycleStatus(handlerRegistered: false);
+          if (cleanupStillOwnsEngine()) {
+            _eventHandler = null;
+            _updateCallV2LifecycleStatus(handlerRegistered: false);
+          }
           await _diagCall('unregister_handler_done', meta: {
             'hadHandler': handler != null,
             'engineGeneration': generation,
@@ -2522,27 +2530,47 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         },
         leaveChannel: () async {
           await engine.leaveChannel();
-          _updateCallV2LifecycleStatus(channelLeft: true);
-          await _diagCall('leave_channel_done', meta: {
-            'engineGeneration': generation,
-          });
+          if (cleanupStillOwnsEngine()) {
+            _updateCallV2LifecycleStatus(channelLeft: true);
+            await _diagCall('leave_channel_done', meta: {
+              'engineGeneration': generation,
+            });
+          } else {
+            _staleCallbackIgnoredCount += 1;
+            await _diagCall('late_cleanup_completion_ignored', meta: {
+              'stage': 'leave_channel',
+              'engineGeneration': generation,
+              'currentEngineGeneration': _engineGeneration,
+            });
+          }
         },
         releaseEngine: () async {
           if (widget.isVideo) {
             try {
               await engine.stopPreview();
-              await _diagCall('stop_preview_done', meta: {
-                'engineGeneration': generation,
-              });
+              if (cleanupStillOwnsEngine()) {
+                await _diagCall('stop_preview_done', meta: {
+                  'engineGeneration': generation,
+                });
+              }
             } catch (e) {
               await _diagCall('stop_preview_error', meta: {'error': '$e'});
             }
           }
           await engine.release(sync: true);
-          _updateCallV2LifecycleStatus(engineReleased: true);
-          await _diagCall('release_done', meta: {
-            'engineGeneration': generation,
-          });
+          if (cleanupStillOwnsEngine()) {
+            _updateCallV2LifecycleStatus(engineReleased: true);
+            await _diagCall('release_done', meta: {
+              'engineGeneration': generation,
+            });
+          } else {
+            _staleCallbackIgnoredCount += 1;
+            await _diagCall('late_cleanup_completion_ignored', meta: {
+              'stage': 'release_engine',
+              'engineGeneration': generation,
+              'currentEngineGeneration': _engineGeneration,
+            });
+          }
         },
         forceDispose: () async {
           return _forceDisposeEngine(
@@ -2582,6 +2610,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         'engineReleased': result.engineReleased,
         'irisDisposed': result.irisDisposed,
         'forcedDisposalAttempted': result.forcedDisposalAttempted,
+        'unregisterTimedOut': result.unregisterTimedOut,
+        'leaveTimedOut': result.leaveTimedOut,
+        'releaseTimedOut': result.releaseTimedOut,
+        'forceDisposeTimedOut': result.forceDisposeTimedOut,
         'engineGeneration': generation,
         'attemptNumber': result.attemptNumber,
         'failureCount': _engineCleanupGate.failureCount,

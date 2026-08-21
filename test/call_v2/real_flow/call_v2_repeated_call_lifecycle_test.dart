@@ -74,10 +74,8 @@ void main() {
     expect(gate.retryPossible, isTrue);
   });
 
-  test(
-      'never-completing release lets route cleanup finish and blocks next call',
-      () async {
-    final gate = CallV2ProcessEngineCleanupGate();
+  test('never-completing release settles through force disposal', () async {
+    final gate = _boundedGate();
     final engine = _FakeEngine()..releaseCompleter = Completer<void>();
     final harness = _ProcessLifecycleHarness(gate: gate);
 
@@ -92,14 +90,15 @@ void main() {
     expect(harness.sessionResetCount, 1);
     expect(harness.routeCloseCount, 1);
     expect(harness.blockerCode, 'cleanup_in_progress');
-    expect(decision.nextEngineAllowed, isFalse);
-    expect(decision.blockerCode, 'cleanup_in_progress');
+    expect(decision.nextEngineAllowed, isTrue);
+    expect(decision.blockerCode, 'none');
+    expect(decision.previousCleanupAwaited, isTrue);
+    expect(decision.previousCleanupWaitCompleted, isTrue);
     expect(engine.releaseCount, 1);
-    expect(engine.forceDisposeCount, 0);
-    expect(gate.cleanupInProgress, isTrue);
-
-    engine.releaseCompleter!.complete();
-    await gate.currentCleanup;
+    expect(engine.forceDisposeCount, 1);
+    expect(gate.cleanupInProgress, isFalse);
+    expect(gate.previousResult?.releaseTimedOut, isTrue);
+    expect(gate.previousResult?.forcedDisposalAttempted, isTrue);
     expect(gate.nextEngineAllowed, isTrue);
   });
 
@@ -123,6 +122,122 @@ void main() {
     expect(gate.nextEngineAllowed, isTrue);
   });
 
+  test('cleanup longer than UI wait lets immediate Call B wait and proceed',
+      () async {
+    final gate = _patientGate();
+    final engineA = _FakeEngine()..releaseCompleter = Completer<void>();
+    final harness = _ProcessLifecycleHarness(gate: gate);
+
+    final endA = harness.endCall(
+      operations: _operations(engineA, generation: 1),
+      uiWait: Duration.zero,
+    );
+    final cleanupUiResult = await endA;
+    expect(cleanupUiResult, isNull);
+    expect(harness.routeCloseCount, 1);
+    expect(harness.sessionResetCount, 1);
+    expect(gate.cleanupInProgress, isTrue);
+
+    var callBEngineCreated = false;
+    final callB = gate.prepareNextEngine().then((decision) {
+      if (decision.nextEngineAllowed) {
+        callBEngineCreated = true;
+      }
+      return decision;
+    });
+    await Future<void>.delayed(Duration.zero);
+    expect(callBEngineCreated, isFalse);
+
+    engineA.releaseCompleter!.complete();
+    final decision = await callB;
+
+    expect(decision.nextEngineAllowed, isTrue);
+    expect(decision.blockerCode, 'none');
+    expect(decision.previousCleanupAwaited, isTrue);
+    expect(decision.previousCleanupWaitCompleted, isTrue);
+    expect(callBEngineCreated, isTrue);
+    expect(engineA.releaseCount, 1);
+    expect(gate.cleanupInProgress, isFalse);
+    expect(gate.nextEngineAllowed, isTrue);
+  });
+
+  test('never-completing leave times out and cleanup still settles', () async {
+    final gate = _boundedGate();
+    final engine = _FakeEngine()..leaveCompleter = Completer<void>();
+
+    final result = await gate.cleanup(_operations(engine, generation: 1));
+    final decision = await gate.prepareNextEngine();
+
+    expect(result.succeeded, isTrue);
+    expect(result.leaveTimedOut, isTrue);
+    expect(result.releaseTimedOut, isFalse);
+    expect(engine.leaveCount, 1);
+    expect(engine.releaseCount, 1);
+    expect(engine.forceDisposeCount, 0);
+    expect(gate.cleanupInProgress, isFalse);
+    expect(decision.nextEngineAllowed, isTrue);
+  });
+
+  test('fast cleanup keeps unchanged immediate next-call path', () async {
+    final gate = _boundedGate();
+    final engine = _FakeEngine();
+
+    final result = await gate.cleanup(_operations(engine, generation: 1));
+    final decision = await gate.prepareNextEngine();
+
+    expect(result.succeeded, isTrue);
+    expect(result.unregisterTimedOut, isFalse);
+    expect(result.leaveTimedOut, isFalse);
+    expect(result.releaseTimedOut, isFalse);
+    expect(result.forceDisposeTimedOut, isFalse);
+    expect(decision.previousCleanupAwaited, isFalse);
+    expect(decision.nextEngineAllowed, isTrue);
+    expect(engine.events, [
+      'invalidate',
+      'unregister',
+      'leave_start',
+      'leave_done',
+      'release_start',
+      'release_done',
+    ]);
+  });
+
+  test('immediate double next-call attempts share cleanup barrier', () async {
+    final gate = _patientGate();
+    final engineA = _FakeEngine()..releaseCompleter = Completer<void>();
+    final cleanup = gate.cleanup(_operations(engineA, generation: 1));
+    await Future<void>.delayed(Duration.zero);
+
+    var engineCreations = 0;
+    final first = gate.prepareNextEngine().then((decision) {
+      if (decision.nextEngineAllowed && engineCreations == 0) {
+        engineCreations += 1;
+      }
+      return decision;
+    });
+    final second = gate.prepareNextEngine().then((decision) {
+      if (decision.nextEngineAllowed && engineCreations == 0) {
+        engineCreations += 1;
+      }
+      return decision;
+    });
+    await Future<void>.delayed(Duration.zero);
+    expect(engineCreations, 0);
+
+    engineA.releaseCompleter!.complete();
+    final decisions = await Future.wait([first, second]);
+    await cleanup;
+
+    expect(decisions.every((decision) => decision.nextEngineAllowed), isTrue);
+    expect(
+      decisions.every((decision) => decision.previousCleanupAwaited),
+      isTrue,
+    );
+    expect(engineCreations, 1);
+    expect(engineA.releaseCount, 1);
+    expect(gate.cleanupInProgress, isFalse);
+  });
+
   test('ten sequential lifecycles use shared gate before each next call',
       () async {
     final gate = CallV2ProcessEngineCleanupGate();
@@ -142,6 +257,66 @@ void main() {
     }
 
     expect(gate.previousEngineGeneration, 10);
+  });
+
+  test('twenty rapid sequential calls always restore reusable cleanup gate',
+      () async {
+    final gate = _patientGate();
+
+    for (var i = 1; i <= 20; i += 1) {
+      final before = await gate.prepareNextEngine();
+      expect(before.nextEngineAllowed, isTrue, reason: 'before call $i');
+      expect(gate.cleanupInProgress, isFalse, reason: 'before cleanup $i');
+
+      final engine = _FakeEngine();
+      final cleanup = gate.cleanup(_operations(engine, generation: i));
+      Future<CallV2NextEngineDecision>? nextDecision;
+
+      switch (i % 5) {
+        case 0:
+          engine.releaseCompleter = Completer<void>();
+          nextDecision = gate.prepareNextEngine();
+          await Future<void>.delayed(Duration.zero);
+          expect(gate.cleanupInProgress, isTrue, reason: 'slow call $i');
+          engine.releaseCompleter!.complete();
+          break;
+        case 1:
+          break;
+        case 2:
+          engine.releaseError = StateError('release_failed');
+          break;
+        case 3:
+          engine.leaveCompleter = Completer<void>();
+          break;
+        case 4:
+          engine.releaseError = TimeoutException('release_failed');
+          break;
+      }
+
+      final result = await cleanup;
+      final after = nextDecision == null
+          ? await gate.prepareNextEngine()
+          : await nextDecision;
+
+      expect(result.succeeded, isTrue, reason: 'cleanup $i');
+      expect(after.nextEngineAllowed, isTrue, reason: 'after call $i');
+      expect(gate.cleanupInProgress, isFalse, reason: 'settled $i');
+      expect(gate.previousEngineGeneration, i, reason: 'generation $i');
+      expect(engine.releaseCount, 1, reason: 'release $i');
+      if (i % 5 == 2 || i % 5 == 4) {
+        expect(engine.forceDisposeCount, 1, reason: 'force dispose $i');
+      }
+      if (i % 5 == 3) {
+        expect(result.leaveTimedOut, isTrue, reason: 'leave timeout $i');
+      }
+      if (i % 5 == 0) {
+        expect(after.previousCleanupAwaited, isTrue, reason: 'waited $i');
+      }
+    }
+
+    expect(gate.previousEngineGeneration, 20);
+    expect(gate.nextEngineAllowed, isTrue);
+    expect(gate.cleanupInProgress, isFalse);
   });
 
   test('three simultaneous cleanup callers invoke native cleanup once',
@@ -818,6 +993,30 @@ void main() {
   });
 }
 
+CallV2ProcessEngineCleanupGate _boundedGate() {
+  return CallV2ProcessEngineCleanupGate(
+    coordinator: CallV2EngineCleanupCoordinator(
+      unregisterTimeout: const Duration(milliseconds: 10),
+      leaveTimeout: const Duration(milliseconds: 10),
+      releaseTimeout: const Duration(milliseconds: 10),
+      forceDisposeTimeout: const Duration(milliseconds: 10),
+    ),
+    previousCleanupWaitTimeout: const Duration(milliseconds: 80),
+  );
+}
+
+CallV2ProcessEngineCleanupGate _patientGate() {
+  return CallV2ProcessEngineCleanupGate(
+    coordinator: CallV2EngineCleanupCoordinator(
+      unregisterTimeout: const Duration(milliseconds: 50),
+      leaveTimeout: const Duration(milliseconds: 50),
+      releaseTimeout: const Duration(seconds: 1),
+      forceDisposeTimeout: const Duration(milliseconds: 50),
+    ),
+    previousCleanupWaitTimeout: const Duration(seconds: 2),
+  );
+}
+
 CallV2EngineCleanupOperations _operations(
   _FakeEngine engine, {
   required int generation,
@@ -837,7 +1036,9 @@ class _FakeEngine {
 
   bool forceDisposeSucceeds;
   Object? releaseError;
+  Completer<void>? leaveCompleter;
   Completer<void>? releaseCompleter;
+  Completer<bool>? forceDisposeCompleter;
   int unregisterCount = 0;
   int leaveCount = 0;
   int releaseCount = 0;
@@ -852,6 +1053,10 @@ class _FakeEngine {
   Future<void> leave() async {
     leaveCount += 1;
     events.add('leave_start');
+    final completer = leaveCompleter;
+    if (completer != null) {
+      await completer.future;
+    }
     events.add('leave_done');
   }
 
@@ -873,6 +1078,16 @@ class _FakeEngine {
   Future<bool> forceDispose() async {
     forceDisposeCount += 1;
     events.add('force_dispose_start');
+    final completer = forceDisposeCompleter;
+    if (completer != null) {
+      final completed = await completer.future;
+      if (completed) {
+        events.add('force_dispose_done');
+      } else {
+        events.add('force_dispose_failed');
+      }
+      return completed;
+    }
     if (forceDisposeSucceeds) {
       events.add('force_dispose_done');
       return true;

@@ -31,6 +31,10 @@ class CallV2EngineCleanupResult {
     required this.forcedDisposalAttempted,
     required this.irisDisposed,
     required this.errorCode,
+    this.unregisterTimedOut = false,
+    this.leaveTimedOut = false,
+    this.releaseTimedOut = false,
+    this.forceDisposeTimedOut = false,
   });
 
   final int generation;
@@ -42,6 +46,10 @@ class CallV2EngineCleanupResult {
   final bool forcedDisposalAttempted;
   final bool irisDisposed;
   final String errorCode;
+  final bool unregisterTimedOut;
+  final bool leaveTimedOut;
+  final bool releaseTimedOut;
+  final bool forceDisposeTimedOut;
 }
 
 enum CallV2NextEngineBlocker {
@@ -56,12 +64,18 @@ class CallV2NextEngineDecision {
     required this.blocker,
     required this.previousCleanupResult,
     required this.retryAttempted,
+    this.previousCleanupAwaited = false,
+    this.previousCleanupWaitCompleted = false,
+    this.cleanupEscalated = false,
   });
 
   final bool nextEngineAllowed;
   final CallV2NextEngineBlocker blocker;
   final CallV2EngineCleanupResult? previousCleanupResult;
   final bool retryAttempted;
+  final bool previousCleanupAwaited;
+  final bool previousCleanupWaitCompleted;
+  final bool cleanupEscalated;
 
   String get blockerCode {
     return switch (blocker) {
@@ -73,6 +87,20 @@ class CallV2NextEngineDecision {
 }
 
 class CallV2EngineCleanupCoordinator {
+  CallV2EngineCleanupCoordinator({
+    Duration unregisterTimeout = const Duration(seconds: 1),
+    Duration leaveTimeout = const Duration(seconds: 4),
+    Duration releaseTimeout = const Duration(seconds: 4),
+    Duration forceDisposeTimeout = const Duration(seconds: 4),
+  })  : _unregisterTimeout = unregisterTimeout,
+        _leaveTimeout = leaveTimeout,
+        _releaseTimeout = releaseTimeout,
+        _forceDisposeTimeout = forceDisposeTimeout;
+
+  final Duration _unregisterTimeout;
+  final Duration _leaveTimeout;
+  final Duration _releaseTimeout;
+  final Duration _forceDisposeTimeout;
   Future<CallV2EngineCleanupResult>? _inFlight;
   int _attemptNumber = 0;
   int _failureCount = 0;
@@ -112,35 +140,53 @@ class CallV2EngineCleanupCoordinator {
     var forcedDisposalAttempted = false;
     var irisDisposed = false;
     var errorCode = 'none';
+    var releaseTimedOut = false;
+    var forceDisposeTimedOut = false;
 
-    try {
-      await operations.unregisterHandler();
-      handlerUnregistered = true;
-    } catch (_) {
-      errorCode = 'handler_unregister_failed';
+    final unregisterResult = await _runBoundedVoidStep(
+      operations.unregisterHandler,
+      timeout: _unregisterTimeout,
+      failureCode: 'handler_unregister_failed',
+      timeoutCode: 'handler_unregister_timeout',
+    );
+    handlerUnregistered = unregisterResult.succeeded;
+    if (!unregisterResult.succeeded) {
+      errorCode = unregisterResult.errorCode;
     }
 
-    try {
-      await operations.leaveChannel();
-      channelLeft = true;
-    } catch (_) {
-      errorCode = 'leave_failed';
+    final leaveResult = await _runBoundedVoidStep(
+      operations.leaveChannel,
+      timeout: _leaveTimeout,
+      failureCode: 'leave_failed',
+      timeoutCode: 'leave_timeout',
+    );
+    channelLeft = leaveResult.succeeded;
+    if (!leaveResult.succeeded) {
+      errorCode = leaveResult.errorCode;
     }
 
     if (operations.release) {
-      try {
-        await operations.releaseEngine();
-        engineReleased = true;
-      } catch (_) {
-        errorCode = 'release_failed';
+      final releaseResult = await _runBoundedVoidStep(
+        operations.releaseEngine,
+        timeout: _releaseTimeout,
+        failureCode: 'release_failed',
+        timeoutCode: 'release_timeout',
+      );
+      engineReleased = releaseResult.succeeded;
+      releaseTimedOut = releaseResult.timedOut;
+      if (!releaseResult.succeeded) {
+        errorCode = releaseResult.errorCode;
         forcedDisposalAttempted = true;
-        try {
-          irisDisposed = await operations.forceDispose();
-        } catch (_) {
-          irisDisposed = false;
-        }
+        final forceDisposeResult = await _runBoundedBoolStep(
+          operations.forceDispose,
+          timeout: _forceDisposeTimeout,
+          failureCode: 'forced_dispose_failed',
+          timeoutCode: 'forced_dispose_timeout',
+        );
+        irisDisposed = forceDisposeResult.succeeded;
+        forceDisposeTimedOut = forceDisposeResult.timedOut;
         if (!irisDisposed) {
-          errorCode = 'forced_dispose_failed';
+          errorCode = forceDisposeResult.errorCode;
         }
       }
     }
@@ -161,16 +207,80 @@ class CallV2EngineCleanupCoordinator {
       forcedDisposalAttempted: forcedDisposalAttempted,
       irisDisposed: irisDisposed,
       errorCode: errorCode,
+      unregisterTimedOut: unregisterResult.timedOut,
+      leaveTimedOut: leaveResult.timedOut,
+      releaseTimedOut: releaseTimedOut,
+      forceDisposeTimedOut: forceDisposeTimedOut,
     );
   }
+
+  Future<_BoundedCleanupStep> _runBoundedVoidStep(
+    Future<void> Function() operation, {
+    required Duration timeout,
+    required String failureCode,
+    required String timeoutCode,
+  }) async {
+    try {
+      await operation().timeout(timeout);
+      return const _BoundedCleanupStep.succeeded();
+    } on TimeoutException {
+      return _BoundedCleanupStep.failed(timeoutCode, timedOut: true);
+    } catch (_) {
+      return _BoundedCleanupStep.failed(failureCode);
+    }
+  }
+
+  Future<_BoundedCleanupStep> _runBoundedBoolStep(
+    Future<bool> Function() operation, {
+    required Duration timeout,
+    required String failureCode,
+    required String timeoutCode,
+  }) async {
+    try {
+      final succeeded = await operation().timeout(timeout);
+      if (succeeded) {
+        return const _BoundedCleanupStep.succeeded();
+      }
+      return _BoundedCleanupStep.failed(failureCode);
+    } on TimeoutException {
+      return _BoundedCleanupStep.failed(timeoutCode, timedOut: true);
+    } catch (_) {
+      return _BoundedCleanupStep.failed(failureCode);
+    }
+  }
+}
+
+class _BoundedCleanupStep {
+  const _BoundedCleanupStep({
+    required this.succeeded,
+    required this.errorCode,
+    required this.timedOut,
+  });
+
+  const _BoundedCleanupStep.succeeded()
+      : succeeded = true,
+        errorCode = 'none',
+        timedOut = false;
+
+  const _BoundedCleanupStep.failed(
+    this.errorCode, {
+    this.timedOut = false,
+  }) : succeeded = false;
+
+  final bool succeeded;
+  final String errorCode;
+  final bool timedOut;
 }
 
 class CallV2ProcessEngineCleanupGate {
   CallV2ProcessEngineCleanupGate({
     CallV2EngineCleanupCoordinator? coordinator,
-  }) : _coordinator = coordinator ?? CallV2EngineCleanupCoordinator();
+    Duration previousCleanupWaitTimeout = const Duration(seconds: 14),
+  })  : _coordinator = coordinator ?? CallV2EngineCleanupCoordinator(),
+        _previousCleanupWaitTimeout = previousCleanupWaitTimeout;
 
   final CallV2EngineCleanupCoordinator _coordinator;
+  final Duration _previousCleanupWaitTimeout;
   CallV2EngineCleanupOperations? _retainedOperations;
   Future<CallV2EngineCleanupResult>? _currentCleanup;
   CallV2EngineCleanupResult? _previousResult;
@@ -225,6 +335,36 @@ class CallV2ProcessEngineCleanupGate {
   }
 
   Future<CallV2NextEngineDecision> prepareNextEngine() async {
+    final activeCleanup = _currentCleanup;
+    if (activeCleanup != null) {
+      try {
+        final activeResult = await activeCleanup.timeout(
+          _previousCleanupWaitTimeout,
+        );
+        return CallV2NextEngineDecision(
+          nextEngineAllowed: activeResult.succeeded,
+          blocker: activeResult.succeeded
+              ? CallV2NextEngineBlocker.none
+              : CallV2NextEngineBlocker.cleanupFailed,
+          previousCleanupResult: activeResult,
+          retryAttempted: false,
+          previousCleanupAwaited: true,
+          previousCleanupWaitCompleted: true,
+          cleanupEscalated: !activeResult.succeeded,
+        );
+      } on TimeoutException {
+        return CallV2NextEngineDecision(
+          nextEngineAllowed: false,
+          blocker: CallV2NextEngineBlocker.cleanupInProgress,
+          previousCleanupResult: _previousResult,
+          retryAttempted: false,
+          previousCleanupAwaited: true,
+          previousCleanupWaitCompleted: false,
+          cleanupEscalated: true,
+        );
+      }
+    }
+
     if (cleanupInProgress) {
       return CallV2NextEngineDecision(
         nextEngineAllowed: false,
