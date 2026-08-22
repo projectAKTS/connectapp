@@ -1,114 +1,174 @@
-# Active Task — Phase 3C Client View-Model Groundwork
+# Active Task — Repeat Call Pending CallKit Accept Durability
 
 Branch: `call-v2`
-Accepted Phase 3B checkpoint: `05a5407ab2d77a5f8772ae05bdf3b6a3cffa7a8e`
-Accepted Phase 3B workflow: `28386385870`
-Phase 3B implementation commit message: `feat(call-v2): implement phase 3B task`
 
-## Latest focused failure
+Starting SHA: `6b548b2f4ade470e4b8b02fae9d5517ee0438ec9`
 
-Workflow run `28394453498` passed the transition preflight, unchanged backend baseline, backend checks, deployment-readiness validation, Firestore rules tests, three emulator runs, formatting, and Flutter analysis. It failed only at:
+## Goal
 
-```bash
-flutter test test/call_v2
-```
+Fix the physical repeat-call race where Call B is accepted in native CallKit
+while Call A is still ending or tearing down, but Call B's accepted intent is
+lost before its route can open.
 
-Exact failing test:
+This task authorizes only the pending-accept lifecycle correction required for
+that physical Call 2 failure. Do not reopen Phase 3C presenter work.
 
-`presenter derives display-safe state and actions by lifecycle`
+## Physical Evidence
 
-Exact mismatch at `test/call_v2/call_v2_behavior_test.dart:365`:
+- Call 1 connected, worked, and ended normally.
+- Call 2 received PushKit and presented one native CallKit UI.
+- Native CallKit Accept opened Helperly.
+- The Call 2 route did not open and RTC did not start.
+- The failure boundary is accepted recovery / pending lifecycle handoff to route
+  opening, not Agora media setup.
 
-- expected: `CallLocalPhase.inCall`
-- actual: `CallLocalPhase.presentingIncoming`
+## Authorized Root Cause
 
-The workflow discarded the generated Phase 3C implementation after failure. Rebuild the complete Phase 3C task from the accepted Phase 3B checkpoint.
+When the previous call lifecycle is `ending`, `teardown`, or `reserving`, a new
+incoming invite may be stored in `CallV2CallLifecycleArbiter` as
+`_pendingInviteId`.
 
-The accepted manager intentionally ignores equal or lower durable snapshot versions. Therefore, lifecycle-transition tests and fixtures must use monotonically increasing call versions when moving from ringing to accepted, active, or terminal. Do not weaken snapshot monotonicity, ownership, or terminal protections to make the test pass. Ensure the presenter derives state from the manager's accepted authoritative snapshot after each increasing-version injection.
+If native CallKit Accept arrives for that exact pending invite,
+`_handleIncomingCandidate(autoAccept: true)` may see `reserveIncoming()` return
+duplicate or pending. The existing duplicate auto-accept path depends on both:
 
-## Review decision
+- `_incomingPromptInviteId` matching the invite; and
+- `_incomingUiOwner` being CallKit.
 
-Phase 3B is accepted. Exact review confirmed the implementation stayed bounded to disabled, non-production Call V2 client harness groundwork.
+A merely pending invite does not yet have that presentation-owner state, so the
+accepted intent can be returned as ignored or failed. When previous teardown
+completes, `_continueClaimedPendingIncoming` then applies normal unaccepted
+incoming presentation semantics and requires `ringing`, losing the fact that
+CallKit Accept already occurred.
 
-Accepted Phase 3B properties:
+## Authorized Files
 
-- `CallV2Harness` composes `CallV2FeatureGate`, `CallV2Api`, `CallSessionManagerV2`, and `CallNavigationCoordinatorV2`.
-- The harness is inert when the feature gate is false.
-- Harness methods expose only testable public-snapshot injection, safe command invocation, navigation-intent derivation, and terminal cleanup.
-- Request payloads remain limited to safe client fields such as `callId`, `version`, `mediaState`, and `mediaVersion`.
-- No client-supplied authenticated UID, raw UID, rollout authority, task IDs, command IDs, lock fields, or private server authority were added.
-- Duplicate in-flight command taps remain suppressed.
-- Terminal cleanup clears local ownership idempotently.
-- Navigation intents remain deduped and do not touch `Navigator` or existing routes.
-- Tests use fake transports only.
-- Workflow validation passed backend baseline, backend checks, deployment-readiness validation, Firestore rules tests, three emulator runs, Flutter format/analyze/tests, and `git diff --check`.
+Modify only where required under:
 
-## Phase 3C goal
-
-Add a small disabled-by-default, pure Dart Call V2 client view-model/presenter layer around the accepted harness primitives. This phase should make future UI work easier to test by deriving display-safe state and allowed user actions from public snapshots and local phase, without wiring any real UI, app startup, routes, native call stacks, push, Firestore listeners, Agora, CallKit, PushKit, FCM, or live Firebase.
-
-The result must remain non-production and unreachable from the existing app.
-
-## Required work
-
-1. **Create a pure Call V2 view-model/presenter.**
-   - Add a small presenter/view-model under `lib/call_v2/**` that consumes the accepted harness state or accepted domain objects.
-   - It may derive display-safe values such as local phase, title/status keys, whether accept/decline/end/cancel/report-media actions should be enabled, and whether an open or close navigation intent is pending.
-   - It must not import Flutter widgets, `Navigator`, app routes, Firebase, Agora, CallKit, PushKit, FCM, permissions, platform channels, or production configuration.
-   - It must not subscribe to Firestore, call startup code, register routes, request native permissions, or contact real services.
-
-2. **Preserve authentication and request-shape safety.**
-   - Do not add `actorUid`, `authenticatedUid`, raw `uid`, staff/rollout/cohort fields, allowlists, salts, percentages, fencing/lock fields, task IDs, command IDs, or private server authority to client request payloads.
-   - Do not serialize local participant role as authenticated authority.
-   - Continue to rely on server-side Firebase Auth for identity.
-
-3. **Preserve ownership, monotonicity, command, and navigation behavior.**
-   - Equal/lower snapshots must remain ignored for the same call.
-   - A terminal snapshot must not be replaced by lower/equal nonterminal data.
-   - A different call must remain ignored while a nonterminal call is owned.
-   - Duplicate command taps through the harness/presenter must still produce one in-flight transport request.
-   - Terminal cleanup must clear local ownership and remain idempotent.
-   - Navigation intents must stay deduped and must not call `Navigator` or existing routes.
-
-4. **Add behavioral tests for the presenter/view-model.**
-   - Feature gate disabled: derived state remains idle/inert and actions do not call transport.
-   - Feature gate enabled: public snapshots derive expected local phase and display-safe state.
-   - Allowed-action derivation matches ringing/accepted/active/terminal phases for caller and callee roles.
-   - Lifecycle-transition fixtures must increment durable snapshot versions; equal/lower versions must continue to be tested as ignored.
-   - Duplicate command taps through the presenter still produce one safe transport request.
-   - Terminal snapshot through the presenter produces one close intent, cleanup clears ownership, and repeated cleanup/close does not emit duplicates.
-   - Tests must use fake transports only; no real network, Firebase, native, Agora, CallKit, PushKit, FCM, widgets, routes, or platform access.
-
-5. **Keep Phase 3A and 3B tests intact.**
-   - Do not weaken existing request-shape, parser, manager, navigation, harness, or error-code tests.
-   - Add tests rather than deleting behavioral coverage.
-
-## Allowed files
-
-- `lib/call_v2/**`
+- `lib/call_v2/real_flow/**`
+- `lib/services/call_session_manager.dart`
+- `lib/services/notification_service.dart`
 - `test/call_v2/**`
-- `docs/call-v2/**`
-- `docs/agent-loop/**`
-- `pubspec.yaml` and `pubspec.lock` only when genuinely required
+
+`ios/Runner/AppDelegate.swift` may be changed only if strictly necessary for
+safe diagnostics or compatibility with the existing accept payload. Do not
+change it if `callkitAcceptedNative` already carries sufficient information.
+
+## Authorized Implementation
+
+1. Add exact invite- and generation-scoped pending accepted intent.
+2. When native CallKit Accept targets the pending invite, record durable accepted
+   intent instead of returning ignored or failed.
+3. Converge plugin Accept duplicates on the same accepted intent in either event
+   order.
+4. Preserve accepted recovery payload/state while previous teardown remains in
+   progress without classifying the wait as a network failure.
+5. Make previous teardown completion claim the pending invite and, when its exact
+   accepted intent is present, continue directly through the existing guarded
+   `_acceptInviteAndOpen` path.
+6. Do not resolve or present incoming UI again for an already-accepted pending
+   invite, and do not require another user action.
+7. Treat `ringing`, `accepted`, and `joining` as valid continuation states for an
+   already-accepted pending invite, using existing idempotent acceptance logic.
+8. Treat missing, declined, missed, cancelled, ended, and failed pending invites
+   as non-openable; clear their accepted intent and close native state safely.
+9. Prevent a superseded pending invite's accepted intent from transferring to or
+   opening its replacement.
+10. Drive continuation from teardown completion rather than retry-timer
+    exhaustion.
+11. Preserve exactly one route open and exactly one RTC setup owner.
+12. Clear pending accepted intent on successful route open, terminal or missing
+    invite, supersession, sign out, production hard reset, and explicit
+    decline/end before claim. Do not clear it merely because navigation is
+    temporarily unavailable, teardown is active, or duplicate recovery arrives.
+
+## Generation Safety
+
+Accepted pending ownership must bind to the exact invite and lifecycle
+generation. A late callback from the previous generation must not clear, open,
+or mutate the newly claimed call. Claiming the pending invite into the next
+generation must transfer only that invite's accepted intent, and consumption
+must be atomic/idempotent for that ownership.
+
+## Accepted Recovery Semantics
+
+The same invite waiting behind previous teardown is a durable pending accepted
+state, not `AcceptedCallRecoveryResult.failed` and not `pendingNetwork`. It must
+not create a retry storm or exhaust retries while teardown is active. Teardown
+completion itself must trigger continuation.
+
+## Files and Behavior That Must Not Change
+
+Do not modify:
+
+- `lib/call_v2/real_flow/call_v2_engine_cleanup_coordinator.dart`
+- Agora RTC initialization or token architecture
+- Agora App ID or token callable
+- Firebase backend/functions or Firestore rules
+- PushKit presentation policy
+- CallKit single-owner policy
+- Flutter `IncomingCallScreen` policy
+
+Do not restore dual Flutter Accept/Decline UI. Do not deploy backend changes or
+build TestFlight.
+
+## Required Tests
+
+1. Call A connected, teardown begins, B becomes pending, native Accept B arrives,
+   A teardown completes, and B automatically opens exactly once with one RTC
+   setup owner and no second interaction.
+2. Native Accept B arrives before the Firestore pending callback; signals
+   converge and B opens once after teardown.
+3. Firestore B becomes pending before native Accept; B opens once after teardown.
+4. Native and plugin Accept duplicates in both orders produce one accepted
+   intent, one route, one RTC owner, and no retry storm.
+5. B becomes `accepted` before claim and still opens after teardown.
+6. B becomes `joining` before claim and still opens when valid under the current
+   state machine.
+7. B becomes terminal before claim; no route opens, accepted intent clears,
+   native state closes, and lifecycle settles idle.
+8. B is superseded by C; B cannot open later and its accepted intent does not
+   transfer to C.
+9. Repeat 20 sequential cycles: Call N ends, N+1 arrives during teardown, native
+   Accept occurs, teardown completes, and N+1 opens once with one RTC owner.
+
+Tests must not use force-quit semantics.
+
+## Safe Diagnostics
+
+Diagnostics may expose only safe state such as:
+
+- `pendingIncomingPresent`
+- `pendingAcceptedIntent`
+- `pendingAcceptedRecorded`
+- `pendingAcceptedClaimed`
+- `pendingAcceptedContinuationStarted`
+- `pendingAcceptedContinuationCompleted`
+- `previousTeardownCompleted`
+- `callLifecycleState`
+- `routeOpenCount`
+- `rtcSetupOwnerCount`
+- `sessionIdle`
+- `blockerCode`
+
+Do not expose UIDs, invite IDs, channels, CallKit UUIDs, tokens, payloads, Agora
+credentials, or raw identifiers.
 
 ## Validation
 
-Run and pass all of these before marking ready for review:
+Run and pass after implementation:
 
 ```bash
-flutter pub get
-dart format lib/call_v2 test/call_v2
-dart format --output=none --set-exit-if-changed lib/call_v2 test/call_v2
-flutter analyze lib/call_v2 test/call_v2
-flutter test test/call_v2
+flutter analyze
+flutter test test/call_v2 --no-pub
+flutter test test/notification_foreground_recovery_test.dart --no-pub
+git diff --check
 ```
 
-Backend deployment-readiness, rules, emulator, syntax, and whitespace validations must remain green if the workflow includes them.
+No backend deployment and no TestFlight build.
 
-## Safety
+## Path-Drift Baseline
 
-V1 must remain untouched. The V2 feature gate must default false. Do not wire app startup, production routes, Firestore listeners, Agora, CallKit, PushKit, FCM, native code, production Firebase, IAM, OIDC, queues, secrets, kill switches, rollout configuration, or live services. Do not deploy, enable switches, change live configuration, contact production services, or invent production values.
-
-## Handoff
-
-Report exact changed files and behavioral test results. Explicitly confirm disabled default, V1 isolation, no client-supplied authenticated UID, safe request shapes, duplicate-command suppression, terminal cleanup, navigation dedupe, fake-only tests, monotonically increasing lifecycle-test versions, and no deployment/live contact.
+The authorized path-drift baseline is
+`6b548b2f4ade470e4b8b02fae9d5517ee0438ec9`. Legitimate history before this
+accepted physical-test checkpoint must not be classified as unauthorized drift.

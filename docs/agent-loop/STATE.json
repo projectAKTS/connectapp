@@ -1,49 +1,32 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "3C",
-  "status": "revision_required",
-  "accepted_checkpoint_sha": "05a5407ab2d77a5f8772ae05bdf3b6a3cffa7a8e",
-  "starting_sha": "301cd1eb7fa8b6022818d3fd59ddbf7593e351e2",
+  "phase": "physical_repeat_call_pending_accept",
+  "status": "implementation_required",
+  "accepted_checkpoint_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
+  "starting_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
   "code_commit_sha": null,
   "ending_sha": "SELF",
   "changed_files": [],
   "validation": {
-    "accepted_phase3b_workflow_run": "28386385870",
-    "accepted_phase3b_job": "84101997464",
-    "accepted_phase3b_code_commit": "05a5407ab2d77a5f8772ae05bdf3b6a3cffa7a8e",
-    "latest_phase3c_workflow_run": "28394453498",
-    "latest_phase3c_job": "84129480172",
-    "baseline_preflight": "passed",
-    "node_version": "20",
-    "check": "failed",
-    "deployment_readiness": "passed",
-    "rules_tests": "passed",
-    "emulator_runs": [
-      "passed",
-      "passed",
-      "passed"
-    ],
-    "index_syntax_check": "passed",
-    "flutter_format": "passed",
-    "flutter_analysis": "passed",
-    "flutter_tests": "failed: 73 passed, 1 failed",
-    "diff_check": "not_reached_after_flutter_failure",
-    "emulator_transient_retries": 0,
-    "failed_stage": "flutter-tests",
-    "failed_test": "presenter derives display-safe state and actions by lifecycle",
-    "failure_mismatch": "expected CallLocalPhase.inCall, actual CallLocalPhase.presentingIncoming"
+    "physical_call_1_connected": true,
+    "physical_call_1_ended_normally": true,
+    "physical_call_2_pushkit_received": true,
+    "physical_call_2_callkit_accepted": true,
+    "physical_call_2_app_opened": true,
+    "physical_call_2_route_opened": false,
+    "physical_call_2_rtc_started": false
   },
   "safety": {
     "deployed": false,
     "production_services_contacted": false,
-    "kill_switches_enabled": false,
-    "production_values_invented": false
+    "firebase_changes": false,
+    "backend_changes": false
   },
   "review": {
-    "decision": "revision_required",
-    "notes": "Focused correction: lifecycle-transition test fixtures must increment durable snapshot versions. Do not weaken accepted equal/lower snapshot rejection. Rebuild the discarded Phase 3C implementation and rerun."
+    "decision": "implementation_required",
+    "notes": "Focused pending-CallKit-Accept durability correction only. Do not reopen Phase 3C presenter work in this task."
   }
 }
