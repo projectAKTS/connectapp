@@ -2,14 +2,21 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "physical_repeat_call_pending_accept",
-  "status": "task_ready",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "starting_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
+  "code_commit_sha": "ac341289a1add19b70b0352e8d95fee3805a2f25",
   "ending_sha": "SELF",
-  "changed_files": [],
+  "changed_files": [
+    "lib/call_v2/real_flow/call_v2_call_lifecycle_arbiter.dart",
+    "lib/services/call_session_manager.dart",
+    "lib/services/notification_service.dart",
+    "test/call_v2/real_flow/call_v2_notification_ownership_test.dart",
+    "test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart",
+    "test/call_v2/real_flow/call_v2_repeated_call_lifecycle_test.dart"
+  ],
   "validation": {
     "physical_call_1_connected": true,
     "physical_call_1_ended_normally": true,
@@ -17,7 +24,14 @@
     "physical_call_2_callkit_accepted": true,
     "physical_call_2_app_opened": true,
     "physical_call_2_route_opened": false,
-    "physical_call_2_rtc_started": false
+    "physical_call_2_rtc_started": false,
+    "flutter_analyze": "passed",
+    "call_v2_tests": "passed: 2254",
+    "foreground_recovery_tests": "passed: 3",
+    "focused_arbiter_tests": "passed: 50",
+    "focused_manager_tests": "passed: 52",
+    "focused_notification_tests": "passed: 14",
+    "git_diff_check": "passed"
   },
   "safety": {
     "deployed": false,
@@ -26,7 +40,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "implementation_required",
-    "notes": "Focused pending-CallKit-Accept durability correction only. Do not reopen Phase 3C presenter work in this task."
+    "decision": "ready_for_review",
+    "notes": "Generation-scoped pending CallKit Accept intent now survives previous-call teardown and continues through one idempotent route/RTC ownership path. Physical two-iPhone repeat-call validation remains required."
   }
 }
