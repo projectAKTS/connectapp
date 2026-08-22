@@ -810,6 +810,75 @@ void main() {
     expect(arbiter.activePromptCount, 1);
   });
 
+  test('pending accepted intent transfers only to its exact next generation',
+      () {
+    final arbiter = CallV2CallLifecycleArbiter();
+    final outgoing = arbiter.reserveOutgoing();
+    arbiter.outgoingInviteCreated(
+      generation: outgoing.generation,
+      inviteId: 'invite_a',
+    );
+    arbiter.markConnected(outgoing.generation);
+    arbiter.beginEnding(outgoing.generation);
+    arbiter.reserveIncoming('invite_b');
+
+    expect(
+      arbiter.recordPendingAcceptedIntent(
+        generation: outgoing.generation,
+        inviteId: 'invite_b',
+      ),
+      isTrue,
+    );
+    expect(
+      arbiter.recordPendingAcceptedIntent(
+        generation: outgoing.generation,
+        inviteId: 'invite_b',
+      ),
+      isTrue,
+    );
+    expect(arbiter.pendingAcceptedIntent, isTrue);
+
+    final claimed = arbiter.completeTeardownAndClaimPending(
+      outgoing.generation,
+    );
+    expect(claimed.acceptedIntent, isTrue);
+    expect(claimed.generation, outgoing.generation + 1);
+    expect(arbiter.pendingAcceptedIntent, isFalse);
+    expect(
+      arbiter.recordPendingAcceptedIntent(
+        generation: outgoing.generation,
+        inviteId: 'invite_b',
+      ),
+      isFalse,
+    );
+  });
+
+  test('superseding pending invite clears exact accepted intent', () {
+    final arbiter = CallV2CallLifecycleArbiter();
+    final outgoing = arbiter.reserveOutgoing();
+    arbiter.outgoingInviteCreated(
+      generation: outgoing.generation,
+      inviteId: 'invite_a',
+    );
+    arbiter.markConnected(outgoing.generation);
+    arbiter.beginTeardown(outgoing.generation);
+    arbiter.reserveIncoming('invite_b');
+    arbiter.recordPendingAcceptedIntent(
+      generation: outgoing.generation,
+      inviteId: 'invite_b',
+    );
+
+    final replacement = arbiter.reserveIncoming('invite_c');
+    expect(replacement.displacedInviteId, 'invite_b');
+    expect(arbiter.pendingAcceptedIntent, isFalse);
+
+    final claimed = arbiter.completeTeardownAndClaimPending(
+      outgoing.generation,
+    );
+    expect(claimed.inviteId, 'invite_c');
+    expect(claimed.acceptedIntent, isFalse);
+  });
+
   test('newest pending invite wins while teardown is in progress', () {
     final arbiter = CallV2CallLifecycleArbiter();
 

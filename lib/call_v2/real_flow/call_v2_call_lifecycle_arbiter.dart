@@ -38,6 +38,7 @@ class CallV2PendingClaim {
     required this.claimed,
     required this.generation,
     required this.lifecycleState,
+    required this.acceptedIntent,
     this.inviteId,
   });
 
@@ -48,22 +49,26 @@ class CallV2PendingClaim {
           claimed: false,
           generation: generation,
           lifecycleState: lifecycleState,
+          acceptedIntent: false,
         );
 
   const CallV2PendingClaim.claimed({
     required int generation,
     required String inviteId,
+    required bool acceptedIntent,
   }) : this._(
           claimed: true,
           generation: generation,
           lifecycleState: CallV2CallLifecycleState.incomingPrompt,
           inviteId: inviteId,
+          acceptedIntent: acceptedIntent,
         );
 
   final bool claimed;
   final int generation;
   final CallV2CallLifecycleState lifecycleState;
   final String? inviteId;
+  final bool acceptedIntent;
 }
 
 class CallV2CallLifecycleArbiter {
@@ -71,6 +76,10 @@ class CallV2CallLifecycleArbiter {
   int _generation = 0;
   String? _claimedInviteId;
   String? _pendingInviteId;
+  String? _pendingAcceptedInviteId;
+  int? _pendingAcceptedGeneration;
+  bool _pendingAcceptedRecorded = false;
+  bool _pendingAcceptedClaimed = false;
   int _duplicateInviteSuppressedCount = 0;
   int _busyInviteDeclinedCount = 0;
   int _staleCandidateDroppedCount = 0;
@@ -86,6 +95,7 @@ class CallV2CallLifecycleArbiter {
       _state == CallV2CallLifecycleState.incomingPrompt;
   bool get incomingCandidateClaimed => _claimedInviteId != null;
   bool get pendingIncomingPresent => _pendingInviteId != null;
+  bool get pendingAcceptedIntent => _pendingAcceptedInviteId != null;
   int get pendingIncomingCount => _pendingInviteId == null ? 0 : 1;
   int get activePromptCount =>
       _state == CallV2CallLifecycleState.incomingPrompt ? 1 : 0;
@@ -155,6 +165,7 @@ class CallV2CallLifecycleArbiter {
       _generation += 1;
       _claimedInviteId = normalized;
       _pendingInviteId = null;
+      _clearPendingAcceptedIntent();
       _state = CallV2CallLifecycleState.incomingPrompt;
       return CallV2CallReservation(
         action: CallV2CallReservationAction.reserved,
@@ -181,6 +192,9 @@ class CallV2CallLifecycleArbiter {
       final displaced = _pendingInviteId;
       if (displaced != null && displaced != normalized) {
         _displacedPendingSupersededCount += 1;
+        if (_pendingAcceptedInviteId == displaced) {
+          _clearPendingAcceptedIntent();
+        }
       }
       _pendingInviteId = normalized;
       return CallV2CallReservation(
@@ -197,6 +211,41 @@ class CallV2CallLifecycleArbiter {
       generation: _generation,
       lifecycleState: _state,
     );
+  }
+
+  bool recordPendingAcceptedIntent({
+    required int generation,
+    required String inviteId,
+  }) {
+    final normalized = inviteId.trim();
+    final pendingLifecycle = _state == CallV2CallLifecycleState.ending ||
+        _state == CallV2CallLifecycleState.teardown ||
+        _state == CallV2CallLifecycleState.reserving;
+    if (normalized.isEmpty ||
+        generation != _generation ||
+        !pendingLifecycle ||
+        _pendingInviteId != normalized) {
+      _staleCandidateDroppedCount += 1;
+      return false;
+    }
+    if (_pendingAcceptedInviteId == normalized &&
+        _pendingAcceptedGeneration == generation) {
+      return true;
+    }
+    _pendingAcceptedInviteId = normalized;
+    _pendingAcceptedGeneration = generation;
+    _pendingAcceptedRecorded = true;
+    return true;
+  }
+
+  bool clearPendingInvite(String inviteId) {
+    final normalized = inviteId.trim();
+    if (normalized.isEmpty || _pendingInviteId != normalized) return false;
+    _pendingInviteId = null;
+    if (_pendingAcceptedInviteId == normalized) {
+      _clearPendingAcceptedIntent();
+    }
+    return true;
   }
 
   bool ownsIncoming({
@@ -338,8 +387,12 @@ class CallV2CallLifecycleArbiter {
       );
     }
     final pending = _pendingInviteId;
+    final acceptedIntent = pending != null &&
+        _pendingAcceptedInviteId == pending &&
+        _pendingAcceptedGeneration == generation;
     _claimedInviteId = null;
     _pendingInviteId = null;
+    _clearPendingAcceptedIntent();
     if (pending == null) {
       _state = CallV2CallLifecycleState.idle;
       return CallV2PendingClaim.none(
@@ -350,9 +403,11 @@ class CallV2CallLifecycleArbiter {
     _generation += 1;
     _claimedInviteId = pending;
     _state = CallV2CallLifecycleState.incomingPrompt;
+    _pendingAcceptedClaimed = acceptedIntent;
     return CallV2PendingClaim.claimed(
       generation: _generation,
       inviteId: pending,
+      acceptedIntent: acceptedIntent,
     );
   }
 
@@ -360,6 +415,7 @@ class CallV2CallLifecycleArbiter {
     _generation += 1;
     _claimedInviteId = null;
     _pendingInviteId = null;
+    _clearPendingAcceptedIntent();
     if (publishIdle) {
       _state = CallV2CallLifecycleState.idle;
     } else {
@@ -394,6 +450,9 @@ class CallV2CallLifecycleArbiter {
     _generation = 0;
     _claimedInviteId = null;
     _pendingInviteId = null;
+    _clearPendingAcceptedIntent();
+    _pendingAcceptedRecorded = false;
+    _pendingAcceptedClaimed = false;
     _duplicateInviteSuppressedCount = 0;
     _busyInviteDeclinedCount = 0;
     _staleCandidateDroppedCount = 0;
@@ -411,6 +470,9 @@ class CallV2CallLifecycleArbiter {
       'incomingPipelineBusy': incomingPipelineBusy,
       'incomingCandidateClaimed': incomingCandidateClaimed,
       'pendingIncomingPresent': pendingIncomingPresent,
+      'pendingAcceptedIntent': pendingAcceptedIntent,
+      'pendingAcceptedRecorded': _pendingAcceptedRecorded,
+      'pendingAcceptedClaimed': _pendingAcceptedClaimed,
       'pendingIncomingCount': pendingIncomingCount,
       'activePromptCount': activePromptCount,
       'activeCallRouteCount': activeCallRouteCount,
@@ -435,5 +497,10 @@ class CallV2CallLifecycleArbiter {
       'orphanInviteCancelledCount': orphanInviteCancelledCount,
       'lifecycleRegressionSuppressedCount': lifecycleRegressionSuppressedCount,
     };
+  }
+
+  void _clearPendingAcceptedIntent() {
+    _pendingAcceptedInviteId = null;
+    _pendingAcceptedGeneration = null;
   }
 }

@@ -304,6 +304,93 @@ void main() {
     await manager.forceIdleForTest();
   });
 
+  for (final nativeFirst in <bool>[true, false]) {
+    testWidgets(
+        '${nativeFirst ? 'native then plugin' : 'plugin then native'} pending accepts coalesce through teardown',
+        (tester) async {
+      final navigatorKey = GlobalKey<NavigatorState>();
+      final openedRoutes = <String>[];
+      await tester.pumpWidget(MaterialApp(
+        navigatorKey: navigatorKey,
+        home: const Scaffold(body: Text('home')),
+      ));
+      await seedInvite('invite_pending_duplicate',
+          status: CallInviteStatus.ringing);
+      manager.configure(
+        navigatorKey: navigatorKey,
+        listNativeCalls: () async => const <NativeCallSnapshot>[],
+        endNativeCall: (_) async {},
+        appForegroundProvider: () async => true,
+        callScreenOpenRecorderForTest: recordingCallOpenRecorder(openedRoutes),
+        skipActiveInviteBindingForTest: true,
+        iosCallkitOnlyIncomingUiForTest: true,
+      );
+      await manager.debugCreateHeldCallRouteForTest(
+        inviteId: 'invite_previous',
+        channel: 'channel_invite_previous',
+      );
+      await manager.debugMarkHeldRouteTerminalForTest('invite_previous');
+      await manager.handleNotificationInviteTap(
+        inviteId: 'invite_pending_duplicate',
+        channel: 'channel_invite_pending_duplicate',
+        isVideo: false,
+        fromName: 'Notify Caller',
+        fromUid: callerUid,
+        source: 'pending_firestore',
+      );
+
+      Future<void> nativeAccept() {
+        return notifications.debugSimulateNativeAcceptedCallkitBridgeForTest(
+          inviteId: 'invite_pending_duplicate',
+          channel: 'channel_invite_pending_duplicate',
+          isVideo: false,
+          fromName: 'Notify Caller',
+          fromUid: callerUid,
+        );
+      }
+
+      Future<void> pluginAccept() {
+        return notifications.debugSimulateAcceptedCallkitEventForTest(
+          inviteId: 'invite_pending_duplicate',
+          channel: 'channel_invite_pending_duplicate',
+          isVideo: false,
+          fromName: 'Notify Caller',
+          fromUid: callerUid,
+        );
+      }
+
+      if (nativeFirst) {
+        await nativeAccept();
+        await pluginAccept();
+      } else {
+        await pluginAccept();
+        await nativeAccept();
+      }
+
+      expect(manager.debugSnapshot()['pendingAcceptedIntent'], isTrue);
+      expect(
+        notifications.debugSnapshotForTest()['acceptedRecoveryRetryScheduled'],
+        isFalse,
+      );
+      expect(
+        notifications.debugSnapshotForTest()['acceptedRecoveryRetryAttempts'],
+        0,
+      );
+      expect(openedRoutes, isEmpty);
+
+      await manager.debugCloseHeldRouteForTest('invite_previous');
+      await tester.pump();
+      expect(openedRoutes, ['invite_pending_duplicate']);
+      expect(manager.debugSnapshot()['routeOpenCount'], 1);
+      expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 1);
+      expect(
+        notifications.debugSnapshotForTest()['acceptedRecoveryRetryScheduled'],
+        isFalse,
+      );
+      await manager.forceIdleForTest();
+    });
+  }
+
   testWidgets(
       'native CallKit accept uses recovery coordinator for network retry',
       (tester) async {

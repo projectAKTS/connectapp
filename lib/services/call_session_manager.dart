@@ -60,6 +60,7 @@ enum IncomingUiOwner {
 enum AcceptedCallRecoveryResult {
   opened,
   alreadyOpen,
+  pendingTeardown,
   pendingAuth,
   pendingNavigator,
   pendingNetwork,
@@ -80,6 +81,7 @@ enum _RouteOpenResult {
 enum _IncomingCandidateResult {
   opened,
   alreadyOpen,
+  acceptedPending,
   pending,
   callkitOwned,
   flutterPrompted,
@@ -120,6 +122,28 @@ class CallInvitePayload {
   final String fromUid;
   final String toUid;
   final CallV2RealCallConnectionSystem connectionSystem;
+}
+
+class _PendingAcceptedInviteIntent {
+  const _PendingAcceptedInviteIntent({
+    required this.payload,
+    required this.ownerGeneration,
+    this.claimedGeneration,
+  });
+
+  final CallInvitePayload payload;
+  final int ownerGeneration;
+  final int? claimedGeneration;
+
+  bool matches(String inviteId) => payload.inviteId == inviteId.trim();
+
+  _PendingAcceptedInviteIntent claimedBy(int generation) {
+    return _PendingAcceptedInviteIntent(
+      payload: payload,
+      ownerGeneration: ownerGeneration,
+      claimedGeneration: generation,
+    );
+  }
 }
 
 class NativeCallSnapshot {
@@ -244,6 +268,12 @@ class CallSessionManager {
   String? _incomingPromptInviteId;
   CallInvitePayload? _pendingIncomingPromptPayload;
   String? _pendingIncomingPromptSource;
+  _PendingAcceptedInviteIntent? _pendingAcceptedInviteIntent;
+  bool _pendingAcceptedRecorded = false;
+  bool _pendingAcceptedClaimed = false;
+  bool _pendingAcceptedContinuationStarted = false;
+  bool _pendingAcceptedContinuationCompleted = false;
+  bool _previousTeardownCompleted = false;
   String? _incomingListenerBoundUid;
   int _incomingListenerGeneration = 0;
   int _incomingListenerErrorCount = 0;
@@ -343,6 +373,12 @@ class CallSessionManager {
     _pendingIncomingPromptRetryTimer = null;
     _pendingIncomingPromptPayload = null;
     _pendingIncomingPromptSource = null;
+    _pendingAcceptedInviteIntent = null;
+    _pendingAcceptedRecorded = false;
+    _pendingAcceptedClaimed = false;
+    _pendingAcceptedContinuationStarted = false;
+    _pendingAcceptedContinuationCompleted = false;
+    _previousTeardownCompleted = false;
     _acceptedRecoveryPending = false;
     _acceptedRecoveryAcknowledged = false;
     _acceptedRecoveryAttemptCount = 0;
@@ -506,6 +542,7 @@ class CallSessionManager {
     if (!_debugTestAccessEnabled) {
       throw StateError('debugInvalidateLifecycleForTest is test-mode only');
     }
+    _clearPendingAcceptedIntent();
     _callLifecycleArbiter.invalidateForProductionReset();
   }
 
@@ -515,6 +552,7 @@ class CallSessionManager {
     _callRouteActive = false;
     _incomingPromptActive = false;
     _incomingPromptInviteId = null;
+    _clearPendingAcceptedIntent();
     _callLifecycleArbiter.invalidateForProductionReset();
   }
 
@@ -729,6 +767,7 @@ class CallSessionManager {
     _incomingListenerBackoff.reset();
     _handledInviteExpiries.clear();
     await _diagResourceCounts('clear_for_signed_out_start');
+    _clearPendingAcceptedIntent();
     await _resetSessionState(
       reason: 'signed_out',
       endCurrentNativeCall: true,
@@ -776,12 +815,14 @@ class CallSessionManager {
         return;
       }
       if (session != null) {
+        _discardPendingAcceptedIntent();
         await _finalizeTerminalSessionCleanup(
           inviteId: session.inviteId,
           reason: reason,
           forceClearUiFlags: true,
         );
       } else {
+        _discardPendingAcceptedIntent();
         await _resetSessionState(
           reason: reason,
           endCurrentNativeCall: true,
@@ -1211,6 +1252,14 @@ class CallSessionManager {
           ? AcceptedCallRecoveryResult.alreadyOpen
           : AcceptedCallRecoveryResult.opened;
     }
+    if (result == _IncomingCandidateResult.acceptedPending) {
+      await _diagManager('accepted_recovery_pending_teardown', meta: {
+        'pendingAcceptedIntent': true,
+        'pendingAcceptedRecorded': _pendingAcceptedRecorded,
+        'callLifecycleState': _callLifecycleArbiter.state.name,
+      });
+      return AcceptedCallRecoveryResult.pendingTeardown;
+    }
     if (result == _IncomingCandidateResult.busy) {
       return AcceptedCallRecoveryResult.busy;
     }
@@ -1323,6 +1372,9 @@ class CallSessionManager {
     final ownsPrompt = _incomingPromptInviteId == normalizedInviteId &&
         _incomingUiOwner != IncomingUiOwner.none;
     if (!ownsPrompt) {
+      _callLifecycleArbiter.clearPendingInvite(normalizedInviteId);
+      _clearPendingAcceptedIntent(inviteId: normalizedInviteId);
+      _clearPendingIncomingPrompt(normalizedInviteId);
       await _markNativeInviteStateByIdsSafely(
         inviteId: normalizedInviteId,
         channel: channel,
@@ -1674,6 +1726,72 @@ class CallSessionManager {
     );
   }
 
+  bool _recordPendingAcceptedIntent(
+    CallInvitePayload payload, {
+    required int ownerGeneration,
+  }) {
+    if (!_callLifecycleArbiter.recordPendingAcceptedIntent(
+      generation: ownerGeneration,
+      inviteId: payload.inviteId,
+    )) {
+      return false;
+    }
+    final current = _pendingAcceptedInviteIntent;
+    if (current == null ||
+        !current.matches(payload.inviteId) ||
+        current.ownerGeneration != ownerGeneration) {
+      _pendingAcceptedInviteIntent = _PendingAcceptedInviteIntent(
+        payload: payload,
+        ownerGeneration: ownerGeneration,
+      );
+      _pendingAcceptedRecorded = true;
+      _pendingAcceptedClaimed = false;
+      _pendingAcceptedContinuationStarted = false;
+      _pendingAcceptedContinuationCompleted = false;
+    }
+    return true;
+  }
+
+  _PendingAcceptedInviteIntent? _claimPendingAcceptedIntent(
+    CallV2PendingClaim claim,
+  ) {
+    final claimedInviteId = claim.inviteId;
+    if (!claim.acceptedIntent || claimedInviteId == null) return null;
+    final current = _pendingAcceptedInviteIntent;
+    if (current == null ||
+        !current.matches(claimedInviteId) ||
+        current.ownerGeneration + 1 != claim.generation) {
+      return null;
+    }
+    final claimed = current.claimedBy(claim.generation);
+    _pendingAcceptedInviteIntent = claimed;
+    _pendingAcceptedClaimed = true;
+    return claimed;
+  }
+
+  void _clearPendingAcceptedIntent({
+    String? inviteId,
+    int? claimedGeneration,
+  }) {
+    final current = _pendingAcceptedInviteIntent;
+    if (current == null) return;
+    if (inviteId != null && !current.matches(inviteId)) return;
+    if (claimedGeneration != null &&
+        current.claimedGeneration != claimedGeneration) {
+      return;
+    }
+    _pendingAcceptedInviteIntent = null;
+  }
+
+  void _discardPendingAcceptedIntent() {
+    final current = _pendingAcceptedInviteIntent;
+    if (current != null) {
+      _callLifecycleArbiter.clearPendingInvite(current.payload.inviteId);
+      _clearPendingIncomingPrompt(current.payload.inviteId);
+    }
+    _pendingAcceptedInviteIntent = null;
+  }
+
   Future<_IncomingCandidateResult> _handleIncomingCandidate(
     CallInvitePayload payload, {
     required String source,
@@ -1702,6 +1820,36 @@ class CallSessionManager {
           lifecycleGeneration: reservation.generation,
         );
       }
+      if (autoAccept &&
+          _recordPendingAcceptedIntent(
+            payload,
+            ownerGeneration: reservation.generation,
+          )) {
+        _schedulePendingIncomingPrompt(
+          payload,
+          source: source,
+          reason: 'accepted_behind_${reservation.lifecycleState.name}',
+        );
+        await _diagManager('pending_accept_recorded', meta: {
+          'pendingAcceptedRecorded': true,
+          'pendingAcceptedIntent': true,
+          'callLifecycleState': reservation.lifecycleState.name,
+        });
+        return _IncomingCandidateResult.acceptedPending;
+      }
+      final claimedAcceptedIntent = _pendingAcceptedInviteIntent;
+      if (autoAccept &&
+          claimedAcceptedIntent != null &&
+          claimedAcceptedIntent.matches(payload.inviteId) &&
+          claimedAcceptedIntent.claimedGeneration == reservation.generation &&
+          _callLifecycleArbiter.ownsGeneration(reservation.generation)) {
+        return _acceptInviteAndOpen(
+          claimedAcceptedIntent.payload,
+          source: source,
+          lifecycleGeneration: reservation.generation,
+          preserveLifecycleOnNavigatorUnavailable: true,
+        );
+      }
       if (_current?.inviteId == payload.inviteId && _callRouteActive) {
         return _IncomingCandidateResult.alreadyOpen;
       }
@@ -1725,6 +1873,7 @@ class CallSessionManager {
     if (reservation.action == CallV2CallReservationAction.pending) {
       final displacedInviteId = reservation.displacedInviteId;
       if (displacedInviteId != null) {
+        _clearPendingAcceptedIntent(inviteId: displacedInviteId);
         await _declineInviteTransaction(
           displacedInviteId,
           source: 'superseded_pending_invite',
@@ -1745,6 +1894,18 @@ class CallSessionManager {
         source: source,
         reason: 'lifecycle_${reservation.lifecycleState.name}',
       );
+      if (autoAccept &&
+          _recordPendingAcceptedIntent(
+            payload,
+            ownerGeneration: reservation.generation,
+          )) {
+        await _diagManager('pending_accept_recorded', meta: {
+          'pendingAcceptedRecorded': true,
+          'pendingAcceptedIntent': true,
+          'callLifecycleState': reservation.lifecycleState.name,
+        });
+        return _IncomingCandidateResult.acceptedPending;
+      }
       await _diagManager('incoming_pending_recorded', meta: {
         'source': source,
         'via': via,
@@ -2032,6 +2193,7 @@ class CallSessionManager {
     CallInvitePayload payload, {
     required String source,
     int? lifecycleGeneration,
+    bool preserveLifecycleOnNavigatorUnavailable = false,
   }) async {
     if (lifecycleGeneration != null &&
         !_callLifecycleArbiter.ownsGeneration(lifecycleGeneration)) {
@@ -2120,6 +2282,10 @@ class CallSessionManager {
         channel: payload.channel,
         reason: 'accept_latest_terminal',
       );
+      _clearPendingAcceptedIntent(
+        inviteId: payload.inviteId,
+        claimedGeneration: lifecycleGeneration,
+      );
       return _IncomingCandidateResult.ignored;
     }
 
@@ -2151,6 +2317,12 @@ class CallSessionManager {
         state: 'active',
         reason: 'route_opened',
       );
+      _pendingAcceptedContinuationCompleted =
+          _pendingAcceptedInviteIntent?.matches(payload.inviteId) == true;
+      _clearPendingAcceptedIntent(
+        inviteId: payload.inviteId,
+        claimedGeneration: generation,
+      );
       return _IncomingCandidateResult.opened;
     }
     if (routeResult == _RouteOpenResult.alreadyOpenSameInvite) {
@@ -2159,7 +2331,17 @@ class CallSessionManager {
         state: 'active',
         reason: 'route_already_open',
       );
+      _pendingAcceptedContinuationCompleted =
+          _pendingAcceptedInviteIntent?.matches(payload.inviteId) == true;
+      _clearPendingAcceptedIntent(
+        inviteId: payload.inviteId,
+        claimedGeneration: generation,
+      );
       return _IncomingCandidateResult.alreadyOpen;
+    }
+    if (routeResult == _RouteOpenResult.navigatorUnavailable &&
+        preserveLifecycleOnNavigatorUnavailable) {
+      return _IncomingCandidateResult.pending;
     }
     _releaseFailedIncomingGeneration(generation);
     return routeResult == _RouteOpenResult.navigatorUnavailable
@@ -2701,11 +2883,13 @@ class CallSessionManager {
     _callLifecycleArbiter.beginTeardown(session.lifecycleGeneration);
     final pendingPayload = _pendingIncomingPromptPayload;
     final pendingSource = _pendingIncomingPromptSource;
+    final preservePendingAcceptedRecovery =
+        _pendingAcceptedInviteIntent != null;
     await _resetSessionState(
       reason: reason,
       onlyInviteId: inviteId,
       endCurrentNativeCall: true,
-      clearStoredAcceptedRecovery: true,
+      clearStoredAcceptedRecovery: !preservePendingAcceptedRecovery,
       forceClearUiFlags:
           forceClearUiFlags || (!_callRouteActive && !_openingCallRoute),
     );
@@ -2727,11 +2911,16 @@ class CallSessionManager {
     required String source,
   }) async {
     if (!pendingClaim.claimed) return;
+    _previousTeardownCompleted = true;
     final claimedInviteId = pendingClaim.inviteId;
+    final acceptedIntent = _claimPendingAcceptedIntent(pendingClaim);
+    final effectivePayload = acceptedIntent?.payload ?? pendingPayload;
+    final effectiveSource = pendingSource ?? 'accepted_pending';
     if (claimedInviteId == null ||
-        pendingPayload == null ||
-        pendingPayload.inviteId != claimedInviteId ||
-        pendingSource == null ||
+        effectivePayload == null ||
+        effectivePayload.inviteId != claimedInviteId ||
+        (acceptedIntent == null && pendingSource == null) ||
+        (pendingClaim.acceptedIntent && acceptedIntent == null) ||
         !_callLifecycleArbiter.ownsIncoming(
           generation: pendingClaim.generation,
           inviteId: claimedInviteId,
@@ -2753,11 +2942,13 @@ class CallSessionManager {
         'source': source,
         'errorType': error.runtimeType.toString(),
       });
-      _schedulePendingIncomingPrompt(
-        pendingPayload,
-        source: pendingSource,
-        reason: 'claimed_verify_error',
-      );
+      if (acceptedIntent == null) {
+        _schedulePendingIncomingPrompt(
+          effectivePayload,
+          source: effectiveSource,
+          reason: 'claimed_verify_error',
+        );
+      }
       return;
     }
     if (!_callLifecycleArbiter.ownsIncoming(
@@ -2767,15 +2958,26 @@ class CallSessionManager {
       return;
     }
     final latestStatus = _parseStatus(latest?['status']);
-    if (latest == null || latestStatus != CallInviteStatus.ringing) {
+    final acceptedContinuationStatus =
+        latestStatus == CallInviteStatus.ringing ||
+            latestStatus == CallInviteStatus.accepted ||
+            latestStatus == CallInviteStatus.joining;
+    final canContinue = acceptedIntent == null
+        ? latest != null && latestStatus == CallInviteStatus.ringing
+        : latest != null && acceptedContinuationStatus;
+    if (latest == null || !canContinue) {
       _incomingPromptActive = false;
       _incomingPromptInviteId = null;
       _incomingUiOwner = IncomingUiOwner.none;
       _clearPendingIncomingPrompt(claimedInviteId);
+      _clearPendingAcceptedIntent(
+        inviteId: claimedInviteId,
+        claimedGeneration: pendingClaim.generation,
+      );
       _markInviteHandled(claimedInviteId);
       await _endNativeCallForInvite(
         inviteId: claimedInviteId,
-        channel: pendingPayload.channel,
+        channel: effectivePayload.channel,
         reason: source,
       );
       _callLifecycleArbiter.beginEnding(pendingClaim.generation);
@@ -2796,11 +2998,13 @@ class CallSessionManager {
 
     final payload = CallInvitePayload(
       inviteId: claimedInviteId,
-      channel: (latest['channel'] ?? pendingPayload.channel).toString().trim(),
+      channel:
+          (latest['channel'] ?? effectivePayload.channel).toString().trim(),
       isVideo: _truthy(latest['isVideo']),
-      fromName: (latest['fromName'] ?? pendingPayload.fromName).toString(),
-      fromUid: (latest['fromUid'] ?? pendingPayload.fromUid).toString().trim(),
-      toUid: (latest['toUid'] ?? pendingPayload.toUid).toString().trim(),
+      fromName: (latest['fromName'] ?? effectivePayload.fromName).toString(),
+      fromUid:
+          (latest['fromUid'] ?? effectivePayload.fromUid).toString().trim(),
+      toUid: (latest['toUid'] ?? effectivePayload.toUid).toString().trim(),
       connectionSystem: callConnectionSystemFromInviteValue(
         latest['callSystem'],
       ),
@@ -2810,6 +3014,45 @@ class CallSessionManager {
         generation: pendingClaim.generation,
         inviteId: claimedInviteId,
       );
+      return;
+    }
+
+    if (acceptedIntent != null) {
+      _clearPendingIncomingPrompt(claimedInviteId);
+      _incomingPromptActive = false;
+      _incomingPromptInviteId = null;
+      _incomingUiOwner = IncomingUiOwner.none;
+      _pendingAcceptedContinuationStarted = true;
+      final accepted = _callLifecycleArbiter.incomingAccepted(
+        generation: pendingClaim.generation,
+        inviteId: claimedInviteId,
+      );
+      if (!accepted) return;
+      await _diagManager('pending_accept_continuation_started', meta: {
+        'pendingAcceptedClaimed': true,
+        'pendingAcceptedContinuationStarted': true,
+        'previousTeardownCompleted': true,
+        'callLifecycleState': _callLifecycleArbiter.state.name,
+      });
+      final result = await _acceptInviteAndOpen(
+        payload,
+        source: '$effectiveSource:accepted_teardown_complete',
+        lifecycleGeneration: pendingClaim.generation,
+        preserveLifecycleOnNavigatorUnavailable: true,
+      );
+      if (result == _IncomingCandidateResult.opened ||
+          result == _IncomingCandidateResult.alreadyOpen) {
+        _acceptedRecoveryPending = false;
+        _acceptedRecoveryAcknowledged = true;
+        await _clearStoredAcceptedCallRecoverySafely(
+          'pending_accept_continuation_opened',
+        );
+        await _diagManager('pending_accept_continuation_completed', meta: {
+          'pendingAcceptedContinuationCompleted': true,
+          'routeOpenCount': _routeOpenCount,
+          'rtcSetupOwnerCount': _rtcSetupOwnerCount,
+        });
+      }
       return;
     }
 
@@ -2842,7 +3085,7 @@ class CallSessionManager {
     }
     unawaited(_presentIncomingPrompt(
       payload,
-      source: '$pendingSource:teardown_complete',
+      source: '$effectiveSource:teardown_complete',
       lifecycleGeneration: pendingClaim.generation,
     ));
   }
@@ -3225,6 +3468,13 @@ class CallSessionManager {
       'iosFlutterIncomingPromptViolationCount':
           _iosFlutterIncomingPromptViolationCount,
       'callkitAcceptCount': _callkitAcceptCount,
+      'pendingAcceptedIntent': _pendingAcceptedInviteIntent != null,
+      'pendingAcceptedRecorded': _pendingAcceptedRecorded,
+      'pendingAcceptedClaimed': _pendingAcceptedClaimed,
+      'pendingAcceptedContinuationStarted': _pendingAcceptedContinuationStarted,
+      'pendingAcceptedContinuationCompleted':
+          _pendingAcceptedContinuationCompleted,
+      'previousTeardownCompleted': _previousTeardownCompleted,
       'acceptedRecoverySingleFlight': _routeOpenCount <= 1,
       'routeOpenCount': _routeOpenCount,
       'rtcSetupOwnerCount': _rtcSetupOwnerCount,

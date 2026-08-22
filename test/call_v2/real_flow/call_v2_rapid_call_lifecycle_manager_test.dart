@@ -55,6 +55,22 @@ void main() {
     );
   }
 
+  CallScreenOpenRecorderForTest recordingRoute(List<String> routes) {
+    return ({
+      required String inviteId,
+      required String channel,
+      required bool isVideo,
+      required String otherUserName,
+      required String? otherUserId,
+      required bool isCaller,
+      required connectionSystem,
+      required bool callV2FallbackUsed,
+      required String callV2BlockerCode,
+    }) async {
+      routes.add(inviteId);
+    };
+  }
+
   void configureIosCallkitOnly({
     required List<NativeCallSnapshot> nativeCalls,
     List<String>? presentedInvites,
@@ -235,6 +251,320 @@ void main() {
     expect(find.text('Incoming Audio Call'), findsNothing);
     await manager.clearForSignedOut();
     await tester.pump();
+  });
+
+  testWidgets(
+      'pending CallKit accept survives previous teardown and opens once',
+      (tester) async {
+    final routes = <String>[];
+    final nativeCalls = <NativeCallSnapshot>[nativeForInvite('invite_b')];
+    await tester.pumpWidget(buildHarness());
+    configureIosCallkitOnly(
+      nativeCalls: nativeCalls,
+      routeRecorder: recordingRoute(routes),
+    );
+    await seedInvite('invite_b');
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'invite_a',
+      channel: 'channel_invite_a',
+    );
+    await manager.debugMarkHeldRouteTerminalForTest('invite_a');
+
+    await manager.handleNotificationInviteTap(
+      inviteId: 'invite_b',
+      channel: 'channel_invite_b',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'firestore_pending',
+    );
+    final accepted = await manager.handleRecoveredAcceptedInvite(
+      inviteId: 'invite_b',
+      channel: 'channel_invite_b',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+    );
+
+    expect(accepted, AcceptedCallRecoveryResult.pendingTeardown);
+    expect(routes, isEmpty);
+    expect(manager.debugSnapshot()['pendingAcceptedIntent'], isTrue);
+    expect(manager.debugSnapshot()['pendingAcceptedRecorded'], isTrue);
+    expect(manager.debugSnapshot()['routeOpenCount'], 0);
+
+    await manager.debugCloseHeldRouteForTest('invite_a');
+    await tester.pump();
+
+    final snapshot = manager.debugSnapshot();
+    expect(routes, ['invite_b']);
+    expect(snapshot['pendingAcceptedClaimed'], isTrue);
+    expect(snapshot['pendingAcceptedContinuationStarted'], isTrue);
+    expect(snapshot['pendingAcceptedContinuationCompleted'], isTrue);
+    expect(snapshot['previousTeardownCompleted'], isTrue);
+    expect(snapshot['pendingAcceptedIntent'], isFalse);
+    expect(snapshot['routeOpenCount'], 1);
+    expect(snapshot['rtcSetupOwnerCount'], 1);
+    expect(snapshot['flutterIncomingPromptCount'], 0);
+    await manager.forceIdleForTest();
+  });
+
+  testWidgets('CallKit accept before Firestore candidate converges once',
+      (tester) async {
+    final routes = <String>[];
+    await tester.pumpWidget(buildHarness());
+    configureIosCallkitOnly(
+      nativeCalls: <NativeCallSnapshot>[nativeForInvite('invite_b')],
+      routeRecorder: recordingRoute(routes),
+    );
+    await seedInvite('invite_b');
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'invite_a',
+      channel: 'channel_invite_a',
+    );
+    await manager.debugMarkHeldRouteTerminalForTest('invite_a');
+
+    final accepted = await manager.handleRecoveredAcceptedInvite(
+      inviteId: 'invite_b',
+      channel: 'channel_invite_b',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+    );
+    await manager.handleNotificationInviteTap(
+      inviteId: 'invite_b',
+      channel: 'channel_invite_b',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'firestore_after_accept',
+    );
+
+    expect(accepted, AcceptedCallRecoveryResult.pendingTeardown);
+    expect(manager.debugSnapshot()['pendingAcceptedIntent'], isTrue);
+    await manager.debugCloseHeldRouteForTest('invite_a');
+    await tester.pump();
+    expect(routes, ['invite_b']);
+    expect(manager.debugSnapshot()['routeOpenCount'], 1);
+    expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 1);
+    await manager.forceIdleForTest();
+  });
+
+  testWidgets('pending Firestore candidate then CallKit accept opens once',
+      (tester) async {
+    final routes = <String>[];
+    await tester.pumpWidget(buildHarness());
+    configureIosCallkitOnly(
+      nativeCalls: <NativeCallSnapshot>[nativeForInvite('invite_b')],
+      routeRecorder: recordingRoute(routes),
+    );
+    await seedInvite('invite_b');
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'invite_a',
+      channel: 'channel_invite_a',
+    );
+    await manager.debugMarkHeldRouteTerminalForTest('invite_a');
+    await manager.handleNotificationInviteTap(
+      inviteId: 'invite_b',
+      channel: 'channel_invite_b',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'firestore_before_accept',
+    );
+
+    final accepted = await manager.handleRecoveredAcceptedInvite(
+      inviteId: 'invite_b',
+      channel: 'channel_invite_b',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+    );
+    expect(accepted, AcceptedCallRecoveryResult.pendingTeardown);
+    await manager.debugCloseHeldRouteForTest('invite_a');
+    await tester.pump();
+    expect(routes, ['invite_b']);
+    expect(manager.debugSnapshot()['routeOpenCount'], 1);
+    expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 1);
+    await manager.forceIdleForTest();
+  });
+
+  for (final status in <CallInviteStatus>[
+    CallInviteStatus.accepted,
+    CallInviteStatus.joining,
+  ]) {
+    testWidgets('pending accepted continuation allows ${status.name}',
+        (tester) async {
+      final routes = <String>[];
+      await tester.pumpWidget(buildHarness());
+      configureIosCallkitOnly(
+        nativeCalls: <NativeCallSnapshot>[nativeForInvite('invite_b')],
+        routeRecorder: recordingRoute(routes),
+      );
+      await seedInvite('invite_b');
+      await manager.debugCreateHeldCallRouteForTest(
+        inviteId: 'invite_a',
+        channel: 'channel_invite_a',
+      );
+      await manager.debugMarkHeldRouteTerminalForTest('invite_a');
+      expect(
+        await manager.handleRecoveredAcceptedInvite(
+          inviteId: 'invite_b',
+          channel: 'channel_invite_b',
+          isVideo: false,
+          fromName: callerName,
+          fromUid: callerUid,
+        ),
+        AcceptedCallRecoveryResult.pendingTeardown,
+      );
+      await firestore.collection('callInvites').doc('invite_b').set({
+        'status': status.name,
+      }, SetOptions(merge: true));
+
+      await manager.debugCloseHeldRouteForTest('invite_a');
+      await tester.pump();
+      expect(routes, ['invite_b']);
+      expect(manager.debugSnapshot()['routeOpenCount'], 1);
+      expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 1);
+      await manager.forceIdleForTest();
+    });
+  }
+
+  for (final status in <CallInviteStatus>[
+    CallInviteStatus.ended,
+    CallInviteStatus.cancelled,
+    CallInviteStatus.failed,
+  ]) {
+    testWidgets('terminal ${status.name} clears pending accepted intent',
+        (tester) async {
+      final routes = <String>[];
+      final endedNative = <String>[];
+      await tester.pumpWidget(buildHarness());
+      final nativeCalls = <NativeCallSnapshot>[nativeForInvite('invite_b')];
+      manager.configure(
+        navigatorKey: navigatorKey,
+        appForegroundProvider: () async => true,
+        listNativeCalls: () async => List<NativeCallSnapshot>.from(nativeCalls),
+        endNativeCall: (callkitId) async {
+          endedNative.add(callkitId);
+          nativeCalls.removeWhere((call) => call.callkitId == callkitId);
+        },
+        callScreenOpenRecorderForTest: recordingRoute(routes),
+        skipActiveInviteBindingForTest: true,
+        iosCallkitOnlyIncomingUiForTest: true,
+      );
+      await seedInvite('invite_b');
+      await manager.debugCreateHeldCallRouteForTest(
+        inviteId: 'invite_a',
+        channel: 'channel_invite_a',
+      );
+      await manager.debugMarkHeldRouteTerminalForTest('invite_a');
+      await manager.handleRecoveredAcceptedInvite(
+        inviteId: 'invite_b',
+        channel: 'channel_invite_b',
+        isVideo: false,
+        fromName: callerName,
+        fromUid: callerUid,
+      );
+      await firestore.collection('callInvites').doc('invite_b').set({
+        'status': status.name,
+      }, SetOptions(merge: true));
+
+      await manager.debugCloseHeldRouteForTest('invite_a');
+      await tester.pump();
+      expect(routes, isEmpty);
+      expect(endedNative, isNotEmpty);
+      expect(manager.debugSnapshot()['pendingAcceptedIntent'], isFalse);
+      expect(manager.debugSnapshot()['sessionIdle'], isTrue);
+    });
+  }
+
+  testWidgets('superseded pending invite cannot transfer accepted intent',
+      (tester) async {
+    final routes = <String>[];
+    await tester.pumpWidget(buildHarness());
+    configureIosCallkitOnly(
+      nativeCalls: <NativeCallSnapshot>[
+        nativeForInvite('invite_b'),
+        nativeForInvite('invite_c'),
+      ],
+      routeRecorder: recordingRoute(routes),
+    );
+    await seedInvite('invite_b');
+    await seedInvite('invite_c');
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'invite_a',
+      channel: 'channel_invite_a',
+    );
+    await manager.debugMarkHeldRouteTerminalForTest('invite_a');
+    await manager.handleRecoveredAcceptedInvite(
+      inviteId: 'invite_b',
+      channel: 'channel_invite_b',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+    );
+    await manager.handleNotificationInviteTap(
+      inviteId: 'invite_c',
+      channel: 'channel_invite_c',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'superseding_c',
+    );
+    await firestore.collection('callInvites').doc('invite_c').set({
+      'status': CallInviteStatus.cancelled.name,
+    }, SetOptions(merge: true));
+
+    await manager.debugCloseHeldRouteForTest('invite_a');
+    await tester.pump();
+    final inviteB =
+        await firestore.collection('callInvites').doc('invite_b').get();
+    expect(inviteB.data()?['status'], CallInviteStatus.declined.name);
+    expect(routes, isEmpty);
+    expect(manager.debugSnapshot()['pendingAcceptedIntent'], isFalse);
+    expect(manager.debugSnapshot()['sessionIdle'], isTrue);
+  });
+
+  testWidgets('twenty accepted-during-teardown calls each open once',
+      (tester) async {
+    final routes = <String>[];
+    final nativeCalls = <NativeCallSnapshot>[];
+    await tester.pumpWidget(buildHarness());
+    configureIosCallkitOnly(
+      nativeCalls: nativeCalls,
+      routeRecorder: recordingRoute(routes),
+    );
+    var previousInvite = 'invite_0';
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: previousInvite,
+      channel: 'channel_$previousInvite',
+    );
+
+    for (var i = 1; i <= 20; i += 1) {
+      await manager.debugMarkHeldRouteTerminalForTest(previousInvite);
+      final nextInvite = 'invite_$i';
+      await seedInvite(nextInvite);
+      nativeCalls.add(nativeForInvite(nextInvite));
+      final result = await manager.handleRecoveredAcceptedInvite(
+        inviteId: nextInvite,
+        channel: 'channel_$nextInvite',
+        isVideo: false,
+        fromName: callerName,
+        fromUid: callerUid,
+      );
+      expect(result, AcceptedCallRecoveryResult.pendingTeardown);
+      expect(manager.debugSnapshot()['pendingAcceptedIntent'], isTrue);
+
+      await manager.debugCloseHeldRouteForTest(previousInvite);
+      await tester.pump();
+      expect(routes.length, i);
+      expect(routes.last, nextInvite);
+      expect(manager.debugSnapshot()['routeOpenCount'], i);
+      expect(manager.debugSnapshot()['rtcSetupOwnerCount'], i);
+      expect(manager.debugSnapshot()['hiddenSessionDetected'], isFalse);
+      previousInvite = nextInvite;
+    }
+    await manager.forceIdleForTest();
   });
 
   testWidgets('newer pending invite supersedes older and owns after teardown',

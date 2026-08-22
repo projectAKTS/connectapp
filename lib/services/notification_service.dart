@@ -2467,6 +2467,13 @@ class NotificationService with WidgetsBindingObserver {
         _acceptedRecoveryRetryResultForTest = null;
         _pendingAcceptedCallkitRecoveryPayload = null;
         return;
+      case AcceptedCallRecoveryResult.pendingTeardown:
+        _acceptedRecoveryRetryTimer?.cancel();
+        _acceptedRecoveryRetryTimer = null;
+        _acceptedRecoveryRetryAttempts = 0;
+        _acceptedRecoveryRetryScheduledForTest = false;
+        _acceptedRecoveryRetryResultForTest = null;
+        return;
       case AcceptedCallRecoveryResult.pendingAuth:
       case AcceptedCallRecoveryResult.pendingNavigator:
       case AcceptedCallRecoveryResult.pendingNetwork:
