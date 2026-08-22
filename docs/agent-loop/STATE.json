@@ -2,7 +2,7 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "physical_repeat_call_pending_accept",
-  "status": "implementation_required",
+  "status": "task_ready",
   "accepted_checkpoint_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "starting_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
