@@ -2,20 +2,18 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "physical_repeat_call_pending_accept",
-  "status": "revision_required",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "starting_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "ac341289a1add19b70b0352e8d95fee3805a2f25",
+  "code_commit_sha": "ab9a90e057ae06d6d739355a02e0e6cfade00607",
   "ending_sha": "SELF",
   "changed_files": [
-    "lib/call_v2/real_flow/call_v2_call_lifecycle_arbiter.dart",
     "lib/services/call_session_manager.dart",
     "lib/services/notification_service.dart",
     "test/call_v2/real_flow/call_v2_notification_ownership_test.dart",
-    "test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart",
-    "test/call_v2/real_flow/call_v2_repeated_call_lifecycle_test.dart"
+    "test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart"
   ],
   "validation": {
     "physical_call_1_connected": true,
@@ -26,11 +24,10 @@
     "physical_call_2_route_opened": false,
     "physical_call_2_rtc_started": false,
     "flutter_analyze": "passed",
-    "call_v2_tests": "passed: 2254",
+    "call_v2_tests": "passed: 2260",
     "foreground_recovery_tests": "passed: 3",
-    "focused_arbiter_tests": "passed: 50",
-    "focused_manager_tests": "passed: 52",
-    "focused_notification_tests": "passed: 14",
+    "focused_manager_tests": "passed: 57",
+    "focused_notification_tests": "passed: 15",
     "git_diff_check": "passed"
   },
   "safety": {
@@ -40,7 +37,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "revision_required",
-    "notes": "Physical repeat-call still fails when Call 2 Accept foregrounds the app. Accepted pending ownership is preserved, but teardown continuation can lose route opening when Navigator is temporarily unavailable. Required revision: durable foreground/navigator-ready route continuation for the already-accepted pending call, with exactly one route/RTC owner."
+    "decision": "ready_for_review",
+    "notes": "Accepted Call 2 now retains an exact generation-owned route obligation across temporary Navigator unavailability. App-resumed readiness probes are bounded and single-flight; terminal, missing, stale-generation, reset, and sign-out paths discard safely. Physical two-iPhone repeat-call validation remains required."
   }
 }
