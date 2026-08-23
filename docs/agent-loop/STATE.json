@@ -2,7 +2,7 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "physical_repeat_call_pending_accept",
-  "status": "ready_for_review",
+  "status": "revision_required",
   "accepted_checkpoint_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "starting_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
@@ -40,7 +40,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "Generation-scoped pending CallKit Accept intent now survives previous-call teardown and continues through one idempotent route/RTC ownership path. Physical two-iPhone repeat-call validation remains required."
+    "decision": "revision_required",
+    "notes": "Physical repeat-call still fails when Call 2 Accept foregrounds the app. Accepted pending ownership is preserved, but teardown continuation can lose route opening when Navigator is temporarily unavailable. Required revision: durable foreground/navigator-ready route continuation for the already-accepted pending call, with exactly one route/RTC owner."
   }
 }
