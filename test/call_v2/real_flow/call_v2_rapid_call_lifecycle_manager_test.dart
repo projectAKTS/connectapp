@@ -104,6 +104,77 @@ void main() {
     );
   }
 
+  void configureAcceptedRouteHarness({
+    required List<NativeCallSnapshot> nativeCalls,
+    required List<String> routes,
+    required bool Function() appReady,
+    CallScreenOpenRecorderForTest? routeRecorder,
+    List<String>? endedNative,
+  }) {
+    manager.configure(
+      navigatorKey: navigatorKey,
+      appForegroundProvider: () async => appReady(),
+      listNativeCalls: () async => List<NativeCallSnapshot>.from(nativeCalls),
+      endNativeCall: (callkitId) async {
+        endedNative?.add(callkitId);
+        nativeCalls.removeWhere((call) => call.callkitId == callkitId);
+      },
+      markNativeInviteState: ({
+        required String inviteId,
+        required String channel,
+        required String state,
+      }) async {},
+      iosCallkitOnlyIncomingUiForTest: true,
+      callScreenOpenRecorderForTest: routeRecorder ?? recordingRoute(routes),
+      skipActiveInviteBindingForTest: true,
+    );
+  }
+
+  Future<void> createAcceptedRoutePending({
+    required WidgetTester tester,
+    required String previousInvite,
+    required String nextInvite,
+    required List<NativeCallSnapshot> nativeCalls,
+    required List<String> routes,
+    required bool Function() appReady,
+    CallScreenOpenRecorderForTest? routeRecorder,
+    List<String>? endedNative,
+  }) async {
+    await tester.pumpWidget(buildHarness());
+    configureAcceptedRouteHarness(
+      nativeCalls: nativeCalls,
+      routes: routes,
+      appReady: appReady,
+      routeRecorder: routeRecorder,
+      endedNative: endedNative,
+    );
+    await seedInvite(nextInvite);
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: previousInvite,
+      channel: 'channel_$previousInvite',
+    );
+    await manager.debugMarkHeldRouteTerminalForTest(previousInvite);
+    expect(
+      await manager.handleRecoveredAcceptedInvite(
+        inviteId: nextInvite,
+        channel: 'channel_$nextInvite',
+        isVideo: false,
+        fromName: callerName,
+        fromUid: callerUid,
+      ),
+      AcceptedCallRecoveryResult.pendingTeardown,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await manager.debugCloseHeldRouteForTest(previousInvite);
+    await tester.pump();
+    expect(routes, isEmpty);
+    expect(manager.debugSnapshot()['acceptedRoutePending'], isTrue);
+    expect(
+      manager.debugSnapshot()['acceptedRouteNavigatorUnavailable'],
+      isTrue,
+    );
+  }
+
   Future<void> claimCallkitOwnedInvite(
     WidgetTester tester,
     String inviteId,
@@ -302,9 +373,241 @@ void main() {
     expect(snapshot['pendingAcceptedContinuationCompleted'], isTrue);
     expect(snapshot['previousTeardownCompleted'], isTrue);
     expect(snapshot['pendingAcceptedIntent'], isFalse);
+    expect(snapshot['acceptedRouteNavigatorUnavailable'], isFalse);
+    expect(snapshot['acceptedRoutePending'], isFalse);
     expect(snapshot['routeOpenCount'], 1);
     expect(snapshot['rtcSetupOwnerCount'], 1);
     expect(snapshot['flutterIncomingPromptCount'], 0);
+    await manager.forceIdleForTest();
+  });
+
+  testWidgets('background accepted route resumes after navigator becomes ready',
+      (tester) async {
+    final routes = <String>[];
+    final nativeCalls = <NativeCallSnapshot>[nativeForInvite('invite_b')];
+    var appReady = false;
+
+    await createAcceptedRoutePending(
+      tester: tester,
+      previousInvite: 'invite_a',
+      nextInvite: 'invite_b',
+      nativeCalls: nativeCalls,
+      routes: routes,
+      appReady: () => appReady,
+    );
+
+    final pending = manager.debugSnapshot();
+    expect(pending['pendingAcceptedIntent'], isTrue);
+    expect(pending['acceptedRouteGenerationOwned'], isTrue);
+    expect(pending['acceptedRouteAttemptInFlight'], isFalse);
+    expect(pending['acceptedRouteOpened'], isFalse);
+    expect(pending['routeOpenCount'], 0);
+    expect(pending['rtcSetupOwnerCount'], 0);
+    final acceptedInvite =
+        await firestore.collection('callInvites').doc('invite_b').get();
+    expect(acceptedInvite.data()?['status'], CallInviteStatus.accepted.name);
+
+    appReady = true;
+    await tester.pumpWidget(buildHarness());
+    expect(
+      await manager.resumePendingAcceptedRouteIfReady(
+        source: 'test_app_resumed',
+      ),
+      AcceptedCallRecoveryResult.opened,
+    );
+    await tester.pump();
+
+    final opened = manager.debugSnapshot();
+    expect(routes, ['invite_b']);
+    expect(opened['acceptedRoutePending'], isFalse);
+    expect(opened['acceptedRouteResumeTriggered'], isTrue);
+    expect(opened['acceptedRouteOpened'], isTrue);
+    expect(opened['routeOpenCount'], 1);
+    expect(opened['rtcSetupOwnerCount'], 1);
+    await manager.forceIdleForTest();
+  });
+
+  testWidgets('multiple resumed triggers coalesce one accepted route attempt',
+      (tester) async {
+    final routes = <String>[];
+    final nativeCalls = <NativeCallSnapshot>[nativeForInvite('invite_b')];
+    final routeStarted = Completer<void>();
+    final releaseRoute = Completer<void>();
+    var appReady = false;
+    Future<void> recorder({
+      required String inviteId,
+      required String channel,
+      required bool isVideo,
+      required String otherUserName,
+      required String? otherUserId,
+      required bool isCaller,
+      required dynamic connectionSystem,
+      required bool callV2FallbackUsed,
+      required String callV2BlockerCode,
+    }) async {
+      routes.add(inviteId);
+      if (!routeStarted.isCompleted) routeStarted.complete();
+      await releaseRoute.future;
+    }
+
+    await createAcceptedRoutePending(
+      tester: tester,
+      previousInvite: 'invite_a',
+      nextInvite: 'invite_b',
+      nativeCalls: nativeCalls,
+      routes: routes,
+      appReady: () => appReady,
+      routeRecorder: recorder,
+    );
+    appReady = true;
+    await tester.pumpWidget(buildHarness());
+
+    final first = manager.resumePendingAcceptedRouteIfReady(
+      source: 'resume_1',
+    );
+    await routeStarted.future;
+    final duplicates = List<Future<AcceptedCallRecoveryResult>>.generate(
+      5,
+      (index) => manager.resumePendingAcceptedRouteIfReady(
+        source: 'resume_${index + 2}',
+      ),
+    );
+    expect(manager.debugSnapshot()['acceptedRouteAttemptInFlight'], isTrue);
+    releaseRoute.complete();
+    final results = await Future.wait([first, ...duplicates]);
+
+    expect(results, everyElement(AcceptedCallRecoveryResult.opened));
+    expect(routes, ['invite_b']);
+    expect(manager.debugSnapshot()['routeOpenCount'], 1);
+    expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 1);
+    await manager.forceIdleForTest();
+  });
+
+  testWidgets('terminal invite cannot resume after navigator becomes ready',
+      (tester) async {
+    final routes = <String>[];
+    final endedNative = <String>[];
+    final nativeCalls = <NativeCallSnapshot>[nativeForInvite('invite_b')];
+    var appReady = false;
+    await createAcceptedRoutePending(
+      tester: tester,
+      previousInvite: 'invite_a',
+      nextInvite: 'invite_b',
+      nativeCalls: nativeCalls,
+      routes: routes,
+      appReady: () => appReady,
+      endedNative: endedNative,
+    );
+    await firestore.collection('callInvites').doc('invite_b').set({
+      'status': CallInviteStatus.cancelled.name,
+    }, SetOptions(merge: true));
+
+    appReady = true;
+    await tester.pumpWidget(buildHarness());
+    expect(
+      await manager.resumePendingAcceptedRouteIfReady(
+        source: 'terminal_resume',
+      ),
+      AcceptedCallRecoveryResult.terminal,
+    );
+    expect(
+      await manager.resumePendingAcceptedRouteIfReady(
+        source: 'late_terminal_resume',
+      ),
+      AcceptedCallRecoveryResult.invalid,
+    );
+
+    final snapshot = manager.debugSnapshot();
+    expect(routes, isEmpty);
+    expect(endedNative, isNotEmpty);
+    expect(snapshot['acceptedRoutePending'], isFalse);
+    expect(snapshot['acceptedRouteDiscarded'], isTrue);
+    expect(snapshot['sessionIdle'], isTrue);
+  });
+
+  testWidgets('invalidated generation cannot resume accepted route',
+      (tester) async {
+    final routes = <String>[];
+    final nativeCalls = <NativeCallSnapshot>[nativeForInvite('invite_b')];
+    var appReady = false;
+    await createAcceptedRoutePending(
+      tester: tester,
+      previousInvite: 'invite_a',
+      nextInvite: 'invite_b',
+      nativeCalls: nativeCalls,
+      routes: routes,
+      appReady: () => appReady,
+    );
+
+    manager.debugInvalidateLifecycleForTest();
+    appReady = true;
+    await tester.pumpWidget(buildHarness());
+    expect(
+      await manager.resumePendingAcceptedRouteIfReady(
+        source: 'stale_generation_resume',
+      ),
+      AcceptedCallRecoveryResult.invalid,
+    );
+    expect(routes, isEmpty);
+    expect(manager.debugSnapshot()['acceptedRoutePending'], isFalse);
+    expect(manager.debugSnapshot()['routeOpenCount'], 0);
+    expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 0);
+  });
+
+  testWidgets('twenty background accepted routes resume once per generation',
+      (tester) async {
+    final routes = <String>[];
+    final nativeCalls = <NativeCallSnapshot>[];
+    var appReady = true;
+    await tester.pumpWidget(buildHarness());
+    configureAcceptedRouteHarness(
+      nativeCalls: nativeCalls,
+      routes: routes,
+      appReady: () => appReady,
+    );
+    var previousInvite = 'background_invite_0';
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: previousInvite,
+      channel: 'channel_$previousInvite',
+    );
+
+    for (var i = 1; i <= 20; i += 1) {
+      final nextInvite = 'background_invite_$i';
+      await seedInvite(nextInvite);
+      nativeCalls.add(nativeForInvite(nextInvite));
+      await manager.debugMarkHeldRouteTerminalForTest(previousInvite);
+      expect(
+        await manager.handleRecoveredAcceptedInvite(
+          inviteId: nextInvite,
+          channel: 'channel_$nextInvite',
+          isVideo: false,
+          fromName: callerName,
+          fromUid: callerUid,
+        ),
+        AcceptedCallRecoveryResult.pendingTeardown,
+      );
+
+      appReady = false;
+      await tester.pumpWidget(const SizedBox.shrink());
+      await manager.debugCloseHeldRouteForTest(previousInvite);
+      expect(manager.debugSnapshot()['acceptedRoutePending'], isTrue);
+      expect(routes.length, i - 1);
+
+      appReady = true;
+      await tester.pumpWidget(buildHarness());
+      expect(
+        await manager.resumePendingAcceptedRouteIfReady(
+          source: 'background_cycle_$i',
+        ),
+        AcceptedCallRecoveryResult.opened,
+      );
+      expect(routes.length, i);
+      expect(routes.last, nextInvite);
+      expect(manager.debugSnapshot()['routeOpenCount'], i);
+      expect(manager.debugSnapshot()['rtcSetupOwnerCount'], i);
+      expect(manager.debugSnapshot()['acceptedRoutePending'], isFalse);
+      previousInvite = nextInvite;
+    }
     await manager.forceIdleForTest();
   });
 

@@ -108,6 +108,8 @@ class NotificationService with WidgetsBindingObserver {
   bool _acceptedRecoveryRetryScheduledForTest = false;
   AcceptedCallRecoveryResult? _acceptedRecoveryRetryResultForTest;
   _AcceptedCallkitRecoveryPayload? _pendingAcceptedCallkitRecoveryPayload;
+  Future<void>? _acceptedRouteResumeFuture;
+  int _acceptedRouteResumeGeneration = 0;
   int _pushBindingGeneration = 0;
   bool _signOutPreparationInProgress = false;
   String? _signOutPreparingUid;
@@ -1021,6 +1023,7 @@ class NotificationService with WidgetsBindingObserver {
     _acceptedRecoveryRetryAttempts = 0;
     _acceptedRecoveryRetryScheduledForTest = false;
     _acceptedRecoveryRetryResultForTest = null;
+    _acceptedRouteResumeGeneration += 1;
     _pendingAcceptedCallkitRecoveryPayload = null;
     _nativeAcceptBridgeReceivedForTest = false;
     _acceptedRecoveryCoalescedForTest = false;
@@ -1094,6 +1097,7 @@ class NotificationService with WidgetsBindingObserver {
     _acceptedRecoveryRetryTimer = null;
     _acceptedRecoveryRetryScheduledForTest = false;
     _acceptedRecoveryRetryResultForTest = null;
+    _acceptedRouteResumeGeneration += 1;
     _pendingAcceptedCallkitRecoveryPayload = null;
     _nativeAcceptBridgeReceivedForTest = false;
     _acceptedRecoveryCoalescedForTest = false;
@@ -1253,12 +1257,67 @@ class NotificationService with WidgetsBindingObserver {
       },
     );
     if (state != AppLifecycleState.resumed) return;
+    unawaited(_resumePendingAcceptedRouteAfterForeground());
     unawaited(FirestoreReadHelper.recoverNetwork(reason: 'app_resumed'));
     if (!_initialized) {
       unawaited(initialize());
       return;
     }
     unawaited(_syncOnResume());
+  }
+
+  Future<void> _resumePendingAcceptedRouteAfterForeground() async {
+    final inFlight = _acceptedRouteResumeFuture;
+    if (inFlight != null) return inFlight;
+    final generation = _acceptedRouteResumeGeneration;
+    late final Future<void> future;
+    future = _runAcceptedRouteReadinessProbe(generation);
+    _acceptedRouteResumeFuture = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_acceptedRouteResumeFuture, future)) {
+        _acceptedRouteResumeFuture = null;
+      }
+    }
+  }
+
+  Future<void> _runAcceptedRouteReadinessProbe(int generation) async {
+    const maxAttempts = 12;
+    for (var attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      if (generation != _acceptedRouteResumeGeneration) return;
+      final result =
+          await CallSessionManager.instance.resumePendingAcceptedRouteIfReady(
+        source: 'app_resumed',
+      );
+      if (generation != _acceptedRouteResumeGeneration) return;
+      switch (result) {
+        case AcceptedCallRecoveryResult.opened:
+        case AcceptedCallRecoveryResult.alreadyOpen:
+        case AcceptedCallRecoveryResult.terminal:
+        case AcceptedCallRecoveryResult.invalid:
+          _handleAcceptedRecoveryResult(result);
+          return;
+        case AcceptedCallRecoveryResult.pendingTeardown:
+          return;
+        case AcceptedCallRecoveryResult.pendingNavigator:
+          if (attempt == maxAttempts) {
+            await _diagPush('accepted_route_readiness_deferred', meta: {
+              'acceptedRoutePending': true,
+              'navigatorReady': navigatorKey?.currentState?.mounted == true,
+            });
+            return;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+          continue;
+        case AcceptedCallRecoveryResult.pendingAuth:
+        case AcceptedCallRecoveryResult.pendingNetwork:
+        case AcceptedCallRecoveryResult.busy:
+        case AcceptedCallRecoveryResult.failed:
+          _handleAcceptedRecoveryResult(result);
+          return;
+      }
+    }
   }
 
   Future<void> _syncOnResume() async {
@@ -2661,6 +2720,10 @@ class NotificationService with WidgetsBindingObserver {
     await _runAcceptedRecoveryRetry(result);
   }
 
+  Future<void> debugResumePendingAcceptedRouteForTest() async {
+    await _resumePendingAcceptedRouteAfterForeground();
+  }
+
   Map<String, dynamic> debugSnapshotForTest() {
     return <String, dynamic>{
       'acceptedRecoveryRetryScheduled':
@@ -2671,6 +2734,7 @@ class NotificationService with WidgetsBindingObserver {
           _pendingAcceptedCallkitRecoveryPayload != null,
       'nativeAcceptBridgeReceived': _nativeAcceptBridgeReceivedForTest,
       'acceptedRecoveryCoalesced': _acceptedRecoveryCoalescedForTest,
+      'acceptedRouteResumeInFlight': _acceptedRouteResumeFuture != null,
       'boundUid': _boundUid,
       'pushBindingGeneration': _pushBindingGeneration,
       'signOutPreparationInProgress': _signOutPreparationInProgress,

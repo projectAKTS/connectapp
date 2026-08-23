@@ -392,6 +392,104 @@ void main() {
   }
 
   testWidgets(
+      'native plugin and resumed duplicates preserve one background route owner',
+      (tester) async {
+    final navigatorKey = GlobalKey<NavigatorState>();
+    final openedRoutes = <String>[];
+    var appReady = true;
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navigatorKey,
+      home: const Scaffold(body: Text('home')),
+    ));
+    await seedInvite('invite_background_duplicates',
+        status: CallInviteStatus.ringing);
+    manager.configure(
+      navigatorKey: navigatorKey,
+      listNativeCalls: () async => const <NativeCallSnapshot>[],
+      endNativeCall: (_) async {},
+      appForegroundProvider: () async => appReady,
+      callScreenOpenRecorderForTest: recordingCallOpenRecorder(openedRoutes),
+      skipActiveInviteBindingForTest: true,
+      iosCallkitOnlyIncomingUiForTest: true,
+    );
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'invite_previous_background',
+      channel: 'channel_invite_previous_background',
+    );
+    await manager.debugMarkHeldRouteTerminalForTest(
+      'invite_previous_background',
+    );
+
+    await notifications.debugSimulateNativeAcceptedCallkitBridgeForTest(
+      inviteId: 'invite_background_duplicates',
+      channel: 'channel_invite_background_duplicates',
+      isVideo: false,
+      fromName: 'Notify Caller',
+      fromUid: callerUid,
+    );
+    await notifications.debugSimulateAcceptedCallkitEventForTest(
+      inviteId: 'invite_background_duplicates',
+      channel: 'channel_invite_background_duplicates',
+      isVideo: false,
+      fromName: 'Notify Caller',
+      fromUid: callerUid,
+    );
+
+    appReady = false;
+    await tester.pumpWidget(const SizedBox.shrink());
+    await manager.debugCloseHeldRouteForTest('invite_previous_background');
+    expect(manager.debugSnapshot()['acceptedRoutePending'], isTrue);
+    expect(openedRoutes, isEmpty);
+
+    await notifications.debugSimulateAcceptedCallkitEventForTest(
+      inviteId: 'invite_background_duplicates',
+      channel: 'channel_invite_background_duplicates',
+      isVideo: false,
+      fromName: 'Notify Caller',
+      fromUid: callerUid,
+    );
+    await notifications.debugSimulateNativeAcceptedCallkitBridgeForTest(
+      inviteId: 'invite_background_duplicates',
+      channel: 'channel_invite_background_duplicates',
+      isVideo: false,
+      fromName: 'Notify Caller',
+      fromUid: callerUid,
+    );
+    expect(
+      notifications.debugSnapshotForTest()['acceptedRecoveryRetryScheduled'],
+      isFalse,
+    );
+
+    final resumed = List<Future<void>>.generate(
+      5,
+      (_) => notifications.debugResumePendingAcceptedRouteForTest(),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(
+      notifications.debugSnapshotForTest()['acceptedRouteResumeInFlight'],
+      isTrue,
+    );
+    appReady = true;
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navigatorKey,
+      home: const Scaffold(body: Text('home')),
+    ));
+    await tester.pump(const Duration(milliseconds: 300));
+    await Future.wait(resumed);
+
+    final snapshot = manager.debugSnapshot();
+    expect(openedRoutes, ['invite_background_duplicates']);
+    expect(snapshot['acceptedRoutePending'], isFalse);
+    expect(snapshot['routeOpenCount'], 1);
+    expect(snapshot['rtcSetupOwnerCount'], 1);
+    expect(
+      notifications.debugSnapshotForTest()['acceptedRecoveryRetryScheduled'],
+      isFalse,
+    );
+    await manager.forceIdleForTest();
+  });
+
+  testWidgets(
       'native CallKit accept uses recovery coordinator for network retry',
       (tester) async {
     final navigatorKey = GlobalKey<NavigatorState>();
