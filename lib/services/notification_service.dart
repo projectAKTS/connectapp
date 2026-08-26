@@ -124,6 +124,13 @@ class NotificationService with WidgetsBindingObserver {
       bool.fromEnvironment('ENABLE_RUNTIME_DIAG', defaultValue: false);
   static const int _maxAppleTokenRetryAttempts = 8;
   static const int _maxAcceptedRecoveryRetryAttempts = 8;
+  static const Duration _defaultAcceptedRouteReadinessInterval =
+      Duration(milliseconds: 250);
+  static const Duration _defaultAcceptedRouteReadinessWindow =
+      Duration(seconds: 20);
+  Duration _acceptedRouteReadinessInterval =
+      _defaultAcceptedRouteReadinessInterval;
+  Duration _acceptedRouteReadinessWindow = _defaultAcceptedRouteReadinessWindow;
 
   bool get _debugTestAccessEnabled {
     var enabled = HelperlyTestRuntime.isEnabled;
@@ -1283,9 +1290,13 @@ class NotificationService with WidgetsBindingObserver {
   }
 
   Future<void> _runAcceptedRouteReadinessProbe(int generation) async {
-    const maxAttempts = 12;
+    final interval = _acceptedRouteReadinessInterval;
+    final maxAttempts = (_acceptedRouteReadinessWindow.inMicroseconds ~/
+            interval.inMicroseconds) +
+        1;
     for (var attempt = 1; attempt <= maxAttempts; attempt += 1) {
       if (generation != _acceptedRouteResumeGeneration) return;
+      if (!CallSessionManager.instance.hasPendingAcceptedRouteOwnership) return;
       final result =
           await CallSessionManager.instance.resumePendingAcceptedRouteIfReady(
         source: 'app_resumed',
@@ -1299,16 +1310,19 @@ class NotificationService with WidgetsBindingObserver {
           _handleAcceptedRecoveryResult(result);
           return;
         case AcceptedCallRecoveryResult.pendingTeardown:
-          return;
         case AcceptedCallRecoveryResult.pendingNavigator:
+          if (!CallSessionManager.instance.hasPendingAcceptedRouteOwnership) {
+            return;
+          }
           if (attempt == maxAttempts) {
             await _diagPush('accepted_route_readiness_deferred', meta: {
-              'acceptedRoutePending': true,
+              'acceptedRoutePending':
+                  CallSessionManager.instance.hasPendingAcceptedRouteOwnership,
               'navigatorReady': navigatorKey?.currentState?.mounted == true,
             });
             return;
           }
-          await Future<void>.delayed(const Duration(milliseconds: 250));
+          await Future<void>.delayed(interval);
           continue;
         case AcceptedCallRecoveryResult.pendingAuth:
         case AcceptedCallRecoveryResult.pendingNetwork:
@@ -2722,6 +2736,22 @@ class NotificationService with WidgetsBindingObserver {
 
   Future<void> debugResumePendingAcceptedRouteForTest() async {
     await _resumePendingAcceptedRouteAfterForeground();
+  }
+
+  void debugConfigureAcceptedRouteReadinessForTest({
+    required Duration interval,
+    required Duration window,
+  }) {
+    if (!_debugTestAccessEnabled) {
+      throw StateError(
+        'debugConfigureAcceptedRouteReadinessForTest is test-mode only',
+      );
+    }
+    if (interval <= Duration.zero || window < interval) {
+      throw ArgumentError('Invalid accepted route readiness timing');
+    }
+    _acceptedRouteReadinessInterval = interval;
+    _acceptedRouteReadinessWindow = window;
   }
 
   Map<String, dynamic> debugSnapshotForTest() {

@@ -323,6 +323,10 @@ class CallSessionManager {
 
   FirebaseFirestore get _db => HelperlyTestRuntime.firestore;
   String get _currentUid => HelperlyTestRuntime.currentUid ?? '';
+
+  bool get hasPendingAcceptedRouteOwnership =>
+      _pendingAcceptedInviteIntent != null ||
+      _acceptedRouteContinuation != null;
   bool get isIdleForDebug =>
       _callLifecycleArbiter.isIdle &&
       _current == null &&
