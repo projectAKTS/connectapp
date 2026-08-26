@@ -2,7 +2,7 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "physical_repeat_call_pending_accept",
-  "status": "ready_for_review",
+  "status": "revision_required",
   "accepted_checkpoint_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "starting_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
@@ -37,7 +37,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "Accepted Call 2 now retains an exact generation-owned route obligation across temporary Navigator unavailability. App-resumed readiness probes are bounded and single-flight; terminal, missing, stale-generation, reset, and sign-out paths discard safely. Physical two-iPhone repeat-call validation remains required."
+    "decision": "revision_required",
+    "notes": "Source review found a readiness-ownership gap when app resume occurs before previous-call teardown claims the accepted pending invite. The foreground probe exits on pendingTeardown, so a later pendingNavigator result may have no remaining resume owner. Required revision: one bounded, single-flight readiness owner spanning pendingTeardown through pendingNavigator, with deterministic cancellation when accepted ownership disappears."
   }
 }
