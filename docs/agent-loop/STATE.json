@@ -2,18 +2,17 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "physical_repeat_call_pending_accept",
-  "status": "revision_required",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "starting_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "ab9a90e057ae06d6d739355a02e0e6cfade00607",
+  "code_commit_sha": "89a9a794bc3459b141f5c849507ca7f1b3990f8a",
   "ending_sha": "SELF",
   "changed_files": [
     "lib/services/call_session_manager.dart",
     "lib/services/notification_service.dart",
-    "test/call_v2/real_flow/call_v2_notification_ownership_test.dart",
-    "test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart"
+    "test/call_v2/real_flow/call_v2_notification_ownership_test.dart"
   ],
   "validation": {
     "physical_call_1_connected": true,
@@ -24,10 +23,9 @@
     "physical_call_2_route_opened": false,
     "physical_call_2_rtc_started": false,
     "flutter_analyze": "passed",
-    "call_v2_tests": "passed: 2260",
+    "call_v2_tests": "passed: 2264",
     "foreground_recovery_tests": "passed: 3",
-    "focused_manager_tests": "passed: 57",
-    "focused_notification_tests": "passed: 15",
+    "focused_notification_tests": "passed: 19",
     "git_diff_check": "passed"
   },
   "safety": {
@@ -37,7 +35,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "revision_required",
-    "notes": "Source review found a readiness-ownership gap when app resume occurs before previous-call teardown claims the accepted pending invite. The foreground probe exits on pendingTeardown, so a later pendingNavigator result may have no remaining resume owner. Required revision: one bounded, single-flight readiness owner spanning pendingTeardown through pendingNavigator, with deterministic cancellation when accepted ownership disappears."
+    "decision": "ready_for_review",
+    "notes": "The single-flight foreground readiness owner now spans pendingTeardown through pendingNavigator for up to 20 seconds, covering the existing bounded teardown limits. It stops deterministically when accepted ownership disappears and opens exactly one route/RTC owner without requiring a second resume event. Physical two-iPhone repeat-call validation remains required."
   }
 }
