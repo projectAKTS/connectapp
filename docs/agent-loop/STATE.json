@@ -2,17 +2,18 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "physical_repeat_call_pending_accept",
-  "status": "revision_required",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "starting_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "973fc2271a84c44bbe8bcaecfa45e3192732d6a2",
+  "code_commit_sha": "4c6db2dc3380d9383a756d61ffe0ac8ac529d8c9",
   "ending_sha": "SELF",
   "changed_files": [
     "lib/services/call_session_manager.dart",
     "lib/services/notification_service.dart",
-    "test/call_v2/real_flow/call_v2_notification_ownership_test.dart"
+    "test/call_v2/real_flow/call_v2_notification_ownership_test.dart",
+    "test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart"
   ],
   "validation": {
     "physical_call_1_connected": true,
@@ -23,9 +24,9 @@
     "physical_call_2_route_opened": false,
     "physical_call_2_rtc_started": false,
     "flutter_analyze": "passed",
-    "call_v2_tests": "passed: 2268",
+    "call_v2_tests": "passed: 2274",
     "foreground_recovery_tests": "passed: 3",
-    "focused_notification_tests": "passed: 23",
+    "focused_notification_tests": "passed: 29",
     "focused_rapid_lifecycle_tests": "passed: 57",
     "git_diff_check": "passed"
   },
@@ -36,7 +37,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "revision_required",
-    "notes": "Physical Call 2 still leaves an accepted native CallKit session active indefinitely when no Flutter route opens. Required revision: add an exact-invite and generation-scoped accepted-native route watch with authoritative terminal observation, an independent watchdog, preserved actual CallKit identity, and verified exact native-call cleanup."
+    "decision": "ready_for_review",
+    "notes": "Implemented exact-invite/generation accepted-native route ownership with authoritative terminal observation, an independent watchdog, preserved actual CallKit identity, verified exact native-call cleanup, route ownership transfer, and reset/sign-out disposal. Physical two-iPhone repeat-call validation remains required."
   }
 }

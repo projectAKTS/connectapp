@@ -2,74 +2,101 @@
 
 Phase: `physical_repeat_call_pending_accept`
 Status: `ready_for_review`
+Remote checkpoint: `318a6aac3994bde2e7726ba59ed2aa81563c6fa9`
 Authorized baseline: `6b548b2f4ade470e4b8b02fae9d5517ee0438ec9`
-Starting HEAD: `3f2d22789b28027b1ddc76c5b7967f11b1c05b1c`
-Implementation commit: `973fc2271a84c44bbe8bcaecfa45e3192732d6a2`
+Implementation commit: `4c6db2dc3380d9383a756d61ffe0ac8ac529d8c9`
 
 ## Root Cause
 
-`handleRecoveredAcceptedInvite()` returned `pendingNavigator` before loading the
-authoritative invite or passing native CallKit Accept into lifecycle ownership.
-If app resume preceded the native bridge, the readiness probe observed no
-ownership and exited. The bridge then recorded no route obligation, so Call 2
-could remain on Home with a live native accepted call.
+After native CallKit Accept, accepted route ownership could remain pending with
+no routed Flutter session. That state had no independent authoritative terminal
+observer or absolute cleanup deadline. If routing never succeeded, a remote
+terminal transition could leave the actual accepted native CallKit session
+active indefinitely. Cleanup could also target a reconstructed identifier, and
+an in-flight acceptance coroutine could re-mark native state after terminal
+cleanup began.
 
 ## Correction
 
-- Removed Navigator readiness as a prerequisite for accepted-event ingestion.
-- Idle and teardown-blocked native accepts now establish exact-invite,
-  generation-scoped accepted route ownership before attempting route work.
-- The native bridge kicks the existing single-flight readiness coordinator only
-  after ownership exists, closing both resume-before-bridge and
-  bridge-before-resume orderings.
-- Navigator-unavailable recovery no longer starts the separate accepted-call
-  retry timer while durable route ownership exists.
-- Route-pending readiness re-reads the authoritative invite. Terminal or missing
-  state clears ownership, clears stored recovery, ends matching native CallKit
-  state, and returns the lifecycle to idle.
-- The bounded readiness deadline deterministically marks a still-open invite
-  failed, ends matching native state, clears accepted ownership and recovery,
-  and releases the lifecycle instead of orphaning an accepted native call.
-- Duplicate native/plugin accepts converge on one continuation, one route open,
-  and one RTC setup owner.
+- Preserves the actual CallKit identifier carried by the existing native and
+  plugin acceptance bridges; reconstruction is only a fallback when no exact
+  identifier exists.
+- Adds one exact-invite, lifecycle-generation accepted-native route watch when
+  accepted ownership exists but the route has not opened.
+- The watch owns a direct authoritative invite listener and an independent
+  20-second watchdog. It does not depend on Navigator readiness, app resume,
+  Agora startup, or an active routed session.
+- Missing, declined, missed, cancelled, ended, or failed authoritative state
+  invalidates pending ownership, cancels readiness and watcher resources, clears
+  stored recovery, ends the exact native call, verifies it is absent, and
+  returns the lifecycle to reusable idle state.
+- Watchdog expiry rereads authoritative state and guardedly fails a still-live
+  unrouteable invite before performing the same exact native cleanup.
+- Exact native cleanup performs one end request, a bounded active-call
+  verification, and one exact-ID escalation if the matching native call remains.
+- Listener cleanup never awaits cancellation of its own subscription, avoiding
+  self-cancellation deadlock.
+- Successful route opening atomically transfers ownership by canceling the
+  pending listener/watchdog before normal routed lifecycle ownership continues.
+- Terminal cleanup publishes ending/teardown before asynchronous cleanup and
+  acceptance now rejects ending, teardown, or idle generations, preventing late
+  callbacks from restoring accepted state.
+- Sign-out, hard reset, pending supersession, and route-readiness deadline paths
+  dispose the exact pending-native owner.
+
+## AppDelegate Review
+
+`AppDelegate.swift` is unchanged. The accepted checkpoint already sends
+`call.data.uuid` as `callkitId` in `callkitAcceptedNative` and stores it as
+`lastCallkitAcceptedCallkitId`. The existing native state bridge preserves a
+canonical UUID, so no native presentation or ownership change was necessary.
+
+## Regression Resolution
+
+The focused full-file regression was an obsolete test timing assumption. The
+new terminal listener resolves ownership immediately, so a later explicit
+resume correctly returns `invalid` instead of being the operation that first
+returns `terminal`. Fake-time tests were minimally synchronized with listener
+attachment, canceled readiness delay, reset delay, and intentional watcher
+disposal. Production guarantees were not weakened.
 
 ## Tests
 
-- Exact physical ordering: Call A teardown, Call B native Accept with no
-  Navigator, teardown completion, Navigator mount, one route and RTC owner.
-- Resume before the native bridge exits safely; the later bridge records
-  ownership, kicks readiness, and opens without a second resume event.
-- Native bridge before Navigator/resume retains durable idle-lifecycle route
-  ownership and opens once when routing becomes available.
-- Authoritative terminal state before route open clears ownership and matching
-  native state and cannot be resurrected by a later Navigator mount.
-- Readiness deadline leaves no pending ownership or native accepted state and
-  settles the lifecycle idle.
-- Native/plugin/resume duplicates retain one route/RTC owner.
-- Twenty alternating resume-before-bridge and bridge-before-resume background
-  cycles each open exactly once.
-- Existing accepted/joining, terminal, supersession, generation, and pending
-  teardown coverage remains passing.
+- Exact native identifier is preserved and exact cleanup never uses the
+  reconstructed fallback when the accepted ID is available.
+- Remote declined, cancelled, ended, failed, and missed states end the exact
+  native call without Navigator, clear ownership/recovery, and remain reusable.
+- Independent watchdog fails a live unrouteable invite, verifies exact native
+  removal, and exercises one controlled exact-ID escalation.
+- Terminal-listener cleanup settles without self-cancellation deadlock.
+- Route-open transfer prevents a stale pending watcher from ending the routed
+  call; terminal ownership prevents a concurrent late route open.
+- Native/plugin duplicate accepts converge on one owner and one outcome.
+- Sign-out and hard reset end exact pending native ownership.
+- Twenty sequential cycles alternate successful route transfer, remote terminal
+  cleanup, and watchdog cleanup with expected route/RTC counts and no stale
+  native calls.
 
 ## Validation
 
 - `flutter analyze`: passed, no issues.
-- `flutter test test/call_v2 --no-pub`: passed, 2,268 tests.
+- `flutter test test/call_v2 --no-pub`: passed, 2,274 tests.
 - `flutter test test/notification_foreground_recovery_test.dart --no-pub`:
   passed, 3 tests.
-- Focused notification ownership tests: passed, 23 tests.
-- Focused rapid lifecycle-manager tests: passed, 57 tests.
+- Focused notification ownership file: passed, 29 tests.
+- Focused rapid lifecycle-manager file: passed, 57 tests.
 - `git diff --check`: passed.
 
 ## Safety
 
-No engine cleanup coordinator, Agora/RTC/token architecture, native
-PushKit/CallKit presentation code, Firebase/backend code, rules, or deployment
-configuration changed. No Firebase service was contacted, no TestFlight build
-was created, and nothing was deployed.
+No `AppDelegate.swift`, engine cleanup coordinator, Agora/RTC/token code,
+Firebase/backend code, Firestore rules, or deployment configuration changed.
+No Firebase service was contacted, no TestFlight build was created, and nothing
+was deployed.
 
 ## Physical Follow-up
 
-Install the pushed branch tip on both iPhones and repeat Call 1 followed by
-background Call 2 Accept during Call 1 teardown, including the case where app
-resume arrives before the native accept bridge.
+Install the pushed branch tip on both iPhones and repeat the exact Call 1 then
+background Call 2 native Accept scenario. Verify that Call 2 either opens its
+single Flutter route or its exact native CallKit session ends automatically when
+the remote invite terminalizes or the pending-route watchdog expires.
