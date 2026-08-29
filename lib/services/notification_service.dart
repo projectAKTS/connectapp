@@ -110,6 +110,7 @@ class NotificationService with WidgetsBindingObserver {
   _AcceptedCallkitRecoveryPayload? _pendingAcceptedCallkitRecoveryPayload;
   Future<void>? _acceptedRouteResumeFuture;
   int _acceptedRouteResumeGeneration = 0;
+  bool _acceptedBridgeReadinessKick = false;
   int _pushBindingGeneration = 0;
   bool _signOutPreparationInProgress = false;
   String? _signOutPreparingUid;
@@ -1031,6 +1032,7 @@ class NotificationService with WidgetsBindingObserver {
     _acceptedRecoveryRetryScheduledForTest = false;
     _acceptedRecoveryRetryResultForTest = null;
     _acceptedRouteResumeGeneration += 1;
+    _acceptedBridgeReadinessKick = false;
     _pendingAcceptedCallkitRecoveryPayload = null;
     _nativeAcceptBridgeReceivedForTest = false;
     _acceptedRecoveryCoalescedForTest = false;
@@ -1105,6 +1107,7 @@ class NotificationService with WidgetsBindingObserver {
     _acceptedRecoveryRetryScheduledForTest = false;
     _acceptedRecoveryRetryResultForTest = null;
     _acceptedRouteResumeGeneration += 1;
+    _acceptedBridgeReadinessKick = false;
     _pendingAcceptedCallkitRecoveryPayload = null;
     _nativeAcceptBridgeReceivedForTest = false;
     _acceptedRecoveryCoalescedForTest = false;
@@ -1315,9 +1318,13 @@ class NotificationService with WidgetsBindingObserver {
             return;
           }
           if (attempt == maxAttempts) {
+            final deadlineResult = await CallSessionManager.instance
+                .resolvePendingAcceptedRouteDeadline();
+            _handleAcceptedRecoveryResult(deadlineResult);
             await _diagPush('accepted_route_readiness_deferred', meta: {
               'acceptedRoutePending':
                   CallSessionManager.instance.hasPendingAcceptedRouteOwnership,
+              'acceptedRouteDeadlineReached': true,
               'navigatorReady': navigatorKey?.currentState?.mounted == true,
             });
             return;
@@ -2516,6 +2523,17 @@ class NotificationService with WidgetsBindingObserver {
         fromUid: fromUid,
       );
       _handleAcceptedRecoveryResult(result);
+      if ((result == AcceptedCallRecoveryResult.pendingTeardown ||
+              result == AcceptedCallRecoveryResult.pendingNavigator) &&
+          CallSessionManager.instance.hasPendingAcceptedRouteOwnership) {
+        _acceptedBridgeReadinessKick = true;
+        await _diagPush('accepted_bridge_readiness_kick', meta: {
+          'acceptedBridgeReadinessKick': true,
+          'acceptedOwnershipRecorded': true,
+          'acceptedRoutePending': true,
+        });
+        unawaited(_resumePendingAcceptedRouteAfterForeground());
+      }
     } catch (error) {
       await _diagPush('accepted_call_recovery_error', meta: {
         'trigger': trigger,
@@ -2547,8 +2565,18 @@ class NotificationService with WidgetsBindingObserver {
         _acceptedRecoveryRetryScheduledForTest = false;
         _acceptedRecoveryRetryResultForTest = null;
         return;
-      case AcceptedCallRecoveryResult.pendingAuth:
       case AcceptedCallRecoveryResult.pendingNavigator:
+        if (CallSessionManager.instance.hasPendingAcceptedRouteOwnership) {
+          _acceptedRecoveryRetryTimer?.cancel();
+          _acceptedRecoveryRetryTimer = null;
+          _acceptedRecoveryRetryAttempts = 0;
+          _acceptedRecoveryRetryScheduledForTest = false;
+          _acceptedRecoveryRetryResultForTest = null;
+          return;
+        }
+        _scheduleAcceptedRecoveryRetry(result);
+        return;
+      case AcceptedCallRecoveryResult.pendingAuth:
       case AcceptedCallRecoveryResult.pendingNetwork:
       case AcceptedCallRecoveryResult.busy:
       case AcceptedCallRecoveryResult.failed:
@@ -2765,6 +2793,7 @@ class NotificationService with WidgetsBindingObserver {
       'nativeAcceptBridgeReceived': _nativeAcceptBridgeReceivedForTest,
       'acceptedRecoveryCoalesced': _acceptedRecoveryCoalescedForTest,
       'acceptedRouteResumeInFlight': _acceptedRouteResumeFuture != null,
+      'acceptedBridgeReadinessKick': _acceptedBridgeReadinessKick,
       'boundUid': _boundUid,
       'pushBindingGeneration': _pushBindingGeneration,
       'signOutPreparationInProgress': _signOutPreparationInProgress,

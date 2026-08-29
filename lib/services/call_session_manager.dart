@@ -301,6 +301,11 @@ class CallSessionManager {
   bool _acceptedRouteOpened = false;
   bool _acceptedRouteDiscarded = false;
   bool _acceptedRouteAppResumed = false;
+  bool _acceptedBridgeIngestionStarted = false;
+  bool _acceptedOwnershipRecorded = false;
+  bool _acceptedRouteDeadlineReached = false;
+  bool _acceptedRouteTerminalObserved = false;
+  String? _nativeAcceptedCallInviteId;
   String? _incomingListenerBoundUid;
   int _incomingListenerGeneration = 0;
   int _incomingListenerErrorCount = 0;
@@ -418,6 +423,11 @@ class CallSessionManager {
     _acceptedRouteOpened = false;
     _acceptedRouteDiscarded = false;
     _acceptedRouteAppResumed = false;
+    _acceptedBridgeIngestionStarted = false;
+    _acceptedOwnershipRecorded = false;
+    _acceptedRouteDeadlineReached = false;
+    _acceptedRouteTerminalObserved = false;
+    _nativeAcceptedCallInviteId = null;
     _acceptedRecoveryPending = false;
     _acceptedRecoveryAcknowledged = false;
     _acceptedRecoveryAttemptCount = 0;
@@ -1237,15 +1247,7 @@ class CallSessionManager {
       });
       return AcceptedCallRecoveryResult.pendingAuth;
     }
-    final nav = _navigatorKey?.currentState;
-    if (nav == null || !nav.mounted) {
-      await _diagManager('accepted_recovery_pending', meta: {
-        'authReady': true,
-        'navigatorReady': false,
-        'acceptedRecoveryAttemptCount': _acceptedRecoveryAttemptCount,
-      });
-      return AcceptedCallRecoveryResult.pendingNavigator;
-    }
+    _acceptedBridgeIngestionStarted = true;
     final payload = await _loadInvitePayload(
       inviteId: inviteId,
       fallbackChannel: channel,
@@ -1280,6 +1282,7 @@ class CallSessionManager {
     }
     final status = _parseStatus(latest?['status']);
     if (latest == null || _isTerminalStatus(status)) {
+      _acceptedRouteTerminalObserved = true;
       await _markNativeInviteStateSafely(
         payload,
         state: 'terminal',
@@ -1814,6 +1817,7 @@ class CallSessionManager {
       _acceptedRouteOpened = false;
       _acceptedRouteDiscarded = false;
       _acceptedRouteAppResumed = false;
+      _acceptedOwnershipRecorded = true;
     }
     return true;
   }
@@ -1890,6 +1894,7 @@ class CallSessionManager {
     _acceptedRouteOpened = false;
     _acceptedRouteDiscarded = false;
     _acceptedRouteAppResumed = false;
+    _acceptedOwnershipRecorded = true;
   }
 
   Future<AcceptedCallRecoveryResult> resumePendingAcceptedRouteIfReady({
@@ -1922,6 +1927,90 @@ class CallSessionManager {
         _acceptedRouteAttemptInFlight = false;
       }
     }
+  }
+
+  Future<AcceptedCallRecoveryResult> resolvePendingAcceptedRouteDeadline({
+    String source = 'accepted_route_readiness_deadline',
+  }) async {
+    final continuation = _acceptedRouteContinuation;
+    final intent = _pendingAcceptedInviteIntent;
+    final payload = continuation?.payload ?? intent?.payload;
+    if (payload == null) return AcceptedCallRecoveryResult.invalid;
+
+    _acceptedRouteDeadlineReached = true;
+    Map<String, dynamic>? latest;
+    try {
+      latest = await _readInviteData(payload.inviteId);
+    } catch (_) {}
+    final latestStatus = _parseStatus(latest?['status']);
+    final authoritativeTerminal =
+        latest == null || _isTerminalStatus(latestStatus);
+    _acceptedRouteTerminalObserved = authoritativeTerminal;
+
+    if (!authoritativeTerminal) {
+      await _setInviteStatusIfCurrent(
+        inviteId: payload.inviteId,
+        expectedStatuses: const <CallInviteStatus>{
+          CallInviteStatus.ringing,
+          CallInviteStatus.accepted,
+          CallInviteStatus.joining,
+          CallInviteStatus.connected,
+        },
+        updates: <String, dynamic>{
+          'status': CallInviteStatus.failed.name,
+          'calleeStage': CallInviteStatus.failed.name,
+          'failedAt': FieldValue.serverTimestamp(),
+          'endedBy': _currentUid,
+          'endReason': 'accepted_route_readiness_deadline',
+        },
+      );
+    }
+
+    _acceptedRouteDiscarded = true;
+    _clearPendingIncomingPrompt(payload.inviteId);
+    _callLifecycleArbiter.clearPendingInvite(payload.inviteId);
+    _clearPendingAcceptedIntent(
+      inviteId: payload.inviteId,
+      claimedGeneration: continuation?.claimedGeneration,
+    );
+    await _markNativeInviteStateSafely(
+      payload,
+      state: 'terminal',
+      reason: source,
+    );
+    await _endNativeCallForInvite(
+      inviteId: payload.inviteId,
+      channel: payload.channel,
+      reason: source,
+    );
+
+    final generation = continuation?.claimedGeneration;
+    if (generation != null &&
+        _callLifecycleArbiter.ownsGeneration(generation)) {
+      _callLifecycleArbiter.beginEnding(generation);
+      _callLifecycleArbiter.beginTeardown(generation);
+      final pendingPayload = _pendingIncomingPromptPayload;
+      final pendingSource = _pendingIncomingPromptSource;
+      final pendingClaim =
+          _callLifecycleArbiter.completeTeardownAndClaimPending(generation);
+      await _continueClaimedPendingIncoming(
+        pendingClaim: pendingClaim,
+        pendingPayload: pendingPayload,
+        pendingSource: pendingSource,
+        source: '$source:terminal_complete',
+      );
+    }
+
+    _acceptedRecoveryPending = false;
+    _acceptedRecoveryAcknowledged = true;
+    await _clearStoredAcceptedCallRecoverySafely(source);
+    await _diagManager('accepted_route_deadline_resolved', meta: {
+      'acceptedRouteDeadlineReached': true,
+      'acceptedRouteTerminalObserved': authoritativeTerminal,
+      'acceptedRoutePending': hasPendingAcceptedRouteOwnership,
+      'sessionIdle': isIdleForDebug,
+    });
+    return AcceptedCallRecoveryResult.terminal;
   }
 
   Future<AcceptedCallRecoveryResult> _resumeAcceptedRouteContinuation(
@@ -1978,10 +2067,16 @@ class CallSessionManager {
             latestStatus == CallInviteStatus.joining ||
             latestStatus == CallInviteStatus.connected);
     if (!openable) {
+      _acceptedRouteTerminalObserved = true;
       _acceptedRouteDiscarded = true;
       _clearPendingAcceptedIntent(
         inviteId: continuation.payload.inviteId,
         claimedGeneration: continuation.claimedGeneration,
+      );
+      await _markNativeInviteStateSafely(
+        continuation.payload,
+        state: 'terminal',
+        reason: 'accepted_route_terminal',
       );
       await _endNativeCallForInvite(
         inviteId: continuation.payload.inviteId,
@@ -2138,10 +2233,15 @@ class CallSessionManager {
         _incomingPromptActive = false;
         _incomingPromptInviteId = null;
         _incomingUiOwner = IncomingUiOwner.none;
+        _ownAcceptedRouteContinuation(
+          payload: payload,
+          claimedGeneration: reservation.generation,
+        );
         return _acceptInviteAndOpen(
           payload,
           source: source,
           lifecycleGeneration: reservation.generation,
+          preserveLifecycleOnNavigatorUnavailable: true,
         );
       }
       if (autoAccept &&
@@ -2291,10 +2391,15 @@ class CallSessionManager {
       _incomingPromptActive = false;
       _incomingPromptInviteId = null;
       _incomingUiOwner = IncomingUiOwner.none;
+      _ownAcceptedRouteContinuation(
+        payload: payload,
+        claimedGeneration: reservation.generation,
+      );
       return _acceptInviteAndOpen(
         payload,
         source: source,
         lifecycleGeneration: reservation.generation,
+        preserveLifecycleOnNavigatorUnavailable: true,
       );
     }
     final owner = await _resolveIncomingUiOwner(payload);
@@ -3671,6 +3776,12 @@ class CallSessionManager {
     required String state,
     required String reason,
   }) async {
+    if (state == 'accepted' || state == 'active') {
+      _nativeAcceptedCallInviteId = inviteId.trim();
+    } else if (state == 'terminal' &&
+        _nativeAcceptedCallInviteId == inviteId.trim()) {
+      _nativeAcceptedCallInviteId = null;
+    }
     final marker = _markNativeInviteState;
     if (marker == null) return;
     try {
@@ -3852,6 +3963,11 @@ class CallSessionManager {
       'acceptedRouteOpened': _acceptedRouteOpened,
       'acceptedRouteDiscarded': _acceptedRouteDiscarded,
       'appResumed': _acceptedRouteAppResumed,
+      'acceptedBridgeIngestionStarted': _acceptedBridgeIngestionStarted,
+      'acceptedOwnershipRecorded': _acceptedOwnershipRecorded,
+      'acceptedRouteDeadlineReached': _acceptedRouteDeadlineReached,
+      'acceptedRouteTerminalObserved': _acceptedRouteTerminalObserved,
+      'nativeAcceptedCallActive': _nativeAcceptedCallInviteId != null,
       'acceptedRecoverySingleFlight': _routeOpenCount <= 1,
       'routeOpenCount': _routeOpenCount,
       'rtcSetupOwnerCount': _rtcSetupOwnerCount,
