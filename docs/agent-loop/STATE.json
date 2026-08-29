@@ -2,7 +2,7 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "physical_repeat_call_pending_accept",
-  "status": "ready_for_review",
+  "status": "revision_required",
   "accepted_checkpoint_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "starting_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
@@ -35,7 +35,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "The single-flight foreground readiness owner now spans pendingTeardown through pendingNavigator for up to 20 seconds, covering the existing bounded teardown limits. It stops deterministically when accepted ownership disappears and opens exactly one route/RTC owner without requiring a second resume event. Physical two-iPhone repeat-call validation remains required."
+    "decision": "revision_required",
+    "notes": "Physical Call 2 still fails because handleRecoveredAcceptedInvite checks Navigator before ingesting native Accept into durable lifecycle ownership. A resume probe can therefore observe no ownership and exit. Required revision: ingest accepted ownership before routing checks, kick the single-flight readiness coordinator after bridge ingestion, and deterministically close route-pending native state on authoritative terminal status or readiness expiry."
   }
 }
