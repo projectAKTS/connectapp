@@ -2,7 +2,7 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "physical_repeat_call_pending_accept",
-  "status": "ready_for_review",
+  "status": "revision_required",
   "accepted_checkpoint_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "starting_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
@@ -36,7 +36,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "Native CallKit Accept is now ingested into exact-invite lifecycle ownership before Navigator readiness. The bridge kicks the single-flight readiness coordinator after ownership exists, while authoritative terminal observation and bounded deadline cleanup prevent orphaned native accepted state. Physical two-iPhone repeat-call validation remains required."
+    "decision": "revision_required",
+    "notes": "Physical Call 2 still leaves an accepted native CallKit session active indefinitely when no Flutter route opens. Required revision: add an exact-invite and generation-scoped accepted-native route watch with authoritative terminal observation, an independent watchdog, preserved actual CallKit identity, and verified exact native-call cleanup."
   }
 }
