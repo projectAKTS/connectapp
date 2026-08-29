@@ -3,42 +3,73 @@
 Phase: `physical_repeat_call_pending_accept`
 Status: `ready_for_review`
 Authorized baseline: `6b548b2f4ade470e4b8b02fae9d5517ee0438ec9`
-Starting HEAD: `0f79c2d5e317ce82085702b10087531c22a32227`
-Implementation commit: `89a9a794bc3459b141f5c849507ca7f1b3990f8a`
+Starting HEAD: `3f2d22789b28027b1ddc76c5b7967f11b1c05b1c`
+Implementation commit: `973fc2271a84c44bbe8bcaecfa45e3192732d6a2`
 
-## Source Review Gap
+## Root Cause
 
-The foreground readiness probe stopped immediately when it observed `pendingTeardown`. If app resume occurred before previous-call teardown claimed the accepted pending invite, the probe could end before the accepted-route continuation existed. A later one-shot route attempt could then encounter an unavailable Navigator with no remaining lifecycle event to retry it.
+`handleRecoveredAcceptedInvite()` returned `pendingNavigator` before loading the
+authoritative invite or passing native CallKit Accept into lifecycle ownership.
+If app resume preceded the native bridge, the readiness probe observed no
+ownership and exited. The bridge then recorded no route obligation, so Call 2
+could remain on Home with a live native accepted call.
 
 ## Correction
 
-- Added a safe manager ownership predicate covering either pending accepted intent or accepted-route continuation.
-- Kept the existing NotificationService single-flight readiness owner alive across both `pendingTeardown` and `pendingNavigator`.
-- Rechecked accepted ownership before each attempt and before every delay, stopping deterministically when ownership disappears.
-- Extended the production readiness window from three seconds to twenty seconds at 250 millisecond intervals. This covers the existing cleanup coordinator's bounded 13–14 second teardown limits without indefinite polling.
-- Preserved generation cancellation on sign-out and disposal, and retained existing terminal, invalid, opened, and already-open completion handling.
-- Added no manager-to-NotificationService callback, RTC cleanup change, native change, backend change, or deployment behavior.
+- Removed Navigator readiness as a prerequisite for accepted-event ingestion.
+- Idle and teardown-blocked native accepts now establish exact-invite,
+  generation-scoped accepted route ownership before attempting route work.
+- The native bridge kicks the existing single-flight readiness coordinator only
+  after ownership exists, closing both resume-before-bridge and
+  bridge-before-resume orderings.
+- Navigator-unavailable recovery no longer starts the separate accepted-call
+  retry timer while durable route ownership exists.
+- Route-pending readiness re-reads the authoritative invite. Terminal or missing
+  state clears ownership, clears stored recovery, ends matching native CallKit
+  state, and returns the lifecycle to idle.
+- The bounded readiness deadline deterministically marks a still-open invite
+  failed, ends matching native state, clears accepted ownership and recovery,
+  and releases the lifecycle instead of orphaning an accepted native call.
+- Duplicate native/plugin accepts converge on one continuation, one route open,
+  and one RTC setup owner.
 
 ## Tests
 
-- App resume before teardown now spans three `pendingTeardown` ticks, teardown claim, temporary Navigator unavailability, and route opening without another resume event.
-- Readiness ownership remains active through a simulated four-second teardown, then opens once after Navigator mount.
-- A terminal pending invite clears ownership and stops the probe without opening a route.
-- Twenty sequential resume-before-teardown cycles each open one route with one RTC setup owner.
-- Existing immediate-Navigator, duplicate Accept, terminal, generation, route-busy, and background-cycle tests remain passing.
+- Exact physical ordering: Call A teardown, Call B native Accept with no
+  Navigator, teardown completion, Navigator mount, one route and RTC owner.
+- Resume before the native bridge exits safely; the later bridge records
+  ownership, kicks readiness, and opens without a second resume event.
+- Native bridge before Navigator/resume retains durable idle-lifecycle route
+  ownership and opens once when routing becomes available.
+- Authoritative terminal state before route open clears ownership and matching
+  native state and cannot be resurrected by a later Navigator mount.
+- Readiness deadline leaves no pending ownership or native accepted state and
+  settles the lifecycle idle.
+- Native/plugin/resume duplicates retain one route/RTC owner.
+- Twenty alternating resume-before-bridge and bridge-before-resume background
+  cycles each open exactly once.
+- Existing accepted/joining, terminal, supersession, generation, and pending
+  teardown coverage remains passing.
 
 ## Validation
 
 - `flutter analyze`: passed, no issues.
-- `flutter test test/call_v2 --no-pub`: passed, 2,264 tests.
-- `flutter test test/notification_foreground_recovery_test.dart --no-pub`: passed, 3 tests.
-- Focused notification ownership tests: passed, 19 tests.
+- `flutter test test/call_v2 --no-pub`: passed, 2,268 tests.
+- `flutter test test/notification_foreground_recovery_test.dart --no-pub`:
+  passed, 3 tests.
+- Focused notification ownership tests: passed, 23 tests.
+- Focused rapid lifecycle-manager tests: passed, 57 tests.
 - `git diff --check`: passed.
 
 ## Safety
 
-No Agora/RTC/token architecture, engine cleanup coordinator, native PushKit/CallKit code, Firebase/backend code, rules, or deployment configuration changed. No Firebase service was contacted, no TestFlight build was created, and nothing was deployed.
+No engine cleanup coordinator, Agora/RTC/token architecture, native
+PushKit/CallKit presentation code, Firebase/backend code, rules, or deployment
+configuration changed. No Firebase service was contacted, no TestFlight build
+was created, and nothing was deployed.
 
 ## Physical Follow-up
 
-Install the pushed branch tip on both iPhones and repeat Call 1 followed by background Call 2 Accept during Call 1 teardown, without delivering another foreground event.
+Install the pushed branch tip on both iPhones and repeat Call 1 followed by
+background Call 2 Accept during Call 1 teardown, including the case where app
+resume arrives before the native accept bridge.
