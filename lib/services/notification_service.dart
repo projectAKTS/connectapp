@@ -27,6 +27,7 @@ class _AcceptedCallkitRecoveryPayload {
     required this.isVideo,
     required this.fromName,
     required this.fromUid,
+    required this.callkitId,
   });
 
   final String inviteId;
@@ -34,11 +35,15 @@ class _AcceptedCallkitRecoveryPayload {
   final bool isVideo;
   final String fromName;
   final String fromUid;
+  final String callkitId;
 
   bool matches(_AcceptedCallkitRecoveryPayload other) {
     return inviteId == other.inviteId &&
         channel == other.channel &&
-        isVideo == other.isVideo;
+        isVideo == other.isVideo &&
+        (callkitId.isEmpty ||
+            other.callkitId.isEmpty ||
+            callkitId == other.callkitId);
   }
 }
 
@@ -53,6 +58,7 @@ class NotificationService with WidgetsBindingObserver {
       markNativeInviteState: _markNativeCallkitInviteState,
       clearStoredAcceptedCallRecovery: _clearStoredAcceptedCallRecovery,
       appForegroundProvider: _isAppActuallyForeground,
+      cancelAcceptedRouteReadiness: _cancelAcceptedRouteReadiness,
     );
   }
 
@@ -253,6 +259,12 @@ class NotificationService with WidgetsBindingObserver {
       CallSessionManager.instance.hasActiveUiOrSession;
 
   Future<void> _clearStoredAcceptedCallRecovery() async {
+    _acceptedRecoveryRetryTimer?.cancel();
+    _acceptedRecoveryRetryTimer = null;
+    _acceptedRecoveryRetryAttempts = 0;
+    _acceptedRecoveryRetryScheduledForTest = false;
+    _acceptedRecoveryRetryResultForTest = null;
+    _pendingAcceptedCallkitRecoveryPayload = null;
     if (!Platform.isIOS) return;
     try {
       await _pushTokenChannel.invokeMethod('clearStoredAcceptedCall');
@@ -262,13 +274,15 @@ class NotificationService with WidgetsBindingObserver {
   Future<void> _markNativeCallkitInviteState({
     required String inviteId,
     required String channel,
+    required String callkitId,
     required String state,
   }) async {
     if (!Platform.isIOS || !_enableIosCallKit) return;
+    final exactCallkitId = callkitId.trim();
     try {
       await _pushTokenChannel.invokeMethod('markCallkitInviteState', {
-        'inviteId': inviteId,
-        'channel': channel,
+        'inviteId': exactCallkitId.isEmpty ? inviteId : exactCallkitId,
+        'channel': exactCallkitId.isEmpty ? channel : '',
         'state': state,
       });
       await _diagPush('callkit_invite_state_marked', meta: {
@@ -280,6 +294,10 @@ class NotificationService with WidgetsBindingObserver {
         'blockerCode': 'native_state_mark_failed',
       });
     }
+  }
+
+  void _cancelAcceptedRouteReadiness() {
+    _acceptedRouteResumeGeneration += 1;
   }
 
   Future<bool> _presentIncomingCallkitFromManager(
@@ -1160,6 +1178,7 @@ class NotificationService with WidgetsBindingObserver {
           ((data['inviteId'] ?? data['callId'] ?? channel)).toString().trim();
       final fromName = (data['fromName'] ?? 'Caller').toString();
       final fromUid = (data['fromUid'] ?? '').toString().trim();
+      final callkitId = (data['callkitId'] ?? '').toString().trim();
       final isVideo = _videoField(data, const <String, dynamic>{});
       _nativeAcceptBridgeReceivedForTest = true;
       unawaited(_diagPush('callkit_native_accept_bridge_received', meta: {
@@ -1182,6 +1201,7 @@ class NotificationService with WidgetsBindingObserver {
             isVideo: isVideo,
             fromName: fromName,
             fromUid: fromUid,
+            callkitId: callkitId,
             trigger: 'native_callkit_accept',
           );
         }),
@@ -1539,6 +1559,7 @@ class NotificationService with WidgetsBindingObserver {
           isVideo: isVideo,
           fromName: fromName,
           fromUid: fromUid,
+          callkitId: id,
           trigger: 'callkit_accept',
         );
         return;
@@ -2409,6 +2430,7 @@ class NotificationService with WidgetsBindingObserver {
           isVideo: isVideo,
           fromName: fromName.isEmpty ? 'Caller' : fromName,
           fromUid: fromUid,
+          callkitId: acceptedCallkitId,
         );
         _handleAcceptedRecoveryResult(result);
         return;
@@ -2457,6 +2479,12 @@ class NotificationService with WidgetsBindingObserver {
           ),
         );
         final isVideo = _videoField(extra, body);
+        final callkitId = _stringField(
+          extra,
+          body,
+          'id',
+          fallback: _stringField(extra, body, 'callkitId'),
+        );
 
         final result =
             await CallSessionManager.instance.handleRecoveredAcceptedInvite(
@@ -2465,6 +2493,7 @@ class NotificationService with WidgetsBindingObserver {
           isVideo: isVideo,
           fromName: fromName,
           fromUid: fromUid,
+          callkitId: callkitId,
         );
         _handleAcceptedRecoveryResult(result);
         return;
@@ -2486,6 +2515,7 @@ class NotificationService with WidgetsBindingObserver {
     required bool isVideo,
     required String fromName,
     required String fromUid,
+    required String callkitId,
     required String trigger,
   }) async {
     final nextPayload = _AcceptedCallkitRecoveryPayload(
@@ -2494,6 +2524,7 @@ class NotificationService with WidgetsBindingObserver {
       isVideo: isVideo,
       fromName: fromName,
       fromUid: fromUid,
+      callkitId: callkitId,
     );
     if (_recoveringAcceptedCall) {
       final pending = _pendingAcceptedCallkitRecoveryPayload;
@@ -2521,6 +2552,7 @@ class NotificationService with WidgetsBindingObserver {
         isVideo: isVideo,
         fromName: fromName.isEmpty ? 'Caller' : fromName,
         fromUid: fromUid,
+        callkitId: callkitId,
       );
       _handleAcceptedRecoveryResult(result);
       if ((result == AcceptedCallRecoveryResult.pendingTeardown ||
@@ -2635,6 +2667,7 @@ class NotificationService with WidgetsBindingObserver {
         isVideo: payload.isVideo,
         fromName: payload.fromName,
         fromUid: payload.fromUid,
+        callkitId: payload.callkitId,
         trigger: 'retry_${result.name}',
       );
       return;
@@ -2678,19 +2711,24 @@ class NotificationService with WidgetsBindingObserver {
     required bool isVideo,
     required String fromName,
     required String fromUid,
+    String? callkitId,
   }) async {
-    _rememberAcceptedCallkitCall(
-        inviteId,
+    final exactCallkitId = callkitId ??
         normalizeCallkitId(
           rawId: inviteId,
           fallback: channel,
-        ));
+        );
+    _rememberAcceptedCallkitCall(
+      inviteId,
+      exactCallkitId,
+    );
     await _recoverAcceptedCallkitEvent(
       inviteId: inviteId,
       channel: channel,
       isVideo: isVideo,
       fromName: fromName,
       fromUid: fromUid,
+      callkitId: exactCallkitId,
       trigger: 'debug_callkit_accept',
     );
   }
@@ -2701,6 +2739,7 @@ class NotificationService with WidgetsBindingObserver {
     required bool isVideo,
     required String fromName,
     required String fromUid,
+    String? callkitId,
   }) async {
     await _handleNativePushMethodCall(
       MethodCall('callkitAcceptedNative', <String, dynamic>{
@@ -2710,10 +2749,11 @@ class NotificationService with WidgetsBindingObserver {
         'fromName': fromName,
         'fromUid': fromUid,
         'isVideo': isVideo,
-        'callkitId': normalizeCallkitId(
-          rawId: inviteId,
-          fallback: channel,
-        ),
+        'callkitId': callkitId ??
+            normalizeCallkitId(
+              rawId: inviteId,
+              fallback: channel,
+            ),
       }),
     );
     for (var i = 0; i < 8; i += 1) {

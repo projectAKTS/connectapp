@@ -94,6 +94,7 @@ void main() {
       markNativeInviteState: ({
         required String inviteId,
         required String channel,
+        required String callkitId,
         required String state,
       }) async {
         markedStates?.add(state);
@@ -122,6 +123,7 @@ void main() {
       markNativeInviteState: ({
         required String inviteId,
         required String channel,
+        required String callkitId,
         required String state,
       }) async {},
       iosCallkitOnlyIncomingUiForTest: true,
@@ -508,7 +510,7 @@ void main() {
       await manager.resumePendingAcceptedRouteIfReady(
         source: 'terminal_resume',
       ),
-      AcceptedCallRecoveryResult.terminal,
+      AcceptedCallRecoveryResult.invalid,
     );
     expect(
       await manager.resumePendingAcceptedRouteIfReady(
@@ -552,6 +554,7 @@ void main() {
     expect(manager.debugSnapshot()['acceptedRoutePending'], isFalse);
     expect(manager.debugSnapshot()['routeOpenCount'], 0);
     expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 0);
+    await manager.clearForSignedOut();
   });
 
   testWidgets('twenty background accepted routes resume once per generation',
@@ -1974,6 +1977,7 @@ void main() {
     expect(cleared, 0);
     expect(manager.debugSnapshot()['acceptedRecoveryPending'], isTrue);
     expect(manager.debugSnapshot()['hiddenSessionDetected'], isFalse);
+    await manager.clearForSignedOut();
   });
 
   testWidgets('terminal accepted recovery closes native call and clears record',
