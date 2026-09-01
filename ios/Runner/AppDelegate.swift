@@ -10,6 +10,210 @@ import flutter_callkit_incoming
 import AVFAudio
 import CallKit
 
+final class CallV2SafeNativeDiagnosticLedger {
+  private struct Entry {
+    let sequence: Int
+    let elapsedMilliseconds: Int
+    let stage: String
+  }
+
+  private struct Timeline {
+    let exactKey: String
+    let ordinal: Int
+    let startedAt: Date
+    var entries: [Entry]
+  }
+
+  private let maximumRetainedCalls = 2
+  private var timelines: [Timeline] = []
+  private var nextOrdinal = 1
+
+  @discardableResult
+  func begin(exactKey: String) -> Int {
+    let normalized = exactKey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !normalized.isEmpty else { return 0 }
+    if let existing = timelines.first(where: { $0.exactKey == normalized }) {
+      return existing.ordinal
+    }
+    timelines.append(Timeline(
+      exactKey: normalized,
+      ordinal: nextOrdinal,
+      startedAt: Date(),
+      entries: []
+    ))
+    nextOrdinal += 1
+    if timelines.count > maximumRetainedCalls {
+      timelines.removeFirst(timelines.count - maximumRetainedCalls)
+    }
+    return timelines.last?.ordinal ?? 0
+  }
+
+  func record(exactKey: String, stage: String) {
+    let normalized = exactKey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !normalized.isEmpty else { return }
+    let ordinal = begin(exactKey: normalized)
+    guard ordinal > 0,
+      let index = timelines.firstIndex(where: { $0.exactKey == normalized })
+    else { return }
+    let elapsed = max(
+      0,
+      Int(Date().timeIntervalSince(timelines[index].startedAt) * 1000)
+    )
+    let sequence = timelines[index].entries.count + 1
+    timelines[index].entries.append(Entry(
+      sequence: sequence,
+      elapsedMilliseconds: elapsed,
+      stage: stage
+    ))
+  }
+
+  func metadata(exactKey: String) -> (ordinal: Int, startedAtEpochMilliseconds: Int)? {
+    let normalized = exactKey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard let timeline = timelines.first(where: { $0.exactKey == normalized }) else {
+      return nil
+    }
+    return (
+      timeline.ordinal,
+      Int(timeline.startedAt.timeIntervalSince1970 * 1000)
+    )
+  }
+
+  func safeSnapshot(
+    nativeWatchActive: Bool,
+    routeOwnedAck: Bool,
+    nativeCallActive: Bool,
+    blockerCode: String
+  ) -> [String: Any] {
+    return [
+      "calls": timelines.map { timeline in
+        [
+          "ordinal": timeline.ordinal,
+          "startedAtEpochMilliseconds": Int(timeline.startedAt.timeIntervalSince1970 * 1000),
+          "entries": timeline.entries.map { entry in
+            [
+              "sequence": entry.sequence,
+              "elapsedMilliseconds": entry.elapsedMilliseconds,
+              "stage": entry.stage,
+            ]
+          },
+        ]
+      },
+      "nativeWatchActive": nativeWatchActive,
+      "routeOwnedAck": routeOwnedAck,
+      "nativeCallActive": nativeCallActive,
+      "blockerCode": blockerCode,
+    ]
+  }
+}
+
+final class CallV2NativeRouteSafetyWatchdog {
+  private struct Watch {
+    let workItem: DispatchWorkItem
+  }
+
+  private let timeout: TimeInterval
+  private let verificationDelay: TimeInterval
+  private let queue: DispatchQueue
+  private let record: (String, String) -> Void
+  private let requestExactEnd: (String) -> Void
+  private let exactCallIsActive: (String) -> Bool
+  private var watches: [String: Watch] = [:]
+  private(set) var routeOwnedAck = false
+  private(set) var blockerCode = "none"
+
+  init(
+    timeout: TimeInterval = 20,
+    verificationDelay: TimeInterval = 0.2,
+    queue: DispatchQueue = .main,
+    record: @escaping (String, String) -> Void,
+    requestExactEnd: @escaping (String) -> Void,
+    exactCallIsActive: @escaping (String) -> Bool
+  ) {
+    self.timeout = timeout
+    self.verificationDelay = verificationDelay
+    self.queue = queue
+    self.record = record
+    self.requestExactEnd = requestExactEnd
+    self.exactCallIsActive = exactCallIsActive
+  }
+
+  var activeCount: Int { watches.count }
+
+  @discardableResult
+  func start(exactKey: String) -> Bool {
+    let key = normalized(exactKey)
+    guard !key.isEmpty else { return false }
+    if watches[key] != nil { return false }
+    routeOwnedAck = false
+    blockerCode = "none"
+    var workItem: DispatchWorkItem!
+    workItem = DispatchWorkItem { [weak self] in
+      self?.handleTimeout(exactKey: key, expectedWorkItem: workItem)
+    }
+    watches[key] = Watch(workItem: workItem)
+    record(key, "nativeSafetyWatchStarted")
+    queue.asyncAfter(deadline: .now() + timeout, execute: workItem)
+    return true
+  }
+
+  @discardableResult
+  func acknowledgeRouteOwned(exactKey: String) -> Bool {
+    let key = normalized(exactKey)
+    guard let watch = watches.removeValue(forKey: key) else { return false }
+    watch.workItem.cancel()
+    routeOwnedAck = true
+    blockerCode = "none"
+    record(key, "nativeRouteOwnedAckReceived")
+    return true
+  }
+
+  @discardableResult
+  func terminal(exactKey: String) -> Bool {
+    let key = normalized(exactKey)
+    guard let watch = watches.removeValue(forKey: key) else { return false }
+    watch.workItem.cancel()
+    record(key, "terminalObserved")
+    return true
+  }
+
+  func isWatching(exactKey: String) -> Bool {
+    return watches[normalized(exactKey)] != nil
+  }
+
+  private func handleTimeout(exactKey: String, expectedWorkItem: DispatchWorkItem) {
+    guard let watch = watches[exactKey], watch.workItem === expectedWorkItem else {
+      return
+    }
+    watches.removeValue(forKey: exactKey)
+    blockerCode = "native_route_timeout"
+    record(exactKey, "nativeSafetyTimeoutFired")
+    record(exactKey, "nativeCallEndRequested")
+    requestExactEnd(exactKey)
+    verifyExactEnd(exactKey: exactKey, allowEscalation: true)
+  }
+
+  private func verifyExactEnd(exactKey: String, allowEscalation: Bool) {
+    queue.asyncAfter(deadline: .now() + verificationDelay) { [weak self] in
+      guard let self else { return }
+      if !exactCallIsActive(exactKey) {
+        record(exactKey, "nativeCallEnded")
+        record(exactKey, "nativeCallEndVerified")
+        return
+      }
+      if allowEscalation {
+        requestExactEnd(exactKey)
+        verifyExactEnd(exactKey: exactKey, allowEscalation: false)
+      } else {
+        blockerCode = "native_end_unverified"
+      }
+    }
+  }
+
+  private func normalized(_ value: String) -> String {
+    return value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+  }
+}
+
 @main
 @objc class AppDelegate: FlutterAppDelegate, PKPushRegistryDelegate, CallkitIncomingAppDelegate {
   private let pushTokenChannelName = "connectapp/pushTokens"
@@ -41,6 +245,19 @@ import CallKit
   private let callkitPresentationMaxAttempts = 2
   private var voipRegistry: PKPushRegistry?
   private var pushTokenChannel: FlutterMethodChannel?
+  private var callV2NativeAcceptedCallActive = false
+  private let callV2SafeDiagnosticLedger = CallV2SafeNativeDiagnosticLedger()
+  private lazy var callV2NativeSafetyWatchdog = CallV2NativeRouteSafetyWatchdog(
+    record: { [weak self] exactKey, stage in
+      self?.callV2SafeDiagnosticLedger.record(exactKey: exactKey, stage: stage)
+    },
+    requestExactEnd: { [weak self] exactKey in
+      self?.endAcceptedCallkitForSafety(exactKey: exactKey)
+    },
+    exactCallIsActive: { [weak self] exactKey in
+      self?.activeCallkitContains(callkitId: exactKey) == true
+    }
+  )
 
   override func application(
     _ application: UIApplication,
@@ -208,6 +425,29 @@ import CallKit
           @unknown default:
             result("unknown")
           }
+          return
+        }
+
+        if call.method == "getCallV2SafeDiagnosticTimeline" {
+          result(self.callV2SafeDiagnosticLedger.safeSnapshot(
+            nativeWatchActive: self.callV2NativeSafetyWatchdog.activeCount > 0,
+            routeOwnedAck: self.callV2NativeSafetyWatchdog.routeOwnedAck,
+            nativeCallActive: self.callV2NativeAcceptedCallActive,
+            blockerCode: self.callV2NativeSafetyWatchdog.blockerCode
+          ))
+          return
+        }
+
+        if call.method == "callkitRouteOwned" {
+          guard let args = call.arguments as? [String: Any] else {
+            result(false)
+            return
+          }
+          let exactKey = ((args["callkitId"] as? String) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+          result(self.callV2NativeSafetyWatchdog.acknowledgeRouteOwned(
+            exactKey: exactKey
+          ))
           return
         }
 
@@ -748,8 +988,14 @@ import CallKit
   ) {
     let trimmedCallkitId = callkitId.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmedCallkitId.isEmpty { return }
+    _ = callV2NativeSafetyWatchdog.terminal(exactKey: trimmedCallkitId)
+    callV2NativeAcceptedCallActive = false
     markCallkitPresentationState(callkitId: trimmedCallkitId, state: "terminal")
 
+    callV2SafeDiagnosticLedger.record(
+      exactKey: trimmedCallkitId,
+      stage: "nativeCallEndRequested"
+    )
     SwiftFlutterCallkitIncomingPlugin.sharedInstance?.saveEndCall(trimmedCallkitId, 2)
     let data = flutter_callkit_incoming.Data(
       id: trimmedCallkitId,
@@ -765,12 +1011,46 @@ import CallKit
       "channel": channel,
     ]
     SwiftFlutterCallkitIncomingPlugin.sharedInstance?.endCall(data)
+    verifyNativeCallEnded(exactKey: trimmedCallkitId)
     clearStoredAcceptedCall()
     storePushkitState(
       "terminal_push_end_requested",
       payloadType: payloadType,
       detail: detail.isEmpty ? "identifier_present=true" : detail
     )
+  }
+
+  private func endAcceptedCallkitForSafety(exactKey: String) {
+    let key = exactKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !key.isEmpty else { return }
+    callV2NativeAcceptedCallActive = false
+    markCallkitPresentationState(callkitId: key, state: "terminal")
+    SwiftFlutterCallkitIncomingPlugin.sharedInstance?.saveEndCall(key, 2)
+    let data = flutter_callkit_incoming.Data(
+      id: key,
+      nameCaller: "Helperly",
+      handle: "Call ended",
+      type: 0
+    )
+    data.extra = ["id": key, "callkitId": key]
+    SwiftFlutterCallkitIncomingPlugin.sharedInstance?.endCall(data)
+    clearStoredAcceptedCall()
+  }
+
+  private func verifyNativeCallEnded(exactKey: String) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+      guard let self else { return }
+      if !activeCallkitContains(callkitId: exactKey) {
+        callV2SafeDiagnosticLedger.record(
+          exactKey: exactKey,
+          stage: "nativeCallEnded"
+        )
+        callV2SafeDiagnosticLedger.record(
+          exactKey: exactKey,
+          stage: "nativeCallEndVerified"
+        )
+      }
+    }
   }
 
   private func clearStoredAcceptedCall() {
@@ -963,6 +1243,10 @@ import CallKit
       fromPushKit: fromPushKit
     )
     markCallkitPresentationState(callkitId: callkitId, state: "presented")
+    callV2SafeDiagnosticLedger.record(
+      exactKey: callkitId,
+      stage: "callkitPresented"
+    )
     storePushkitState(
       "incoming_report_requested",
       payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
@@ -1021,6 +1305,10 @@ import CallKit
     let isVideoRaw = "\((data["isVideo"] as? String) ?? (data["isVideo"] as? Bool == true ? "true" : "false"))"
     let isVideo = isVideoRaw.lowercased() == "true"
     let callkitId = normalizedCallkitId(raw: rawCallId, fallback: channel)
+    callV2SafeDiagnosticLedger.record(
+      exactKey: callkitId,
+      stage: "pushkitReceived"
+    )
     storeLastPushkitIncoming(rawCallId: rawCallId, channel: channel, callkitId: callkitId)
     storePushkitState(
       "incoming_received",
@@ -1097,6 +1385,16 @@ import CallKit
     storeAcceptedCall(call)
     storeCallkitEvent("accept", call: call)
     markCallkitPresentationState(callkitId: call.data.uuid, state: "accepted")
+    callV2NativeAcceptedCallActive = true
+    callV2SafeDiagnosticLedger.record(
+      exactKey: call.data.uuid,
+      stage: "nativeAcceptObserved"
+    )
+    _ = callV2NativeSafetyWatchdog.start(exactKey: call.data.uuid)
+    callV2SafeDiagnosticLedger.record(
+      exactKey: call.data.uuid,
+      stage: "nativeCallStillActive"
+    )
     let extra = call.data.extra as? [String: Any]
     let inviteId = inviteIdFromCall(call)
     let channel = ((extra?["channel"] as? String) ?? "")
@@ -1109,6 +1407,13 @@ import CallKit
       .trimmingCharacters(in: .whitespacesAndNewlines)
       .lowercased()
     let isVideo = isVideoRaw == "true" || isVideoRaw == "1"
+    let diagnosticMetadata = callV2SafeDiagnosticLedger.metadata(
+      exactKey: call.data.uuid
+    )
+    callV2SafeDiagnosticLedger.record(
+      exactKey: call.data.uuid,
+      stage: "nativeAcceptBridgeDispatched"
+    )
     notifyFlutterOfForegroundVoip(
       method: "callkitAcceptedNative",
       payload: [
@@ -1119,6 +1424,9 @@ import CallKit
         "fromUid": fromUid,
         "isVideo": isVideo,
         "callkitId": call.data.uuid,
+        "diagnosticOrdinal": diagnosticMetadata?.ordinal ?? 0,
+        "diagnosticStartedAtEpochMilliseconds":
+          diagnosticMetadata?.startedAtEpochMilliseconds ?? 0,
       ]
     )
     if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
@@ -1134,6 +1442,8 @@ import CallKit
     storeCallkitEvent("decline", call: call)
     clearStoredAcceptedCall()
     markCallkitPresentationState(callkitId: call.data.uuid, state: "terminal")
+    callV2NativeAcceptedCallActive = false
+    _ = callV2NativeSafetyWatchdog.terminal(exactKey: call.data.uuid)
     let inviteId = inviteIdFromCall(call)
     if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
       syncInviteStatus(inviteId: inviteId, status: "declined", additional: [
@@ -1148,6 +1458,8 @@ import CallKit
     storeCallkitEvent("end", call: call)
     clearStoredAcceptedCall()
     markCallkitPresentationState(callkitId: call.data.uuid, state: "terminal")
+    callV2NativeAcceptedCallActive = false
+    _ = callV2NativeSafetyWatchdog.terminal(exactKey: call.data.uuid)
     let inviteId = inviteIdFromCall(call)
     if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
       syncInviteStatus(inviteId: inviteId, status: "ended", additional: [
@@ -1162,6 +1474,8 @@ import CallKit
     storeCallkitEvent("timeout", call: call)
     clearStoredAcceptedCall()
     markCallkitPresentationState(callkitId: call.data.uuid, state: "terminal")
+    callV2NativeAcceptedCallActive = false
+    _ = callV2NativeSafetyWatchdog.terminal(exactKey: call.data.uuid)
     let inviteId = inviteIdFromCall(call)
     if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
       syncInviteStatus(inviteId: inviteId, status: "missed")

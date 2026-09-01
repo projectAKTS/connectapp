@@ -199,6 +199,60 @@ void main() {
   });
 
   testWidgets(
+      'exact native route ownership is acknowledged only after route opens',
+      (tester) async {
+    final navigatorKey = GlobalKey<NavigatorState>();
+    final openedRoutes = <String>[];
+    final acknowledgements = <String>[];
+    var appReady = false;
+    const exactNativeKey = 'exact_native_route_owner';
+    await seedInvite('invite_exact_route_ack');
+    manager.configure(
+      navigatorKey: navigatorKey,
+      listNativeCalls: () async => const <NativeCallSnapshot>[],
+      endNativeCall: (_) async {},
+      appForegroundProvider: () async => appReady,
+      callScreenOpenRecorderForTest: recordingCallOpenRecorder(openedRoutes),
+      skipActiveInviteBindingForTest: true,
+      iosCallkitOnlyIncomingUiForTest: true,
+      acknowledgeNativeRouteOwnership: (exactKey) async {
+        acknowledgements.add(exactKey);
+        return true;
+      },
+    );
+    notifications.debugConfigureAcceptedRouteReadinessForTest(
+      interval: const Duration(milliseconds: 10),
+      window: const Duration(seconds: 1),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+
+    await notifications.debugSimulateNativeAcceptedCallkitBridgeForTest(
+      inviteId: 'invite_exact_route_ack',
+      channel: 'channel_invite_exact_route_ack',
+      isVideo: false,
+      fromName: 'Notify Caller',
+      fromUid: callerUid,
+      callkitId: exactNativeKey,
+    );
+    await tester.pump();
+
+    expect(openedRoutes, isEmpty);
+    expect(acknowledgements, isEmpty);
+
+    appReady = true;
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navigatorKey,
+      home: const Scaffold(body: Text('home')),
+    ));
+    await pumpUntilRouteOpened(tester);
+    await notifications.debugResumePendingAcceptedRouteForTest();
+
+    expect(openedRoutes, <String>['invite_exact_route_ack']);
+    expect(acknowledgements, <String>[exactNativeKey]);
+    await manager.forceIdleForTest();
+  });
+
+  testWidgets(
       'background accept during teardown waits for navigator without another resume',
       (tester) async {
     final navigatorKey = GlobalKey<NavigatorState>();

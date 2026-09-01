@@ -13,6 +13,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:uuid/uuid.dart';
 
+import '../call_v2/diagnostics/call_v2_physical_diagnostic_ledger.dart';
 import 'call_session_manager.dart';
 import 'callkit_id.dart';
 import 'current_chat.dart';
@@ -59,6 +60,9 @@ class NotificationService with WidgetsBindingObserver {
       clearStoredAcceptedCallRecovery: _clearStoredAcceptedCallRecovery,
       appForegroundProvider: _isAppActuallyForeground,
       cancelAcceptedRouteReadiness: _cancelAcceptedRouteReadiness,
+      acknowledgeNativeRouteOwnership: HelperlyTestRuntime.isEnabled
+          ? null
+          : CallV2PhysicalDiagnosticLedger.instance.acknowledgeRouteOpened,
     );
   }
 
@@ -1179,7 +1183,19 @@ class NotificationService with WidgetsBindingObserver {
       final fromName = (data['fromName'] ?? 'Caller').toString();
       final fromUid = (data['fromUid'] ?? '').toString().trim();
       final callkitId = (data['callkitId'] ?? '').toString().trim();
+      final diagnosticOrdinal = data['diagnosticOrdinal'];
+      final diagnosticStartedAt = data['diagnosticStartedAtEpochMilliseconds'];
       final isVideo = _videoField(data, const <String, dynamic>{});
+      CallV2PhysicalDiagnosticLedger.instance.beginAcceptedNativeCall(
+        exactNativeKey: callkitId,
+        nativeOrdinal: diagnosticOrdinal is int ? diagnosticOrdinal : null,
+        startedAtEpochMilliseconds:
+            diagnosticStartedAt is int ? diagnosticStartedAt : null,
+      );
+      CallV2PhysicalDiagnosticLedger.instance.record(
+        CallV2PhysicalDiagnosticStage.flutterAcceptBridgeReceived,
+        exactNativeKey: callkitId,
+      );
       _nativeAcceptBridgeReceivedForTest = true;
       unawaited(_diagPush('callkit_native_accept_bridge_received', meta: {
         'nativeAcceptBridgeReceived': true,
@@ -1287,6 +1303,9 @@ class NotificationService with WidgetsBindingObserver {
       },
     );
     if (state != AppLifecycleState.resumed) return;
+    CallV2PhysicalDiagnosticLedger.instance.record(
+      CallV2PhysicalDiagnosticStage.appResumed,
+    );
     unawaited(_resumePendingAcceptedRouteAfterForeground());
     unawaited(FirestoreReadHelper.recoverNetwork(reason: 'app_resumed'));
     if (!_initialized) {

@@ -46,6 +46,8 @@ import 'call_v2/integration/call_v2_disabled_startup_execution_boundary.dart';
 import 'call_v2/integration/call_v2_first_actual_app_wiring_touchpoint.dart';
 import 'call_v2/integration/call_v2_route_registry.dart';
 import 'call_v2/integration/call_v2_rollout_policy.dart';
+import 'call_v2/real_flow/call_v2_real_call_flow_gate.dart';
+import 'call_v2/diagnostics/call_v2_physical_diagnostics_view.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 late final NotificationService notificationService;
@@ -280,10 +282,13 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       title: 'Connect App',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
-      builder: (context, child) => GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
-        child: child,
+      builder: (context, child) => CallV2PhysicalDiagnosticsOverlay(
+        enabled: const CallV2RealCallFlowConfig().enabled,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+          child: child,
+        ),
       ),
 
       // Start from AuthGate

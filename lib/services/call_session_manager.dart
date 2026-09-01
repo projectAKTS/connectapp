@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../call_v2/diagnostics/call_v2_physical_diagnostic_ledger.dart';
 import '../call_v2/real_flow/call_v2_call_lifecycle_arbiter.dart';
 import '../call_v2/real_flow/call_v2_incoming_listener_backoff.dart';
 import '../call_v2/real_flow/call_v2_real_call_flow_gate.dart';
@@ -234,6 +235,9 @@ typedef NativeInviteStateMarker = Future<void> Function({
 typedef StoredAcceptedCallRecoveryClearer = Future<void> Function();
 typedef AppForegroundProvider = Future<bool> Function();
 typedef AcceptedRouteReadinessCanceller = void Function();
+typedef NativeRouteOwnershipAcknowledger = Future<bool> Function(
+  String exactNativeKey,
+);
 typedef CallScreenOpenRecorderForTest = Future<void> Function({
   required String inviteId,
   required String channel,
@@ -372,6 +376,7 @@ class CallSessionManager {
   bool _acceptedRecoveryAcknowledged = false;
   bool? _iosCallkitOnlyIncomingUiForTest;
   AcceptedRouteReadinessCanceller? _cancelAcceptedRouteReadiness;
+  NativeRouteOwnershipAcknowledger? _acknowledgeNativeRouteOwnership;
   int _callkitFallbackRequestedCount = 0;
   int _callkitPresentationCount = 0;
   int _flutterIncomingPromptCount = 0;
@@ -522,6 +527,7 @@ class CallSessionManager {
     _afterOutgoingInviteWriteForTest = null;
     _readInviteDataForTest = null;
     _callScreenOpenRecorderForTest = null;
+    _acknowledgeNativeRouteOwnership = null;
     _skipActiveInviteBindingForTest = false;
     _iosCallkitOnlyIncomingUiForTest = null;
     _callLifecycleArbiter.forceIdleForTest();
@@ -581,6 +587,7 @@ class CallSessionManager {
     bool? skipActiveInviteBindingForTest,
     bool? iosCallkitOnlyIncomingUiForTest,
     AcceptedRouteReadinessCanceller? cancelAcceptedRouteReadiness,
+    NativeRouteOwnershipAcknowledger? acknowledgeNativeRouteOwnership,
   }) {
     if (navigatorKey != null) {
       _navigatorKey = navigatorKey;
@@ -620,6 +627,9 @@ class CallSessionManager {
     }
     if (cancelAcceptedRouteReadiness != null) {
       _cancelAcceptedRouteReadiness = cancelAcceptedRouteReadiness;
+    }
+    if (acknowledgeNativeRouteOwnership != null) {
+      _acknowledgeNativeRouteOwnership = acknowledgeNativeRouteOwnership;
     }
   }
 
@@ -1624,6 +1634,9 @@ class CallSessionManager {
     final session = _current;
     if (!_canApplyMediaProgress(session, inviteId: inviteId)) return;
     final generation = session!.lifecycleGeneration;
+    CallV2PhysicalDiagnosticLedger.instance.record(
+      CallV2PhysicalDiagnosticStage.rtcSetupStarted,
+    );
 
     // The caller opens the call screen while the invite is still ringing.
     // Do not advance the session into the accepted/joining timeout path until
@@ -1671,6 +1684,12 @@ class CallSessionManager {
     final session = _current;
     if (!_canApplyMediaProgress(session, inviteId: inviteId)) return;
     final generation = session!.lifecycleGeneration;
+    CallV2PhysicalDiagnosticLedger.instance.record(
+      CallV2PhysicalDiagnosticStage.agoraJoinAttempted,
+    );
+    CallV2PhysicalDiagnosticLedger.instance.record(
+      CallV2PhysicalDiagnosticStage.agoraJoined,
+    );
     session.localJoined = true;
     if (session.phase != CallSessionPhase.connected &&
         (!isCaller || session.status != CallInviteStatus.ringing)) {
@@ -1712,6 +1731,9 @@ class CallSessionManager {
     final session = _current;
     if (!_canApplyMediaProgress(session, inviteId: inviteId)) return;
     final generation = session!.lifecycleGeneration;
+    CallV2PhysicalDiagnosticLedger.instance.record(
+      CallV2PhysicalDiagnosticStage.remoteJoined,
+    );
     session.remoteJoined = true;
     if (!_callLifecycleArbiter.markConnected(generation)) return;
     session.phase = CallSessionPhase.connected;
@@ -1938,6 +1960,10 @@ class CallSessionManager {
       _acceptedRouteDiscarded = false;
       _acceptedRouteAppResumed = false;
       _acceptedOwnershipRecorded = true;
+      CallV2PhysicalDiagnosticLedger.instance.record(
+        CallV2PhysicalDiagnosticStage.acceptedOwnershipRecorded,
+        exactNativeKey: payload.acceptedCallkitId,
+      );
     }
     _ensureAcceptedNativeRouteWatch(
       payload: payload,
@@ -2020,6 +2046,10 @@ class CallSessionManager {
     _acceptedRouteDiscarded = false;
     _acceptedRouteAppResumed = false;
     _acceptedOwnershipRecorded = true;
+    CallV2PhysicalDiagnosticLedger.instance.record(
+      CallV2PhysicalDiagnosticStage.acceptedOwnershipRecorded,
+      exactNativeKey: payload.acceptedCallkitId,
+    );
     _ensureAcceptedNativeRouteWatch(
       payload: payload,
       lifecycleGeneration: claimedGeneration,
@@ -3462,11 +3492,17 @@ class CallSessionManager {
 
     _openingCallRoute = true;
     try {
+      CallV2PhysicalDiagnosticLedger.instance.record(
+        CallV2PhysicalDiagnosticStage.routeAttemptStarted,
+      );
       await _waitForAppResumed();
       final nav = await _waitForNavigator();
       if (nav == null || !nav.mounted) {
         return _RouteOpenResult.navigatorUnavailable;
       }
+      CallV2PhysicalDiagnosticLedger.instance.record(
+        CallV2PhysicalDiagnosticStage.navigatorReady,
+      );
       _callRouteActive = true;
       await _diagManager('route_push', meta: {
         'source': source,
@@ -3489,6 +3525,10 @@ class CallSessionManager {
         );
         _routeOpenCount += 1;
         _rtcSetupOwnerCount += 1;
+        CallV2PhysicalDiagnosticLedger.instance.record(
+          CallV2PhysicalDiagnosticStage.routeOpened,
+        );
+        _acknowledgeAcceptedNativeRouteIfOwned(session);
         return _RouteOpenResult.opened;
       }
       final routeFuture = nav.push(
@@ -3521,6 +3561,10 @@ class CallSessionManager {
       }));
       _routeOpenCount += 1;
       _rtcSetupOwnerCount += 1;
+      CallV2PhysicalDiagnosticLedger.instance.record(
+        CallV2PhysicalDiagnosticStage.routeOpened,
+      );
+      _acknowledgeAcceptedNativeRouteIfOwned(session);
       return _RouteOpenResult.opened;
     } catch (error) {
       await _diagManager('route_push_failed', meta: {
@@ -3531,6 +3575,25 @@ class CallSessionManager {
     } finally {
       _openingCallRoute = false;
     }
+  }
+
+  void _acknowledgeAcceptedNativeRouteIfOwned(
+    _CallSession session,
+  ) {
+    final watch = _acceptedNativeRouteWatch;
+    if (watch == null ||
+        !watch.matches(session.inviteId) ||
+        watch.routeOpened ||
+        watch.terminal) {
+      return;
+    }
+    final exactNativeKey = watch.payload.acceptedCallkitId.trim();
+    if (exactNativeKey.isEmpty) return;
+    final acknowledge = _acknowledgeNativeRouteOwnership;
+    if (acknowledge == null) return;
+    unawaited(Future<bool>.sync(() => acknowledge(exactNativeKey)).catchError(
+      (_) => false,
+    ));
   }
 
   Future<void> _rollbackFailedRouteSession(
@@ -3710,6 +3773,9 @@ class CallSessionManager {
     required String message,
     required bool isError,
   }) async {
+    CallV2PhysicalDiagnosticLedger.instance.record(
+      CallV2PhysicalDiagnosticStage.terminalObserved,
+    );
     final session = _current;
     if (session != null && session.inviteId == inviteId) {
       if (session.terminalSignalSent && session.status == status) {
@@ -3879,6 +3945,9 @@ class CallSessionManager {
   }) async {
     if (!pendingClaim.claimed) return;
     _previousTeardownCompleted = true;
+    CallV2PhysicalDiagnosticLedger.instance.record(
+      CallV2PhysicalDiagnosticStage.previousTeardownCompleted,
+    );
     final claimedInviteId = pendingClaim.inviteId;
     final acceptedIntent = _claimPendingAcceptedIntent(pendingClaim);
     final effectivePayload = acceptedIntent?.payload ?? pendingPayload;

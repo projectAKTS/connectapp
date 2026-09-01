@@ -29,6 +29,7 @@ Modify only where required under:
 - `lib/services/notification_service.dart`
 - `lib/main.dart` only if needed to expose an existing hidden developer entry
 - `ios/Runner/AppDelegate.swift`
+- `ios/RunnerTests/RunnerTests.swift`
 - `test/call_v2/**`
 - `test/notification_foreground_recovery_test.dart`
 - `docs/agent-loop/**`
