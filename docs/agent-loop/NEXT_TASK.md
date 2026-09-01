@@ -1,162 +1,97 @@
-# Active Task — Repeat Call Pending CallKit Accept Durability
+# Active Task — Physical Call 2 Diagnostics and Native Safety Watchdog
 
 Branch: `call-v2`
 
-Starting SHA: `6b548b2f4ade470e4b8b02fae9d5517ee0438ec9`
+Starting SHA: `ad2a5149a44bc053ee54ca3bfd93b2327765c36c`
 
 ## Goal
 
-Fix the physical repeat-call race where Call B is accepted in native CallKit
-while Call A is still ending or tearing down, but Call B's accepted intent is
-lost before its route can open.
-
-This task authorizes only the pending-accept lifecycle correction required for
-that physical Call 2 failure. Do not reopen Phase 3C presenter work.
+Add a safe two-call diagnostic checkpoint ledger and a minimal exact-ID native
+CallKit safety watchdog. This revision must expose where physical Call 2 stops
+without changing routing, RTC, token, Firestore call protocol, PushKit
+presentation, or CallKit presentation ownership.
 
 ## Physical Evidence
 
-- Call 1 connected, worked, and ended normally.
-- Call 2 received PushKit and presented one native CallKit UI.
-- Native CallKit Accept opened Helperly.
-- The Call 2 route did not open and RTC did not start.
-- The failure boundary is accepted recovery / pending lifecycle handoff to route
-  opening, not Agora media setup.
-
-## Authorized Root Cause
-
-When the previous call lifecycle is `ending`, `teardown`, or `reserving`, a new
-incoming invite may be stored in `CallV2CallLifecycleArbiter` as
-`_pendingInviteId`.
-
-If native CallKit Accept arrives for that exact pending invite,
-`_handleIncomingCandidate(autoAccept: true)` may see `reserveIncoming()` return
-duplicate or pending. The existing duplicate auto-accept path depends on both:
-
-- `_incomingPromptInviteId` matching the invite; and
-- `_incomingUiOwner` being CallKit.
-
-A merely pending invite does not yet have that presentation-owner state, so the
-accepted intent can be returned as ignored or failed. When previous teardown
-completes, `_continueClaimedPendingIncoming` then applies normal unaccepted
-incoming presentation semantics and requires `ringing`, losing the fact that
-CallKit Accept already occurred.
+- Call 1 connects audio/video and ends normally.
+- Call 2 receives PushKit, presents one native CallKit UI, and is accepted once.
+- Helperly foregrounds but remains on Home; no Flutter call route or Agora join
+  occurs.
+- The native CallKit session and iOS call/video indicator remain active until
+  force quit.
 
 ## Authorized Files
 
 Modify only where required under:
 
-- `lib/call_v2/real_flow/**`
+- `lib/call_v2/**`
 - `lib/services/call_session_manager.dart`
 - `lib/services/notification_service.dart`
+- `lib/main.dart` only if needed to expose an existing hidden developer entry
+- `ios/Runner/AppDelegate.swift`
 - `test/call_v2/**`
+- `test/notification_foreground_recovery_test.dart`
+- `docs/agent-loop/**`
 
-`ios/Runner/AppDelegate.swift` may be changed only if strictly necessary for
-safe diagnostics or compatibility with the existing accept payload. Do not
-change it if `callkitAcceptedNative` already carries sufficient information.
+Do not modify backend/functions, Firestore rules, Firebase configuration,
+dependencies, platform entitlements, Agora cleanup/token/App ID behavior, or V1.
 
-## Authorized Implementation
+## Diagnostic Ledger
 
-1. Add exact invite- and generation-scoped pending accepted intent.
-2. When native CallKit Accept targets the pending invite, record durable accepted
-   intent instead of returning ignored or failed.
-3. Converge plugin Accept duplicates on the same accepted intent in either event
-   order.
-4. Preserve accepted recovery payload/state while previous teardown remains in
-   progress without classifying the wait as a network failure.
-5. Make previous teardown completion claim the pending invite and, when its exact
-   accepted intent is present, continue directly through the existing guarded
-   `_acceptInviteAndOpen` path.
-6. Do not resolve or present incoming UI again for an already-accepted pending
-   invite, and do not require another user action.
-7. Treat `ringing`, `accepted`, and `joining` as valid continuation states for an
-   already-accepted pending invite, using existing idempotent acceptance logic.
-8. Treat missing, declined, missed, cancelled, ended, and failed pending invites
-   as non-openable; clear their accepted intent and close native state safely.
-9. Prevent a superseded pending invite's accepted intent from transferring to or
-   opening its replacement.
-10. Drive continuation from teardown completion rather than retry-timer
-    exhaustion.
-11. Preserve exactly one route open and exactly one RTC setup owner.
-12. Clear pending accepted intent on successful route open, terminal or missing
-    invite, supersession, sign out, production hard reset, and explicit
-    decline/end before claim. Do not clear it merely because navigation is
-    temporarily unavailable, teardown is active, or duplicate recovery arrives.
+Implement an ordered in-process ledger retaining at most the previous and
+current call timelines. Each entry contains only a monotonic sequence, elapsed
+milliseconds, and a controlled stage enum/name. Summary state may contain only
+safe booleans, counters, enums, and blocker codes.
 
-## Generation Safety
+Record controlled native and Flutter checkpoints covering PushKit receipt,
+CallKit presentation/accept/bridge, accepted ownership, teardown completion,
+resume/Navigator readiness, route attempt/open, RTC setup/join, remote join,
+terminal observation, native watchdog timeout, native end request, and native
+end verification.
 
-Accepted pending ownership must bind to the exact invite and lifecycle
-generation. A late callback from the previous generation must not clear, open,
-or mutate the newly claimed call. Claiming the pending invite into the next
-generation must transfer only that invite's accepted intent, and consumption
-must be atomic/idempotent for that ownership.
+Never retain or expose UIDs, invite/call IDs, channels, CallKit UUIDs, device
+identifiers, tokens, payloads, credentials, raw provider data, or stacks.
 
-## Accepted Recovery Semantics
+Expose a hidden developer-only in-app view/copy mechanism for a compact CALL 1,
+CALL 2, and SAFE STATE report. It must not make Call V2 publicly reachable or
+enable rollout.
 
-The same invite waiting behind previous teardown is a durable pending accepted
-state, not `AcceptedCallRecoveryResult.failed` and not `pendingNetwork`. It must
-not create a retry storm or exhaust retries while teardown is active. Teardown
-completion itself must trigger continuation.
+## Native Safety Watchdog
 
-## Files and Behavior That Must Not Change
+- Start one exact-UUID watchdog after native CallKit Accept.
+- Coalesce duplicate accepts for the same UUID.
+- Flutter sends `callkitRouteOwned` with the exact accepted UUID only after the
+  actual Flutter call route has opened successfully and ownership is still
+  valid.
+- Matching route-owned ACK or native terminal event cancels the watchdog.
+- If the 20-second deadline wins, end the exact native call once, perform
+  bounded verification, record only safe checkpoints, and clear ownership.
+- Ignore late ACK after timeout and late timeout after ACK.
+- Route-owned ACK must not be sent for pending Navigator, route busy, accepted
+  pending, Firestore accepted/joining state, failed route push, or Agora setup.
 
-Do not modify:
+## Forbidden Changes
 
-- `lib/call_v2/real_flow/call_v2_engine_cleanup_coordinator.dart`
-- Agora RTC initialization or token architecture
-- Agora App ID or token callable
-- Firebase backend/functions or Firestore rules
-- PushKit presentation policy
-- CallKit single-owner policy
-- Flutter `IncomingCallScreen` policy
-
-Do not restore dual Flutter Accept/Decline UI. Do not deploy backend changes or
-build TestFlight.
+Do not rewrite `CallSessionManager` routing, add another accepted continuation
+model, change the engine cleanup coordinator, change Agora/token/backend
+behavior, modify Firestore protocol/rules, change PushKit presentation, change
+CallKit single-owner policy, deploy, or build TestFlight.
 
 ## Required Tests
 
-1. Call A connected, teardown begins, B becomes pending, native Accept B arrives,
-   A teardown completes, and B automatically opens exactly once with one RTC
-   setup owner and no second interaction.
-2. Native Accept B arrives before the Firestore pending callback; signals
-   converge and B opens once after teardown.
-3. Firestore B becomes pending before native Accept; B opens once after teardown.
-4. Native and plugin Accept duplicates in both orders produce one accepted
-   intent, one route, one RTC owner, and no retry storm.
-5. B becomes `accepted` before claim and still opens after teardown.
-6. B becomes `joining` before claim and still opens when valid under the current
-   state machine.
-7. B becomes terminal before claim; no route opens, accepted intent clears,
-   native state closes, and lifecycle settles idle.
-8. B is superseded by C; B cannot open later and its accepted intent does not
-   transfer to C.
-9. Repeat 20 sequential cycles: Call N ends, N+1 arrives during teardown, native
-   Accept occurs, teardown completes, and N+1 opens once with one RTC owner.
-
-Tests must not use force-quit semantics.
-
-## Safe Diagnostics
-
-Diagnostics may expose only safe state such as:
-
-- `pendingIncomingPresent`
-- `pendingAcceptedIntent`
-- `pendingAcceptedRecorded`
-- `pendingAcceptedClaimed`
-- `pendingAcceptedContinuationStarted`
-- `pendingAcceptedContinuationCompleted`
-- `previousTeardownCompleted`
-- `callLifecycleState`
-- `routeOpenCount`
-- `rtcSetupOwnerCount`
-- `sessionIdle`
-- `blockerCode`
-
-Do not expose UIDs, invite IDs, channels, CallKit UUIDs, tokens, payloads, Agora
-credentials, or raw identifiers.
+1. Native Accept starts one watchdog; duplicate exact UUID accepts coalesce.
+2. Actual route open sends one exact route-owned ACK and cancels the watchdog.
+3. Navigator unavailable sends no ACK.
+4. Timeout ends and verifies the exact native call.
+5. ACK just before timeout wins; timeout just before ACK wins and late ACK is
+   ignored.
+6. Native terminal event cancels the watchdog.
+7. Sequential calls have independent watchdog ownership.
+8. Diagnostic timeline ordering is monotonic, retains two calls, and contains
+   no unsafe identifiers or sensitive key wording.
+9. Existing Call V2 and foreground recovery suites remain passing.
 
 ## Validation
-
-Run and pass after implementation:
 
 ```bash
 flutter analyze
@@ -165,10 +100,4 @@ flutter test test/notification_foreground_recovery_test.dart --no-pub
 git diff --check
 ```
 
-No backend deployment and no TestFlight build.
-
-## Path-Drift Baseline
-
-The authorized path-drift baseline is
-`6b548b2f4ade470e4b8b02fae9d5517ee0438ec9`. Legitimate history before this
-accepted physical-test checkpoint must not be classified as unauthorized drift.
+Run relevant iOS/unit tests if available. Do not deploy or build TestFlight.

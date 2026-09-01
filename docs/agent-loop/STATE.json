@@ -1,10 +1,10 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "physical_repeat_call_pending_accept",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
-  "starting_sha": "6b548b2f4ade470e4b8b02fae9d5517ee0438ec9",
+  "phase": "physical_callkit_native_safety_diagnostics",
+  "status": "revision_required",
+  "accepted_checkpoint_sha": "ad2a5149a44bc053ee54ca3bfd93b2327765c36c",
+  "starting_sha": "ad2a5149a44bc053ee54ca3bfd93b2327765c36c",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
   "code_commit_sha": "4c6db2dc3380d9383a756d61ffe0ac8ac529d8c9",
@@ -37,7 +37,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "Implemented exact-invite/generation accepted-native route ownership with authoritative terminal observation, an independent watchdog, preserved actual CallKit identity, verified exact native-call cleanup, route ownership transfer, and reset/sign-out disposal. Physical two-iPhone repeat-call validation remains required."
+    "decision": "revision_required",
+    "notes": "Physical Call 2 still foregrounds to Home without opening the Flutter route or starting RTC, and the accepted native CallKit session remains active until force quit. Required revision is diagnostic and native-safety only: add a safe two-call checkpoint ledger, hidden in-app report, and exact-ID native watchdog canceled only by actual route ownership or terminal state."
   }
 }
