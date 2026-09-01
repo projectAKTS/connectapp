@@ -2,42 +2,43 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "physical_callkit_native_safety_diagnostics",
-  "status": "revision_required",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "ad2a5149a44bc053ee54ca3bfd93b2327765c36c",
   "starting_sha": "ad2a5149a44bc053ee54ca3bfd93b2327765c36c",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "4c6db2dc3380d9383a756d61ffe0ac8ac529d8c9",
+  "code_commit_sha": "899578f4162e1ef3196b1fed708db4682b239ba9",
   "ending_sha": "SELF",
   "changed_files": [
+    "docs/agent-loop/NEXT_TASK.md",
+    "ios/Runner/AppDelegate.swift",
+    "ios/RunnerTests/RunnerTests.swift",
+    "lib/call_v2/diagnostics/call_v2_physical_diagnostic_ledger.dart",
+    "lib/call_v2/diagnostics/call_v2_physical_diagnostics_view.dart",
+    "lib/main.dart",
     "lib/services/call_session_manager.dart",
     "lib/services/notification_service.dart",
+    "test/call_v2/diagnostics/call_v2_physical_diagnostic_ledger_test.dart",
     "test/call_v2/real_flow/call_v2_notification_ownership_test.dart",
-    "test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart"
+    "test/call_v2/ui/call_v2_physical_diagnostics_view_test.dart"
   ],
   "validation": {
-    "physical_call_1_connected": true,
-    "physical_call_1_ended_normally": true,
-    "physical_call_2_pushkit_received": true,
-    "physical_call_2_callkit_accepted": true,
-    "physical_call_2_app_opened": true,
-    "physical_call_2_route_opened": false,
-    "physical_call_2_rtc_started": false,
     "flutter_analyze": "passed",
-    "call_v2_tests": "passed: 2274",
+    "focused_diagnostic_ui_ownership_tests": "passed: 37",
+    "call_v2_tests": "passed: 2282",
     "foreground_recovery_tests": "passed: 3",
-    "focused_notification_tests": "passed: 29",
-    "focused_rapid_lifecycle_tests": "passed: 57",
+    "ios_runner_tests": "passed: 6",
     "git_diff_check": "passed"
   },
   "safety": {
     "deployed": false,
+    "testflight_built": false,
     "production_services_contacted": false,
     "firebase_changes": false,
     "backend_changes": false
   },
   "review": {
-    "decision": "revision_required",
-    "notes": "Physical Call 2 still foregrounds to Home without opening the Flutter route or starting RTC, and the accepted native CallKit session remains active until force quit. Required revision is diagnostic and native-safety only: add a safe two-call checkpoint ledger, hidden in-app report, and exact-ID native watchdog canceled only by actual route ownership or terminal state."
+    "decision": "ready_for_review",
+    "notes": "Added a safe two-call physical checkpoint ledger, developer-gated in-app report, and one exact-native-ID CallKit watchdog. Native ownership is acknowledged only after the actual Flutter route push succeeds; otherwise the 20-second watchdog ends and verifies the exact native call. Routing, RTC cleanup, token, Firestore protocol, and presentation ownership remain unchanged."
   }
 }
