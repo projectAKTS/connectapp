@@ -1,10 +1,10 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "physical_callkit_native_safety_diagnostics",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "ad2a5149a44bc053ee54ca3bfd93b2327765c36c",
-  "starting_sha": "ad2a5149a44bc053ee54ca3bfd93b2327765c36c",
+  "phase": "physical_diagnostics_access_correction",
+  "status": "revision_required",
+  "accepted_checkpoint_sha": "25911fb55411a3766ce5d0cf369feb7b51d21fd7",
+  "starting_sha": "25911fb55411a3766ce5d0cf369feb7b51d21fd7",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
   "code_commit_sha": "899578f4162e1ef3196b1fed708db4682b239ba9",
@@ -38,7 +38,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "Added a safe two-call physical checkpoint ledger, developer-gated in-app report, and one exact-native-ID CallKit watchdog. Native ownership is acknowledged only after the actual Flutter route push succeeds; otherwise the 20-second watchdog ends and verifies the exact native call. Routing, RTC cleanup, token, Firestore protocol, and presentation ownership remain unchanged."
+    "decision": "revision_required",
+    "notes": "The diagnostics overlay context is above the app Navigator in MaterialApp.builder, and the initial/copy report can remain Dart-only until manual refresh. Required revision: explicit existing-navigator access, nullable builder-child handling, and automatic native timeline refresh before display/copy."
   }
 }
