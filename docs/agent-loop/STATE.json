@@ -2,30 +2,22 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "physical_diagnostics_access_correction",
-  "status": "revision_required",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "25911fb55411a3766ce5d0cf369feb7b51d21fd7",
   "starting_sha": "25911fb55411a3766ce5d0cf369feb7b51d21fd7",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "899578f4162e1ef3196b1fed708db4682b239ba9",
+  "code_commit_sha": "3b810f5d74c7b6f85241283cfe2f0bea69c71317",
   "ending_sha": "SELF",
   "changed_files": [
-    "docs/agent-loop/NEXT_TASK.md",
-    "ios/Runner/AppDelegate.swift",
-    "ios/RunnerTests/RunnerTests.swift",
-    "lib/call_v2/diagnostics/call_v2_physical_diagnostic_ledger.dart",
     "lib/call_v2/diagnostics/call_v2_physical_diagnostics_view.dart",
     "lib/main.dart",
-    "lib/services/call_session_manager.dart",
-    "lib/services/notification_service.dart",
-    "test/call_v2/diagnostics/call_v2_physical_diagnostic_ledger_test.dart",
-    "test/call_v2/real_flow/call_v2_notification_ownership_test.dart",
     "test/call_v2/ui/call_v2_physical_diagnostics_view_test.dart"
   ],
   "validation": {
     "flutter_analyze": "passed",
-    "focused_diagnostic_ui_ownership_tests": "passed: 37",
-    "call_v2_tests": "passed: 2282",
+    "focused_physical_diagnostics_tests": "passed: 8",
+    "call_v2_tests": "passed: 2283",
     "foreground_recovery_tests": "passed: 3",
     "ios_runner_tests": "passed: 6",
     "git_diff_check": "passed"
@@ -38,7 +30,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "revision_required",
-    "notes": "The diagnostics overlay context is above the app Navigator in MaterialApp.builder, and the initial/copy report can remain Dart-only until manual refresh. Required revision: explicit existing-navigator access, nullable builder-child handling, and automatic native timeline refresh before display/copy."
+    "decision": "ready_for_review",
+    "notes": "The builder-mounted overlay now opens through the existing Navigator key, handles the nullable builder child explicitly, refreshes native safe checkpoints before initial display and Copy, and is covered in the actual MaterialApp.builder topology. Routing, RTC, and native watchdog semantics are unchanged."
   }
 }

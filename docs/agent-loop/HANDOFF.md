@@ -1,80 +1,62 @@
 # Review Handoff
 
-Phase: `physical_callkit_native_safety_diagnostics`
+Phase: `physical_diagnostics_access_correction`
 Status: `ready_for_review`
-Starting checkpoint: `ad2a5149a44bc053ee54ca3bfd93b2327765c36c`
-Implementation commit: `899578f4162e1ef3196b1fed708db4682b239ba9`
+Starting checkpoint: `25911fb55411a3766ce5d0cf369feb7b51d21fd7`
+Implementation commit: `3b810f5d74c7b6f85241283cfe2f0bea69c71317`
 
-## Diagnostic Ledger
+## Diagnostics Access
 
-- Adds a process-local ordered ledger retaining at most the previous and current
-  native-accepted call timelines.
-- Each exported checkpoint contains only a controlled stage, monotonic sequence,
-  and elapsed milliseconds. Summary state contains only booleans, counters, and
-  a controlled blocker code.
-- Native and Flutter entries merge through a private ordinal while exact native
-  ownership values remain outside every safe snapshot and copied report.
-- An explicitly developer-gated overlay provides refresh, screenshot, and copy
-  access to compact `CALL 1`, `CALL 2`, and `SAFE STATE` output. It adds no route
-  and is absent unless the existing real-flow developer build flag is enabled.
+- The existing `MaterialApp.builder` overlay now receives the app's existing
+  `navigatorKey` and obtains a context from that Navigator's overlay before
+  opening the diagnostics bottom sheet. It adds no Navigator or route.
+- The builder's nullable child is handled explicitly with an inert non-null
+  fallback.
+- The diagnostics button has no dependency on an ancestor Navigator or Overlay,
+  so it remains operable from its actual builder position above the Navigator.
+- The existing Call V2 real-flow developer flag remains the sole enablement gate.
 
-## Native Watchdog
+## Native Timeline Freshness
 
-- Native CallKit Accept starts one exact-UUID 20-second watchdog; duplicate
-  Accept callbacks for the same UUID coalesce.
-- The existing native acceptance UUID is retained privately and used for the
-  exact end request. The watchdog does not reconstruct ownership from invite or
-  channel data.
-- A matching terminal event or a matching Flutter `callkitRouteOwned` ACK
-  cancels the watchdog. Late ACKs and stale timeouts have no owner and are
-  ignored.
-- Timeout removes watchdog ownership first, requests one exact native end,
-  verifies active calls after a bounded delay, and permits one exact-ID retry.
-  Safe state records `native_end_unverified` if verification still fails.
-
-## Flutter Route ACK
-
-- Flutter sends the exact native ownership ACK only after the existing
-  Navigator push has succeeded and the accepted-native watch still owns the
-  same session.
-- No ACK is sent for unavailable Navigator, pending teardown, accepted
-  Firestore state, route-busy, or failed route-push outcomes.
-- ACK dispatch is best-effort and non-blocking, so diagnostics cannot roll back
-  or stall an otherwise successful route.
-- Existing routing, accepted continuation, RTC cleanup, Agora/token behavior,
-  Firestore protocol, and PushKit/CallKit presentation ownership are unchanged.
+- Opening the view automatically refreshes and merges the native safe timeline
+  before rendering the report.
+- Copy performs another native refresh and copies that same latest merged report.
+- Reports remain limited to controlled stages, timestamps, counters, booleans,
+  and controlled blocker state; private ownership values are not rendered or
+  copied.
 
 ## Tests
 
-- Dart ledger tests cover ordered bounded retention, native merge, safe output,
-  exact private ACK transport, unavailable-Navigator behavior, and late ACK.
-- Lifecycle ownership tests prove one ACK only after actual route open and no
-  ACK while Navigator is unavailable.
-- Signed iOS simulator tests cover one watchdog, duplicate Accept coalescing,
-  route ACK cancellation, exact timeout/end verification, terminal
-  cancellation, sequential calls, and safe native output.
-- Production UI isolation remains passing after locating the developer view in
-  the diagnostics boundary rather than the production UI module.
+- The focused ledger and widget suite passed 8 tests.
+- The integration-shaped widget test installs the enabled overlay through
+  `MaterialApp.builder`, preserves its real Navigator child, taps
+  `call-v2-diagnostics-open`, and proves the diagnostics sheet opens without a
+  Navigator/context error.
+- The same test proves a native-only checkpoint appears on initial open and a
+  newly supplied native-only checkpoint is included by Copy after a fresh bridge
+  load. The disabled-overlay isolation test remains passing.
 
 ## Validation
 
 - `flutter analyze`: passed, no issues.
-- Focused diagnostic, UI, and ownership tests: passed, 37 tests.
-- `flutter test test/call_v2 --no-pub`: passed, 2,282 tests.
+- Focused physical diagnostics ledger/widget tests: passed, 8 tests.
+- `flutter test test/call_v2 --no-pub`: passed, 2,283 tests.
 - `flutter test test/notification_foreground_recovery_test.dart --no-pub`:
   passed, 3 tests.
-- `xcodebuild ... -only-testing:RunnerTests ... test`: passed, 6 tests.
+- Signed iOS simulator `RunnerTests`: passed, 6 tests.
 - `git diff --check`: passed.
 
 ## Safety
 
-No backend/functions, Firebase configuration, Firestore rules, Agora engine
-cleanup, token/App ID behavior, dependency files, or deployment configuration
-changed. No backend/Firebase deployment or TestFlight build was performed.
+Routing, accepted continuation, lifecycle ownership, Agora/RTC behavior, token
+handling, Firebase/backend, Firestore protocol/rules, PushKit/CallKit
+presentation, and native watchdog termination semantics were not changed. No
+deployment or TestFlight build was performed. This correction does not claim
+the physical repeat-call issue is fixed; it makes the next physical diagnostic
+report reliably accessible and current.
 
 ## Physical Follow-up
 
-Install the pushed branch tip on both physical iPhones and reproduce Call 1,
-then background Call 2 Accept. Open the developer diagnostic overlay after the
-result, copy the two-call report, and verify that an unopened route causes the
-exact native CallKit session to end within 20 seconds without force quit.
+Install the reviewed branch tip on both physical iPhones, reproduce the failed
+second-call sequence, then immediately open and copy the refreshed Call V2
+diagnostic report for source-level triage.
