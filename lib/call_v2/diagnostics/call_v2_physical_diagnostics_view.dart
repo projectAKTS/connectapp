@@ -20,11 +20,17 @@ class _CallV2PhysicalDiagnosticsViewState
     extends State<CallV2PhysicalDiagnosticsView> {
   late final CallV2PhysicalDiagnosticLedger _ledger =
       widget.ledger ?? CallV2PhysicalDiagnosticLedger.instance;
-  bool _refreshing = false;
+  bool _refreshing = true;
+  String? _report;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInitialReport();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final report = _ledger.buildSafeReport();
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -47,21 +53,27 @@ class _CallV2PhysicalDiagnosticsViewState
                 IconButton(
                   key: const ValueKey<String>('call-v2-diagnostics-copy'),
                   tooltip: 'Copy diagnostics',
-                  onPressed: () =>
-                      Clipboard.setData(ClipboardData(text: report)),
+                  onPressed: _refreshing ? null : _copyLatestReport,
                   icon: const Icon(Icons.copy),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             Expanded(
-              child: SingleChildScrollView(
-                child: SelectableText(
-                  report,
-                  key: const ValueKey<String>('call-v2-diagnostics-report'),
-                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-                ),
-              ),
+              child: _report == null
+                  ? const Center(child: CircularProgressIndicator())
+                  : SingleChildScrollView(
+                      child: SelectableText(
+                        _report!,
+                        key: const ValueKey<String>(
+                          'call-v2-diagnostics-report',
+                        ),
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
             ),
           ],
         ),
@@ -69,11 +81,35 @@ class _CallV2PhysicalDiagnosticsViewState
     );
   }
 
+  Future<void> _loadInitialReport() async {
+    await _ledger.refreshNativeTimeline();
+    if (!mounted) return;
+    setState(() {
+      _report = _ledger.buildSafeReport();
+      _refreshing = false;
+    });
+  }
+
   Future<void> _refresh() async {
     setState(() => _refreshing = true);
     await _ledger.refreshNativeTimeline();
     if (!mounted) return;
-    setState(() => _refreshing = false);
+    setState(() {
+      _report = _ledger.buildSafeReport();
+      _refreshing = false;
+    });
+  }
+
+  Future<void> _copyLatestReport() async {
+    setState(() => _refreshing = true);
+    await _ledger.refreshNativeTimeline();
+    final report = _ledger.buildSafeReport();
+    await Clipboard.setData(ClipboardData(text: report));
+    if (!mounted) return;
+    setState(() {
+      _report = report;
+      _refreshing = false;
+    });
   }
 }
 
@@ -82,10 +118,14 @@ class CallV2PhysicalDiagnosticsOverlay extends StatelessWidget {
     super.key,
     required this.child,
     required this.enabled,
+    required this.navigatorKey,
+    this.ledger,
   });
 
   final Widget child;
   final bool enabled;
+  final GlobalKey<NavigatorState> navigatorKey;
+  final CallV2PhysicalDiagnosticLedger? ledger;
 
   @override
   Widget build(BuildContext context) {
@@ -98,21 +138,32 @@ class CallV2PhysicalDiagnosticsOverlay extends StatelessWidget {
           right: 8,
           bottom: 84,
           child: SafeArea(
-            child: IconButton.filledTonal(
-              key: const ValueKey<String>('call-v2-diagnostics-open'),
-              tooltip: 'Call diagnostics',
-              onPressed: () {
-                showModalBottomSheet<void>(
-                  context: context,
-                  useSafeArea: true,
-                  isScrollControlled: true,
-                  builder: (_) => const FractionallySizedBox(
-                    heightFactor: 0.8,
-                    child: CallV2PhysicalDiagnosticsView(),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.bug_report_outlined),
+            child: Semantics(
+              label: 'Call diagnostics',
+              button: true,
+              child: Material(
+                color: Theme.of(context).colorScheme.secondaryContainer,
+                elevation: 2,
+                shape: const CircleBorder(),
+                child: IconButton(
+                  key: const ValueKey<String>('call-v2-diagnostics-open'),
+                  onPressed: () {
+                    final navigatorContext =
+                        navigatorKey.currentState?.overlay?.context;
+                    if (navigatorContext == null) return;
+                    showModalBottomSheet<void>(
+                      context: navigatorContext,
+                      useSafeArea: true,
+                      isScrollControlled: true,
+                      builder: (_) => FractionallySizedBox(
+                        heightFactor: 0.8,
+                        child: CallV2PhysicalDiagnosticsView(ledger: ledger),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.bug_report_outlined),
+                ),
+              ),
             ),
           ),
         ),

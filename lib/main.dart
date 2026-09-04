@@ -284,10 +284,11 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       theme: buildAppTheme(),
       builder: (context, child) => CallV2PhysicalDiagnosticsOverlay(
         enabled: const CallV2RealCallFlowConfig().enabled,
+        navigatorKey: navigatorKey,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
-          child: child,
+          child: child ?? const SizedBox.shrink(),
         ),
       ),
 
