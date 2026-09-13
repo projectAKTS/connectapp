@@ -1959,7 +1959,10 @@ void main() {
       (tester) async {
     var cleared = 0;
     manager.configure(
-      clearStoredAcceptedCallRecovery: () async {
+      clearStoredAcceptedCallRecovery: ({
+        required String inviteId,
+        required String callkitId,
+      }) async {
         cleared += 1;
       },
     );
@@ -1989,7 +1992,10 @@ void main() {
     manager.configure(
       navigatorKey: navigatorKey,
       appForegroundProvider: () async => true,
-      clearStoredAcceptedCallRecovery: () async {
+      clearStoredAcceptedCallRecovery: ({
+        required String inviteId,
+        required String callkitId,
+      }) async {
         cleared += 1;
       },
       listNativeCalls: () async => const <NativeCallSnapshot>[

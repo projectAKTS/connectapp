@@ -38,13 +38,24 @@ class _AcceptedCallkitRecoveryPayload {
   final String fromUid;
   final String callkitId;
 
-  bool matches(_AcceptedCallkitRecoveryPayload other) {
-    return inviteId == other.inviteId &&
-        channel == other.channel &&
-        isVideo == other.isVideo &&
-        (callkitId.isEmpty ||
-            other.callkitId.isEmpty ||
-            callkitId == other.callkitId);
+  bool matchesIdentity(_AcceptedCallkitRecoveryPayload other) {
+    return matchesIdentityValues(
+      inviteId: other.inviteId,
+      callkitId: other.callkitId,
+    );
+  }
+
+  bool matchesIdentityValues({
+    required String inviteId,
+    required String callkitId,
+  }) {
+    final ownExactId = this.callkitId.trim();
+    final otherExactId = callkitId.trim();
+    if (ownExactId.isNotEmpty && otherExactId.isNotEmpty) {
+      if (ownExactId == otherExactId) return true;
+    }
+    return this.inviteId.trim().isNotEmpty &&
+        this.inviteId.trim() == inviteId.trim();
   }
 }
 
@@ -111,6 +122,10 @@ class NotificationService with WidgetsBindingObserver {
   DateTime? _lastResumeSyncAt;
   bool _callPermissionsPrimed = false;
   bool _recoveringAcceptedCall = false;
+  bool _recoveringStoredAcceptedCall = false;
+  int _acceptedRecoveryGeneration = 0;
+  _AcceptedCallkitRecoveryPayload? _activeAcceptedCallkitRecoveryPayload;
+  _AcceptedCallkitRecoveryPayload? _acceptedCallkitRecoveryOwnerPayload;
   bool _nativeAcceptBridgeReceivedForTest = false;
   bool _acceptedRecoveryCoalescedForTest = false;
   Timer? _acceptedRecoveryRetryTimer;
@@ -119,6 +134,7 @@ class NotificationService with WidgetsBindingObserver {
   AcceptedCallRecoveryResult? _acceptedRecoveryRetryResultForTest;
   _AcceptedCallkitRecoveryPayload? _pendingAcceptedCallkitRecoveryPayload;
   Future<void>? _acceptedRouteResumeFuture;
+  int? _acceptedRouteResumeFutureGeneration;
   int _acceptedRouteResumeGeneration = 0;
   bool _acceptedBridgeReadinessKick = false;
   int _pushBindingGeneration = 0;
@@ -262,13 +278,38 @@ class NotificationService with WidgetsBindingObserver {
   bool get _hasActiveIncomingUi =>
       CallSessionManager.instance.hasActiveUiOrSession;
 
-  Future<void> _clearStoredAcceptedCallRecovery() async {
+  void _invalidateAcceptedRecoveryCoordinator() {
+    _acceptedRecoveryGeneration += 1;
     _acceptedRecoveryRetryTimer?.cancel();
     _acceptedRecoveryRetryTimer = null;
     _acceptedRecoveryRetryAttempts = 0;
     _acceptedRecoveryRetryScheduledForTest = false;
     _acceptedRecoveryRetryResultForTest = null;
     _pendingAcceptedCallkitRecoveryPayload = null;
+    _activeAcceptedCallkitRecoveryPayload = null;
+    _acceptedCallkitRecoveryOwnerPayload = null;
+    _recoveringAcceptedCall = false;
+  }
+
+  Future<void> _clearStoredAcceptedCallRecovery({
+    String inviteId = '',
+    String callkitId = '',
+  }) async {
+    final hasScopedIdentity =
+        inviteId.trim().isNotEmpty || callkitId.trim().isNotEmpty;
+    final owner = _acceptedCallkitRecoveryOwnerPayload;
+    if (hasScopedIdentity &&
+        owner != null &&
+        !owner.matchesIdentityValues(
+          inviteId: inviteId,
+          callkitId: callkitId,
+        )) {
+      await _diagPush('accepted_call_recovery_stale_clear_ignored', meta: {
+        'acceptedRecoveryRejectedStaleOwner': true,
+      });
+      return;
+    }
+    _invalidateAcceptedRecoveryCoordinator();
     if (!Platform.isIOS) return;
     try {
       await _pushTokenChannel.invokeMethod('clearStoredAcceptedCall');
@@ -1048,14 +1089,9 @@ class NotificationService with WidgetsBindingObserver {
     _invalidatePushBinding();
     final tokenSub = _tokenSub;
     _tokenSub = null;
-    _acceptedRecoveryRetryTimer?.cancel();
-    _acceptedRecoveryRetryTimer = null;
-    _acceptedRecoveryRetryAttempts = 0;
-    _acceptedRecoveryRetryScheduledForTest = false;
-    _acceptedRecoveryRetryResultForTest = null;
+    _invalidateAcceptedRecoveryCoordinator();
     _acceptedRouteResumeGeneration += 1;
     _acceptedBridgeReadinessKick = false;
-    _pendingAcceptedCallkitRecoveryPayload = null;
     _nativeAcceptBridgeReceivedForTest = false;
     _acceptedRecoveryCoalescedForTest = false;
     _appleTokenRetryTimer?.cancel();
@@ -1124,13 +1160,10 @@ class NotificationService with WidgetsBindingObserver {
 
   Future<void> dispose() async {
     await _diagResourceCounts('notification_dispose_start');
-    _acceptedRecoveryRetryTimer?.cancel();
-    _acceptedRecoveryRetryTimer = null;
-    _acceptedRecoveryRetryScheduledForTest = false;
-    _acceptedRecoveryRetryResultForTest = null;
+    _invalidateAcceptedRecoveryCoordinator();
+    _recoveringStoredAcceptedCall = false;
     _acceptedRouteResumeGeneration += 1;
     _acceptedBridgeReadinessKick = false;
-    _pendingAcceptedCallkitRecoveryPayload = null;
     _nativeAcceptBridgeReceivedForTest = false;
     _acceptedRecoveryCoalescedForTest = false;
     if (_observerBound) {
@@ -1316,17 +1349,22 @@ class NotificationService with WidgetsBindingObserver {
   }
 
   Future<void> _resumePendingAcceptedRouteAfterForeground() async {
-    final inFlight = _acceptedRouteResumeFuture;
-    if (inFlight != null) return inFlight;
     final generation = _acceptedRouteResumeGeneration;
+    final inFlight = _acceptedRouteResumeFuture;
+    if (inFlight != null &&
+        _acceptedRouteResumeFutureGeneration == generation) {
+      return inFlight;
+    }
     late final Future<void> future;
     future = _runAcceptedRouteReadinessProbe(generation);
     _acceptedRouteResumeFuture = future;
+    _acceptedRouteResumeFutureGeneration = generation;
     try {
       await future;
     } finally {
       if (identical(_acceptedRouteResumeFuture, future)) {
         _acceptedRouteResumeFuture = null;
+        _acceptedRouteResumeFutureGeneration = null;
       }
     }
   }
@@ -2390,9 +2428,9 @@ class NotificationService with WidgetsBindingObserver {
 
   Future<void> _recoverAcceptedCallkitCall({String trigger = 'manual'}) async {
     if (!Platform.isIOS || !_enableIosCallKit) return;
-    if (_recoveringAcceptedCall) return;
+    if (_recoveringStoredAcceptedCall) return;
 
-    _recoveringAcceptedCall = true;
+    _recoveringStoredAcceptedCall = true;
     try {
       final nativeTokens = await _readNativePushTokens();
       await _syncNativePushDiagnostics(nativeTokens);
@@ -2425,11 +2463,17 @@ class NotificationService with WidgetsBindingObserver {
           'acceptedInviteId': acceptedInviteId,
           'acceptedChannel': acceptedChannel,
         });
-        await _clearStoredAcceptedCallRecovery();
+        await _clearStoredAcceptedCallRecovery(
+          inviteId: acceptedInviteId,
+          callkitId: acceptedCallkitId,
+        );
         return;
       }
       if (hasTerminalCallkitEvent && terminalMatchesAcceptedCall) {
-        await _clearStoredAcceptedCallRecovery();
+        await _clearStoredAcceptedCallRecovery(
+          inviteId: acceptedInviteId,
+          callkitId: acceptedCallkitId,
+        );
         return;
       }
       if (acceptedAt.isNotEmpty &&
@@ -2442,21 +2486,27 @@ class NotificationService with WidgetsBindingObserver {
         final isVideo = _truthyValue(
           _normalizeTokenLikeValue(nativeTokens['lastCallkitAcceptedIsVideo']),
         );
-        final result =
-            await CallSessionManager.instance.handleRecoveredAcceptedInvite(
+        await _recoverAcceptedCallkitEvent(
           inviteId: acceptedInviteId,
           channel: acceptedChannel,
           isVideo: isVideo,
           fromName: fromName.isEmpty ? 'Caller' : fromName,
           fromUid: fromUid,
           callkitId: acceptedCallkitId,
+          trigger: trigger,
+          allowDistinctPreemption: false,
         );
-        _handleAcceptedRecoveryResult(result);
         return;
       }
 
       if (_hasActiveIncomingUi && !(await _resetStaleIncomingUiIfNeeded())) {
-        _handleAcceptedRecoveryResult(AcceptedCallRecoveryResult.busy);
+        if (_acceptedCallkitRecoveryOwnerPayload == null) {
+          _scheduleAcceptedRecoveryRetry(
+            AcceptedCallRecoveryResult.busy,
+            generation: _acceptedRecoveryGeneration,
+            payload: null,
+          );
+        }
         return;
       }
 
@@ -2505,16 +2555,16 @@ class NotificationService with WidgetsBindingObserver {
           fallback: _stringField(extra, body, 'callkitId'),
         );
 
-        final result =
-            await CallSessionManager.instance.handleRecoveredAcceptedInvite(
+        await _recoverAcceptedCallkitEvent(
           inviteId: inviteId,
           channel: channel,
           isVideo: isVideo,
           fromName: fromName,
           fromUid: fromUid,
           callkitId: callkitId,
+          trigger: trigger,
+          allowDistinctPreemption: false,
         );
-        _handleAcceptedRecoveryResult(result);
         return;
       }
     } catch (e) {
@@ -2522,9 +2572,15 @@ class NotificationService with WidgetsBindingObserver {
         'trigger': trigger,
         'error': '$e',
       });
-      _handleAcceptedRecoveryResult(AcceptedCallRecoveryResult.pendingNetwork);
+      if (_acceptedCallkitRecoveryOwnerPayload == null) {
+        _scheduleAcceptedRecoveryRetry(
+          AcceptedCallRecoveryResult.pendingNetwork,
+          generation: _acceptedRecoveryGeneration,
+          payload: null,
+        );
+      }
     } finally {
-      _recoveringAcceptedCall = false;
+      _recoveringStoredAcceptedCall = false;
     }
   }
 
@@ -2536,6 +2592,9 @@ class NotificationService with WidgetsBindingObserver {
     required String fromUid,
     required String callkitId,
     required String trigger,
+    bool allowDistinctPreemption = true,
+    int? expectedOwnerGeneration,
+    bool preserveRetryAttempts = false,
   }) async {
     final nextPayload = _AcceptedCallkitRecoveryPayload(
       inviteId: inviteId,
@@ -2545,10 +2604,33 @@ class NotificationService with WidgetsBindingObserver {
       fromUid: fromUid,
       callkitId: callkitId,
     );
-    if (_recoveringAcceptedCall) {
-      final pending = _pendingAcceptedCallkitRecoveryPayload;
-      if (pending != null && pending.matches(nextPayload)) {
+    CallV2PhysicalDiagnosticLedger.instance.record(
+      CallV2PhysicalDiagnosticStage.acceptedRecoveryEntered,
+      exactNativeKey: callkitId,
+    );
+
+    if (expectedOwnerGeneration != null &&
+        !_ownsAcceptedRecovery(expectedOwnerGeneration, nextPayload)) {
+      _recordStaleAcceptedRecoveryIfSuperseded(nextPayload);
+      return;
+    }
+
+    final currentOwner = _acceptedCallkitRecoveryOwnerPayload;
+    if (!allowDistinctPreemption &&
+        currentOwner != null &&
+        !currentOwner.matchesIdentity(nextPayload)) {
+      _recordStaleAcceptedRecovery(nextPayload);
+      return;
+    }
+
+    final active = _activeAcceptedCallkitRecoveryPayload;
+    if (_recoveringAcceptedCall && active != null) {
+      if (active.matchesIdentity(nextPayload)) {
         _acceptedRecoveryCoalescedForTest = true;
+        CallV2PhysicalDiagnosticLedger.instance.record(
+          CallV2PhysicalDiagnosticStage.acceptedRecoveryCoalescedSameCall,
+          exactNativeKey: callkitId,
+        );
         await _diagPush('accepted_call_recovery_coalesced', meta: {
           'acceptedRecoveryCoalesced': true,
           'acceptedRecoverySource': trigger,
@@ -2557,13 +2639,30 @@ class NotificationService with WidgetsBindingObserver {
         });
         return;
       }
-      _pendingAcceptedCallkitRecoveryPayload = nextPayload;
-      _handleAcceptedRecoveryResult(AcceptedCallRecoveryResult.pendingNetwork);
-      return;
+      if (!allowDistinctPreemption) {
+        _recordStaleAcceptedRecovery(nextPayload);
+        return;
+      }
     }
+
+    _acceptedRecoveryRetryTimer?.cancel();
+    _acceptedRecoveryRetryTimer = null;
+    _acceptedRecoveryRetryScheduledForTest = false;
+    _acceptedRecoveryRetryResultForTest = null;
+    if (!preserveRetryAttempts) {
+      _acceptedRecoveryRetryAttempts = 0;
+    }
+    _acceptedRouteResumeGeneration += 1;
+    final generation = ++_acceptedRecoveryGeneration;
+    _acceptedCallkitRecoveryOwnerPayload = nextPayload;
     _pendingAcceptedCallkitRecoveryPayload = nextPayload;
+    _activeAcceptedCallkitRecoveryPayload = nextPayload;
     _recoveringAcceptedCall = true;
     try {
+      CallV2PhysicalDiagnosticLedger.instance.record(
+        CallV2PhysicalDiagnosticStage.acceptedRecoveryOwnershipRequested,
+        exactNativeKey: callkitId,
+      );
       final result =
           await CallSessionManager.instance.handleRecoveredAcceptedInvite(
         inviteId: inviteId,
@@ -2573,7 +2672,15 @@ class NotificationService with WidgetsBindingObserver {
         fromUid: fromUid,
         callkitId: callkitId,
       );
-      _handleAcceptedRecoveryResult(result);
+      if (!_ownsAcceptedRecovery(generation, nextPayload)) {
+        _recordStaleAcceptedRecoveryIfSuperseded(nextPayload);
+        return;
+      }
+      _handleAcceptedRecoveryResult(
+        result,
+        generation: generation,
+        payload: nextPayload,
+      );
       if ((result == AcceptedCallRecoveryResult.pendingTeardown ||
               result == AcceptedCallRecoveryResult.pendingNavigator) &&
           CallSessionManager.instance.hasPendingAcceptedRouteOwnership) {
@@ -2590,13 +2697,66 @@ class NotificationService with WidgetsBindingObserver {
         'trigger': trigger,
         'error': '$error',
       });
-      _handleAcceptedRecoveryResult(AcceptedCallRecoveryResult.pendingNetwork);
+      if (_ownsAcceptedRecovery(generation, nextPayload)) {
+        _handleAcceptedRecoveryResult(
+          AcceptedCallRecoveryResult.pendingNetwork,
+          generation: generation,
+          payload: nextPayload,
+        );
+      }
     } finally {
-      _recoveringAcceptedCall = false;
+      if (_ownsAcceptedRecovery(generation, nextPayload) &&
+          identical(_activeAcceptedCallkitRecoveryPayload, nextPayload)) {
+        _activeAcceptedCallkitRecoveryPayload = null;
+        _recoveringAcceptedCall = false;
+      }
     }
   }
 
-  void _handleAcceptedRecoveryResult(AcceptedCallRecoveryResult result) {
+  bool _ownsAcceptedRecovery(
+    int generation,
+    _AcceptedCallkitRecoveryPayload payload,
+  ) {
+    final owner = _acceptedCallkitRecoveryOwnerPayload;
+    return generation == _acceptedRecoveryGeneration &&
+        owner != null &&
+        owner.matchesIdentity(payload);
+  }
+
+  void _recordStaleAcceptedRecovery(
+    _AcceptedCallkitRecoveryPayload payload,
+  ) {
+    CallV2PhysicalDiagnosticLedger.instance.record(
+      CallV2PhysicalDiagnosticStage.acceptedRecoveryRejectedStaleOwner,
+      exactNativeKey: payload.callkitId,
+    );
+    unawaited(_diagPush('accepted_call_recovery_stale_owner_ignored', meta: {
+      'acceptedRecoveryRejectedStaleOwner': true,
+    }));
+  }
+
+  void _recordStaleAcceptedRecoveryIfSuperseded(
+    _AcceptedCallkitRecoveryPayload payload,
+  ) {
+    final owner = _acceptedCallkitRecoveryOwnerPayload;
+    if (owner != null && !owner.matchesIdentity(payload)) {
+      _recordStaleAcceptedRecovery(payload);
+    }
+  }
+
+  void _handleAcceptedRecoveryResult(
+    AcceptedCallRecoveryResult result, {
+    int? generation,
+    _AcceptedCallkitRecoveryPayload? payload,
+  }) {
+    if (generation != null &&
+        payload != null &&
+        !_ownsAcceptedRecovery(generation, payload)) {
+      _recordStaleAcceptedRecoveryIfSuperseded(payload);
+      return;
+    }
+    final ownedGeneration = generation ?? _acceptedRecoveryGeneration;
+    final ownedPayload = payload ?? _pendingAcceptedCallkitRecoveryPayload;
     switch (result) {
       case AcceptedCallRecoveryResult.opened:
       case AcceptedCallRecoveryResult.alreadyOpen:
@@ -2607,7 +2767,12 @@ class NotificationService with WidgetsBindingObserver {
         _acceptedRecoveryRetryAttempts = 0;
         _acceptedRecoveryRetryScheduledForTest = false;
         _acceptedRecoveryRetryResultForTest = null;
-        _pendingAcceptedCallkitRecoveryPayload = null;
+        if (ownedPayload == null ||
+            _pendingAcceptedCallkitRecoveryPayload
+                    ?.matchesIdentity(ownedPayload) ==
+                true) {
+          _pendingAcceptedCallkitRecoveryPayload = null;
+        }
         return;
       case AcceptedCallRecoveryResult.pendingTeardown:
         _acceptedRecoveryRetryTimer?.cancel();
@@ -2625,18 +2790,34 @@ class NotificationService with WidgetsBindingObserver {
           _acceptedRecoveryRetryResultForTest = null;
           return;
         }
-        _scheduleAcceptedRecoveryRetry(result);
+        _scheduleAcceptedRecoveryRetry(
+          result,
+          generation: ownedGeneration,
+          payload: ownedPayload,
+        );
         return;
       case AcceptedCallRecoveryResult.pendingAuth:
       case AcceptedCallRecoveryResult.pendingNetwork:
       case AcceptedCallRecoveryResult.busy:
       case AcceptedCallRecoveryResult.failed:
-        _scheduleAcceptedRecoveryRetry(result);
+        _scheduleAcceptedRecoveryRetry(
+          result,
+          generation: ownedGeneration,
+          payload: ownedPayload,
+        );
         return;
     }
   }
 
-  void _scheduleAcceptedRecoveryRetry(AcceptedCallRecoveryResult result) {
+  void _scheduleAcceptedRecoveryRetry(
+    AcceptedCallRecoveryResult result, {
+    required int generation,
+    required _AcceptedCallkitRecoveryPayload? payload,
+  }) {
+    if (payload != null && !_ownsAcceptedRecovery(generation, payload)) {
+      _recordStaleAcceptedRecoveryIfSuperseded(payload);
+      return;
+    }
     if ((!Platform.isIOS && !_debugTestAccessEnabled) || !_enableIosCallKit) {
       return;
     }
@@ -2662,7 +2843,11 @@ class NotificationService with WidgetsBindingObserver {
         ? const Duration(milliseconds: 500)
         : Duration(milliseconds: 500 * attempt.clamp(1, 6));
     _acceptedRecoveryRetryTimer = Timer(delay, () {
-      unawaited(_runAcceptedRecoveryRetry(result));
+      unawaited(_runAcceptedRecoveryRetry(
+        result,
+        generation: generation,
+        payload: payload,
+      ));
     });
     _acceptedRecoveryRetryScheduledForTest = true;
     _acceptedRecoveryRetryResultForTest = result;
@@ -2673,21 +2858,31 @@ class NotificationService with WidgetsBindingObserver {
   }
 
   Future<void> _runAcceptedRecoveryRetry(
-    AcceptedCallRecoveryResult result,
-  ) async {
+    AcceptedCallRecoveryResult result, {
+    int? generation,
+    _AcceptedCallkitRecoveryPayload? payload,
+  }) async {
+    final expectedGeneration = generation ?? _acceptedRecoveryGeneration;
+    final expectedPayload = payload ?? _pendingAcceptedCallkitRecoveryPayload;
+    if (expectedPayload != null &&
+        !_ownsAcceptedRecovery(expectedGeneration, expectedPayload)) {
+      _recordStaleAcceptedRecoveryIfSuperseded(expectedPayload);
+      return;
+    }
     _acceptedRecoveryRetryTimer = null;
     _acceptedRecoveryRetryScheduledForTest = false;
     _acceptedRecoveryRetryResultForTest = null;
-    final payload = _pendingAcceptedCallkitRecoveryPayload;
-    if (payload != null) {
+    if (expectedPayload != null) {
       await _recoverAcceptedCallkitEvent(
-        inviteId: payload.inviteId,
-        channel: payload.channel,
-        isVideo: payload.isVideo,
-        fromName: payload.fromName,
-        fromUid: payload.fromUid,
-        callkitId: payload.callkitId,
+        inviteId: expectedPayload.inviteId,
+        channel: expectedPayload.channel,
+        isVideo: expectedPayload.isVideo,
+        fromName: expectedPayload.fromName,
+        fromUid: expectedPayload.fromUid,
+        callkitId: expectedPayload.callkitId,
         trigger: 'retry_${result.name}',
+        expectedOwnerGeneration: expectedGeneration,
+        preserveRetryAttempts: true,
       );
       return;
     }
@@ -2849,6 +3044,10 @@ class NotificationService with WidgetsBindingObserver {
       'acceptedRecoveryRetryAttempts': _acceptedRecoveryRetryAttempts,
       'acceptedRecoveryPayloadPending':
           _pendingAcceptedCallkitRecoveryPayload != null,
+      'acceptedRecoveryInFlight': _recoveringAcceptedCall,
+      'acceptedRecoveryOwnerPresent':
+          _acceptedCallkitRecoveryOwnerPayload != null,
+      'acceptedRecoveryGeneration': _acceptedRecoveryGeneration,
       'nativeAcceptBridgeReceived': _nativeAcceptBridgeReceivedForTest,
       'acceptedRecoveryCoalesced': _acceptedRecoveryCoalescedForTest,
       'acceptedRouteResumeInFlight': _acceptedRouteResumeFuture != null,

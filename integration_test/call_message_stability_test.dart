@@ -124,7 +124,10 @@ void main() {
     CallSessionManager.instance.configure(
       listNativeCalls: () async => const <NativeCallSnapshot>[],
       endNativeCall: (_) async {},
-      clearStoredAcceptedCallRecovery: () async {},
+      clearStoredAcceptedCallRecovery: ({
+        required inviteId,
+        required callkitId,
+      }) async {},
     );
     await CallSessionManager.instance.clearForSignedOut();
     HelperlyTestRuntime.configureForTest(

@@ -232,7 +232,10 @@ typedef NativeInviteStateMarker = Future<void> Function({
   required String callkitId,
   required String state,
 });
-typedef StoredAcceptedCallRecoveryClearer = Future<void> Function();
+typedef StoredAcceptedCallRecoveryClearer = Future<void> Function({
+  required String inviteId,
+  required String callkitId,
+});
 typedef AppForegroundProvider = Future<bool> Function();
 typedef AcceptedRouteReadinessCanceller = void Function();
 typedef NativeRouteOwnershipAcknowledger = Future<bool> Function(
@@ -374,6 +377,9 @@ class CallSessionManager {
   int _acceptedRecoveryAttemptCount = 0;
   bool _acceptedRecoveryPending = false;
   bool _acceptedRecoveryAcknowledged = false;
+  int _acceptedRecoveryRequestGeneration = 0;
+  String _acceptedRecoveryRequestInviteId = '';
+  String _acceptedRecoveryRequestCallkitId = '';
   bool? _iosCallkitOnlyIncomingUiForTest;
   AcceptedRouteReadinessCanceller? _cancelAcceptedRouteReadiness;
   NativeRouteOwnershipAcknowledger? _acknowledgeNativeRouteOwnership;
@@ -516,6 +522,9 @@ class CallSessionManager {
     _acceptedRecoveryPending = false;
     _acceptedRecoveryAcknowledged = false;
     _acceptedRecoveryAttemptCount = 0;
+    _acceptedRecoveryRequestGeneration += 1;
+    _acceptedRecoveryRequestInviteId = '';
+    _acceptedRecoveryRequestCallkitId = '';
     _awaitingPushkit = false;
     _callkitFallbackRequestedCount = 0;
     _callkitPresentationCount = 0;
@@ -984,7 +993,11 @@ class CallSessionManager {
           keepCallkitId: session.callkitId.isEmpty ? null : session.callkitId,
           reason: reason,
         );
-        await _clearStoredAcceptedCallRecoverySafely(reason);
+        await _clearStoredAcceptedCallRecoverySafely(
+          reason,
+          inviteId: session.inviteId,
+          callkitId: session.callkitId,
+        );
         await _diagManager('hard_reset_deferred_until_route_closed', meta: {
           ..._sessionSnapshot(),
           'reason': reason,
@@ -1345,6 +1358,10 @@ class CallSessionManager {
     String? fromUid,
     String callkitId = '',
   }) async {
+    final requestGeneration = _claimAcceptedRecoveryRequest(
+      inviteId: inviteId,
+      callkitId: callkitId,
+    );
     _acceptedRecoveryAttemptCount += 1;
     _acceptedRecoveryPending = true;
     _acceptedRecoveryAcknowledged = false;
@@ -1354,6 +1371,13 @@ class CallSessionManager {
       final resumed = await resumePendingAcceptedRouteIfReady(
         source: 'callkit_recovery_duplicate',
       );
+      if (!_ownsAcceptedRecoveryRequest(
+        generation: requestGeneration,
+        inviteId: inviteId,
+        callkitId: callkitId,
+      )) {
+        return AcceptedCallRecoveryResult.busy;
+      }
       switch (resumed) {
         case AcceptedCallRecoveryResult.opened:
         case AcceptedCallRecoveryResult.alreadyOpen:
@@ -1384,6 +1408,13 @@ class CallSessionManager {
       fallbackFromName: fromName,
       fallbackFromUid: fromUid ?? '',
     );
+    if (!_ownsAcceptedRecoveryRequest(
+      generation: requestGeneration,
+      inviteId: inviteId,
+      callkitId: callkitId,
+    )) {
+      return AcceptedCallRecoveryResult.busy;
+    }
     if (loadedPayload == null) {
       await _endNativeCallForInvite(
         inviteId: inviteId,
@@ -1392,7 +1423,11 @@ class CallSessionManager {
       );
       _acceptedRecoveryPending = false;
       _acceptedRecoveryAcknowledged = true;
-      await _clearStoredAcceptedCallRecoverySafely('accepted_recovery_invalid');
+      await _clearStoredAcceptedCallRecoverySafely(
+        'accepted_recovery_invalid',
+        inviteId: inviteId,
+        callkitId: callkitId,
+      );
       return AcceptedCallRecoveryResult.invalid;
     }
     final payload = loadedPayload.withAcceptedCallkitId(callkitId);
@@ -1400,6 +1435,13 @@ class CallSessionManager {
     try {
       latest = await _readInviteData(payload.inviteId);
     } catch (error) {
+      if (!_ownsAcceptedRecoveryRequest(
+        generation: requestGeneration,
+        inviteId: inviteId,
+        callkitId: callkitId,
+      )) {
+        return AcceptedCallRecoveryResult.busy;
+      }
       await _diagManager('accepted_recovery_read_pending_network', meta: {
         'acceptedRecoveryAttemptCount': _acceptedRecoveryAttemptCount,
         'error': '$error',
@@ -1409,6 +1451,13 @@ class CallSessionManager {
         force: FirestoreReadHelper.isRecoverableError(error),
       ));
       return AcceptedCallRecoveryResult.pendingNetwork;
+    }
+    if (!_ownsAcceptedRecoveryRequest(
+      generation: requestGeneration,
+      inviteId: inviteId,
+      callkitId: callkitId,
+    )) {
+      return AcceptedCallRecoveryResult.busy;
     }
     final status = _parseStatus(latest?['status']);
     if (latest == null || _isTerminalStatus(status)) {
@@ -1427,6 +1476,8 @@ class CallSessionManager {
       _acceptedRecoveryAcknowledged = true;
       await _clearStoredAcceptedCallRecoverySafely(
         'accepted_recovery_terminal',
+        inviteId: payload.inviteId,
+        callkitId: payload.acceptedCallkitId,
       );
       return AcceptedCallRecoveryResult.terminal;
     }
@@ -1436,11 +1487,22 @@ class CallSessionManager {
       via: 'callkit_recovery',
       autoAccept: true,
     );
+    if (!_ownsAcceptedRecoveryRequest(
+      generation: requestGeneration,
+      inviteId: inviteId,
+      callkitId: callkitId,
+    )) {
+      return AcceptedCallRecoveryResult.busy;
+    }
     if (result == _IncomingCandidateResult.opened ||
         result == _IncomingCandidateResult.alreadyOpen) {
       _acceptedRecoveryPending = false;
       _acceptedRecoveryAcknowledged = true;
-      await _clearStoredAcceptedCallRecoverySafely('accepted_recovery_opened');
+      await _clearStoredAcceptedCallRecoverySafely(
+        'accepted_recovery_opened',
+        inviteId: payload.inviteId,
+        callkitId: payload.acceptedCallkitId,
+      );
       return result == _IncomingCandidateResult.alreadyOpen
           ? AcceptedCallRecoveryResult.alreadyOpen
           : AcceptedCallRecoveryResult.opened;
@@ -1460,6 +1522,41 @@ class CallSessionManager {
       return AcceptedCallRecoveryResult.pendingNavigator;
     }
     return AcceptedCallRecoveryResult.failed;
+  }
+
+  int _claimAcceptedRecoveryRequest({
+    required String inviteId,
+    required String callkitId,
+  }) {
+    final normalizedInviteId = inviteId.trim();
+    final normalizedCallkitId = callkitId.trim();
+    final sameExactIdentity = _acceptedRecoveryRequestCallkitId.isNotEmpty &&
+        normalizedCallkitId.isNotEmpty &&
+        _acceptedRecoveryRequestCallkitId == normalizedCallkitId;
+    final sameFallbackIdentity = (_acceptedRecoveryRequestCallkitId.isEmpty ||
+            normalizedCallkitId.isEmpty) &&
+        _acceptedRecoveryRequestInviteId.isNotEmpty &&
+        _acceptedRecoveryRequestInviteId == normalizedInviteId;
+    if (!sameExactIdentity && !sameFallbackIdentity) {
+      _acceptedRecoveryRequestGeneration += 1;
+    }
+    _acceptedRecoveryRequestInviteId = normalizedInviteId;
+    _acceptedRecoveryRequestCallkitId = normalizedCallkitId;
+    return _acceptedRecoveryRequestGeneration;
+  }
+
+  bool _ownsAcceptedRecoveryRequest({
+    required int generation,
+    required String inviteId,
+    required String callkitId,
+  }) {
+    if (generation != _acceptedRecoveryRequestGeneration) return false;
+    final normalizedCallkitId = callkitId.trim();
+    if (_acceptedRecoveryRequestCallkitId.isNotEmpty &&
+        normalizedCallkitId.isNotEmpty) {
+      return _acceptedRecoveryRequestCallkitId == normalizedCallkitId;
+    }
+    return _acceptedRecoveryRequestInviteId == inviteId.trim();
   }
 
   Future<void> declineInvite({
@@ -2237,7 +2334,11 @@ class CallSessionManager {
       reason: reason,
     );
     await _endAcceptedNativeCallVerified(watch, reason: reason);
-    await _clearStoredAcceptedCallRecoverySafely(reason);
+    await _clearStoredAcceptedCallRecoverySafely(
+      reason,
+      inviteId: watch.payload.inviteId,
+      callkitId: watch.payload.acceptedCallkitId,
+    );
 
     _clearPendingIncomingPrompt(watch.payload.inviteId);
     _callLifecycleArbiter.clearPendingInvite(watch.payload.inviteId);
@@ -2482,7 +2583,11 @@ class CallSessionManager {
 
     _acceptedRecoveryPending = false;
     _acceptedRecoveryAcknowledged = true;
-    await _clearStoredAcceptedCallRecoverySafely(source);
+    await _clearStoredAcceptedCallRecoverySafely(
+      source,
+      inviteId: payload.inviteId,
+      callkitId: payload.acceptedCallkitId,
+    );
     await _diagManager('accepted_route_deadline_resolved', meta: {
       'acceptedRouteDeadlineReached': true,
       'acceptedRouteTerminalObserved': authoritativeTerminal,
@@ -2575,6 +2680,8 @@ class CallSessionManager {
       _acceptedRecoveryAcknowledged = true;
       await _clearStoredAcceptedCallRecoverySafely(
         'accepted_route_terminal',
+        inviteId: continuation.payload.inviteId,
+        callkitId: continuation.payload.acceptedCallkitId,
       );
       return AcceptedCallRecoveryResult.terminal;
     }
@@ -2607,6 +2714,8 @@ class CallSessionManager {
       );
       await _clearStoredAcceptedCallRecoverySafely(
         'accepted_route_opened',
+        inviteId: continuation.payload.inviteId,
+        callkitId: continuation.payload.acceptedCallkitId,
       );
       await _diagManager('accepted_route_continuation_completed', meta: {
         'acceptedRouteOpened': true,
@@ -4180,7 +4289,11 @@ class CallSessionManager {
       await _endStaleNativeCalls(keepCallkitId: null, reason: reason);
     }
     if (clearStoredAcceptedRecovery) {
-      await _clearStoredAcceptedCallRecoverySafely(reason);
+      await _clearStoredAcceptedCallRecoverySafely(
+        reason,
+        inviteId: session?.inviteId ?? normalizedInviteId,
+        callkitId: callkitId,
+      );
       _acceptedRecoveryPending = false;
       _acceptedRecoveryAcknowledged = false;
       _acceptedRecoveryAttemptCount = 0;
@@ -4188,11 +4301,15 @@ class CallSessionManager {
     await _diagResourceCounts('reset_session_state_done');
   }
 
-  Future<void> _clearStoredAcceptedCallRecoverySafely(String reason) async {
+  Future<void> _clearStoredAcceptedCallRecoverySafely(
+    String reason, {
+    required String inviteId,
+    required String callkitId,
+  }) async {
     final clearer = _clearStoredAcceptedCallRecovery;
     if (clearer == null) return;
     try {
-      await clearer();
+      await clearer(inviteId: inviteId, callkitId: callkitId);
     } catch (e) {
       await _diagManager('accepted_recovery_clear_error', meta: {
         'reason': reason,
