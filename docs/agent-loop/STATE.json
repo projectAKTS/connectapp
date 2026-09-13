@@ -1,31 +1,16 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "accepted_call_continuation_stale_authority",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "6c6173148dfc6e9454dec801f911117b2eacd464",
-  "starting_sha": "6c6173148dfc6e9454dec801f911117b2eacd464",
+  "phase": "accepted_call_exact_identity",
+  "status": "revision_required",
+  "accepted_checkpoint_sha": "71fd2070cd60affe15019b8db0730e36f1a4015c",
+  "starting_sha": "71fd2070cd60affe15019b8db0730e36f1a4015c",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "f4ed3bfedd922ecfddc2d25ed3c63cf0597e0625",
+  "code_commit_sha": "",
   "ending_sha": "SELF",
-  "changed_files": [
-    "integration_test/call_message_stability_test.dart",
-    "lib/call_v2/diagnostics/call_v2_physical_diagnostic_ledger.dart",
-    "lib/services/call_session_manager.dart",
-    "lib/services/notification_service.dart",
-    "test/call_v2/real_flow/call_v2_notification_ownership_test.dart",
-    "test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart"
-  ],
-  "validation": {
-    "flutter_analyze": "passed",
-    "accepted_recovery_tests": "passed: 33",
-    "call_session_manager_tests": "passed: 57",
-    "diagnostic_ledger_tests": "passed: 5",
-    "call_v2_tests": "passed: 2286",
-    "foreground_recovery_tests": "passed: 3",
-    "git_diff_check": "passed"
-  },
+  "changed_files": [],
+  "validation": {},
   "safety": {
     "deployed": false,
     "testflight_built": false,
@@ -34,7 +19,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "Accepted recovery is now identity- and generation-owned across NotificationService and CallSessionManager. Same-call duplicates coalesce, distinct exact accepts supersede stale recovery, and old results/retries/clears cannot mutate the newer call. Deterministic sequential and delayed-completion regressions pass. Physical repeat-call acceptance remains required."
+    "decision": "revision_required",
+    "notes": "Physical Call 2 is incorrectly coalesced with Call 1 when invite identifiers match but both exact CallKit UUIDs are present and different. Required revision: make exact-ID mismatch authoritative, retain invite fallback only when an exact ID is unavailable, and prove terminal retry ownership is released."
   }
 }
