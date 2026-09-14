@@ -94,6 +94,21 @@ enum _IncomingCandidateResult {
   failed,
 }
 
+bool _matchesAcceptedCallIdentity({
+  required String firstInviteId,
+  required String firstCallkitId,
+  required String secondInviteId,
+  required String secondCallkitId,
+}) {
+  final firstExactId = firstCallkitId.trim().toLowerCase();
+  final secondExactId = secondCallkitId.trim().toLowerCase();
+  if (firstExactId.isNotEmpty && secondExactId.isNotEmpty) {
+    return firstExactId == secondExactId;
+  }
+  final firstFallbackId = firstInviteId.trim();
+  return firstFallbackId.isNotEmpty && firstFallbackId == secondInviteId.trim();
+}
+
 class CallTerminalSignal {
   const CallTerminalSignal({
     required this.inviteId,
@@ -143,6 +158,15 @@ class CallInvitePayload {
       connectionSystem: connectionSystem,
     );
   }
+
+  bool matchesAcceptedIdentity(CallInvitePayload other) {
+    return _matchesAcceptedCallIdentity(
+      firstInviteId: inviteId,
+      firstCallkitId: acceptedCallkitId,
+      secondInviteId: other.inviteId,
+      secondCallkitId: other.acceptedCallkitId,
+    );
+  }
 }
 
 class _AcceptedNativeRouteWatch {
@@ -163,7 +187,19 @@ class _AcceptedNativeRouteWatch {
   bool routeOpened = false;
   bool terminal = false;
 
-  bool matches(String inviteId) => payload.inviteId == inviteId.trim();
+  bool matchesInvite(String inviteId) => payload.inviteId == inviteId.trim();
+
+  bool matchesIdentity(CallInvitePayload other) =>
+      payload.matchesAcceptedIdentity(other);
+
+  bool matchesSession(_CallSession session) {
+    return _matchesAcceptedCallIdentity(
+      firstInviteId: payload.inviteId,
+      firstCallkitId: payload.acceptedCallkitId,
+      secondInviteId: session.inviteId,
+      secondCallkitId: session.acceptedCallkitId,
+    );
+  }
 }
 
 class _PendingAcceptedInviteIntent {
@@ -177,7 +213,10 @@ class _PendingAcceptedInviteIntent {
   final int ownerGeneration;
   final int? claimedGeneration;
 
-  bool matches(String inviteId) => payload.inviteId == inviteId.trim();
+  bool matchesInvite(String inviteId) => payload.inviteId == inviteId.trim();
+
+  bool matchesIdentity(CallInvitePayload other) =>
+      payload.matchesAcceptedIdentity(other);
 
   _PendingAcceptedInviteIntent claimedBy(int generation) {
     return _PendingAcceptedInviteIntent(
@@ -266,6 +305,7 @@ class _CallSession {
     this.connectionSystem = CallV2RealCallConnectionSystem.legacyV1,
     this.callV2FallbackUsed = false,
     this.callV2BlockerCode = 'none',
+    this.acceptedCallkitId = '',
     this.lifecycleGeneration = 0,
     DateTime? createdAt,
     DateTime? lastTouchedAt,
@@ -281,6 +321,7 @@ class _CallSession {
   final CallV2RealCallConnectionSystem connectionSystem;
   final bool callV2FallbackUsed;
   final String callV2BlockerCode;
+  final String acceptedCallkitId;
   final int lifecycleGeneration;
   final DateTime createdAt;
   CallSessionPhase phase;
@@ -291,8 +332,30 @@ class _CallSession {
   bool terminalSignalSent = false;
 
   bool get isTerminal => phase == CallSessionPhase.terminal;
-  String get callkitId =>
-      normalizeCallkitId(rawId: inviteId, fallback: channel);
+  String get callkitId {
+    final exactId = acceptedCallkitId.trim();
+    return exactId.isNotEmpty
+        ? exactId
+        : normalizeCallkitId(rawId: inviteId, fallback: channel);
+  }
+
+  bool matchesAcceptedPayload(CallInvitePayload payload) {
+    return _matchesAcceptedCallIdentity(
+      firstInviteId: inviteId,
+      firstCallkitId: acceptedCallkitId,
+      secondInviteId: payload.inviteId,
+      secondCallkitId: payload.acceptedCallkitId,
+    );
+  }
+
+  bool matchesAcceptedSession(_CallSession other) {
+    return _matchesAcceptedCallIdentity(
+      firstInviteId: inviteId,
+      firstCallkitId: acceptedCallkitId,
+      secondInviteId: other.inviteId,
+      secondCallkitId: other.acceptedCallkitId,
+    );
+  }
 }
 
 class CallSessionManager {
@@ -1419,6 +1482,7 @@ class CallSessionManager {
       await _endNativeCallForInvite(
         inviteId: inviteId,
         channel: channel,
+        callkitId: callkitId,
         reason: 'accepted_recovery_invalid',
       );
       _acceptedRecoveryPending = false;
@@ -1470,6 +1534,7 @@ class CallSessionManager {
       await _endNativeCallForInvite(
         inviteId: payload.inviteId,
         channel: payload.channel,
+        callkitId: payload.acceptedCallkitId,
         reason: 'accepted_recovery_terminal',
       );
       _acceptedRecoveryPending = false;
@@ -1529,15 +1594,14 @@ class CallSessionManager {
     required String callkitId,
   }) {
     final normalizedInviteId = inviteId.trim();
-    final normalizedCallkitId = callkitId.trim();
-    final sameExactIdentity = _acceptedRecoveryRequestCallkitId.isNotEmpty &&
-        normalizedCallkitId.isNotEmpty &&
-        _acceptedRecoveryRequestCallkitId == normalizedCallkitId;
-    final sameFallbackIdentity = (_acceptedRecoveryRequestCallkitId.isEmpty ||
-            normalizedCallkitId.isEmpty) &&
-        _acceptedRecoveryRequestInviteId.isNotEmpty &&
-        _acceptedRecoveryRequestInviteId == normalizedInviteId;
-    if (!sameExactIdentity && !sameFallbackIdentity) {
+    final normalizedCallkitId = callkitId.trim().toLowerCase();
+    final sameIdentity = _matchesAcceptedCallIdentity(
+      firstInviteId: _acceptedRecoveryRequestInviteId,
+      firstCallkitId: _acceptedRecoveryRequestCallkitId,
+      secondInviteId: normalizedInviteId,
+      secondCallkitId: normalizedCallkitId,
+    );
+    if (!sameIdentity) {
       _acceptedRecoveryRequestGeneration += 1;
     }
     _acceptedRecoveryRequestInviteId = normalizedInviteId;
@@ -1551,12 +1615,12 @@ class CallSessionManager {
     required String callkitId,
   }) {
     if (generation != _acceptedRecoveryRequestGeneration) return false;
-    final normalizedCallkitId = callkitId.trim();
-    if (_acceptedRecoveryRequestCallkitId.isNotEmpty &&
-        normalizedCallkitId.isNotEmpty) {
-      return _acceptedRecoveryRequestCallkitId == normalizedCallkitId;
-    }
-    return _acceptedRecoveryRequestInviteId == inviteId.trim();
+    return _matchesAcceptedCallIdentity(
+      firstInviteId: _acceptedRecoveryRequestInviteId,
+      firstCallkitId: _acceptedRecoveryRequestCallkitId,
+      secondInviteId: inviteId,
+      secondCallkitId: callkitId,
+    );
   }
 
   Future<void> declineInvite({
@@ -2040,7 +2104,7 @@ class CallSessionManager {
     }
     final current = _pendingAcceptedInviteIntent;
     if (current == null ||
-        !current.matches(payload.inviteId) ||
+        !current.matchesIdentity(payload) ||
         current.ownerGeneration != ownerGeneration) {
       _acceptedRouteContinuation = null;
       _pendingAcceptedInviteIntent = _PendingAcceptedInviteIntent(
@@ -2077,7 +2141,7 @@ class CallSessionManager {
     if (!claim.acceptedIntent || claimedInviteId == null) return null;
     final current = _pendingAcceptedInviteIntent;
     if (current == null ||
-        !current.matches(claimedInviteId) ||
+        !current.matchesInvite(claimedInviteId) ||
         current.ownerGeneration + 1 != claim.generation) {
       return null;
     }
@@ -2093,7 +2157,7 @@ class CallSessionManager {
   }) {
     final current = _pendingAcceptedInviteIntent;
     if (current != null) {
-      if (inviteId != null && !current.matches(inviteId)) return;
+      if (inviteId != null && !current.matchesInvite(inviteId)) return;
       if (claimedGeneration != null &&
           current.claimedGeneration != claimedGeneration) {
         return;
@@ -2160,7 +2224,7 @@ class CallSessionManager {
     required bool claimed,
   }) {
     final current = _acceptedNativeRouteWatch;
-    if (current != null && current.matches(payload.inviteId)) {
+    if (current != null && current.matchesIdentity(payload)) {
       current.payload =
           payload.acceptedCallkitId.isEmpty ? current.payload : payload;
       current.lifecycleGeneration = lifecycleGeneration;
@@ -2561,6 +2625,7 @@ class CallSessionManager {
     await _endNativeCallForInvite(
       inviteId: payload.inviteId,
       channel: payload.channel,
+      callkitId: payload.acceptedCallkitId,
       reason: source,
     );
 
@@ -2614,7 +2679,7 @@ class CallSessionManager {
     }
     if (_callRouteActive && activeInviteId == continuation.payload.inviteId) {
       final watch = _acceptedNativeRouteWatch;
-      if (watch != null && watch.matches(continuation.payload.inviteId)) {
+      if (watch != null && watch.matchesIdentity(continuation.payload)) {
         await _transferAcceptedNativeWatchToRoute(watch);
       }
       _acceptedRouteOpened = true;
@@ -2669,6 +2734,7 @@ class CallSessionManager {
       await _endNativeCallForInvite(
         inviteId: continuation.payload.inviteId,
         channel: continuation.payload.channel,
+        callkitId: continuation.payload.acceptedCallkitId,
         reason: 'accepted_route_terminal',
       );
       _callLifecycleArbiter.beginEnding(continuation.claimedGeneration);
@@ -2701,7 +2767,7 @@ class CallSessionManager {
     if (result == _IncomingCandidateResult.opened ||
         result == _IncomingCandidateResult.alreadyOpen) {
       final watch = _acceptedNativeRouteWatch;
-      if (watch != null && watch.matches(continuation.payload.inviteId)) {
+      if (watch != null && watch.matchesIdentity(continuation.payload)) {
         await _transferAcceptedNativeWatchToRoute(watch);
       }
       _acceptedRouteOpened = true;
@@ -2774,6 +2840,7 @@ class CallSessionManager {
           ? CallInviteStatus.accepted
           : latestStatus,
       connectionSystem: payload.connectionSystem,
+      acceptedCallkitId: payload.acceptedCallkitId,
       lifecycleGeneration: continuation.claimedGeneration,
     );
     _callLifecycleArbiter.markJoining(continuation.claimedGeneration);
@@ -2786,7 +2853,7 @@ class CallSessionManager {
     if (routeResult == _RouteOpenResult.opened ||
         routeResult == _RouteOpenResult.alreadyOpenSameInvite) {
       final watch = _acceptedNativeRouteWatch;
-      if (watch != null && watch.matches(payload.inviteId)) {
+      if (watch != null && watch.matchesIdentity(payload)) {
         await _transferAcceptedNativeWatchToRoute(watch);
       }
       await _markNativeInviteStateSafely(
@@ -2864,7 +2931,7 @@ class CallSessionManager {
       final claimedAcceptedIntent = _pendingAcceptedInviteIntent;
       if (autoAccept &&
           claimedAcceptedIntent != null &&
-          claimedAcceptedIntent.matches(payload.inviteId) &&
+          claimedAcceptedIntent.matchesIdentity(payload) &&
           claimedAcceptedIntent.claimedGeneration == reservation.generation &&
           _callLifecycleArbiter.ownsGeneration(reservation.generation)) {
         final resumed = await resumePendingAcceptedRouteIfReady(
@@ -2882,7 +2949,8 @@ class CallSessionManager {
         }
         return _IncomingCandidateResult.acceptedPending;
       }
-      if (_current?.inviteId == payload.inviteId && _callRouteActive) {
+      if (_current?.matchesAcceptedPayload(payload) == true &&
+          _callRouteActive) {
         return _IncomingCandidateResult.alreadyOpen;
       }
       return _IncomingCandidateResult.ignored;
@@ -2907,7 +2975,7 @@ class CallSessionManager {
       if (displacedInviteId != null) {
         final displacedWatch = _acceptedNativeRouteWatch;
         if (displacedWatch != null &&
-            displacedWatch.matches(displacedInviteId)) {
+            displacedWatch.matchesInvite(displacedInviteId)) {
           await _resolveAcceptedNativeRouteWatch(
             displacedWatch,
             reason: 'superseded_pending_invite',
@@ -3260,7 +3328,8 @@ class CallSessionManager {
         !_canContinueAcceptedRouteGeneration(lifecycleGeneration)) {
       return _IncomingCandidateResult.ignored;
     }
-    if (_hasTrulyActiveCall() && _current?.inviteId != payload.inviteId) {
+    if (_hasTrulyActiveCall() &&
+        _current?.matchesAcceptedPayload(payload) != true) {
       await _declineInviteTransaction(payload.inviteId,
           source: 'busy_active_call');
       if (lifecycleGeneration != null) {
@@ -3340,6 +3409,7 @@ class CallSessionManager {
       await _endNativeCallForInvite(
         inviteId: payload.inviteId,
         channel: payload.channel,
+        callkitId: payload.acceptedCallkitId,
         reason: 'accept_latest_terminal',
       );
       _acceptedRouteDiscarded = _acceptedRouteContinuation?.matches(
@@ -3367,6 +3437,7 @@ class CallSessionManager {
           ? CallInviteStatus.accepted
           : latestStatus,
       connectionSystem: payload.connectionSystem,
+      acceptedCallkitId: payload.acceptedCallkitId,
       lifecycleGeneration: generation,
     );
 
@@ -3379,7 +3450,7 @@ class CallSessionManager {
     );
     if (routeResult == _RouteOpenResult.opened) {
       final watch = _acceptedNativeRouteWatch;
-      if (watch != null && watch.matches(payload.inviteId)) {
+      if (watch != null && watch.matchesIdentity(payload)) {
         await _transferAcceptedNativeWatchToRoute(watch);
       }
       await _markNativeInviteStateSafely(
@@ -3388,7 +3459,7 @@ class CallSessionManager {
         reason: 'route_opened',
       );
       _pendingAcceptedContinuationCompleted =
-          _pendingAcceptedInviteIntent?.matches(payload.inviteId) == true;
+          _pendingAcceptedInviteIntent?.matchesIdentity(payload) == true;
       _acceptedRouteOpened = _acceptedRouteContinuation?.matches(
             inviteId: payload.inviteId,
             generation: generation,
@@ -3402,7 +3473,7 @@ class CallSessionManager {
     }
     if (routeResult == _RouteOpenResult.alreadyOpenSameInvite) {
       final watch = _acceptedNativeRouteWatch;
-      if (watch != null && watch.matches(payload.inviteId)) {
+      if (watch != null && watch.matchesIdentity(payload)) {
         await _transferAcceptedNativeWatchToRoute(watch);
       }
       await _markNativeInviteStateSafely(
@@ -3411,7 +3482,7 @@ class CallSessionManager {
         reason: 'route_already_open',
       );
       _pendingAcceptedContinuationCompleted =
-          _pendingAcceptedInviteIntent?.matches(payload.inviteId) == true;
+          _pendingAcceptedInviteIntent?.matchesIdentity(payload) == true;
       _acceptedRouteOpened = _acceptedRouteContinuation?.matches(
             inviteId: payload.inviteId,
             generation: generation,
@@ -3548,7 +3619,9 @@ class CallSessionManager {
     required String source,
     bool deferUntilNavigatorReady = false,
   }) async {
-    if (openScreen && _callRouteActive && activeInviteId == session.inviteId) {
+    if (openScreen &&
+        _callRouteActive &&
+        _current?.matchesAcceptedSession(session) == true) {
       return _RouteOpenResult.alreadyOpenSameInvite;
     }
     if (openScreen && _openingCallRoute) {
@@ -3562,7 +3635,7 @@ class CallSessionManager {
       }
     }
 
-    if (_current?.inviteId != session.inviteId) {
+    if (_current?.matchesAcceptedSession(session) != true) {
       await _activeInviteSub?.cancel();
       _activeInviteSub = null;
       _cancelSessionTimers();
@@ -3595,7 +3668,7 @@ class CallSessionManager {
     required String source,
   }) async {
     if (_openingCallRoute) return _RouteOpenResult.routeBusy;
-    if (_callRouteActive && activeInviteId == session.inviteId) {
+    if (_callRouteActive && _current?.matchesAcceptedSession(session) == true) {
       return _RouteOpenResult.alreadyOpenSameInvite;
     }
 
@@ -3659,7 +3732,7 @@ class CallSessionManager {
       );
       unawaited(routeFuture.whenComplete(() async {
         _callRouteActive = false;
-        if (_current?.inviteId == session.inviteId) {
+        if (_current?.matchesAcceptedSession(session) == true) {
           await _diagManager('route_pop', meta: {
             'source': source,
             'callV2Selected': session.connectionSystem ==
@@ -3691,7 +3764,7 @@ class CallSessionManager {
   ) {
     final watch = _acceptedNativeRouteWatch;
     if (watch == null ||
-        !watch.matches(session.inviteId) ||
+        !watch.matchesSession(session) ||
         watch.routeOpened ||
         watch.terminal) {
       return;
@@ -3859,12 +3932,14 @@ class CallSessionManager {
     await _markNativeInviteStateByIdsSafely(
       inviteId: inviteId,
       channel: session.channel,
+      callkitId: session.callkitId,
       state: 'terminal',
       reason: endReason,
     );
     await _endNativeCallForInvite(
       inviteId: inviteId,
       channel: session.channel,
+      callkitId: session.callkitId,
       reason: endReason,
     );
 
@@ -4484,24 +4559,30 @@ class CallSessionManager {
   Future<void> _endNativeCallForInvite({
     required String inviteId,
     required String channel,
+    String callkitId = '',
     required String reason,
   }) async {
     final normalizedInviteId = inviteId.trim();
     final normalizedChannel = channel.trim();
-    final match = await _matchingNativeCallForInvite(
-      inviteId: normalizedInviteId,
-      channel: normalizedChannel,
-    );
-    final callkitId = match?.callkitId ??
-        (normalizedInviteId.isEmpty && normalizedChannel.isEmpty
-            ? ''
-            : normalizeCallkitId(
-                rawId: normalizedInviteId,
-                fallback: normalizedChannel,
-              ));
-    if (callkitId.isEmpty) return;
+    final exactCallkitId = callkitId.trim();
+    final match = exactCallkitId.isEmpty
+        ? await _matchingNativeCallForInvite(
+            inviteId: normalizedInviteId,
+            channel: normalizedChannel,
+          )
+        : null;
+    final resolvedCallkitId = exactCallkitId.isNotEmpty
+        ? exactCallkitId
+        : match?.callkitId ??
+            (normalizedInviteId.isEmpty && normalizedChannel.isEmpty
+                ? ''
+                : normalizeCallkitId(
+                    rawId: normalizedInviteId,
+                    fallback: normalizedChannel,
+                  ));
+    if (resolvedCallkitId.isEmpty) return;
     await _endNativeCallSafely(
-      callkitId,
+      resolvedCallkitId,
       reason: '$reason:end_matching_native',
     );
   }

@@ -720,6 +720,49 @@ void main() {
     await manager.forceIdleForTest();
   });
 
+  testWidgets(
+      'routed accepted terminal cleanup uses the exact native CallKit ID',
+      (tester) async {
+    final navigatorKey = GlobalKey<NavigatorState>();
+    final endedNativeCalls = <String>[];
+    const inviteId = 'routed_exact_cleanup';
+    const channel = 'channel_routed_exact_cleanup';
+    const exactCallkitId = 'routed_exact_native';
+    final reconstructedCallkitId = normalizeCallkitId(
+      rawId: inviteId,
+      fallback: channel,
+    );
+    await seedInvite(inviteId, status: CallInviteStatus.ringing);
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navigatorKey,
+      home: const Scaffold(body: Text('home')),
+    ));
+    manager.configure(
+      navigatorKey: navigatorKey,
+      listNativeCalls: () async => const <NativeCallSnapshot>[],
+      endNativeCall: (callkitId) async => endedNativeCalls.add(callkitId),
+      appForegroundProvider: () async => true,
+      callScreenOpenRecorderForTest: placeholderCallOpenRecorder(),
+      skipActiveInviteBindingForTest: true,
+      iosCallkitOnlyIncomingUiForTest: true,
+    );
+
+    await notifications.debugSimulateNativeAcceptedCallkitBridgeForTest(
+      inviteId: inviteId,
+      channel: channel,
+      isVideo: false,
+      fromName: 'Notify Caller',
+      fromUid: callerUid,
+      callkitId: exactCallkitId,
+    );
+    await pumpUntilRouteOpened(tester);
+    await manager.endCallFromLocalUser(inviteId: inviteId);
+
+    expect(endedNativeCalls, <String>[exactCallkitId]);
+    expect(endedNativeCalls, isNot(contains(reconstructedCallkitId)));
+    await manager.handleCallScreenClosed(inviteId);
+  });
+
   testWidgets('terminal ownership prevents a concurrent late route open',
       (tester) async {
     final navigatorKey = GlobalKey<NavigatorState>();
@@ -1623,6 +1666,79 @@ void main() {
     await manager.forceIdleForTest();
   });
 
+  testWidgets('same invite with different exact CallKit IDs is not coalesced',
+      (tester) async {
+    final navigatorKey = GlobalKey<NavigatorState>();
+    final openedRoutes = <String>[];
+    const inviteId = 'shared_exact_identity';
+    final firstReadStarted = Completer<void>();
+    final releaseFirstRead = Completer<void>();
+    var readCount = 0;
+    await seedInvite(inviteId, status: CallInviteStatus.ringing);
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navigatorKey,
+      home: const Scaffold(body: Text('home')),
+    ));
+    manager.configure(
+      navigatorKey: navigatorKey,
+      listNativeCalls: () async => const <NativeCallSnapshot>[],
+      endNativeCall: (_) async {},
+      appForegroundProvider: () async => true,
+      callScreenOpenRecorderForTest: recordingCallOpenRecorder(openedRoutes),
+      skipActiveInviteBindingForTest: true,
+      iosCallkitOnlyIncomingUiForTest: true,
+      readInviteDataForTest: (_) async {
+        readCount += 1;
+        if (readCount == 1) {
+          firstReadStarted.complete();
+          await releaseFirstRead.future;
+        }
+        return <String, dynamic>{
+          'fromUid': callerUid,
+          'fromName': 'Notify Caller',
+          'toUid': calleeUid,
+          'toName': calleeName,
+          'channel': 'channel_$inviteId',
+          'isVideo': false,
+          'status': CallInviteStatus.ringing.name,
+        };
+      },
+    );
+
+    await notifications.debugSimulateNativeAcceptedCallkitBridgeForTest(
+      inviteId: inviteId,
+      channel: 'channel_$inviteId',
+      isVideo: false,
+      fromName: 'Notify Caller',
+      fromUid: callerUid,
+      callkitId: 'exact_identity_a',
+    );
+    await firstReadStarted.future;
+    await notifications.debugSimulateNativeAcceptedCallkitBridgeForTest(
+      inviteId: inviteId,
+      channel: 'channel_$inviteId',
+      isVideo: false,
+      fromName: 'Notify Caller',
+      fromUid: callerUid,
+      callkitId: 'exact_identity_b',
+    );
+    await pumpUntilRouteOpened(tester);
+
+    expect(readCount, greaterThan(1));
+    expect(
+      notifications.debugSnapshotForTest()['acceptedRecoveryCoalesced'],
+      isFalse,
+    );
+    expect(openedRoutes, <String>[inviteId]);
+    expect(manager.debugSnapshot()['routeOpenCount'], 1);
+    expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 1);
+
+    releaseFirstRead.complete();
+    await tester.pump();
+    expect(openedRoutes, <String>[inviteId]);
+    await manager.forceIdleForTest();
+  });
+
   testWidgets('accept duplicate while recovery in flight is coalesced',
       (tester) async {
     final navigatorKey = GlobalKey<NavigatorState>();
@@ -1666,6 +1782,7 @@ void main() {
       isVideo: false,
       fromName: 'Notify Caller',
       fromUid: callerUid,
+      callkitId: 'exact_duplicate_identity',
     );
     await firstReadStarted.future;
     await notifications.debugSimulateAcceptedCallkitEventForTest(
@@ -1674,8 +1791,10 @@ void main() {
       isVideo: false,
       fromName: 'Notify Caller',
       fromUid: callerUid,
+      callkitId: 'exact_duplicate_identity',
     );
 
+    expect(readCount, 1);
     expect(
       notifications.debugSnapshotForTest()['acceptedRecoveryCoalesced'],
       isTrue,
@@ -1694,6 +1813,74 @@ void main() {
     expect(snapshot['rtcSetupOwnerCount'], 1);
     expect(snapshot['acceptedRecoveryPending'], isFalse);
     expect(snapshot['acceptedRecoveryAcknowledged'], isTrue);
+    await manager.forceIdleForTest();
+  });
+
+  testWidgets('matching invite is fallback when one exact CallKit ID is absent',
+      (tester) async {
+    final navigatorKey = GlobalKey<NavigatorState>();
+    const inviteId = 'fallback_identity';
+    final firstReadStarted = Completer<void>();
+    final releaseFirstRead = Completer<void>();
+    var readCount = 0;
+    await seedInvite(inviteId);
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navigatorKey,
+      home: const Scaffold(body: Text('home')),
+    ));
+    manager.configure(
+      navigatorKey: navigatorKey,
+      listNativeCalls: () async => const <NativeCallSnapshot>[],
+      endNativeCall: (_) async {},
+      appForegroundProvider: () async => true,
+      callScreenOpenRecorderForTest: placeholderCallOpenRecorder(),
+      skipActiveInviteBindingForTest: true,
+      iosCallkitOnlyIncomingUiForTest: true,
+      readInviteDataForTest: (_) async {
+        readCount += 1;
+        if (readCount == 1) {
+          firstReadStarted.complete();
+          await releaseFirstRead.future;
+        }
+        return <String, dynamic>{
+          'fromUid': callerUid,
+          'fromName': 'Notify Caller',
+          'toUid': calleeUid,
+          'toName': calleeName,
+          'channel': 'channel_$inviteId',
+          'isVideo': false,
+          'status': CallInviteStatus.accepted.name,
+        };
+      },
+    );
+
+    await notifications.debugSimulateNativeAcceptedCallkitBridgeForTest(
+      inviteId: inviteId,
+      channel: 'channel_$inviteId',
+      isVideo: false,
+      fromName: 'Notify Caller',
+      fromUid: callerUid,
+      callkitId: 'exact_fallback_identity',
+    );
+    await firstReadStarted.future;
+    await notifications.debugSimulateNativeAcceptedCallkitBridgeForTest(
+      inviteId: inviteId,
+      channel: 'channel_$inviteId',
+      isVideo: false,
+      fromName: 'Notify Caller',
+      fromUid: callerUid,
+      callkitId: '',
+    );
+
+    expect(readCount, 1);
+    expect(
+      notifications.debugSnapshotForTest()['acceptedRecoveryCoalesced'],
+      isTrue,
+    );
+    releaseFirstRead.complete();
+    await tester.pump();
+    expect(manager.debugSnapshot()['routeOpenCount'], 1);
+    expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 1);
     await manager.forceIdleForTest();
   });
 
@@ -1756,19 +1943,14 @@ void main() {
       (tester) async {
     final navigatorKey = GlobalKey<NavigatorState>();
     final openedRoutes = <String>[];
-    const inviteA = 'stale_recovery_a';
-    const inviteB = 'stale_recovery_b';
+    const sharedInvite = 'stale_recovery_shared_invite';
     const callkitA = 'exact_callkit_a';
     const callkitB = 'exact_callkit_b';
-    final statuses = <String, CallInviteStatus>{
-      inviteA: CallInviteStatus.ringing,
-      inviteB: CallInviteStatus.ringing,
-    };
+    var status = CallInviteStatus.ringing;
     var holdDuplicateA = false;
     final duplicateAReadStarted = Completer<void>();
     final releaseDuplicateARead = Completer<void>();
-    await seedInvite(inviteA, status: CallInviteStatus.ringing);
-    await seedInvite(inviteB, status: CallInviteStatus.ringing);
+    await seedInvite(sharedInvite, status: CallInviteStatus.ringing);
 
     await tester.pumpWidget(MaterialApp(
       navigatorKey: navigatorKey,
@@ -1782,8 +1964,9 @@ void main() {
       callScreenOpenRecorderForTest: recordingCallOpenRecorder(openedRoutes),
       skipActiveInviteBindingForTest: true,
       iosCallkitOnlyIncomingUiForTest: true,
-      readInviteDataForTest: (inviteId) async {
-        if (inviteId == inviteA && holdDuplicateA) {
+      readInviteDataForTest: (_) async {
+        if (holdDuplicateA) {
+          holdDuplicateA = false;
           if (!duplicateAReadStarted.isCompleted) {
             duplicateAReadStarted.complete();
           }
@@ -1794,28 +1977,28 @@ void main() {
           'fromName': 'Notify Caller',
           'toUid': calleeUid,
           'toName': calleeName,
-          'channel': 'channel_$inviteId',
+          'channel': 'channel_$sharedInvite',
           'isVideo': false,
-          'status': statuses[inviteId]!.name,
+          'status': status.name,
         };
       },
     );
 
     await notifications.debugSimulateNativeAcceptedCallkitBridgeForTest(
-      inviteId: inviteA,
-      channel: 'channel_$inviteA',
+      inviteId: sharedInvite,
+      channel: 'channel_$sharedInvite',
       isVideo: false,
       fromName: 'Notify Caller',
       fromUid: callerUid,
       callkitId: callkitA,
     );
     await pumpUntilRouteOpened(tester);
-    expect(openedRoutes, <String>[inviteA]);
+    expect(openedRoutes, <String>[sharedInvite]);
 
     holdDuplicateA = true;
     await notifications.debugSimulateNativeAcceptedCallkitBridgeForTest(
-      inviteId: inviteA,
-      channel: 'channel_$inviteA',
+      inviteId: sharedInvite,
+      channel: 'channel_$sharedInvite',
       isVideo: false,
       fromName: 'Notify Caller',
       fromUid: callerUid,
@@ -1823,34 +2006,36 @@ void main() {
     );
     await duplicateAReadStarted.future;
 
-    statuses[inviteA] = CallInviteStatus.ended;
-    await manager.debugMarkHeldRouteTerminalForTest(inviteA);
-    await manager.debugCloseHeldRouteForTest(inviteA);
+    status = CallInviteStatus.ended;
+    await manager.debugMarkHeldRouteTerminalForTest(sharedInvite);
+    await manager.debugCloseHeldRouteForTest(sharedInvite);
     final releasedA = notifications.debugSnapshotForTest();
     expect(releasedA['acceptedRecoveryInFlight'], isFalse);
     expect(releasedA['acceptedRecoveryPayloadPending'], isFalse);
     expect(releasedA['acceptedRecoveryOwnerPresent'], isFalse);
 
+    status = CallInviteStatus.ringing;
+    await seedInvite(sharedInvite, status: CallInviteStatus.ringing);
     await notifications.debugSimulateNativeAcceptedCallkitBridgeForTest(
-      inviteId: inviteB,
-      channel: 'channel_$inviteB',
+      inviteId: sharedInvite,
+      channel: 'channel_$sharedInvite',
       isVideo: false,
       fromName: 'Notify Caller',
       fromUid: callerUid,
       callkitId: callkitB,
     );
     await pumpUntilRouteOpened(tester, expectedRoutes: 2);
-    expect(openedRoutes, <String>[inviteA, inviteB]);
+    expect(openedRoutes, <String>[sharedInvite, sharedInvite]);
     expect(manager.debugSnapshot()['acceptedOwnershipRecorded'], isTrue);
 
     releaseDuplicateARead.complete();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 10));
 
-    expect(openedRoutes, <String>[inviteA, inviteB]);
+    expect(openedRoutes, <String>[sharedInvite, sharedInvite]);
     expect(manager.debugSnapshot()['routeOpenCount'], 2);
     expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 2);
-    expect(manager.activeInviteId, inviteB);
+    expect(manager.activeInviteId, sharedInvite);
     expect(
       notifications.debugSnapshotForTest()['acceptedRecoveryRetryScheduled'],
       isFalse,
@@ -1858,10 +2043,12 @@ void main() {
     await manager.forceIdleForTest();
   });
 
-  testWidgets('three sequential exact accepted calls route once per identity',
+  testWidgets(
+      'different invite and exact IDs route across A B C without reconstruction',
       (tester) async {
     final navigatorKey = GlobalKey<NavigatorState>();
     final openedRoutes = <String>[];
+    final endedNativeCalls = <String>[];
     final statuses = <String, CallInviteStatus>{};
     await tester.pumpWidget(MaterialApp(
       navigatorKey: navigatorKey,
@@ -1870,7 +2057,7 @@ void main() {
     manager.configure(
       navigatorKey: navigatorKey,
       listNativeCalls: () async => const <NativeCallSnapshot>[],
-      endNativeCall: (_) async {},
+      endNativeCall: (callkitId) async => endedNativeCalls.add(callkitId),
       appForegroundProvider: () async => true,
       callScreenOpenRecorderForTest: recordingCallOpenRecorder(openedRoutes),
       skipActiveInviteBindingForTest: true,
@@ -1910,15 +2097,13 @@ void main() {
       await tester.pump();
       expect(openedRoutes.length, call);
 
-      if (call < 3) {
-        statuses[inviteId] = CallInviteStatus.ended;
-        await manager.debugMarkHeldRouteTerminalForTest(inviteId);
-        await manager.debugCloseHeldRouteForTest(inviteId);
-        final recovery = notifications.debugSnapshotForTest();
-        expect(recovery['acceptedRecoveryInFlight'], isFalse);
-        expect(recovery['acceptedRecoveryPayloadPending'], isFalse);
-        expect(recovery['acceptedRecoveryOwnerPresent'], isFalse);
-      }
+      statuses[inviteId] = CallInviteStatus.ended;
+      await manager.endCallFromLocalUser(inviteId: inviteId);
+      await manager.handleCallScreenClosed(inviteId);
+      final recovery = notifications.debugSnapshotForTest();
+      expect(recovery['acceptedRecoveryInFlight'], isFalse);
+      expect(recovery['acceptedRecoveryPayloadPending'], isFalse);
+      expect(recovery['acceptedRecoveryOwnerPresent'], isFalse);
     }
 
     expect(openedRoutes, <String>[
@@ -1928,6 +2113,14 @@ void main() {
     ]);
     expect(manager.debugSnapshot()['routeOpenCount'], 3);
     expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 3);
+    expect(endedNativeCalls, <String>[
+      'exact_sequential_1',
+      'exact_sequential_1',
+      'exact_sequential_2',
+      'exact_sequential_2',
+      'exact_sequential_3',
+      'exact_sequential_3',
+    ]);
     await manager.forceIdleForTest();
   });
 
@@ -1936,11 +2129,10 @@ void main() {
       (tester) async {
     final navigatorKey = GlobalKey<NavigatorState>();
     final openedRoutes = <String>[];
-    const retryInvite = 'terminal_retry_a';
-    const nextInvite = 'terminal_retry_b';
+    const sharedInvite = 'terminal_retry_shared';
     var failRetryRead = true;
-    await seedInvite(retryInvite, status: CallInviteStatus.ended);
-    await seedInvite(nextInvite, status: CallInviteStatus.ringing);
+    var nextExactCall = false;
+    await seedInvite(sharedInvite, status: CallInviteStatus.ended);
     await tester.pumpWidget(MaterialApp(
       navigatorKey: navigatorKey,
       home: const Scaffold(body: Text('home')),
@@ -1954,7 +2146,7 @@ void main() {
       skipActiveInviteBindingForTest: true,
       iosCallkitOnlyIncomingUiForTest: true,
       readInviteDataForTest: (inviteId) async {
-        if (inviteId == retryInvite && failRetryRead) {
+        if (!nextExactCall && failRetryRead) {
           throw FirebaseException(
             plugin: 'cloud_firestore',
             code: 'unavailable',
@@ -1967,16 +2159,16 @@ void main() {
           'toName': calleeName,
           'channel': 'channel_$inviteId',
           'isVideo': false,
-          'status': inviteId == retryInvite
-              ? CallInviteStatus.ended.name
-              : CallInviteStatus.ringing.name,
+          'status': nextExactCall
+              ? CallInviteStatus.ringing.name
+              : CallInviteStatus.ended.name,
         };
       },
     );
 
     await notifications.debugSimulateNativeAcceptedCallkitBridgeForTest(
-      inviteId: retryInvite,
-      channel: 'channel_$retryInvite',
+      inviteId: sharedInvite,
+      channel: 'channel_$sharedInvite',
       isVideo: false,
       fromName: 'Notify Caller',
       fromUid: callerUid,
@@ -1993,10 +2185,23 @@ void main() {
       notifications.debugSnapshotForTest()['acceptedRecoveryOwnerPresent'],
       isFalse,
     );
+    final terminalGeneration =
+        notifications.debugSnapshotForTest()['acceptedRecoveryGeneration'];
+    await notifications.debugRunAcceptedRecoveryRetryForTest();
+    expect(
+      notifications.debugSnapshotForTest()['acceptedRecoveryGeneration'],
+      terminalGeneration,
+    );
+    expect(
+      notifications.debugSnapshotForTest()['acceptedRecoveryRetryScheduled'],
+      isFalse,
+    );
 
+    nextExactCall = true;
+    await seedInvite(sharedInvite, status: CallInviteStatus.ringing);
     await notifications.debugSimulateNativeAcceptedCallkitBridgeForTest(
-      inviteId: nextInvite,
-      channel: 'channel_$nextInvite',
+      inviteId: sharedInvite,
+      channel: 'channel_$sharedInvite',
       isVideo: false,
       fromName: 'Notify Caller',
       fromUid: callerUid,
@@ -2004,7 +2209,7 @@ void main() {
     );
     await pumpUntilRouteOpened(tester);
 
-    expect(openedRoutes, <String>[nextInvite]);
+    expect(openedRoutes, <String>[sharedInvite]);
     expect(manager.debugSnapshot()['routeOpenCount'], 1);
     expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 1);
     expect(

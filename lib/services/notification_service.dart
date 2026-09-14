@@ -21,6 +21,21 @@ import 'diagnostic_service.dart';
 import 'firestore_read_helper.dart';
 import 'helperly_test_runtime.dart';
 
+bool _matchesAcceptedCallkitIdentity({
+  required String firstInviteId,
+  required String firstCallkitId,
+  required String secondInviteId,
+  required String secondCallkitId,
+}) {
+  final firstExactId = firstCallkitId.trim().toLowerCase();
+  final secondExactId = secondCallkitId.trim().toLowerCase();
+  if (firstExactId.isNotEmpty && secondExactId.isNotEmpty) {
+    return firstExactId == secondExactId;
+  }
+  final firstFallbackId = firstInviteId.trim();
+  return firstFallbackId.isNotEmpty && firstFallbackId == secondInviteId.trim();
+}
+
 class _AcceptedCallkitRecoveryPayload {
   const _AcceptedCallkitRecoveryPayload({
     required this.inviteId,
@@ -49,13 +64,33 @@ class _AcceptedCallkitRecoveryPayload {
     required String inviteId,
     required String callkitId,
   }) {
-    final ownExactId = this.callkitId.trim();
-    final otherExactId = callkitId.trim();
-    if (ownExactId.isNotEmpty && otherExactId.isNotEmpty) {
-      if (ownExactId == otherExactId) return true;
-    }
-    return this.inviteId.trim().isNotEmpty &&
-        this.inviteId.trim() == inviteId.trim();
+    return _matchesAcceptedCallkitIdentity(
+      firstInviteId: this.inviteId,
+      firstCallkitId: this.callkitId,
+      secondInviteId: inviteId,
+      secondCallkitId: callkitId,
+    );
+  }
+}
+
+class _RecentAcceptedCallkitCall {
+  const _RecentAcceptedCallkitCall({
+    required this.inviteId,
+    required this.callkitId,
+    required this.seenAt,
+  });
+
+  final String inviteId;
+  final String callkitId;
+  final DateTime seenAt;
+
+  bool matches(String inviteId, String callkitId) {
+    return _matchesAcceptedCallkitIdentity(
+      firstInviteId: this.inviteId,
+      firstCallkitId: this.callkitId,
+      secondInviteId: inviteId,
+      secondCallkitId: callkitId,
+    );
   }
 }
 
@@ -109,8 +144,8 @@ class NotificationService with WidgetsBindingObserver {
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _chatSubUsers;
   final Map<String, DateTime> _recentCallkitTerminalEvents =
       <String, DateTime>{};
-  final Map<String, DateTime> _recentAcceptedCallkitCalls =
-      <String, DateTime>{};
+  final List<_RecentAcceptedCallkitCall> _recentAcceptedCallkitCalls =
+      <_RecentAcceptedCallkitCall>[];
   final Map<String, DateTime> _chatLastNotifiedAt = <String, DateTime>{};
   bool _appleTokensRegisteredForSession = false;
   bool _apnsRetryScheduled = false;
@@ -567,40 +602,26 @@ class NotificationService with WidgetsBindingObserver {
   void _rememberAcceptedCallkitCall(String inviteId, String callkitId) {
     final now = DateTime.now();
     _recentAcceptedCallkitCalls.removeWhere(
-      (_, seenAt) => now.difference(seenAt) > const Duration(seconds: 20),
+      (entry) => now.difference(entry.seenAt) > const Duration(seconds: 20),
     );
-    final trimmedInviteId = inviteId.trim();
-    final trimmedCallkitId = callkitId.trim();
-    if (trimmedInviteId.isNotEmpty) {
-      _recentAcceptedCallkitCalls['invite:$trimmedInviteId'] = now;
-    }
-    if (trimmedCallkitId.isNotEmpty) {
-      _recentAcceptedCallkitCalls['callkit:$trimmedCallkitId'] = now;
-    }
+    _recentAcceptedCallkitCalls.removeWhere(
+      (entry) => entry.matches(inviteId, callkitId),
+    );
+    _recentAcceptedCallkitCalls.add(_RecentAcceptedCallkitCall(
+      inviteId: inviteId.trim(),
+      callkitId: callkitId.trim(),
+      seenAt: now,
+    ));
   }
 
   bool _wasRecentlyAcceptedCallkitCall(String inviteId, String callkitId) {
     final now = DateTime.now();
     _recentAcceptedCallkitCalls.removeWhere(
-      (_, seenAt) => now.difference(seenAt) > const Duration(seconds: 20),
+      (entry) => now.difference(entry.seenAt) > const Duration(seconds: 20),
     );
-    final trimmedInviteId = inviteId.trim();
-    final trimmedCallkitId = callkitId.trim();
-    final inviteSeenAt = trimmedInviteId.isEmpty
-        ? null
-        : _recentAcceptedCallkitCalls['invite:$trimmedInviteId'];
-    if (inviteSeenAt != null &&
-        now.difference(inviteSeenAt) < const Duration(seconds: 20)) {
-      return true;
-    }
-    final callkitSeenAt = trimmedCallkitId.isEmpty
-        ? null
-        : _recentAcceptedCallkitCalls['callkit:$trimmedCallkitId'];
-    if (callkitSeenAt != null &&
-        now.difference(callkitSeenAt) < const Duration(seconds: 20)) {
-      return true;
-    }
-    return false;
+    return _recentAcceptedCallkitCalls.any(
+      (entry) => entry.matches(inviteId, callkitId),
+    );
   }
 
   bool _shouldIgnoreSyntheticAcceptedCallkitEnd(
