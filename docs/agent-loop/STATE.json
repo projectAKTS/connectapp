@@ -1,27 +1,16 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "accepted_call_exact_identity",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "71fd2070cd60affe15019b8db0730e36f1a4015c",
-  "starting_sha": "71fd2070cd60affe15019b8db0730e36f1a4015c",
+  "phase": "accepted_call_identity_provenance",
+  "status": "revision_required",
+  "accepted_checkpoint_sha": "9087e450936aeecbf11c2836ae0e4196065c11b4",
+  "starting_sha": "9087e450936aeecbf11c2836ae0e4196065c11b4",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "cb913aa8377c799225aa2d9d682b2018f9ecd2a9",
+  "code_commit_sha": "",
   "ending_sha": "SELF",
-  "changed_files": [
-    "lib/services/call_session_manager.dart",
-    "lib/services/notification_service.dart",
-    "test/call_v2/real_flow/call_v2_notification_ownership_test.dart"
-  ],
-  "validation": {
-    "flutter_analyze": "passed",
-    "notification_ownership_tests": "passed: 36",
-    "call_session_manager_tests": "passed: 57",
-    "call_v2_tests": "passed: 2289",
-    "foreground_recovery_tests": "passed: 3",
-    "git_diff_check": "passed"
-  },
+  "changed_files": [],
+  "validation": {},
   "safety": {
     "deployed": false,
     "testflight_built": false,
@@ -30,7 +19,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "Accepted-call identity is now exact-ID authoritative in NotificationService and CallSessionManager. Equal non-empty exact IDs coalesce; different non-empty exact IDs are always distinct; invite fallback applies only when an exact ID is absent. Exact accepted native identity is retained through routed terminal cleanup. Source validation passed; no physical-fix claim is made."
+    "decision": "revision_required",
+    "notes": "Physical Call 2 still coalesces before accepted ownership. Required revision: trace exact CallKit ID provenance and ownership latency, preserve exact identity through stored/retry paths, and cancel the exact recovery generation after native terminal verification."
   }
 }

@@ -1,54 +1,33 @@
-# Active Task - Accepted Call Exact-Identity Correction
+# Accepted Call Identity Provenance Revision
 
-Branch: `call-v2`
+Starting SHA: `9087e450936aeecbf11c2836ae0e4196065c11b4`
 
-Starting SHA: `71fd2070cd60affe15019b8db0730e36f1a4015c`
+Physical Call 2 still reaches `acceptedRecoveryCoalescedSameCall` before local
+accepted ownership despite having a new native CallKit presentation. Trace the
+exact CallKit ID from native creation through NotificationService, retries,
+CallSessionManager ownership, routed session, and terminal cleanup. Identify
+the first path that can lose or reconstruct the exact ID.
 
-## Physical Evidence
+Also trace every await between `acceptedRecoveryOwnershipRequested` and
+`acceptedOwnershipRecorded`, and ensure retry ownership is invalidated after
+the exact accepted native call is terminal and verified ended.
 
-Call 1 routes and joins normally, including a duplicate exact native Accept.
-Call 2 reaches `acceptedRecoveryEntered` but is incorrectly reported as
-`acceptedRecoveryCoalescedSameCall`; it never records accepted ownership or
-attempts a route. Call 2 uses a different exact CallKit UUID while the invite
-identifier can equal Call 1's fixture value.
+Required invariants:
 
-## Goal
+- Different non-empty exact CallKit IDs are always distinct, even when the
+  invite ID is reused.
+- Invite fallback is allowed only when at least one exact ID is absent.
+- Stored recovery and retries preserve a known exact accepted ID.
+- A distinct exact call acquires recovery ownership before delayed network I/O.
+- Terminal verification cancels retries/futures for that exact generation.
+- Exact identity survives through routed terminal cleanup.
 
-Make NotificationService use the same canonical accepted-call identity rule as
-CallSessionManager: when both exact CallKit IDs are present, equality is
-authoritative and an exact-ID mismatch is distinct. Use invite identity only
-when at least one exact ID is unavailable. Prove terminal retry ownership does
-not continue after the exact native call terminalizes.
+Add deterministic integration-shaped tests for native bridge provenance,
+same-invite/different-exact-ID ownership, stored/retry reconstruction, fallback
+compatibility, delayed authoritative reads, post-terminal retry cancellation,
+and A/B/C sequential reuse in one process.
 
-## Allowed Files
-
-- `lib/services/notification_service.dart`
-- narrowly relevant accepted-recovery tests under `test/call_v2/**`
-- `docs/agent-loop/**`
-
-Modify another Call V2 identity site only if it violates the same canonical
-rule. Do not change RTC, PushKit, AppDelegate, native watchdog, routing,
-Navigator, Firebase/backend, Firestore schema/rules, or dependencies.
-
-## Required Regression Proof
-
-- Same invite plus different non-empty exact IDs is distinct.
-- Same invite plus equal exact IDs coalesces idempotently.
-- Matching invite fallback works when at least one exact ID is absent.
-- Routed/duplicated/terminated A cannot coalesce B when B has the same invite
-  value and a different exact ID.
-- Terminal B releases retry ownership and later retry callbacks cannot mutate
-  recovery state.
-
-## Validation
-
-```bash
-flutter analyze
-flutter test test/call_v2/real_flow/call_v2_notification_ownership_test.dart --no-pub
-flutter test test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart --no-pub
-flutter test test/call_v2 --no-pub
-flutter test test/notification_foreground_recovery_test.dart --no-pub
-git diff --check
-```
-
-Do not deploy or build TestFlight. Do not claim physical success.
+Do not change Agora, PushKit presentation, the native watchdog or its timeout,
+native CallKit termination, Navigator architecture, Firebase/backend,
+Firestore schema/rules, dependencies, or deployment. Do not build or deploy,
+and do not claim the physical issue is fixed.
