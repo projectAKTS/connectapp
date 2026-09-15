@@ -2,18 +2,16 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "accepted_call_identity_provenance",
-  "status": "revision_required",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "9087e450936aeecbf11c2836ae0e4196065c11b4",
   "starting_sha": "9087e450936aeecbf11c2836ae0e4196065c11b4",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "8ab6e7fb816c59dfa1b85dd4118112e05220b611",
+  "code_commit_sha": "a979ea65aff816cf4d36d6b6a625d94753b332a4",
   "ending_sha": "SELF",
   "changed_files": [
     "ios/Runner/AppDelegate.swift",
     "ios/RunnerTests/RunnerTests.swift",
-    "lib/services/call_session_manager.dart",
-    "lib/services/notification_service.dart",
     "test/call_v2/real_flow/call_v2_notification_ownership_test.dart",
     "test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart"
   ],
@@ -23,7 +21,7 @@
     "lifecycle_manager_tests": "passed, 57 tests",
     "all_call_v2_tests": "passed, 2291 tests",
     "foreground_recovery_tests": "passed, 3 tests",
-    "ios_runner_tests": "passed, 8 tests",
+    "ios_runner_tests": "passed, 15 tests",
     "git_diff_check": "passed"
   },
   "safety": {
@@ -34,7 +32,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "revision_required",
-    "notes": "Physical regression at f7cd84b: stale persisted CallKit presentation state can authorize exact UUID reuse without process-local live ownership. Required revision: process-local live presentation identity for incoming reuse, persisted UUID only for terminal correlation."
+    "decision": "ready_for_review",
+    "notes": "Implemented process-local live native CallKit identity reuse. Incoming presentation UUID reuse no longer trusts stale persisted presentation state; persisted exact UUIDs remain available only for terminal correlation. Same-invite fresh exact UUID accepted recovery now reaches ownership request instead of same-call coalescing. No physical-fix claim is made."
   }
 }
