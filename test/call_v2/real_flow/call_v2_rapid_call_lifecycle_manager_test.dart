@@ -1648,8 +1648,17 @@ void main() {
       source,
       contains('callkitIdForTerminal(rawCallId: String, channel: String)'),
     );
-    expect(source, contains('presentationState: callkitPresentationState'));
+    expect(source, contains('liveExactIdByLogicalKey'));
+    expect(source, contains('callkitLogicalIncomingKey'));
     expect(source, contains('isActive: activeCallkitContains'));
+    expect(source, contains('_ = existingExactId'));
+    expect(source, contains('_ = isActive'));
+    expect(source, contains('func release(exactId: String)'));
+    expect(
+      source,
+      contains('callV2CallkitIdentityAllocator.release(exactId: key)'),
+    );
+    expect(source, contains('func exactIdForTerminal('));
     expect(source, contains('ensureIncomingCallkit('));
     expect(source, contains('call.method == "ensureIncomingCallkit"'));
     expect(source, contains('let ensureOutcome = ensureIncomingCallkit('));
@@ -1658,19 +1667,8 @@ void main() {
     expect(source, contains('return "suppressedAccepted"'));
     expect(source, contains('return "suppressedActive"'));
     expect(source, contains('return "suppressedTerminal"'));
-    expect(
-      source,
-      contains(
-        'if !existing.isEmpty &&\n'
-        '        (isActive || ["presenting", "presented", "accepted", "active"].contains(state))',
-      ),
-    );
-    expect(
-      source,
-      contains(
-        'return makeExactId().trimmingCharacters(in: .whitespacesAndNewlines).lowercased()',
-      ),
-    );
+    expect(source, isNot(contains('isActive || ["presenting"')));
+    expect(source, contains('let fresh = makeExactId()'));
 
     final declineIndex = source.indexOf('if actionId == "DECLINE_CALL"');
     final declineMarkIndex = source.indexOf(

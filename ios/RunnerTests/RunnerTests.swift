@@ -4,31 +4,174 @@ import XCTest
 @testable import Runner
 
 class RunnerTests: XCTestCase {
-  func testNativeIdentityReusesOnlyLivePresentation() {
+  func testNativeIdentityIgnoresStalePersistedAcceptedState() {
+    var generated = ["exact-a", "exact-b"]
+    let allocator = CallV2NativeCallkitIdentityAllocator {
+      generated.removeFirst()
+    }
+
+    let incoming = allocator.exactIdForIncoming(
+      logicalKey: "raw:same-invite",
+      existingExactId: "stale-exact-a",
+      isActive: false
+    )
+
+    XCTAssertEqual(incoming, "exact-a")
+    XCTAssertNotEqual(incoming, "stale-exact-a")
+  }
+
+  func testNativeIdentityIgnoresStalePersistedPresentedState() {
+    var generated = ["exact-b"]
+    let allocator = CallV2NativeCallkitIdentityAllocator {
+      generated.removeFirst()
+    }
+
+    let incoming = allocator.exactIdForIncoming(
+      logicalKey: "raw:same-invite",
+      existingExactId: "stale-presented-a",
+      isActive: false
+    )
+
+    XCTAssertEqual(incoming, "exact-b")
+    XCTAssertNotEqual(incoming, "stale-presented-a")
+  }
+
+  func testNativeIdentityReusesSameProcessPresentationBeforeCxActive() {
     var generated = ["exact-a", "exact-b"]
     let allocator = CallV2NativeCallkitIdentityAllocator {
       generated.removeFirst()
     }
 
     let first = allocator.exactIdForIncoming(
+      logicalKey: "raw:same-invite",
       existingExactId: "",
-      presentationState: "",
       isActive: false
     )
     let duplicate = allocator.exactIdForIncoming(
+      logicalKey: "raw:same-invite",
       existingExactId: first,
-      presentationState: "presented",
-      isActive: true
-    )
-    let sequential = allocator.exactIdForIncoming(
-      existingExactId: first,
-      presentationState: "terminal",
       isActive: false
     )
 
     XCTAssertEqual(first, "exact-a")
     XCTAssertEqual(duplicate, "exact-a")
+  }
+
+  func testNativeIdentityReusesSameProcessActivePresentation() {
+    var generated = ["exact-a", "exact-b"]
+    let allocator = CallV2NativeCallkitIdentityAllocator {
+      generated.removeFirst()
+    }
+
+    let first = allocator.exactIdForIncoming(
+      logicalKey: "raw:same-invite",
+      existingExactId: "",
+      isActive: false
+    )
+    let duplicate = allocator.exactIdForIncoming(
+      logicalKey: "raw:same-invite",
+      existingExactId: first,
+      isActive: true
+    )
+
+    XCTAssertEqual(first, "exact-a")
+    XCTAssertEqual(duplicate, "exact-a")
+  }
+
+  func testNativeIdentityReleaseAllowsFreshSequentialPresentation() {
+    var generated = ["exact-a", "exact-b"]
+    let allocator = CallV2NativeCallkitIdentityAllocator {
+      generated.removeFirst()
+    }
+
+    let first = allocator.exactIdForIncoming(
+      logicalKey: "raw:same-invite",
+      existingExactId: "",
+      isActive: false
+    )
+    allocator.release(exactId: first)
+    let sequential = allocator.exactIdForIncoming(
+      logicalKey: "raw:same-invite",
+      existingExactId: first,
+      isActive: false
+    )
+
+    XCTAssertEqual(first, "exact-a")
     XCTAssertEqual(sequential, "exact-b")
+  }
+
+  func testNativeIdentityProcessRestartAllocatesFreshPresentation() {
+    var firstGenerated = ["exact-a"]
+    let firstAllocator = CallV2NativeCallkitIdentityAllocator {
+      firstGenerated.removeFirst()
+    }
+    let first = firstAllocator.exactIdForIncoming(
+      logicalKey: "raw:same-invite",
+      existingExactId: "",
+      isActive: false
+    )
+
+    var restartedGenerated = ["exact-b"]
+    let restartedAllocator = CallV2NativeCallkitIdentityAllocator {
+      restartedGenerated.removeFirst()
+    }
+    let afterRestart = restartedAllocator.exactIdForIncoming(
+      logicalKey: "raw:same-invite",
+      existingExactId: first,
+      isActive: false
+    )
+
+    XCTAssertEqual(first, "exact-a")
+    XCTAssertEqual(afterRestart, "exact-b")
+  }
+
+  func testNativeIdentityKeepsTerminalCorrelationSeparateFromIncomingReuse() {
+    var generated = ["exact-a", "exact-b"]
+    let allocator = CallV2NativeCallkitIdentityAllocator {
+      generated.removeFirst()
+    }
+    let first = allocator.exactIdForIncoming(
+      logicalKey: "raw:same-invite",
+      existingExactId: "",
+      isActive: false
+    )
+    allocator.release(exactId: first)
+
+    let terminal = allocator.exactIdForTerminal(
+      existingExactId: first,
+      fallbackExactId: "fallback-derived"
+    )
+    let nextIncoming = allocator.exactIdForIncoming(
+      logicalKey: "raw:same-invite",
+      existingExactId: first,
+      isActive: false
+    )
+
+    XCTAssertEqual(terminal, "exact-a")
+    XCTAssertEqual(nextIncoming, "exact-b")
+  }
+
+  func testNativeExactEndVerificationClearsLivePresentationOwnership() {
+    var generated = ["exact-a", "exact-b"]
+    let allocator = CallV2NativeCallkitIdentityAllocator {
+      generated.removeFirst()
+    }
+    let first = allocator.exactIdForIncoming(
+      logicalKey: "raw:same-invite",
+      existingExactId: "",
+      isActive: false
+    )
+
+    XCTAssertTrue(allocator.hasLivePresentation(logicalKey: "raw:same-invite"))
+    allocator.release(exactId: first)
+    XCTAssertFalse(allocator.hasLivePresentation(logicalKey: "raw:same-invite"))
+
+    let second = allocator.exactIdForIncoming(
+      logicalKey: "raw:same-invite",
+      existingExactId: first,
+      isActive: false
+    )
+    XCTAssertEqual(second, "exact-b")
   }
 
   func testNativeAcceptStartsOneWatchForDuplicateExactKey() {

@@ -108,25 +108,52 @@ final class CallV2SafeNativeDiagnosticLedger {
 
 final class CallV2NativeCallkitIdentityAllocator {
   private let makeExactId: () -> String
+  private var liveExactIdByLogicalKey: [String: String] = [:]
 
   init(makeExactId: @escaping () -> String = { UUID().uuidString.lowercased() }) {
     self.makeExactId = makeExactId
   }
 
   func exactIdForIncoming(
+    logicalKey: String,
     existingExactId: String,
-    presentationState: String,
     isActive: Bool
   ) -> String {
+    _ = existingExactId
+    _ = isActive
+    let key = logicalKey.trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    if !key.isEmpty, let live = liveExactIdByLogicalKey[key] {
+      return live
+    }
+    let fresh = makeExactId().trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    if !key.isEmpty {
+      liveExactIdByLogicalKey[key] = fresh
+    }
+    return fresh
+  }
+
+  func release(exactId: String) {
+    let exact = exactId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !exact.isEmpty else { return }
+    liveExactIdByLogicalKey = liveExactIdByLogicalKey.filter { _, value in
+      value != exact
+    }
+  }
+
+  func hasLivePresentation(logicalKey: String) -> Bool {
+    let key = logicalKey.trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    return !key.isEmpty && liveExactIdByLogicalKey[key] != nil
+  }
+
+  func exactIdForTerminal(existingExactId: String, fallbackExactId: String) -> String {
     let existing = existingExactId.trimmingCharacters(in: .whitespacesAndNewlines)
       .lowercased()
-    let state = presentationState.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !existing.isEmpty { return existing }
+    return fallbackExactId.trimmingCharacters(in: .whitespacesAndNewlines)
       .lowercased()
-    if !existing.isEmpty &&
-        (isActive || ["presenting", "presented", "accepted", "active"].contains(state)) {
-      return existing
-    }
-    return makeExactId().trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
   }
 }
 
@@ -700,19 +727,35 @@ final class CallV2NativeRouteSafetyWatchdog {
       .lowercased()
   }
 
+  private func callkitLogicalIncomingKey(rawCallId: String, channel: String) -> String {
+    let normalizedRaw = rawCallId.trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    if !normalizedRaw.isEmpty {
+      return "raw:\(normalizedRaw)"
+    }
+    let normalizedChannel = channel.trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    if !normalizedChannel.isEmpty {
+      return "channel:\(normalizedChannel)"
+    }
+    return ""
+  }
+
   private func callkitIdForIncoming(rawCallId: String, channel: String) -> String {
     let existing = storedCallkitIdMatching(rawCallId: rawCallId, channel: channel)
     return callV2CallkitIdentityAllocator.exactIdForIncoming(
+      logicalKey: callkitLogicalIncomingKey(rawCallId: rawCallId, channel: channel),
       existingExactId: existing,
-      presentationState: callkitPresentationState(callkitId: existing),
       isActive: activeCallkitContains(callkitId: existing)
     )
   }
 
   private func callkitIdForTerminal(rawCallId: String, channel: String) -> String {
     let existing = storedCallkitIdMatching(rawCallId: rawCallId, channel: channel)
-    if !existing.isEmpty { return existing }
-    return normalizedCallkitId(raw: rawCallId, fallback: channel)
+    return callV2CallkitIdentityAllocator.exactIdForTerminal(
+      existingExactId: existing,
+      fallbackExactId: normalizedCallkitId(raw: rawCallId, fallback: channel)
+    )
   }
 
   private func storeLastPushkitIncoming(
@@ -807,6 +850,9 @@ final class CallV2NativeRouteSafetyWatchdog {
     current["timestamp"] = Date().timeIntervalSince1970
     ledger[key] = current
     writeCallkitPresentationLedger(ledger)
+    if normalizedState == "terminal" {
+      callV2CallkitIdentityAllocator.release(exactId: key)
+    }
     return normalizedState
   }
 

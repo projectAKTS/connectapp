@@ -5,6 +5,7 @@ import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:connect_app/call_v2/diagnostics/call_v2_physical_diagnostic_ledger.dart';
 import 'package:connect_app/services/call_session_manager.dart';
 import 'package:connect_app/services/callkit_id.dart';
 import 'package:connect_app/services/helperly_test_runtime.dart';
@@ -1664,6 +1665,7 @@ void main() {
 
   testWidgets('same invite with different exact CallKit IDs is not coalesced',
       (tester) async {
+    CallV2PhysicalDiagnosticLedger.instance.resetForTest();
     final navigatorKey = GlobalKey<NavigatorState>();
     final openedRoutes = <String>[];
     const inviteId = 'shared_exact_identity';
@@ -1742,6 +1744,11 @@ void main() {
     expect(distinctSnapshot['coalesceReason'], 'other');
     expect(distinctSnapshot['acceptedRecoveryRetryScheduled'], isTrue);
     expect(openedRoutes, isEmpty);
+    final physicalReport =
+        CallV2PhysicalDiagnosticLedger.instance.buildSafeReport();
+    expect(physicalReport, contains('acceptedRecoveryOwnershipRequested'));
+    expect(
+        physicalReport, isNot(contains('acceptedRecoveryCoalescedSameCall')));
 
     await notifications.debugSimulateNativeSafetyTerminatedForTest(
       callkitId: 'exact_identity_a',
