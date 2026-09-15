@@ -1639,12 +1639,38 @@ void main() {
 
   test('native source coordinates APNS fallback and PushKit presentation', () {
     final source = File('ios/Runner/AppDelegate.swift').readAsStringSync();
+    expect(source, contains('CallV2NativeCallkitIdentityAllocator'));
+    expect(
+      source,
+      contains('callkitIdForIncoming(rawCallId: String, channel: String)'),
+    );
+    expect(
+      source,
+      contains('callkitIdForTerminal(rawCallId: String, channel: String)'),
+    );
+    expect(source, contains('presentationState: callkitPresentationState'));
+    expect(source, contains('isActive: activeCallkitContains'));
     expect(source, contains('ensureIncomingCallkit('));
     expect(source, contains('call.method == "ensureIncomingCallkit"'));
     expect(source, contains('let ensureOutcome = ensureIncomingCallkit('));
+    expect(source, contains('exactCallkitId: nil'));
+    expect(source, contains('exactCallkitId: callkitId'));
     expect(source, contains('return "suppressedAccepted"'));
     expect(source, contains('return "suppressedActive"'));
     expect(source, contains('return "suppressedTerminal"'));
+    expect(
+      source,
+      contains(
+        'if !existing.isEmpty &&\n'
+        '        (isActive || ["presenting", "presented", "accepted", "active"].contains(state))',
+      ),
+    );
+    expect(
+      source,
+      contains(
+        'return makeExactId().trimmingCharacters(in: .whitespacesAndNewlines).lowercased()',
+      ),
+    );
 
     final declineIndex = source.indexOf('if actionId == "DECLINE_CALL"');
     final declineMarkIndex = source.indexOf(

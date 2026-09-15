@@ -106,6 +106,30 @@ final class CallV2SafeNativeDiagnosticLedger {
   }
 }
 
+final class CallV2NativeCallkitIdentityAllocator {
+  private let makeExactId: () -> String
+
+  init(makeExactId: @escaping () -> String = { UUID().uuidString.lowercased() }) {
+    self.makeExactId = makeExactId
+  }
+
+  func exactIdForIncoming(
+    existingExactId: String,
+    presentationState: String,
+    isActive: Bool
+  ) -> String {
+    let existing = existingExactId.trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    let state = presentationState.trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    if !existing.isEmpty &&
+        (isActive || ["presenting", "presented", "accepted", "active"].contains(state)) {
+      return existing
+    }
+    return makeExactId().trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+  }
+}
+
 final class CallV2NativeRouteSafetyWatchdog {
   private struct Watch {
     let workItem: DispatchWorkItem
@@ -117,6 +141,7 @@ final class CallV2NativeRouteSafetyWatchdog {
   private let record: (String, String) -> Void
   private let requestExactEnd: (String) -> Void
   private let exactCallIsActive: (String) -> Bool
+  private let exactEndVerified: (String) -> Void
   private var watches: [String: Watch] = [:]
   private(set) var routeOwnedAck = false
   private(set) var blockerCode = "none"
@@ -127,7 +152,8 @@ final class CallV2NativeRouteSafetyWatchdog {
     queue: DispatchQueue = .main,
     record: @escaping (String, String) -> Void,
     requestExactEnd: @escaping (String) -> Void,
-    exactCallIsActive: @escaping (String) -> Bool
+    exactCallIsActive: @escaping (String) -> Bool,
+    exactEndVerified: @escaping (String) -> Void = { _ in }
   ) {
     self.timeout = timeout
     self.verificationDelay = verificationDelay
@@ -135,6 +161,7 @@ final class CallV2NativeRouteSafetyWatchdog {
     self.record = record
     self.requestExactEnd = requestExactEnd
     self.exactCallIsActive = exactCallIsActive
+    self.exactEndVerified = exactEndVerified
   }
 
   var activeCount: Int { watches.count }
@@ -198,6 +225,7 @@ final class CallV2NativeRouteSafetyWatchdog {
       if !exactCallIsActive(exactKey) {
         record(exactKey, "nativeCallEnded")
         record(exactKey, "nativeCallEndVerified")
+        exactEndVerified(exactKey)
         return
       }
       if allowEscalation {
@@ -247,6 +275,7 @@ final class CallV2NativeRouteSafetyWatchdog {
   private var pushTokenChannel: FlutterMethodChannel?
   private var callV2NativeAcceptedCallActive = false
   private let callV2SafeDiagnosticLedger = CallV2SafeNativeDiagnosticLedger()
+  private let callV2CallkitIdentityAllocator = CallV2NativeCallkitIdentityAllocator()
   private lazy var callV2NativeSafetyWatchdog = CallV2NativeRouteSafetyWatchdog(
     record: { [weak self] exactKey, stage in
       self?.callV2SafeDiagnosticLedger.record(exactKey: exactKey, stage: stage)
@@ -256,6 +285,12 @@ final class CallV2NativeRouteSafetyWatchdog {
     },
     exactCallIsActive: { [weak self] exactKey in
       self?.activeCallkitContains(callkitId: exactKey) == true
+    },
+    exactEndVerified: { [weak self] exactKey in
+      self?.notifyFlutterOfForegroundVoip(
+        method: "callkitNativeSafetyTerminated",
+        payload: ["callkitId": exactKey]
+      )
     }
   )
 
@@ -397,7 +432,8 @@ final class CallV2NativeRouteSafetyWatchdog {
               fromUid: fromUid,
               isVideo: isVideo,
               payloadType: "call_invite",
-              fromPushKit: false
+              fromPushKit: false,
+              exactCallkitId: nil
             )
             result(["outcome": outcome])
           }
@@ -645,6 +681,38 @@ final class CallV2NativeRouteSafetyWatchdog {
       String(normalizedHex.dropFirst(16).prefix(4)),
       String(normalizedHex.dropFirst(20).prefix(12)),
     ].joined(separator: "-")
+  }
+
+  private func storedCallkitIdMatching(rawCallId: String, channel: String) -> String {
+    let normalizedRaw = rawCallId.trimmingCharacters(in: .whitespacesAndNewlines)
+    let normalizedChannel = channel.trimmingCharacters(in: .whitespacesAndNewlines)
+    let defaults = UserDefaults.standard
+    let storedRaw = (defaults.string(forKey: lastPushkitIncomingCallIdStoreKey) ?? "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let storedChannel = (defaults.string(forKey: lastPushkitIncomingChannelStoreKey) ?? "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let rawMatches = !normalizedRaw.isEmpty && normalizedRaw == storedRaw
+    let channelMatches = normalizedRaw.isEmpty &&
+      !normalizedChannel.isEmpty && normalizedChannel == storedChannel
+    guard rawMatches || channelMatches else { return "" }
+    return (defaults.string(forKey: lastPushkitIncomingCallkitIdStoreKey) ?? "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+  }
+
+  private func callkitIdForIncoming(rawCallId: String, channel: String) -> String {
+    let existing = storedCallkitIdMatching(rawCallId: rawCallId, channel: channel)
+    return callV2CallkitIdentityAllocator.exactIdForIncoming(
+      existingExactId: existing,
+      presentationState: callkitPresentationState(callkitId: existing),
+      isActive: activeCallkitContains(callkitId: existing)
+    )
+  }
+
+  private func callkitIdForTerminal(rawCallId: String, channel: String) -> String {
+    let existing = storedCallkitIdMatching(rawCallId: rawCallId, channel: channel)
+    if !existing.isEmpty { return existing }
+    return normalizedCallkitId(raw: rawCallId, fallback: channel)
   }
 
   private func storeLastPushkitIncoming(
@@ -1173,9 +1241,20 @@ final class CallV2NativeRouteSafetyWatchdog {
     fromUid: String,
     isVideo: Bool,
     payloadType: String,
-    fromPushKit: Bool
+    fromPushKit: Bool,
+    exactCallkitId: String?
   ) -> String {
-    let callkitId = normalizedCallkitId(raw: rawCallId, fallback: channel)
+    let suppliedExactId = (exactCallkitId ?? "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    let callkitId = suppliedExactId.isEmpty
+      ? callkitIdForIncoming(rawCallId: rawCallId, channel: channel)
+      : suppliedExactId
+    storeLastPushkitIncoming(
+      rawCallId: rawCallId,
+      channel: channel,
+      callkitId: callkitId
+    )
     let presentationState = callkitPresentationState(callkitId: callkitId)
     if presentationState == "accepted" {
       storePushkitState(
@@ -1304,7 +1383,13 @@ final class CallV2NativeRouteSafetyWatchdog {
     let channel = (data["channel"] as? String) ?? ""
     let isVideoRaw = "\((data["isVideo"] as? String) ?? (data["isVideo"] as? Bool == true ? "true" : "false"))"
     let isVideo = isVideoRaw.lowercased() == "true"
-    let callkitId = normalizedCallkitId(raw: rawCallId, fallback: channel)
+    let terminalPayload = payloadType == "call_end" || payloadType == "call_cancel" ||
+      payloadStatus == "ended" || payloadStatus == "declined" ||
+      payloadStatus == "missed" || payloadStatus == "cancelled" ||
+      payloadStatus == "failed"
+    let callkitId = terminalPayload
+      ? callkitIdForTerminal(rawCallId: rawCallId, channel: channel)
+      : callkitIdForIncoming(rawCallId: rawCallId, channel: channel)
     callV2SafeDiagnosticLedger.record(
       exactKey: callkitId,
       stage: "pushkitReceived"
@@ -1321,10 +1406,7 @@ final class CallV2NativeRouteSafetyWatchdog {
       payloadStatus
     )
 
-    if payloadType == "call_end" || payloadType == "call_cancel" ||
-        payloadStatus == "ended" || payloadStatus == "declined" ||
-        payloadStatus == "missed" || payloadStatus == "cancelled" ||
-        payloadStatus == "failed" {
+    if terminalPayload {
       markCallkitPresentationState(callkitId: callkitId, state: "terminal")
       endDisplayedCall(
         callkitId: callkitId,
@@ -1344,7 +1426,8 @@ final class CallV2NativeRouteSafetyWatchdog {
       fromUid: fromUid,
       isVideo: isVideo,
       payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
-      fromPushKit: true
+      fromPushKit: true,
+      exactCallkitId: callkitId
     )
     if ensureOutcome != "presented" && ensureOutcome != "existing" {
       NSLog("Helperly PushKit late incoming suppressed identifier_present=true")

@@ -36,6 +36,59 @@ bool _matchesAcceptedCallkitIdentity({
   return firstFallbackId.isNotEmpty && firstFallbackId == secondInviteId.trim();
 }
 
+class _AcceptedIdentityEvidence {
+  const _AcceptedIdentityEvidence({
+    required this.incomingExactIdPresent,
+    required this.ownerExactIdPresent,
+    required this.exactIdsBothPresent,
+    required this.exactIdsEqual,
+    required this.fallbackInviteMatch,
+    required this.coalesceReason,
+  });
+
+  factory _AcceptedIdentityEvidence.compare(
+    _AcceptedCallkitRecoveryPayload? owner,
+    _AcceptedCallkitRecoveryPayload incoming,
+  ) {
+    final ownerExact = owner?.callkitId.trim().toLowerCase() ?? '';
+    final incomingExact = incoming.callkitId.trim().toLowerCase();
+    final bothPresent = ownerExact.isNotEmpty && incomingExact.isNotEmpty;
+    final exactEqual = bothPresent && ownerExact == incomingExact;
+    final fallbackMatch = owner != null &&
+        owner.inviteId.trim().isNotEmpty &&
+        owner.inviteId.trim() == incoming.inviteId.trim();
+    final reason = exactEqual
+        ? 'same_exact_id'
+        : (!bothPresent && fallbackMatch
+            ? 'fallback_missing_exact_id'
+            : 'other');
+    return _AcceptedIdentityEvidence(
+      incomingExactIdPresent: incomingExact.isNotEmpty,
+      ownerExactIdPresent: ownerExact.isNotEmpty,
+      exactIdsBothPresent: bothPresent,
+      exactIdsEqual: exactEqual,
+      fallbackInviteMatch: fallbackMatch,
+      coalesceReason: reason,
+    );
+  }
+
+  final bool incomingExactIdPresent;
+  final bool ownerExactIdPresent;
+  final bool exactIdsBothPresent;
+  final bool exactIdsEqual;
+  final bool fallbackInviteMatch;
+  final String coalesceReason;
+
+  Map<String, Object> toSafeMap() => <String, Object>{
+        'incomingExactIdPresent': incomingExactIdPresent,
+        'ownerExactIdPresent': ownerExactIdPresent,
+        'exactIdsBothPresent': exactIdsBothPresent,
+        'exactIdsEqual': exactIdsEqual,
+        'fallbackInviteMatch': fallbackInviteMatch,
+        'coalesceReason': coalesceReason,
+      };
+}
+
 class _AcceptedCallkitRecoveryPayload {
   const _AcceptedCallkitRecoveryPayload({
     required this.inviteId,
@@ -163,6 +216,17 @@ class NotificationService with WidgetsBindingObserver {
   _AcceptedCallkitRecoveryPayload? _acceptedCallkitRecoveryOwnerPayload;
   bool _nativeAcceptBridgeReceivedForTest = false;
   bool _acceptedRecoveryCoalescedForTest = false;
+  _AcceptedIdentityEvidence _acceptedIdentityEvidence =
+      _AcceptedIdentityEvidence.compare(
+          null,
+          const _AcceptedCallkitRecoveryPayload(
+            inviteId: '',
+            channel: '',
+            isVideo: false,
+            fromName: '',
+            fromUid: '',
+            callkitId: '',
+          ));
   Timer? _acceptedRecoveryRetryTimer;
   int _acceptedRecoveryRetryAttempts = 0;
   bool _acceptedRecoveryRetryScheduledForTest = false;
@@ -1227,6 +1291,29 @@ class NotificationService with WidgetsBindingObserver {
   }
 
   Future<dynamic> _handleNativePushMethodCall(MethodCall call) async {
+    if (call.method == 'callkitNativeSafetyTerminated') {
+      final rawArgs = call.arguments;
+      if (rawArgs is! Map) return true;
+      final data = Map<String, dynamic>.from(rawArgs.cast<dynamic, dynamic>());
+      final callkitId = (data['callkitId'] ?? '').toString().trim();
+      final owner = _acceptedCallkitRecoveryOwnerPayload;
+      if (callkitId.isEmpty) return true;
+      final generation = _acceptedRecoveryGeneration;
+      await CallSessionManager.instance.handleAcceptedNativeSafetyTerminated(
+        inviteId: owner?.inviteId ?? '',
+        callkitId: callkitId,
+      );
+      if (owner != null &&
+          owner.matchesIdentityValues(inviteId: '', callkitId: callkitId) &&
+          _ownsAcceptedRecovery(generation, owner)) {
+        await _clearStoredAcceptedCallRecovery(
+          inviteId: owner.inviteId,
+          callkitId: callkitId,
+        );
+      }
+      return true;
+    }
+
     if (call.method == 'callkitAcceptedNative') {
       final rawArgs = call.arguments;
       if (rawArgs is! Map) return true;
@@ -2473,10 +2560,12 @@ class NotificationService with WidgetsBindingObserver {
       final hasTerminalCallkitEvent = lastCallkitEvent == 'decline' ||
           lastCallkitEvent == 'end' ||
           lastCallkitEvent == 'timeout';
-      final terminalMatchesAcceptedCall = (acceptedInviteId.isNotEmpty &&
-              acceptedInviteId == lastCallkitEventInviteId) ||
-          (acceptedCallkitId.isNotEmpty &&
-              acceptedCallkitId == lastCallkitEventCallkitId);
+      final terminalMatchesAcceptedCall = _matchesAcceptedCallkitIdentity(
+        firstInviteId: acceptedInviteId,
+        firstCallkitId: acceptedCallkitId,
+        secondInviteId: lastCallkitEventInviteId,
+        secondCallkitId: lastCallkitEventCallkitId,
+      );
       if (acceptedAt.isNotEmpty &&
           !_isRecentAcceptedCallTimestamp(acceptedAt)) {
         await _diagPush('accepted_call_recovery_cleared_stale', meta: {
@@ -2637,6 +2726,11 @@ class NotificationService with WidgetsBindingObserver {
     }
 
     final currentOwner = _acceptedCallkitRecoveryOwnerPayload;
+    final active = _activeAcceptedCallkitRecoveryPayload;
+    _acceptedIdentityEvidence = _AcceptedIdentityEvidence.compare(
+      _recoveringAcceptedCall && active != null ? active : currentOwner,
+      nextPayload,
+    );
     if (!allowDistinctPreemption &&
         currentOwner != null &&
         !currentOwner.matchesIdentity(nextPayload)) {
@@ -2644,7 +2738,6 @@ class NotificationService with WidgetsBindingObserver {
       return;
     }
 
-    final active = _activeAcceptedCallkitRecoveryPayload;
     if (_recoveringAcceptedCall && active != null) {
       if (active.matchesIdentity(nextPayload)) {
         _acceptedRecoveryCoalescedForTest = true;
@@ -2657,6 +2750,7 @@ class NotificationService with WidgetsBindingObserver {
           'acceptedRecoverySource': trigger,
           'acceptedRecoveryPending': true,
           'navigatorReady': navigatorKey?.currentState != null,
+          ..._acceptedIdentityEvidence.toSafeMap(),
         });
         return;
       }
@@ -2975,6 +3069,7 @@ class NotificationService with WidgetsBindingObserver {
     required String fromName,
     required String fromUid,
     String? callkitId,
+    bool drainMicrotasks = true,
   }) async {
     await _handleNativePushMethodCall(
       MethodCall('callkitAcceptedNative', <String, dynamic>{
@@ -2991,9 +3086,20 @@ class NotificationService with WidgetsBindingObserver {
             ),
       }),
     );
+    if (!drainMicrotasks) return;
     for (var i = 0; i < 8; i += 1) {
       await Future<void>.microtask(() {});
     }
+  }
+
+  Future<void> debugSimulateNativeSafetyTerminatedForTest({
+    required String callkitId,
+  }) async {
+    await _handleNativePushMethodCall(
+      MethodCall('callkitNativeSafetyTerminated', <String, dynamic>{
+        'callkitId': callkitId,
+      }),
+    );
   }
 
   Future<void> debugOpenChatFromTapForTest({
@@ -3071,6 +3177,7 @@ class NotificationService with WidgetsBindingObserver {
       'acceptedRecoveryGeneration': _acceptedRecoveryGeneration,
       'nativeAcceptBridgeReceived': _nativeAcceptBridgeReceivedForTest,
       'acceptedRecoveryCoalesced': _acceptedRecoveryCoalescedForTest,
+      ..._acceptedIdentityEvidence.toSafeMap(),
       'acceptedRouteResumeInFlight': _acceptedRouteResumeFuture != null,
       'acceptedBridgeReadinessKick': _acceptedBridgeReadinessKick,
       'boundUid': _boundUid,

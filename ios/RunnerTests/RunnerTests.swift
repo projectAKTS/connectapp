@@ -4,6 +4,33 @@ import XCTest
 @testable import Runner
 
 class RunnerTests: XCTestCase {
+  func testNativeIdentityReusesOnlyLivePresentation() {
+    var generated = ["exact-a", "exact-b"]
+    let allocator = CallV2NativeCallkitIdentityAllocator {
+      generated.removeFirst()
+    }
+
+    let first = allocator.exactIdForIncoming(
+      existingExactId: "",
+      presentationState: "",
+      isActive: false
+    )
+    let duplicate = allocator.exactIdForIncoming(
+      existingExactId: first,
+      presentationState: "presented",
+      isActive: true
+    )
+    let sequential = allocator.exactIdForIncoming(
+      existingExactId: first,
+      presentationState: "terminal",
+      isActive: false
+    )
+
+    XCTAssertEqual(first, "exact-a")
+    XCTAssertEqual(duplicate, "exact-a")
+    XCTAssertEqual(sequential, "exact-b")
+  }
+
   func testNativeAcceptStartsOneWatchForDuplicateExactKey() {
     let watchdog = makeWatchdog()
 
@@ -53,6 +80,28 @@ class RunnerTests: XCTestCase {
     XCTAssertTrue(stages.contains("nativeCallEndRequested"))
     XCTAssertTrue(stages.contains("nativeCallEndVerified"))
     XCTAssertFalse(watchdog.acknowledgeRouteOwned(exactKey: "private-native-key"))
+  }
+
+  func testTimeoutReportsExactEndVerificationOnce() {
+    let verified = expectation(description: "verification callback")
+    var active = Set(["private-native-key"])
+    var verifiedKeys: [String] = []
+    let watchdog = CallV2NativeRouteSafetyWatchdog(
+      timeout: 0.01,
+      verificationDelay: 0.005,
+      queue: DispatchQueue(label: "CallV2NativeRouteSafetyWatchdogCallbackTests"),
+      record: { _, _ in },
+      requestExactEnd: { key in active.remove(key) },
+      exactCallIsActive: { active.contains($0) },
+      exactEndVerified: { key in
+        verifiedKeys.append(key)
+        verified.fulfill()
+      }
+    )
+
+    XCTAssertTrue(watchdog.start(exactKey: "private-native-key"))
+    wait(for: [verified], timeout: 0.2)
+    XCTAssertEqual(verifiedKeys, ["private-native-key"])
   }
 
   func testNativeTerminalCancelsWatch() {
