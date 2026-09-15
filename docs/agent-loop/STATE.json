@@ -2,15 +2,30 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "accepted_call_identity_provenance",
-  "status": "revision_required",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "9087e450936aeecbf11c2836ae0e4196065c11b4",
   "starting_sha": "9087e450936aeecbf11c2836ae0e4196065c11b4",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "",
+  "code_commit_sha": "8ab6e7fb816c59dfa1b85dd4118112e05220b611",
   "ending_sha": "SELF",
-  "changed_files": [],
-  "validation": {},
+  "changed_files": [
+    "ios/Runner/AppDelegate.swift",
+    "ios/RunnerTests/RunnerTests.swift",
+    "lib/services/call_session_manager.dart",
+    "lib/services/notification_service.dart",
+    "test/call_v2/real_flow/call_v2_notification_ownership_test.dart",
+    "test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart"
+  ],
+  "validation": {
+    "flutter_analyze": "passed",
+    "notification_ownership_tests": "passed, 38 tests",
+    "lifecycle_manager_tests": "passed, 57 tests",
+    "all_call_v2_tests": "passed, 2291 tests",
+    "foreground_recovery_tests": "passed, 3 tests",
+    "ios_runner_tests": "passed, 8 tests",
+    "git_diff_check": "passed"
+  },
   "safety": {
     "deployed": false,
     "testflight_built": false,
@@ -19,7 +34,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "revision_required",
-    "notes": "Physical Call 2 still coalesces before accepted ownership. Required revision: trace exact CallKit ID provenance and ownership latency, preserve exact identity through stored/retry paths, and cancel the exact recovery generation after native terminal verification."
+    "decision": "ready_for_review",
+    "notes": "Accepted identity provenance, local ownership ordering, and exact native-terminal retry cancellation are implemented. Fresh native CallKit UUID ownership is preserved through accepted recovery and terminal cleanup; route opening remains gated by authoritative Firestore validation. No physical-fix claim is made."
   }
 }

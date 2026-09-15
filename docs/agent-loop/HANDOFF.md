@@ -1,81 +1,126 @@
 # Review Handoff
 
-Phase: `accepted_call_exact_identity`
+Phase: `accepted_call_identity_provenance`
 Status: `ready_for_review`
-Starting checkpoint: `71fd2070cd60affe15019b8db0730e36f1a4015c`
-Implementation commit: `cb913aa8377c799225aa2d9d682b2018f9ecd2a9`
+Starting checkpoint: `9087e450936aeecbf11c2836ae0e4196065c11b4`
+Implementation commit: `8ab6e7fb816c59dfa1b85dd4118112e05220b611`
 Ending SHA: `SELF`
 
-## Root Cause
+## Root Causes
 
-`NotificationService` treated matching invite IDs as a fallback even when both
-accepted events carried different non-empty exact CallKit IDs. This allowed a
-new physical Call B to be coalesced with Call A. The manager already applied
-the intended rule at its recovery-request generation boundary, but downstream
-accepted owners and the recent-event ledger still had invite-only comparisons.
+Identity provenance root cause:
+Native incoming CallKit identity was still derived from the logical call/invite
+shape when the previous presentation had terminalized. In the physical same
+invite reuse case, that made a fresh native presentation look like the same
+exact CallKit call to Dart, so valid duplicate suppression could coalesce Call B
+before accepted ownership.
 
-## Exact Identity Rule
+Ownership latency root cause:
+Accepted recovery previously waited for network-backed invite reads before
+recording local accepted ownership. A delayed authoritative read could leave the
+new accepted CallKit intent without the local owner needed to survive duplicate
+signals and recovery retries.
 
-- Normalize non-empty exact CallKit IDs for comparison.
-- If both exact IDs exist, equality means the same physical accepted call and
-  inequality always means distinct calls.
-- Consult invite identity only when at least one exact CallKit ID is absent.
-- Never let matching invite identity override two different exact IDs.
+Post-terminal retry root cause:
+Native watchdog end verification was terminal for iOS CallKit, but Flutter did
+not receive an exact-ID terminal signal. The accepted recovery generation for
+that exact native call could therefore remain retryable after native end
+verification.
 
 ## Fix
 
-- Notification recovery ownership, pending/retry ownership, scoped clearing,
-  and recent accepted-event matching now use the canonical rule.
-- CallSessionManager recovery generations, pending accepted ownership, native
-  route watches, routed sessions, and active-route duplicate checks use the
-  same rule.
-- Accepted sessions retain the actual native CallKit ID. Terminal marking and
-  native end cleanup use that retained ID directly; fallback reconstruction is
-  used only when no exact accepted ID exists.
-- Terminal recovery already invalidated its exact generation and retry. No
-  separate retry mechanism change was needed; tests prove a terminal A retry
-  cannot mutate or survive into B.
+- Added a native CallKit identity allocator that generates a fresh exact UUID
+  for each new incoming presentation after the previous presentation is no
+  longer live, while reusing the existing exact UUID for duplicate callbacks on
+  the same still-live presentation.
+- Preserved the actual accepted native CallKit UUID through PushKit/native
+  accept, NotificationService accepted recovery, CallSessionManager ownership,
+  routed session payload replacement, route-pending watches, and terminal
+  cleanup.
+- Moved local accepted ownership recording before the delayed authoritative
+  Firestore read, while retaining the authoritative read before any invalid or
+  terminal invite can open the route/RTC.
+- Added exact native safety termination notification from Swift to Flutter after
+  verified native end, and invalidated only the matching accepted recovery
+  generation/watch.
 
-## Regression Proof
+## Invariants
 
-- `same invite with different exact CallKit IDs is not coalesced`: matching
-  invite plus UUID A/UUID B is distinct and the new call reaches ownership.
-- `accept duplicate while recovery in flight is coalesced`: matching invite
-  plus the same exact UUID coalesces and opens one route.
-- `matching invite is fallback when one exact CallKit ID is absent`: preserves
-  compatibility fallback only at the missing-exact-ID boundary.
-- `delayed duplicate A completion cannot suppress distinct accepted B`: stale
-  A completion cannot clear or suppress B when the invite is reused but the
-  exact UUID changes.
+Native UUID invariant:
+A new physical incoming presentation receives a fresh exact CallKit UUID after
+the previous native presentation is terminal. Duplicate handling for the same
+still-live native presentation reuses the existing exact UUID and does not create
+a second native call.
+
+Ownership ordering invariant:
+Accepted ownership is established before redundant/delayed network waits, but
+authoritative Firestore validation still gates route opening. Terminal or
+invalid invites cannot route or start RTC.
+
+Terminal cancellation invariant:
+Native watchdog verified-end sends an exact-ID terminal/cancellation signal into
+Flutter. Only the matching recovery generation and matching native route watch
+are invalidated; stale A terminal completion cannot cancel a newer distinct B.
+
+## Regression Tests
+
+- `testNativeIdentityReusesOnlyLivePresentation`: native allocator creates a
+  fresh exact UUID for a sequential same-invite presentation and reuses the UUID
+  only for a live duplicate presentation.
+- `testTimeoutReportsExactEndVerificationOnce`: native watchdog invokes the
+  exact end-verification callback once after timeout cleanup.
+- `same invite with different exact CallKit IDs is not coalesced`: same invite
+  plus UUID A/UUID B remains distinct; invite fallback does not override exact
+  mismatch.
+- `same invite duplicate exact A does not suppress distinct exact B`: duplicate
+  UUID A remains idempotent, then distinct UUID B can still acquire ownership
+  and route.
+- `native verified terminal cancels exact recovery while authoritative read
+  waits`: exact native terminal invalidates the blocked matching recovery before
+  the delayed read can keep retrying.
 - `terminal accepted retry releases its generation before next exact call`:
-  terminal A retry settles, remains inert, and cannot survive into B.
-- `different invite and exact IDs route across A B C without reconstruction`:
-  three sequential calls route in one service instance and terminal cleanup
-  uses each actual exact native ID.
-- `routed accepted terminal cleanup uses the exact native CallKit ID`: proves
-  the reconstructed fallback ID is not used when the accepted native ID exists.
+  terminal A retry cannot survive into B.
+- `same invite routes A B C with fresh exact native identity in one process`:
+  A -> B -> C reuse the same invite identity with fresh exact UUIDs, one route
+  and one RTC owner per call.
+- `native source coordinates APNS fallback and PushKit presentation`: source
+  audit proves the AppDelegate bridge uses the fresh/live exact identity helper,
+  forwards `call.data.uuid`, and keeps terminal lookup exact.
 
 ## Validation
 
 - `flutter analyze`: passed, no issues.
-- NotificationService accepted ownership: passed, 36 tests.
-- CallSessionManager lifecycle/identity: passed, 57 tests.
-- `flutter test test/call_v2 --no-pub`: passed, 2,289 tests.
-- Foreground recovery: passed, 3 tests.
+- Focused NotificationService accepted ownership:
+  `flutter test test/call_v2/real_flow/call_v2_notification_ownership_test.dart --no-pub`
+  passed, 38 tests.
+- Focused CallSessionManager lifecycle/identity:
+  `flutter test test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart --no-pub`
+  passed, 57 tests.
+- Full Call V2:
+  `flutter test test/call_v2 --no-pub` passed, 2,291 tests.
+- Foreground recovery:
+  `flutter test test/notification_foreground_recovery_test.dart --no-pub`
+  passed, 3 tests.
+- iOS RunnerTests:
+  `xcodebuild test -workspace ios/Runner.xcworkspace -scheme Runner -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.5'`
+  passed, 8 tests.
 - `git diff --check`: passed.
-- The local Flutter resolver transiently rewrote five lockfile entries;
-  `pubspec.lock` was restored and dependency files are unchanged.
+- Flutter tooling transiently rewrote `pubspec.lock`; it was restored. No
+  dependency files remain changed.
 
 ## Files Changed
 
+- `ios/Runner/AppDelegate.swift`
+- `ios/RunnerTests/RunnerTests.swift`
 - `lib/services/call_session_manager.dart`
 - `lib/services/notification_service.dart`
 - `test/call_v2/real_flow/call_v2_notification_ownership_test.dart`
+- `test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart`
 
 ## Scope Check
 
-No changes were made to Agora, PushKit presentation, AppDelegate/native code,
-the native safety watchdog or its timeout, Navigator architecture, Firebase or
-backend code, Firestore schema/rules, dependencies, or deployment settings.
-Nothing was deployed and no TestFlight build was created. This handoff does not
-claim the physical issue is fixed.
+No changes were made to Agora RTC/token/App ID architecture, engine cleanup,
+Navigator architecture, Firebase/backend/functions, Firestore schema/rules,
+dependency versions, rollout settings, or deployment settings. The native
+watchdog timeout was not increased. No TestFlight build was created. This
+handoff does not claim the physical issue is fixed.
