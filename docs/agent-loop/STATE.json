@@ -7,21 +7,19 @@
   "starting_sha": "9087e450936aeecbf11c2836ae0e4196065c11b4",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "a979ea65aff816cf4d36d6b6a625d94753b332a4",
+  "code_commit_sha": "1dba44fe8c24274e6063cf55374e483754f56d7c",
   "ending_sha": "SELF",
   "changed_files": [
     "ios/Runner/AppDelegate.swift",
-    "ios/RunnerTests/RunnerTests.swift",
-    "test/call_v2/real_flow/call_v2_notification_ownership_test.dart",
-    "test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart"
+    "ios/RunnerTests/RunnerTests.swift"
   ],
   "validation": {
     "flutter_analyze": "passed",
-    "notification_ownership_tests": "passed, 38 tests",
-    "lifecycle_manager_tests": "passed, 57 tests",
-    "all_call_v2_tests": "passed, 2291 tests",
-    "foreground_recovery_tests": "passed, 3 tests",
-    "ios_runner_tests": "passed, 15 tests",
+    "notification_ownership_tests": "not run, Dart unchanged",
+    "lifecycle_manager_tests": "not run, Dart unchanged",
+    "all_call_v2_tests": "not run, Dart unchanged",
+    "foreground_recovery_tests": "not run, Dart unchanged",
+    "ios_runner_tests": "passed, 16 tests",
     "git_diff_check": "passed"
   },
   "safety": {
@@ -33,6 +31,6 @@
   },
   "review": {
     "decision": "ready_for_review",
-    "notes": "Implemented process-local live native CallKit identity reuse. Incoming presentation UUID reuse no longer trusts stale persisted presentation state; persisted exact UUIDs remain available only for terminal correlation. Same-invite fresh exact UUID accepted recovery now reaches ownership request instead of same-call coalescing. No physical-fix claim is made."
+    "notes": "Exact-end verification now releases matching process-local live CallKit identity ownership before notifying Flutter. Existing terminal-state release remains intact and idempotent. No physical-fix claim is made."
   }
 }
