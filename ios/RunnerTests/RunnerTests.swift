@@ -247,6 +247,49 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(verifiedKeys, ["private-native-key"])
   }
 
+  func testWatchdogVerifiedEndReleasesLiveIdentityBeforeNextIncoming() {
+    let verified = expectation(description: "watchdog verifies exact native end")
+    var generated = ["exact-a", "exact-b"]
+    let allocator = CallV2NativeCallkitIdentityAllocator {
+      generated.removeFirst()
+    }
+    let logicalKey = "raw:same-invite"
+    let first = allocator.exactIdForIncoming(
+      logicalKey: logicalKey,
+      existingExactId: "",
+      isActive: false
+    )
+    var active = Set([first])
+    var verifiedKeys: [String] = []
+    let watchdog = CallV2NativeRouteSafetyWatchdog(
+      timeout: 0.01,
+      verificationDelay: 0.005,
+      queue: DispatchQueue(label: "CallV2NativeRouteSafetyWatchdogReleaseTests"),
+      record: { _, _ in },
+      requestExactEnd: { key in active.remove(key) },
+      exactCallIsActive: { active.contains($0) },
+      exactEndVerified: { key in
+        allocator.release(exactId: key)
+        verifiedKeys.append(key)
+        verified.fulfill()
+      }
+    )
+
+    XCTAssertEqual(first, "exact-a")
+    XCTAssertTrue(allocator.hasLivePresentation(logicalKey: logicalKey))
+    XCTAssertTrue(watchdog.start(exactKey: first))
+    wait(for: [verified], timeout: 0.2)
+    XCTAssertEqual(verifiedKeys, ["exact-a"])
+    XCTAssertFalse(allocator.hasLivePresentation(logicalKey: logicalKey))
+
+    let second = allocator.exactIdForIncoming(
+      logicalKey: logicalKey,
+      existingExactId: first,
+      isActive: false
+    )
+    XCTAssertEqual(second, "exact-b")
+  }
+
   func testNativeTerminalCancelsWatch() {
     let timeoutDidFire = expectation(description: "terminal cancels timeout")
     timeoutDidFire.isInverted = true

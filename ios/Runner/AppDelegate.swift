@@ -314,6 +314,7 @@ final class CallV2NativeRouteSafetyWatchdog {
       self?.activeCallkitContains(callkitId: exactKey) == true
     },
     exactEndVerified: { [weak self] exactKey in
+      self?.callV2CallkitIdentityAllocator.release(exactId: exactKey)
       self?.notifyFlutterOfForegroundVoip(
         method: "callkitNativeSafetyTerminated",
         payload: ["callkitId": exactKey]
