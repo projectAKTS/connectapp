@@ -2,7 +2,7 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "accepted_call_identity_provenance",
-  "status": "ready_for_review",
+  "status": "revision_required",
   "accepted_checkpoint_sha": "9087e450936aeecbf11c2836ae0e4196065c11b4",
   "starting_sha": "9087e450936aeecbf11c2836ae0e4196065c11b4",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
@@ -34,7 +34,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "Accepted identity provenance, local ownership ordering, and exact native-terminal retry cancellation are implemented. Fresh native CallKit UUID ownership is preserved through accepted recovery and terminal cleanup; route opening remains gated by authoritative Firestore validation. No physical-fix claim is made."
+    "decision": "revision_required",
+    "notes": "Physical regression at f7cd84b: stale persisted CallKit presentation state can authorize exact UUID reuse without process-local live ownership. Required revision: process-local live presentation identity for incoming reuse, persisted UUID only for terminal correlation."
   }
 }
