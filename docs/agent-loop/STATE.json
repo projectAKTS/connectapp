@@ -2,24 +2,25 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "accepted_call_identity_provenance",
-  "status": "revision_required",
-  "accepted_checkpoint_sha": "9087e450936aeecbf11c2836ae0e4196065c11b4",
-  "starting_sha": "9087e450936aeecbf11c2836ae0e4196065c11b4",
+  "status": "ready_for_review",
+  "accepted_checkpoint_sha": "e871a8bb70d06ac4c29efa616bf41f9d12d97276",
+  "starting_sha": "e871a8bb70d06ac4c29efa616bf41f9d12d97276",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "1dba44fe8c24274e6063cf55374e483754f56d7c",
+  "code_commit_sha": "9645d97e97257ded381e770b61c72f861ed38b04",
   "ending_sha": "SELF",
   "changed_files": [
-    "ios/Runner/AppDelegate.swift",
-    "ios/RunnerTests/RunnerTests.swift"
+    "lib/call_v2/diagnostics/call_v2_physical_diagnostic_ledger.dart",
+    "lib/services/call_session_manager.dart",
+    "test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart"
   ],
   "validation": {
     "flutter_analyze": "passed",
-    "notification_ownership_tests": "not run, Dart unchanged",
-    "lifecycle_manager_tests": "not run, Dart unchanged",
-    "all_call_v2_tests": "not run, Dart unchanged",
-    "foreground_recovery_tests": "not run, Dart unchanged",
-    "ios_runner_tests": "passed, 16 tests",
+    "notification_ownership_tests": "passed, 38 tests",
+    "lifecycle_manager_tests": "passed, 61 tests",
+    "all_call_v2_tests": "passed, 2295 tests",
+    "foreground_recovery_tests": "passed, 3 tests",
+    "ios_runner_tests": "not run, native source unchanged",
     "git_diff_check": "passed"
   },
   "safety": {
@@ -30,7 +31,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "revision_required",
-    "notes": "Physical evidence at e871a8b moves the failure boundary after acceptedOwnershipRecorded and before routeAttemptStarted. Required revision: add safe authoritative-read/continuation diagnostics, prove whether Call 2 is blocked by network read failure, stale terminal document state, or lifecycle/generation invalidation, and fix only the proven source."
+    "decision": "ready_for_review",
+    "notes": "Added safe accepted-route authoritative-read and continuation trace stages after acceptedOwnershipRecorded and before routeAttemptStarted. Source evidence points most strongly to A/network read failure as the physical Call 2 boundary; deterministic tests also prove stale terminal document and lifecycle invalidation classifications remain distinguishable. No routing, native, RTC, watchdog, backend, dependency, deployment, or TestFlight changes were made."
   }
 }
