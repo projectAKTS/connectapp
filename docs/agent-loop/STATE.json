@@ -2,7 +2,7 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "accepted_call_identity_provenance",
-  "status": "ready_for_review",
+  "status": "revision_required",
   "accepted_checkpoint_sha": "9087e450936aeecbf11c2836ae0e4196065c11b4",
   "starting_sha": "9087e450936aeecbf11c2836ae0e4196065c11b4",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
@@ -30,7 +30,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "Exact-end verification now releases matching process-local live CallKit identity ownership before notifying Flutter. Existing terminal-state release remains intact and idempotent. No physical-fix claim is made."
+    "decision": "revision_required",
+    "notes": "Physical evidence at e871a8b moves the failure boundary after acceptedOwnershipRecorded and before routeAttemptStarted. Required revision: add safe authoritative-read/continuation diagnostics, prove whether Call 2 is blocked by network read failure, stale terminal document state, or lifecycle/generation invalidation, and fix only the proven source."
   }
 }
