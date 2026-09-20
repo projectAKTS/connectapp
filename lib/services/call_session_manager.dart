@@ -1510,7 +1510,15 @@ class CallSessionManager {
 
     Map<String, dynamic>? latest;
     try {
+      _recordAcceptedRouteStage(
+        bridgePayload,
+        CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadStarted,
+      );
       latest = await _readInviteData(bridgePayload.inviteId);
+      _recordAcceptedRouteStage(
+        bridgePayload,
+        CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadSucceeded,
+      );
     } catch (error) {
       if (!_ownsAcceptedRecoveryRequest(
         generation: requestGeneration,
@@ -1519,6 +1527,10 @@ class CallSessionManager {
       )) {
         return AcceptedCallRecoveryResult.busy;
       }
+      _recordAcceptedRouteStage(
+        bridgePayload,
+        CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadPendingNetwork,
+      );
       await _diagManager('accepted_recovery_read_pending_network', meta: {
         'acceptedRecoveryAttemptCount': _acceptedRecoveryAttemptCount,
         'error': '$error',
@@ -1538,6 +1550,10 @@ class CallSessionManager {
     }
     final status = _parseStatus(latest?['status']);
     if (latest == null || _isTerminalStatus(status)) {
+      _recordAcceptedRouteStage(
+        bridgePayload,
+        CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadTerminal,
+      );
       _acceptedRouteTerminalObserved = true;
       final watch = _acceptedNativeRouteWatch;
       if (watch != null && watch.matchesIdentity(bridgePayload)) {
@@ -1550,11 +1566,19 @@ class CallSessionManager {
       }
       return AcceptedCallRecoveryResult.terminal;
     }
+    _recordAcceptedRouteStage(
+      bridgePayload,
+      CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadOpenable,
+    );
     final payload = _authoritativeAcceptedPayload(bridgePayload, latest);
     _replaceAcceptedOwnershipPayload(
       previous: bridgePayload,
       authoritative: payload,
       generation: continuation.claimedGeneration,
+    );
+    _recordAcceptedRouteStage(
+      payload,
+      CallV2PhysicalDiagnosticStage.acceptedContinuationOpenRequested,
     );
     final result = await _acceptInviteAndOpen(
       payload,
@@ -2265,6 +2289,16 @@ class CallSessionManager {
     );
   }
 
+  void _recordAcceptedRouteStage(
+    CallInvitePayload payload,
+    CallV2PhysicalDiagnosticStage stage,
+  ) {
+    CallV2PhysicalDiagnosticLedger.instance.record(
+      stage,
+      exactNativeKey: payload.acceptedCallkitId,
+    );
+  }
+
   CallInvitePayload _authoritativeAcceptedPayload(
     CallInvitePayload bridgePayload,
     Map<String, dynamic> data,
@@ -2761,10 +2795,18 @@ class CallSessionManager {
     _AcceptedRouteContinuation continuation, {
     required String source,
   }) async {
+    _recordAcceptedRouteStage(
+      continuation.payload,
+      CallV2PhysicalDiagnosticStage.acceptedContinuationResumeStarted,
+    );
     if (!identical(_acceptedRouteContinuation, continuation) ||
         !_callLifecycleArbiter.ownsGeneration(
           continuation.claimedGeneration,
         )) {
+      _recordAcceptedRouteStage(
+        continuation.payload,
+        CallV2PhysicalDiagnosticStage.acceptedContinuationInvalidGeneration,
+      );
       _acceptedRouteDiscarded = true;
       _clearPendingAcceptedIntent(
         inviteId: continuation.payload.inviteId,
@@ -2788,8 +2830,20 @@ class CallSessionManager {
 
     Map<String, dynamic>? latest;
     try {
+      _recordAcceptedRouteStage(
+        continuation.payload,
+        CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadStarted,
+      );
       latest = await _readInviteData(continuation.payload.inviteId);
+      _recordAcceptedRouteStage(
+        continuation.payload,
+        CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadSucceeded,
+      );
     } catch (error) {
+      _recordAcceptedRouteStage(
+        continuation.payload,
+        CallV2PhysicalDiagnosticStage.acceptedContinuationPendingNetwork,
+      );
       await _diagManager('accepted_route_verify_pending', meta: {
         'acceptedRoutePending': true,
         'error': '$error',
@@ -2800,6 +2854,10 @@ class CallSessionManager {
         !_callLifecycleArbiter.ownsGeneration(
           continuation.claimedGeneration,
         )) {
+      _recordAcceptedRouteStage(
+        continuation.payload,
+        CallV2PhysicalDiagnosticStage.acceptedContinuationInvalidGeneration,
+      );
       _acceptedRouteDiscarded = true;
       _clearPendingAcceptedIntent(
         inviteId: continuation.payload.inviteId,
@@ -2815,6 +2873,10 @@ class CallSessionManager {
             latestStatus == CallInviteStatus.joining ||
             latestStatus == CallInviteStatus.connected);
     if (!openable) {
+      _recordAcceptedRouteStage(
+        continuation.payload,
+        CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadTerminal,
+      );
       _acceptedRouteTerminalObserved = true;
       _acceptedRouteDiscarded = true;
       _clearPendingAcceptedIntent(
@@ -2846,6 +2908,10 @@ class CallSessionManager {
       );
       return AcceptedCallRecoveryResult.terminal;
     }
+    _recordAcceptedRouteStage(
+      continuation.payload,
+      CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadOpenable,
+    );
 
     final authoritativePayload = _authoritativeAcceptedPayload(
       continuation.payload,
@@ -2855,6 +2921,10 @@ class CallSessionManager {
       previous: continuation.payload,
       authoritative: authoritativePayload,
       generation: continuation.claimedGeneration,
+    );
+    _recordAcceptedRouteStage(
+      authoritativePayload,
+      CallV2PhysicalDiagnosticStage.acceptedContinuationOpenRequested,
     );
 
     final result = continuation.acceptanceConfirmed
@@ -4274,8 +4344,26 @@ class CallSessionManager {
 
     Map<String, dynamic>? latest;
     try {
+      if (acceptedIntent != null) {
+        _recordAcceptedRouteStage(
+          effectivePayload,
+          CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadStarted,
+        );
+      }
       latest = await _readInviteData(claimedInviteId);
+      if (acceptedIntent != null) {
+        _recordAcceptedRouteStage(
+          effectivePayload,
+          CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadSucceeded,
+        );
+      }
     } catch (error) {
+      if (acceptedIntent != null) {
+        _recordAcceptedRouteStage(
+          effectivePayload,
+          CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadPendingNetwork,
+        );
+      }
       await _diagManager('incoming_pending_verify_error', meta: {
         'source': source,
         'errorType': error.runtimeType.toString(),
@@ -4304,6 +4392,12 @@ class CallSessionManager {
         ? latest != null && latestStatus == CallInviteStatus.ringing
         : latest != null && acceptedContinuationStatus;
     if (latest == null || !canContinue) {
+      if (acceptedIntent != null) {
+        _recordAcceptedRouteStage(
+          effectivePayload,
+          CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadTerminal,
+        );
+      }
       _incomingPromptActive = false;
       _incomingPromptInviteId = null;
       _incomingUiOwner = IncomingUiOwner.none;
@@ -4332,6 +4426,12 @@ class CallSessionManager {
         source: '$source:terminal_claimed_pending',
       );
       return;
+    }
+    if (acceptedIntent != null) {
+      _recordAcceptedRouteStage(
+        effectivePayload,
+        CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadOpenable,
+      );
     }
 
     final payload = CallInvitePayload(
@@ -4371,6 +4471,10 @@ class CallSessionManager {
         inviteId: claimedInviteId,
       );
       if (!accepted) return;
+      _recordAcceptedRouteStage(
+        payload,
+        CallV2PhysicalDiagnosticStage.acceptedContinuationOpenRequested,
+      );
       await _diagManager('pending_accept_continuation_started', meta: {
         'pendingAcceptedClaimed': true,
         'pendingAcceptedContinuationStarted': true,

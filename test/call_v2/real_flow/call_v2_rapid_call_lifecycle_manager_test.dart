@@ -6,6 +6,7 @@ import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:connect_app/call_v2/diagnostics/call_v2_physical_diagnostic_ledger.dart';
 import 'package:connect_app/call_v2/real_flow/call_v2_call_lifecycle_arbiter.dart';
 import 'package:connect_app/services/call_session_manager.dart';
 import 'package:connect_app/services/helperly_test_runtime.dart';
@@ -53,6 +54,28 @@ void main() {
       inviteId: inviteId,
       channel: 'channel_$inviteId',
     );
+  }
+
+  Future<Map<String, dynamic>?> readInviteDoc(String inviteId) async {
+    final snap = await firestore.collection('callInvites').doc(inviteId).get();
+    return snap.data();
+  }
+
+  void beginPhysicalTrace(NativeCallSnapshot nativeCall) {
+    CallV2PhysicalDiagnosticLedger.instance.resetForTest();
+    CallV2PhysicalDiagnosticLedger.instance.beginAcceptedNativeCall(
+      exactNativeKey: nativeCall.callkitId,
+    );
+  }
+
+  String physicalReport() =>
+      CallV2PhysicalDiagnosticLedger.instance.buildSafeReport();
+
+  void expectPhysicalReportContains(Iterable<String> stageNames) {
+    final report = physicalReport();
+    for (final stageName in stageNames) {
+      expect(report, contains(stageName));
+    }
   }
 
   CallScreenOpenRecorderForTest recordingRoute(List<String> routes) {
@@ -239,6 +262,7 @@ void main() {
   }
 
   setUp(() async {
+    CallV2PhysicalDiagnosticLedger.instance.resetForTest();
     firestore = FakeFirebaseFirestore();
     navigatorKey = GlobalKey<NavigatorState>();
     manager = CallSessionManager.instance;
@@ -264,6 +288,7 @@ void main() {
   tearDown(() async {
     await manager.clearForSignedOut();
     HelperlyTestRuntime.clear();
+    CallV2PhysicalDiagnosticLedger.instance.resetForTest();
   });
 
   testWidgets('notification during terminal route teardown stays pending',
@@ -429,6 +454,209 @@ void main() {
     await manager.forceIdleForTest();
   });
 
+  testWidgets(
+      'accepted pending read trace reaches openable route request for Call B',
+      (tester) async {
+    final routes = <String>[];
+    final nativeB = nativeForInvite('invite_b');
+    final nativeCalls = <NativeCallSnapshot>[nativeB];
+    beginPhysicalTrace(nativeB);
+
+    await tester.pumpWidget(buildHarness());
+    configureAcceptedRouteHarness(
+      nativeCalls: nativeCalls,
+      routes: routes,
+      appReady: () => true,
+    );
+    await seedInvite('invite_b');
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'invite_a',
+      channel: 'channel_invite_a',
+    );
+    await manager.debugMarkHeldRouteTerminalForTest('invite_a');
+
+    expect(
+      await manager.handleRecoveredAcceptedInvite(
+        inviteId: 'invite_b',
+        channel: 'channel_invite_b',
+        isVideo: false,
+        fromName: callerName,
+        fromUid: callerUid,
+        callkitId: nativeB.callkitId,
+      ),
+      AcceptedCallRecoveryResult.pendingTeardown,
+    );
+
+    await manager.debugCloseHeldRouteForTest('invite_a');
+    await tester.pump();
+
+    expect(routes, ['invite_b']);
+    expect(manager.debugSnapshot()['routeOpenCount'], 1);
+    expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 1);
+    expectPhysicalReportContains(<String>[
+      'acceptedOwnershipRecorded',
+      'previousTeardownCompleted',
+      'acceptedAuthoritativeReadStarted',
+      'acceptedAuthoritativeReadSucceeded',
+      'acceptedAuthoritativeReadOpenable',
+      'acceptedContinuationOpenRequested',
+      'acceptedContinuationResumeStarted',
+      'routeAttemptStarted',
+      'routeOpened',
+    ]);
+    expect(
+        physicalReport(), isNot(contains('acceptedAuthoritativeReadTerminal')));
+    expect(
+      physicalReport(),
+      isNot(contains('acceptedAuthoritativeReadPendingNetwork')),
+    );
+    await manager.forceIdleForTest();
+  });
+
+  testWidgets(
+      'reused invite document must reset terminal fields before B routes',
+      (tester) async {
+    final routes = <String>[];
+    final nativeB = nativeForInvite('reused_invite');
+    final nativeCalls = <NativeCallSnapshot>[nativeB];
+    beginPhysicalTrace(nativeB);
+
+    await tester.pumpWidget(buildHarness());
+    configureAcceptedRouteHarness(
+      nativeCalls: nativeCalls,
+      routes: routes,
+      appReady: () => true,
+    );
+    await firestore.collection('callInvites').doc('reused_invite').set({
+      'fromUid': callerUid,
+      'fromName': callerName,
+      'toUid': calleeUid,
+      'toName': calleeName,
+      'channel': 'channel_reused_invite',
+      'isVideo': false,
+      'status': CallInviteStatus.ended.name,
+      'createdAt': Timestamp.now(),
+      'callerStage': CallInviteStatus.ended.name,
+      'calleeStage': CallInviteStatus.ended.name,
+      'acceptedAt': Timestamp.now(),
+      'connectedAt': Timestamp.now(),
+      'endedAt': Timestamp.now(),
+      'endedBy': callerUid,
+      'endReason': 'test_previous_call',
+    });
+    await firestore.collection('callInvites').doc('reused_invite').set({
+      'status': CallInviteStatus.ringing.name,
+      'callerStage': CallInviteStatus.ringing.name,
+      'calleeStage': CallInviteStatus.ringing.name,
+      'acceptedAt': FieldValue.delete(),
+      'connectedAt': FieldValue.delete(),
+      'endedAt': FieldValue.delete(),
+      'declinedAt': FieldValue.delete(),
+      'failedAt': FieldValue.delete(),
+      'endedBy': FieldValue.delete(),
+      'endReason': FieldValue.delete(),
+    }, SetOptions(merge: true));
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'invite_a',
+      channel: 'channel_invite_a',
+    );
+    await manager.debugMarkHeldRouteTerminalForTest('invite_a');
+
+    expect(
+      await manager.handleRecoveredAcceptedInvite(
+        inviteId: 'reused_invite',
+        channel: 'channel_reused_invite',
+        isVideo: false,
+        fromName: callerName,
+        fromUid: callerUid,
+        callkitId: nativeB.callkitId,
+      ),
+      AcceptedCallRecoveryResult.pendingTeardown,
+    );
+    await manager.debugCloseHeldRouteForTest('invite_a');
+    await tester.pump();
+
+    final reused =
+        await firestore.collection('callInvites').doc('reused_invite').get();
+    expect(routes, ['reused_invite']);
+    expect(reused.data()?['endedAt'], isNull);
+    expect(reused.data()?['endedBy'], isNull);
+    expectPhysicalReportContains(<String>[
+      'acceptedAuthoritativeReadSucceeded',
+      'acceptedAuthoritativeReadOpenable',
+      'acceptedContinuationOpenRequested',
+      'routeOpened',
+    ]);
+    expect(
+        physicalReport(), isNot(contains('acceptedAuthoritativeReadTerminal')));
+    await manager.forceIdleForTest();
+  });
+
+  testWidgets('temporary accepted read failure preserves B then later opens',
+      (tester) async {
+    final routes = <String>[];
+    final nativeB = nativeForInvite('invite_b');
+    final nativeCalls = <NativeCallSnapshot>[nativeB];
+    beginPhysicalTrace(nativeB);
+    var readAttempts = 0;
+    var appReady = false;
+
+    await createAcceptedRoutePending(
+      tester: tester,
+      previousInvite: 'invite_a',
+      nextInvite: 'invite_b',
+      nativeCalls: nativeCalls,
+      routes: routes,
+      appReady: () => appReady,
+      routeRecorder: recordingRoute(routes),
+    );
+    manager.configure(
+      readInviteDataForTest: (inviteId) async {
+        readAttempts += 1;
+        if (readAttempts == 1) {
+          throw FirebaseException(
+            plugin: 'cloud_firestore',
+            code: 'unavailable',
+          );
+        }
+        return readInviteDoc(inviteId);
+      },
+    );
+
+    appReady = true;
+    await tester.pumpWidget(buildHarness());
+    expect(
+      await manager.resumePendingAcceptedRouteIfReady(
+        source: 'temporary_read_failure',
+      ),
+      AcceptedCallRecoveryResult.pendingNetwork,
+    );
+    expect(routes, isEmpty);
+    expect(manager.debugSnapshot()['acceptedRoutePending'], isTrue);
+    expectPhysicalReportContains(<String>[
+      'acceptedContinuationResumeStarted',
+      'acceptedAuthoritativeReadStarted',
+      'acceptedContinuationPendingNetwork',
+    ]);
+
+    expect(
+      await manager.resumePendingAcceptedRouteIfReady(
+        source: 'temporary_read_recovered',
+      ),
+      AcceptedCallRecoveryResult.opened,
+    );
+    await tester.pump();
+    expect(routes, ['invite_b']);
+    expect(readAttempts, 2);
+    expectPhysicalReportContains(<String>[
+      'acceptedAuthoritativeReadSucceeded',
+      'acceptedAuthoritativeReadOpenable',
+      'acceptedContinuationOpenRequested',
+      'routeOpened',
+    ]);
+    await manager.forceIdleForTest();
+  });
+
   testWidgets('multiple resumed triggers coalesce one accepted route attempt',
       (tester) async {
     final routes = <String>[];
@@ -489,7 +717,9 @@ void main() {
       (tester) async {
     final routes = <String>[];
     final endedNative = <String>[];
-    final nativeCalls = <NativeCallSnapshot>[nativeForInvite('invite_b')];
+    final nativeB = nativeForInvite('invite_b');
+    final nativeCalls = <NativeCallSnapshot>[nativeB];
+    beginPhysicalTrace(nativeB);
     var appReady = false;
     await createAcceptedRoutePending(
       tester: tester,
@@ -530,7 +760,9 @@ void main() {
   testWidgets('invalidated generation cannot resume accepted route',
       (tester) async {
     final routes = <String>[];
-    final nativeCalls = <NativeCallSnapshot>[nativeForInvite('invite_b')];
+    final nativeB = nativeForInvite('invite_b');
+    final nativeCalls = <NativeCallSnapshot>[nativeB];
+    beginPhysicalTrace(nativeB);
     var appReady = false;
     await createAcceptedRoutePending(
       tester: tester,
@@ -611,6 +843,75 @@ void main() {
       expect(manager.debugSnapshot()['acceptedRoutePending'], isFalse);
       previousInvite = nextInvite;
     }
+    await manager.forceIdleForTest();
+  });
+
+  testWidgets(
+      'A B C accepted sequence records openable reads and one route each',
+      (tester) async {
+    final routes = <String>[];
+    final nativeCalls = <NativeCallSnapshot>[];
+    var appReady = true;
+    await tester.pumpWidget(buildHarness());
+    configureAcceptedRouteHarness(
+      nativeCalls: nativeCalls,
+      routes: routes,
+      appReady: () => appReady,
+    );
+    var previousInvite = 'abc_invite_0';
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: previousInvite,
+      channel: 'channel_$previousInvite',
+    );
+
+    for (final suffix in <String>['a', 'b', 'c']) {
+      final nextInvite = 'abc_invite_$suffix';
+      final nativeNext = nativeForInvite(nextInvite);
+      beginPhysicalTrace(nativeNext);
+      nativeCalls.add(nativeNext);
+      await seedInvite(nextInvite);
+      await manager.debugMarkHeldRouteTerminalForTest(previousInvite);
+      expect(
+        await manager.handleRecoveredAcceptedInvite(
+          inviteId: nextInvite,
+          channel: 'channel_$nextInvite',
+          isVideo: false,
+          fromName: callerName,
+          fromUid: callerUid,
+          callkitId: nativeNext.callkitId,
+        ),
+        AcceptedCallRecoveryResult.pendingTeardown,
+      );
+
+      appReady = false;
+      await tester.pumpWidget(const SizedBox.shrink());
+      await manager.debugCloseHeldRouteForTest(previousInvite);
+      expect(routes, isNot(contains(nextInvite)));
+
+      appReady = true;
+      await tester.pumpWidget(buildHarness());
+      expect(
+        await manager.resumePendingAcceptedRouteIfReady(
+          source: 'abc_cycle_$suffix',
+        ),
+        AcceptedCallRecoveryResult.opened,
+      );
+      await tester.pump();
+      expect(routes.last, nextInvite);
+      expect(routes.where((route) => route == nextInvite).length, 1);
+      expectPhysicalReportContains(<String>[
+        'acceptedAuthoritativeReadStarted',
+        'acceptedAuthoritativeReadSucceeded',
+        'acceptedAuthoritativeReadOpenable',
+        'acceptedContinuationOpenRequested',
+        'routeOpened',
+      ]);
+      previousInvite = nextInvite;
+    }
+
+    expect(routes, <String>['abc_invite_a', 'abc_invite_b', 'abc_invite_c']);
+    expect(manager.debugSnapshot()['routeOpenCount'], 3);
+    expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 3);
     await manager.forceIdleForTest();
   });
 
@@ -745,7 +1046,9 @@ void main() {
       final routes = <String>[];
       final endedNative = <String>[];
       await tester.pumpWidget(buildHarness());
-      final nativeCalls = <NativeCallSnapshot>[nativeForInvite('invite_b')];
+      final nativeB = nativeForInvite('invite_b');
+      beginPhysicalTrace(nativeB);
+      final nativeCalls = <NativeCallSnapshot>[nativeB];
       manager.configure(
         navigatorKey: navigatorKey,
         appForegroundProvider: () async => true,
@@ -770,6 +1073,7 @@ void main() {
         isVideo: false,
         fromName: callerName,
         fromUid: callerUid,
+        callkitId: nativeB.callkitId,
       );
       await firestore.collection('callInvites').doc('invite_b').set({
         'status': status.name,
@@ -781,6 +1085,12 @@ void main() {
       expect(endedNative, isNotEmpty);
       expect(manager.debugSnapshot()['pendingAcceptedIntent'], isFalse);
       expect(manager.debugSnapshot()['sessionIdle'], isTrue);
+      expectPhysicalReportContains(<String>[
+        'acceptedAuthoritativeReadStarted',
+        'acceptedAuthoritativeReadSucceeded',
+        'acceptedAuthoritativeReadTerminal',
+      ]);
+      expect(physicalReport(), isNot(contains('routeOpened')));
     });
   }
 
