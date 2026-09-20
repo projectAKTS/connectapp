@@ -1607,7 +1607,7 @@ void main() {
       home: const Scaffold(body: Text('home')),
     ));
     await seedInvite('invite_network_retry');
-    var failRead = true;
+    var failTransaction = true;
     manager.configure(
       navigatorKey: navigatorKey,
       listNativeCalls: () async => const <NativeCallSnapshot>[],
@@ -1616,21 +1616,15 @@ void main() {
       callScreenOpenRecorderForTest: placeholderCallOpenRecorder(),
       skipActiveInviteBindingForTest: true,
       readInviteDataForTest: (inviteId) async {
-        if (failRead) {
+        throw StateError('accepted recovery must not perform a pre-read');
+      },
+      beforeAcceptTransactionAttemptForTest: (attempt) async {
+        if (failTransaction) {
           throw FirebaseException(
             plugin: 'cloud_firestore',
             code: 'unavailable',
           );
         }
-        return <String, dynamic>{
-          'fromUid': callerUid,
-          'fromName': 'Notify Caller',
-          'toUid': calleeUid,
-          'toName': calleeName,
-          'channel': 'channel_invite_network_retry',
-          'isVideo': false,
-          'status': CallInviteStatus.accepted.name,
-        };
       },
     );
 
@@ -1641,6 +1635,9 @@ void main() {
       fromName: 'Notify Caller',
       fromUid: callerUid,
     );
+    for (var i = 0; i < 4; i += 1) {
+      await tester.pump(const Duration(milliseconds: 300));
+    }
 
     expect(manager.debugSnapshot()['acceptedRecoveryPending'], isTrue);
     expect(
@@ -1652,7 +1649,7 @@ void main() {
       1,
     );
 
-    failRead = false;
+    failTransaction = false;
     await notifications.debugRunAcceptedRecoveryRetryForTest();
     await tester.pump();
 
@@ -1669,9 +1666,9 @@ void main() {
     final navigatorKey = GlobalKey<NavigatorState>();
     final openedRoutes = <String>[];
     const inviteId = 'shared_exact_identity';
-    final firstReadStarted = Completer<void>();
-    final releaseFirstRead = Completer<void>();
-    var readCount = 0;
+    final firstTransactionStarted = Completer<void>();
+    final releaseFirstTransaction = Completer<void>();
+    var transactionAttemptCount = 0;
     await seedInvite(inviteId, status: CallInviteStatus.ringing);
     await tester.pumpWidget(MaterialApp(
       navigatorKey: navigatorKey,
@@ -1685,21 +1682,12 @@ void main() {
       callScreenOpenRecorderForTest: recordingCallOpenRecorder(openedRoutes),
       skipActiveInviteBindingForTest: true,
       iosCallkitOnlyIncomingUiForTest: true,
-      readInviteDataForTest: (_) async {
-        readCount += 1;
-        if (readCount == 1) {
-          firstReadStarted.complete();
-          await releaseFirstRead.future;
+      beforeAcceptTransactionAttemptForTest: (_) async {
+        transactionAttemptCount += 1;
+        if (transactionAttemptCount == 1) {
+          firstTransactionStarted.complete();
+          await releaseFirstTransaction.future;
         }
-        return <String, dynamic>{
-          'fromUid': callerUid,
-          'fromName': 'Notify Caller',
-          'toUid': calleeUid,
-          'toName': calleeName,
-          'channel': 'channel_$inviteId',
-          'isVideo': false,
-          'status': CallInviteStatus.ringing.name,
-        };
       },
     );
 
@@ -1712,7 +1700,7 @@ void main() {
       callkitId: 'exact_identity_a',
       drainMicrotasks: false,
     );
-    await firstReadStarted.future;
+    await firstTransactionStarted.future;
     final firstGeneration = notifications
         .debugSnapshotForTest()['acceptedRecoveryGeneration'] as int;
     await notifications.debugSimulateNativeAcceptedCallkitBridgeForTest(
@@ -1727,7 +1715,7 @@ void main() {
     await tester.pump();
 
     final distinctSnapshot = notifications.debugSnapshotForTest();
-    expect(readCount, 1);
+    expect(transactionAttemptCount, 1);
     expect(
       distinctSnapshot['acceptedRecoveryGeneration'],
       greaterThan(firstGeneration),
@@ -1756,7 +1744,7 @@ void main() {
     await seedInvite(inviteId, status: CallInviteStatus.ringing);
     expect(openedRoutes, isEmpty);
 
-    releaseFirstRead.complete();
+    releaseFirstTransaction.complete();
     await tester.pumpWidget(MaterialApp(
       navigatorKey: navigatorKey,
       home: const Scaffold(body: Text('home')),
@@ -1778,9 +1766,9 @@ void main() {
       home: const Scaffold(body: Text('home')),
     ));
     await seedInvite('invite_concurrent_recovery');
-    final firstReadStarted = Completer<void>();
-    final releaseFirstRead = Completer<void>();
-    var readCount = 0;
+    final firstTransactionStarted = Completer<void>();
+    final releaseFirstTransaction = Completer<void>();
+    var transactionAttemptCount = 0;
     manager.configure(
       navigatorKey: navigatorKey,
       listNativeCalls: () async => const <NativeCallSnapshot>[],
@@ -1788,21 +1776,12 @@ void main() {
       appForegroundProvider: () async => true,
       callScreenOpenRecorderForTest: placeholderCallOpenRecorder(),
       skipActiveInviteBindingForTest: true,
-      readInviteDataForTest: (inviteId) async {
-        readCount += 1;
-        if (readCount == 1) {
-          firstReadStarted.complete();
-          await releaseFirstRead.future;
+      beforeAcceptTransactionAttemptForTest: (_) async {
+        transactionAttemptCount += 1;
+        if (transactionAttemptCount == 1) {
+          firstTransactionStarted.complete();
+          await releaseFirstTransaction.future;
         }
-        return <String, dynamic>{
-          'fromUid': callerUid,
-          'fromName': 'Notify Caller',
-          'toUid': calleeUid,
-          'toName': calleeName,
-          'channel': 'channel_invite_concurrent_recovery',
-          'isVideo': false,
-          'status': CallInviteStatus.accepted.name,
-        };
       },
     );
 
@@ -1815,7 +1794,7 @@ void main() {
       fromUid: callerUid,
       callkitId: 'exact_duplicate_identity',
     );
-    await firstReadStarted.future;
+    await firstTransactionStarted.future;
     await notifications.debugSimulateAcceptedCallkitEventForTest(
       inviteId: 'invite_concurrent_recovery',
       channel: 'channel_invite_concurrent_recovery',
@@ -1825,7 +1804,7 @@ void main() {
       callkitId: 'exact_duplicate_identity',
     );
 
-    expect(readCount, 1);
+    expect(transactionAttemptCount, 1);
     expect(
       notifications.debugSnapshotForTest()['acceptedRecoveryCoalesced'],
       isTrue,
@@ -1838,7 +1817,7 @@ void main() {
       notifications.debugSnapshotForTest()['acceptedRecoveryRetryScheduled'],
       isFalse,
     );
-    releaseFirstRead.complete();
+    releaseFirstTransaction.complete();
     await firstRecovery;
     await tester.pump();
 
@@ -1855,9 +1834,9 @@ void main() {
       (tester) async {
     final navigatorKey = GlobalKey<NavigatorState>();
     const inviteId = 'fallback_identity';
-    final firstReadStarted = Completer<void>();
-    final releaseFirstRead = Completer<void>();
-    var readCount = 0;
+    final firstTransactionStarted = Completer<void>();
+    final releaseFirstTransaction = Completer<void>();
+    var transactionAttemptCount = 0;
     await seedInvite(inviteId);
     await tester.pumpWidget(MaterialApp(
       navigatorKey: navigatorKey,
@@ -1871,21 +1850,12 @@ void main() {
       callScreenOpenRecorderForTest: placeholderCallOpenRecorder(),
       skipActiveInviteBindingForTest: true,
       iosCallkitOnlyIncomingUiForTest: true,
-      readInviteDataForTest: (_) async {
-        readCount += 1;
-        if (readCount == 1) {
-          firstReadStarted.complete();
-          await releaseFirstRead.future;
+      beforeAcceptTransactionAttemptForTest: (_) async {
+        transactionAttemptCount += 1;
+        if (transactionAttemptCount == 1) {
+          firstTransactionStarted.complete();
+          await releaseFirstTransaction.future;
         }
-        return <String, dynamic>{
-          'fromUid': callerUid,
-          'fromName': 'Notify Caller',
-          'toUid': calleeUid,
-          'toName': calleeName,
-          'channel': 'channel_$inviteId',
-          'isVideo': false,
-          'status': CallInviteStatus.accepted.name,
-        };
       },
     );
 
@@ -1897,7 +1867,7 @@ void main() {
       fromUid: callerUid,
       callkitId: 'exact_fallback_identity',
     );
-    await firstReadStarted.future;
+    await firstTransactionStarted.future;
     await notifications.debugSimulateNativeAcceptedCallkitBridgeForTest(
       inviteId: inviteId,
       channel: 'channel_$inviteId',
@@ -1907,7 +1877,7 @@ void main() {
       callkitId: '',
     );
 
-    expect(readCount, 1);
+    expect(transactionAttemptCount, 1);
     expect(
       notifications.debugSnapshotForTest()['acceptedRecoveryCoalesced'],
       isTrue,
@@ -1916,7 +1886,7 @@ void main() {
       notifications.debugSnapshotForTest()['coalesceReason'],
       'fallback_missing_exact_id',
     );
-    releaseFirstRead.complete();
+    releaseFirstTransaction.complete();
     await tester.pump();
     expect(manager.debugSnapshot()['routeOpenCount'], 1);
     expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 1);
@@ -2162,8 +2132,6 @@ void main() {
     final navigatorKey = GlobalKey<NavigatorState>();
     final openedRoutes = <String>[];
     const sharedInvite = 'terminal_retry_shared';
-    var failRetryRead = true;
-    var nextExactCall = false;
     await seedInvite(sharedInvite, status: CallInviteStatus.ended);
     await tester.pumpWidget(MaterialApp(
       navigatorKey: navigatorKey,
@@ -2177,25 +2145,6 @@ void main() {
       callScreenOpenRecorderForTest: recordingCallOpenRecorder(openedRoutes),
       skipActiveInviteBindingForTest: true,
       iosCallkitOnlyIncomingUiForTest: true,
-      readInviteDataForTest: (inviteId) async {
-        if (!nextExactCall && failRetryRead) {
-          throw FirebaseException(
-            plugin: 'cloud_firestore',
-            code: 'unavailable',
-          );
-        }
-        return <String, dynamic>{
-          'fromUid': callerUid,
-          'fromName': 'Notify Caller',
-          'toUid': calleeUid,
-          'toName': calleeName,
-          'channel': 'channel_$inviteId',
-          'isVideo': false,
-          'status': nextExactCall
-              ? CallInviteStatus.ringing.name
-              : CallInviteStatus.ended.name,
-        };
-      },
     );
 
     await notifications.debugSimulateNativeAcceptedCallkitBridgeForTest(
@@ -2216,7 +2165,6 @@ void main() {
       isFalse,
     );
 
-    failRetryRead = false;
     await notifications.debugRunAcceptedRecoveryRetryForTest();
     expect(
       notifications.debugSnapshotForTest()['acceptedRecoveryOwnerPresent'],
@@ -2234,7 +2182,6 @@ void main() {
       isFalse,
     );
 
-    nextExactCall = true;
     await seedInvite(sharedInvite, status: CallInviteStatus.ringing);
     await notifications.debugSimulateNativeAcceptedCallkitBridgeForTest(
       inviteId: sharedInvite,
@@ -2257,14 +2204,14 @@ void main() {
   });
 
   testWidgets(
-      'native verified terminal cancels exact recovery while authoritative read waits',
+      'native verified terminal cancels exact recovery while transaction waits',
       (tester) async {
     final navigatorKey = GlobalKey<NavigatorState>();
     const inviteId = 'native_terminal_during_read';
     const exactCallkitId = 'exact_native_terminal_during_read';
-    final readStarted = Completer<void>();
-    final releaseRead = Completer<void>();
-    var readCount = 0;
+    final transactionStarted = Completer<void>();
+    final releaseTransaction = Completer<void>();
+    var transactionAttemptCount = 0;
     await seedInvite(inviteId, status: CallInviteStatus.accepted);
     await tester.pumpWidget(MaterialApp(
       navigatorKey: navigatorKey,
@@ -2278,21 +2225,12 @@ void main() {
       callScreenOpenRecorderForTest: placeholderCallOpenRecorder(),
       skipActiveInviteBindingForTest: true,
       iosCallkitOnlyIncomingUiForTest: true,
-      readInviteDataForTest: (_) async {
-        readCount += 1;
-        if (readCount == 1) {
-          readStarted.complete();
-          await releaseRead.future;
+      beforeAcceptTransactionAttemptForTest: (_) async {
+        transactionAttemptCount += 1;
+        if (transactionAttemptCount == 1) {
+          transactionStarted.complete();
+          await releaseTransaction.future;
         }
-        return <String, dynamic>{
-          'fromUid': callerUid,
-          'fromName': 'Notify Caller',
-          'toUid': calleeUid,
-          'toName': calleeName,
-          'channel': 'channel_$inviteId',
-          'isVideo': false,
-          'status': CallInviteStatus.accepted.name,
-        };
       },
     );
 
@@ -2304,7 +2242,7 @@ void main() {
       fromUid: callerUid,
       callkitId: exactCallkitId,
     );
-    await readStarted.future;
+    await transactionStarted.future;
 
     expect(manager.debugSnapshot()['acceptedOwnershipRecorded'], isTrue);
     expect(manager.debugSnapshot()['acceptedNativeWatchActive'], isTrue);
@@ -2330,7 +2268,7 @@ void main() {
       isFalse,
     );
 
-    releaseRead.complete();
+    releaseTransaction.complete();
     await tester.pump();
     await notifications.debugRunAcceptedRecoveryRetryForTest();
     await tester.pump();

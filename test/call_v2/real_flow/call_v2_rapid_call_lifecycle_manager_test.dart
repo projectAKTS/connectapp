@@ -56,11 +56,6 @@ void main() {
     );
   }
 
-  Future<Map<String, dynamic>?> readInviteDoc(String inviteId) async {
-    final snap = await firestore.collection('callInvites').doc(inviteId).get();
-    return snap.data();
-  }
-
   void beginPhysicalTrace(NativeCallSnapshot nativeCall) {
     CallV2PhysicalDiagnosticLedger.instance.resetForTest();
     CallV2PhysicalDiagnosticLedger.instance.beginAcceptedNativeCall(
@@ -455,7 +450,7 @@ void main() {
   });
 
   testWidgets(
-      'accepted pending read trace reaches openable route request for Call B',
+      'accepted pending transaction reaches authoritative route request for B',
       (tester) async {
     final routes = <String>[];
     final nativeB = nativeForInvite('invite_b');
@@ -496,19 +491,20 @@ void main() {
     expectPhysicalReportContains(<String>[
       'acceptedOwnershipRecorded',
       'previousTeardownCompleted',
-      'acceptedAuthoritativeReadStarted',
-      'acceptedAuthoritativeReadSucceeded',
-      'acceptedAuthoritativeReadOpenable',
+      'acceptedTransactionStarted',
+      'acceptedTransactionSucceeded',
       'acceptedContinuationOpenRequested',
       'acceptedContinuationResumeStarted',
       'routeAttemptStarted',
       'routeOpened',
     ]);
     expect(
-        physicalReport(), isNot(contains('acceptedAuthoritativeReadTerminal')));
+      physicalReport(),
+      isNot(contains('acceptedAuthoritativeReadStarted')),
+    );
     expect(
       physicalReport(),
-      isNot(contains('acceptedAuthoritativeReadPendingNetwork')),
+      isNot(contains('acceptedTransactionPendingNetwork')),
     );
     await manager.forceIdleForTest();
   });
@@ -582,79 +578,262 @@ void main() {
     expect(reused.data()?['endedAt'], isNull);
     expect(reused.data()?['endedBy'], isNull);
     expectPhysicalReportContains(<String>[
-      'acceptedAuthoritativeReadSucceeded',
-      'acceptedAuthoritativeReadOpenable',
+      'acceptedTransactionStarted',
+      'acceptedTransactionSucceeded',
       'acceptedContinuationOpenRequested',
       'routeOpened',
     ]);
     expect(
-        physicalReport(), isNot(contains('acceptedAuthoritativeReadTerminal')));
+      physicalReport(),
+      isNot(contains('acceptedAuthoritativeReadStarted')),
+    );
     await manager.forceIdleForTest();
   });
 
-  testWidgets('temporary accepted read failure preserves B then later opens',
+  testWidgets('standalone read failure cannot block accepted transaction route',
       (tester) async {
     final routes = <String>[];
     final nativeB = nativeForInvite('invite_b');
     final nativeCalls = <NativeCallSnapshot>[nativeB];
     beginPhysicalTrace(nativeB);
     var readAttempts = 0;
-    var appReady = false;
-
-    await createAcceptedRoutePending(
-      tester: tester,
-      previousInvite: 'invite_a',
-      nextInvite: 'invite_b',
+    await tester.pumpWidget(buildHarness());
+    configureAcceptedRouteHarness(
       nativeCalls: nativeCalls,
       routes: routes,
-      appReady: () => appReady,
-      routeRecorder: recordingRoute(routes),
+      appReady: () => true,
     );
+    await seedInvite('invite_b');
     manager.configure(
-      readInviteDataForTest: (inviteId) async {
+      readInviteDataForTest: (_) async {
         readAttempts += 1;
-        if (readAttempts == 1) {
-          throw FirebaseException(
-            plugin: 'cloud_firestore',
-            code: 'unavailable',
-          );
-        }
-        return readInviteDoc(inviteId);
+        throw FirebaseException(
+          plugin: 'cloud_firestore',
+          code: 'unavailable',
+        );
       },
     );
 
-    appReady = true;
-    await tester.pumpWidget(buildHarness());
     expect(
-      await manager.resumePendingAcceptedRouteIfReady(
-        source: 'temporary_read_failure',
-      ),
-      AcceptedCallRecoveryResult.pendingNetwork,
-    );
-    expect(routes, isEmpty);
-    expect(manager.debugSnapshot()['acceptedRoutePending'], isTrue);
-    expectPhysicalReportContains(<String>[
-      'acceptedContinuationResumeStarted',
-      'acceptedAuthoritativeReadStarted',
-      'acceptedContinuationPendingNetwork',
-    ]);
-
-    expect(
-      await manager.resumePendingAcceptedRouteIfReady(
-        source: 'temporary_read_recovered',
+      await manager.handleRecoveredAcceptedInvite(
+        inviteId: 'invite_b',
+        channel: 'untrusted_bridge_channel',
+        isVideo: true,
+        fromName: 'Untrusted Bridge Name',
+        fromUid: 'untrusted_bridge_uid',
+        callkitId: nativeB.callkitId,
       ),
       AcceptedCallRecoveryResult.opened,
     );
     await tester.pump();
     expect(routes, ['invite_b']);
-    expect(readAttempts, 2);
+    expect(readAttempts, 0);
+    expect(manager.activeChannel, 'channel_invite_b');
     expectPhysicalReportContains(<String>[
-      'acceptedAuthoritativeReadSucceeded',
-      'acceptedAuthoritativeReadOpenable',
+      'acceptedTransactionStarted',
+      'acceptedTransactionSucceeded',
       'acceptedContinuationOpenRequested',
       'routeOpened',
     ]);
+    expect(
+        physicalReport(), isNot(contains('acceptedAuthoritativeReadStarted')));
     await manager.forceIdleForTest();
+  });
+
+  testWidgets('accepted transaction retries recoverably then opens one route',
+      (tester) async {
+    final routes = <String>[];
+    final nativeB = nativeForInvite('transaction_retry');
+    final nativeCalls = <NativeCallSnapshot>[nativeB];
+    beginPhysicalTrace(nativeB);
+    var transactionAttempts = 0;
+
+    await tester.pumpWidget(buildHarness());
+    configureAcceptedRouteHarness(
+      nativeCalls: nativeCalls,
+      routes: routes,
+      appReady: () => true,
+    );
+    manager.configure(
+      beforeAcceptTransactionAttemptForTest: (attempt) async {
+        transactionAttempts += 1;
+        if (attempt == 1) {
+          throw FirebaseException(
+            plugin: 'cloud_firestore',
+            code: 'unavailable',
+          );
+        }
+      },
+    );
+    await seedInvite('transaction_retry');
+
+    final recovery = manager.handleRecoveredAcceptedInvite(
+      inviteId: 'transaction_retry',
+      channel: 'channel_transaction_retry',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      callkitId: nativeB.callkitId,
+    );
+    for (var i = 0; i < 10 && transactionAttempts == 0; i += 1) {
+      await tester.pump(const Duration(milliseconds: 25));
+    }
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(await recovery, AcceptedCallRecoveryResult.opened);
+
+    expect(transactionAttempts, 2);
+    expect(routes, ['transaction_retry']);
+    expect(manager.debugSnapshot()['routeOpenCount'], 1);
+    expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 1);
+    expectPhysicalReportContains(<String>[
+      'acceptedTransactionPendingNetwork',
+      'acceptedTransactionSucceeded',
+      'routeOpened',
+    ]);
+    await manager.forceIdleForTest();
+  });
+
+  testWidgets('accepted transaction rejects wrong recipient without route',
+      (tester) async {
+    final routes = <String>[];
+    final nativeB = nativeForInvite('wrong_recipient');
+    final nativeCalls = <NativeCallSnapshot>[nativeB];
+    beginPhysicalTrace(nativeB);
+
+    await tester.pumpWidget(buildHarness());
+    configureAcceptedRouteHarness(
+      nativeCalls: nativeCalls,
+      routes: routes,
+      appReady: () => true,
+    );
+    await seedInvite('wrong_recipient');
+    await firestore.collection('callInvites').doc('wrong_recipient').set({
+      'toUid': 'different_recipient',
+    }, SetOptions(merge: true));
+
+    expect(
+      await manager.handleRecoveredAcceptedInvite(
+        inviteId: 'wrong_recipient',
+        channel: 'channel_wrong_recipient',
+        isVideo: false,
+        fromName: callerName,
+        fromUid: callerUid,
+        callkitId: nativeB.callkitId,
+      ),
+      AcceptedCallRecoveryResult.invalid,
+    );
+    await manager.debugAwaitAcceptedNativeRouteWatchCleanupForTest();
+
+    expect(routes, isEmpty);
+    expect(nativeCalls, isEmpty);
+    expectPhysicalReportContains(<String>[
+      'acceptedTransactionRejectedRecipient',
+    ]);
+    expect(physicalReport(), isNot(contains('routeOpened')));
+  });
+
+  testWidgets('stale cached ringing cannot override server terminal state',
+      (tester) async {
+    final routes = <String>[];
+    final nativeB = nativeForInvite('server_terminal');
+    final nativeCalls = <NativeCallSnapshot>[nativeB];
+    beginPhysicalTrace(nativeB);
+    var staleReadAttempts = 0;
+
+    await tester.pumpWidget(buildHarness());
+    configureAcceptedRouteHarness(
+      nativeCalls: nativeCalls,
+      routes: routes,
+      appReady: () => true,
+    );
+    await seedInvite(
+      'server_terminal',
+      status: CallInviteStatus.cancelled,
+    );
+    manager.configure(
+      skipAcceptedNativeWatchBindingForTest: true,
+      readInviteDataForTest: (_) async {
+        staleReadAttempts += 1;
+        return <String, dynamic>{
+          'fromUid': callerUid,
+          'toUid': calleeUid,
+          'channel': 'stale_cached_channel',
+          'isVideo': false,
+          'status': CallInviteStatus.ringing.name,
+        };
+      },
+    );
+
+    expect(
+      await manager.handleRecoveredAcceptedInvite(
+        inviteId: 'server_terminal',
+        channel: 'untrusted_bridge_channel',
+        isVideo: false,
+        fromName: callerName,
+        fromUid: callerUid,
+        callkitId: nativeB.callkitId,
+      ),
+      AcceptedCallRecoveryResult.terminal,
+    );
+    await manager.debugAwaitAcceptedNativeRouteWatchCleanupForTest();
+
+    expect(staleReadAttempts, 0);
+    expect(routes, isEmpty);
+    expectPhysicalReportContains(<String>[
+      'acceptedTransactionRejectedTerminal',
+    ]);
+    expect(physicalReport(), isNot(contains('routeOpened')));
+  });
+
+  testWidgets('native terminal cancels blocked accepted transaction generation',
+      (tester) async {
+    final routes = <String>[];
+    final nativeB = nativeForInvite('blocked_transaction');
+    final nativeCalls = <NativeCallSnapshot>[nativeB];
+    final transactionStarted = Completer<void>();
+    final releaseTransaction = Completer<void>();
+    var transactionAttempts = 0;
+
+    await tester.pumpWidget(buildHarness());
+    configureAcceptedRouteHarness(
+      nativeCalls: nativeCalls,
+      routes: routes,
+      appReady: () => true,
+    );
+    manager.configure(
+      beforeAcceptTransactionAttemptForTest: (attempt) async {
+        transactionAttempts += 1;
+        if (!transactionStarted.isCompleted) transactionStarted.complete();
+        await releaseTransaction.future;
+      },
+    );
+    await seedInvite('blocked_transaction');
+
+    final recovery = manager.handleRecoveredAcceptedInvite(
+      inviteId: 'blocked_transaction',
+      channel: 'channel_blocked_transaction',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      callkitId: nativeB.callkitId,
+    );
+    await transactionStarted.future;
+    expect(
+      await manager.handleAcceptedNativeSafetyTerminated(
+        inviteId: 'blocked_transaction',
+        callkitId: nativeB.callkitId,
+      ),
+      isTrue,
+    );
+    releaseTransaction.complete();
+    expect(await recovery, AcceptedCallRecoveryResult.busy);
+    await manager.debugAwaitAcceptedNativeRouteWatchCleanupForTest();
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(transactionAttempts, 1);
+    expect(routes, isEmpty);
+    expect(manager.debugSnapshot()['acceptedRoutePending'], isFalse);
+    expect(manager.debugSnapshot()['sessionIdle'], isTrue);
   });
 
   testWidgets('multiple resumed triggers coalesce one accepted route attempt',
@@ -740,13 +919,13 @@ void main() {
       await manager.resumePendingAcceptedRouteIfReady(
         source: 'terminal_resume',
       ),
-      AcceptedCallRecoveryResult.invalid,
+      AcceptedCallRecoveryResult.terminal,
     );
     expect(
       await manager.resumePendingAcceptedRouteIfReady(
         source: 'late_terminal_resume',
       ),
-      AcceptedCallRecoveryResult.invalid,
+      AcceptedCallRecoveryResult.terminal,
     );
 
     final snapshot = manager.debugSnapshot();
@@ -900,9 +1079,8 @@ void main() {
       expect(routes.last, nextInvite);
       expect(routes.where((route) => route == nextInvite).length, 1);
       expectPhysicalReportContains(<String>[
-        'acceptedAuthoritativeReadStarted',
-        'acceptedAuthoritativeReadSucceeded',
-        'acceptedAuthoritativeReadOpenable',
+        'acceptedTransactionStarted',
+        'acceptedTransactionSucceeded',
         'acceptedContinuationOpenRequested',
         'routeOpened',
       ]);
@@ -1085,11 +1263,6 @@ void main() {
       expect(endedNative, isNotEmpty);
       expect(manager.debugSnapshot()['pendingAcceptedIntent'], isFalse);
       expect(manager.debugSnapshot()['sessionIdle'], isTrue);
-      expectPhysicalReportContains(<String>[
-        'acceptedAuthoritativeReadStarted',
-        'acceptedAuthoritativeReadSucceeded',
-        'acceptedAuthoritativeReadTerminal',
-      ]);
       expect(physicalReport(), isNot(contains('routeOpened')));
     });
   }

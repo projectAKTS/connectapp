@@ -48,11 +48,16 @@ enum CallSessionPhase {
   terminal,
 }
 
-enum _AcceptInviteResult {
+enum _AcceptInviteDecision {
   accepted,
   alreadyAccepted,
-  notAllowed,
+  missing,
+  wrongRecipient,
+  terminal,
+  invalidStatus,
+  invalidPayload,
   unavailable,
+  superseded,
 }
 
 enum IncomingUiOwner {
@@ -90,8 +95,26 @@ enum _IncomingCandidateResult {
   callkitOwned,
   flutterPrompted,
   busy,
+  networkPending,
+  terminal,
   ignored,
   failed,
+}
+
+class _AcceptInviteTransactionResult {
+  const _AcceptInviteTransactionResult({
+    required this.decision,
+    this.authoritativePayload,
+    this.authoritativeStatus = CallInviteStatus.unknown,
+  });
+
+  final _AcceptInviteDecision decision;
+  final CallInvitePayload? authoritativePayload;
+  final CallInviteStatus authoritativeStatus;
+
+  bool get accepted =>
+      decision == _AcceptInviteDecision.accepted ||
+      decision == _AcceptInviteDecision.alreadyAccepted;
 }
 
 bool _matchesAcceptedCallIdentity({
@@ -236,6 +259,7 @@ class _AcceptedRouteContinuation {
   CallInvitePayload payload;
   final int claimedGeneration;
   bool acceptanceConfirmed = false;
+  CallInviteStatus authoritativeStatus = CallInviteStatus.unknown;
 
   bool matches({
     required String inviteId,
@@ -377,8 +401,10 @@ class CallSessionManager {
   Future<void> Function()? _afterOutgoingInviteWriteForTest;
   Future<Map<String, dynamic>?> Function(String inviteId)?
       _readInviteDataForTest;
+  Future<void> Function(int attempt)? _beforeAcceptTransactionAttemptForTest;
   CallScreenOpenRecorderForTest? _callScreenOpenRecorderForTest;
   bool _skipActiveInviteBindingForTest = false;
+  bool _skipAcceptedNativeWatchBindingForTest = false;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _incomingInviteSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _activeInviteSub;
   Timer? _ringingTimeoutTimer;
@@ -598,9 +624,11 @@ class CallSessionManager {
     _rtcSetupOwnerCount = 0;
     _afterOutgoingInviteWriteForTest = null;
     _readInviteDataForTest = null;
+    _beforeAcceptTransactionAttemptForTest = null;
     _callScreenOpenRecorderForTest = null;
     _acknowledgeNativeRouteOwnership = null;
     _skipActiveInviteBindingForTest = false;
+    _skipAcceptedNativeWatchBindingForTest = false;
     _iosCallkitOnlyIncomingUiForTest = null;
     _callLifecycleArbiter.forceIdleForTest();
   }
@@ -616,6 +644,12 @@ class CallSessionManager {
 
   Future<void> debugAwaitAcceptedNativeRouteWatchCleanupForTest() async {
     if (!_debugTestAccessEnabled) return;
+    final cleanup = _acceptedNativeRouteWatch?.cleanupFuture ??
+        _acceptedNativeCleanupFuture;
+    if (cleanup != null) await cleanup;
+  }
+
+  Future<void> _awaitAcceptedNativeTerminalCleanup() async {
     final cleanup = _acceptedNativeRouteWatch?.cleanupFuture ??
         _acceptedNativeCleanupFuture;
     if (cleanup != null) await cleanup;
@@ -655,8 +689,10 @@ class CallSessionManager {
     Future<void> Function()? afterOutgoingInviteWriteForTest,
     Future<Map<String, dynamic>?> Function(String inviteId)?
         readInviteDataForTest,
+    Future<void> Function(int attempt)? beforeAcceptTransactionAttemptForTest,
     CallScreenOpenRecorderForTest? callScreenOpenRecorderForTest,
     bool? skipActiveInviteBindingForTest,
+    bool? skipAcceptedNativeWatchBindingForTest,
     bool? iosCallkitOnlyIncomingUiForTest,
     AcceptedRouteReadinessCanceller? cancelAcceptedRouteReadiness,
     NativeRouteOwnershipAcknowledger? acknowledgeNativeRouteOwnership,
@@ -688,11 +724,19 @@ class CallSessionManager {
     if (readInviteDataForTest != null) {
       _readInviteDataForTest = readInviteDataForTest;
     }
+    if (beforeAcceptTransactionAttemptForTest != null) {
+      _beforeAcceptTransactionAttemptForTest =
+          beforeAcceptTransactionAttemptForTest;
+    }
     if (callScreenOpenRecorderForTest != null) {
       _callScreenOpenRecorderForTest = callScreenOpenRecorderForTest;
     }
     if (skipActiveInviteBindingForTest != null) {
       _skipActiveInviteBindingForTest = skipActiveInviteBindingForTest;
+    }
+    if (skipAcceptedNativeWatchBindingForTest != null) {
+      _skipAcceptedNativeWatchBindingForTest =
+          skipAcceptedNativeWatchBindingForTest;
     }
     if (iosCallkitOnlyIncomingUiForTest != null) {
       _iosCallkitOnlyIncomingUiForTest = iosCallkitOnlyIncomingUiForTest;
@@ -1505,86 +1549,15 @@ class CallSessionManager {
     final continuation = _acceptedRouteContinuation;
     if (continuation == null ||
         !continuation.payload.matchesAcceptedIdentity(bridgePayload)) {
+      if (_acceptedRouteTerminalObserved) {
+        await _awaitAcceptedNativeTerminalCleanup();
+        return AcceptedCallRecoveryResult.terminal;
+      }
       return AcceptedCallRecoveryResult.pendingTeardown;
     }
 
-    Map<String, dynamic>? latest;
-    try {
-      _recordAcceptedRouteStage(
-        bridgePayload,
-        CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadStarted,
-      );
-      latest = await _readInviteData(bridgePayload.inviteId);
-      _recordAcceptedRouteStage(
-        bridgePayload,
-        CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadSucceeded,
-      );
-    } catch (error) {
-      if (!_ownsAcceptedRecoveryRequest(
-        generation: requestGeneration,
-        inviteId: inviteId,
-        callkitId: callkitId,
-      )) {
-        return AcceptedCallRecoveryResult.busy;
-      }
-      _recordAcceptedRouteStage(
-        bridgePayload,
-        CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadPendingNetwork,
-      );
-      await _diagManager('accepted_recovery_read_pending_network', meta: {
-        'acceptedRecoveryAttemptCount': _acceptedRecoveryAttemptCount,
-        'error': '$error',
-      });
-      unawaited(FirestoreReadHelper.recoverNetwork(
-        reason: 'accepted_recovery_read',
-        force: FirestoreReadHelper.isRecoverableError(error),
-      ));
-      return AcceptedCallRecoveryResult.pendingNetwork;
-    }
-    if (!_ownsAcceptedRecoveryRequest(
-      generation: requestGeneration,
-      inviteId: inviteId,
-      callkitId: callkitId,
-    )) {
-      return AcceptedCallRecoveryResult.busy;
-    }
-    final status = _parseStatus(latest?['status']);
-    if (latest == null || _isTerminalStatus(status)) {
-      _recordAcceptedRouteStage(
-        bridgePayload,
-        CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadTerminal,
-      );
-      _acceptedRouteTerminalObserved = true;
-      final watch = _acceptedNativeRouteWatch;
-      if (watch != null && watch.matchesIdentity(bridgePayload)) {
-        await _resolveAcceptedNativeRouteWatch(
-          watch,
-          reason: 'accepted_recovery_terminal',
-          deadlineReached: false,
-          markInviteFailed: false,
-        );
-      }
-      return AcceptedCallRecoveryResult.terminal;
-    }
-    _recordAcceptedRouteStage(
-      bridgePayload,
-      CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadOpenable,
-    );
-    final payload = _authoritativeAcceptedPayload(bridgePayload, latest);
-    _replaceAcceptedOwnershipPayload(
-      previous: bridgePayload,
-      authoritative: payload,
-      generation: continuation.claimedGeneration,
-    );
-    _recordAcceptedRouteStage(
-      payload,
-      CallV2PhysicalDiagnosticStage.acceptedContinuationOpenRequested,
-    );
-    final result = await _acceptInviteAndOpen(
-      payload,
+    final result = await resumePendingAcceptedRouteIfReady(
       source: 'callkit_recovery',
-      lifecycleGeneration: continuation.claimedGeneration,
-      preserveLifecycleOnNavigatorUnavailable: true,
     );
     if (!_ownsAcceptedRecoveryRequest(
       generation: requestGeneration,
@@ -1593,34 +1566,7 @@ class CallSessionManager {
     )) {
       return AcceptedCallRecoveryResult.busy;
     }
-    if (result == _IncomingCandidateResult.opened ||
-        result == _IncomingCandidateResult.alreadyOpen) {
-      _acceptedRecoveryPending = false;
-      _acceptedRecoveryAcknowledged = true;
-      await _clearStoredAcceptedCallRecoverySafely(
-        'accepted_recovery_opened',
-        inviteId: payload.inviteId,
-        callkitId: payload.acceptedCallkitId,
-      );
-      return result == _IncomingCandidateResult.alreadyOpen
-          ? AcceptedCallRecoveryResult.alreadyOpen
-          : AcceptedCallRecoveryResult.opened;
-    }
-    if (result == _IncomingCandidateResult.acceptedPending) {
-      await _diagManager('accepted_recovery_pending_teardown', meta: {
-        'pendingAcceptedIntent': true,
-        'pendingAcceptedRecorded': _pendingAcceptedRecorded,
-        'callLifecycleState': _callLifecycleArbiter.state.name,
-      });
-      return AcceptedCallRecoveryResult.pendingTeardown;
-    }
-    if (result == _IncomingCandidateResult.busy) {
-      return AcceptedCallRecoveryResult.busy;
-    }
-    if (result == _IncomingCandidateResult.pending) {
-      return AcceptedCallRecoveryResult.pendingNavigator;
-    }
-    return AcceptedCallRecoveryResult.failed;
+    return result;
   }
 
   Future<bool> handleAcceptedNativeSafetyTerminated({
@@ -2305,13 +2251,11 @@ class CallSessionManager {
   ) {
     return CallInvitePayload(
       inviteId: bridgePayload.inviteId,
-      channel: (data['channel'] ?? bridgePayload.channel).toString().trim(),
-      isVideo: data.containsKey('isVideo')
-          ? _truthy(data['isVideo'])
-          : bridgePayload.isVideo,
+      channel: (data['channel'] ?? '').toString().trim(),
+      isVideo: _truthy(data['isVideo']),
       fromName: (data['fromName'] ?? bridgePayload.fromName).toString(),
-      fromUid: (data['fromUid'] ?? bridgePayload.fromUid).toString().trim(),
-      toUid: (data['toUid'] ?? bridgePayload.toUid).toString().trim(),
+      fromUid: (data['fromUid'] ?? '').toString().trim(),
+      toUid: (data['toUid'] ?? '').toString().trim(),
       acceptedCallkitId: bridgePayload.acceptedCallkitId,
       connectionSystem: callConnectionSystemFromInviteValue(
         data['callSystem'],
@@ -2383,19 +2327,24 @@ class CallSessionManager {
     _nativeEndEscalated = false;
     _acceptedNativeWatchBlockerCode = 'none';
 
-    watch.subscription =
-        _db.collection('callInvites').doc(payload.inviteId).snapshots().listen(
-      (snapshot) {
-        unawaited(_handleAcceptedNativeWatchSnapshot(watch, snapshot));
-      },
-      onError: (Object error) {
-        if (!identical(_acceptedNativeRouteWatch, watch)) return;
-        unawaited(_diagManager('accepted_native_watch_listener_error', meta: {
-          'acceptedNativeWatchActive': true,
-          'blockerCode': 'accepted_native_watch_listener_error',
-        }));
-      },
-    );
+    if (!_skipAcceptedNativeWatchBindingForTest) {
+      watch.subscription = _db
+          .collection('callInvites')
+          .doc(payload.inviteId)
+          .snapshots()
+          .listen(
+        (snapshot) {
+          unawaited(_handleAcceptedNativeWatchSnapshot(watch, snapshot));
+        },
+        onError: (Object error) {
+          if (!identical(_acceptedNativeRouteWatch, watch)) return;
+          unawaited(_diagManager('accepted_native_watch_listener_error', meta: {
+            'acceptedNativeWatchActive': true,
+            'blockerCode': 'accepted_native_watch_listener_error',
+          }));
+        },
+      );
+    }
     watch.timeoutTimer = Timer(_acceptedNativeWatchTimeout, () {
       unawaited(_handleAcceptedNativeWatchDeadline(watch));
     });
@@ -2665,6 +2614,10 @@ class CallSessionManager {
   }) async {
     final continuation = _acceptedRouteContinuation;
     if (continuation == null) {
+      if (_acceptedRouteTerminalObserved) {
+        await _awaitAcceptedNativeTerminalCleanup();
+        return AcceptedCallRecoveryResult.terminal;
+      }
       return _pendingAcceptedInviteIntent == null
           ? AcceptedCallRecoveryResult.invalid
           : AcceptedCallRecoveryResult.pendingTeardown;
@@ -2828,109 +2781,10 @@ class CallSessionManager {
       return AcceptedCallRecoveryResult.alreadyOpen;
     }
 
-    Map<String, dynamic>? latest;
-    try {
-      _recordAcceptedRouteStage(
-        continuation.payload,
-        CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadStarted,
-      );
-      latest = await _readInviteData(continuation.payload.inviteId);
-      _recordAcceptedRouteStage(
-        continuation.payload,
-        CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadSucceeded,
-      );
-    } catch (error) {
-      _recordAcceptedRouteStage(
-        continuation.payload,
-        CallV2PhysicalDiagnosticStage.acceptedContinuationPendingNetwork,
-      );
-      await _diagManager('accepted_route_verify_pending', meta: {
-        'acceptedRoutePending': true,
-        'error': '$error',
-      });
-      return AcceptedCallRecoveryResult.pendingNetwork;
-    }
-    if (!identical(_acceptedRouteContinuation, continuation) ||
-        !_callLifecycleArbiter.ownsGeneration(
-          continuation.claimedGeneration,
-        )) {
-      _recordAcceptedRouteStage(
-        continuation.payload,
-        CallV2PhysicalDiagnosticStage.acceptedContinuationInvalidGeneration,
-      );
-      _acceptedRouteDiscarded = true;
-      _clearPendingAcceptedIntent(
-        inviteId: continuation.payload.inviteId,
-        claimedGeneration: continuation.claimedGeneration,
-      );
-      return AcceptedCallRecoveryResult.invalid;
-    }
-
-    final latestStatus = _parseStatus(latest?['status']);
-    final openable = latest != null &&
-        (latestStatus == CallInviteStatus.ringing ||
-            latestStatus == CallInviteStatus.accepted ||
-            latestStatus == CallInviteStatus.joining ||
-            latestStatus == CallInviteStatus.connected);
-    if (!openable) {
-      _recordAcceptedRouteStage(
-        continuation.payload,
-        CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadTerminal,
-      );
-      _acceptedRouteTerminalObserved = true;
-      _acceptedRouteDiscarded = true;
-      _clearPendingAcceptedIntent(
-        inviteId: continuation.payload.inviteId,
-        claimedGeneration: continuation.claimedGeneration,
-      );
-      await _markNativeInviteStateSafely(
-        continuation.payload,
-        state: 'terminal',
-        reason: 'accepted_route_terminal',
-      );
-      await _endNativeCallForInvite(
-        inviteId: continuation.payload.inviteId,
-        channel: continuation.payload.channel,
-        callkitId: continuation.payload.acceptedCallkitId,
-        reason: 'accepted_route_terminal',
-      );
-      _callLifecycleArbiter.beginEnding(continuation.claimedGeneration);
-      _callLifecycleArbiter.beginTeardown(continuation.claimedGeneration);
-      _callLifecycleArbiter.completeTeardownAndClaimPending(
-        continuation.claimedGeneration,
-      );
-      _acceptedRecoveryPending = false;
-      _acceptedRecoveryAcknowledged = true;
-      await _clearStoredAcceptedCallRecoverySafely(
-        'accepted_route_terminal',
-        inviteId: continuation.payload.inviteId,
-        callkitId: continuation.payload.acceptedCallkitId,
-      );
-      return AcceptedCallRecoveryResult.terminal;
-    }
-    _recordAcceptedRouteStage(
-      continuation.payload,
-      CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadOpenable,
-    );
-
-    final authoritativePayload = _authoritativeAcceptedPayload(
-      continuation.payload,
-      latest,
-    );
-    _replaceAcceptedOwnershipPayload(
-      previous: continuation.payload,
-      authoritative: authoritativePayload,
-      generation: continuation.claimedGeneration,
-    );
-    _recordAcceptedRouteStage(
-      authoritativePayload,
-      CallV2PhysicalDiagnosticStage.acceptedContinuationOpenRequested,
-    );
-
     final result = continuation.acceptanceConfirmed
         ? await _openConfirmedAcceptedRoute(
             continuation,
-            latestStatus: latestStatus,
+            latestStatus: continuation.authoritativeStatus,
             source: source,
           )
         : await _acceptInviteAndOpen(
@@ -2980,7 +2834,22 @@ class CallSessionManager {
     if (result == _IncomingCandidateResult.busy) {
       return AcceptedCallRecoveryResult.busy;
     }
+    if (result == _IncomingCandidateResult.networkPending) {
+      _recordAcceptedRouteStage(
+        continuation.payload,
+        CallV2PhysicalDiagnosticStage.acceptedContinuationPendingNetwork,
+      );
+      return AcceptedCallRecoveryResult.pendingNetwork;
+    }
+    if (result == _IncomingCandidateResult.terminal) {
+      await _awaitAcceptedNativeTerminalCleanup();
+      return AcceptedCallRecoveryResult.terminal;
+    }
     if (result == _IncomingCandidateResult.ignored) {
+      if (_acceptedRouteTerminalObserved) {
+        await _awaitAcceptedNativeTerminalCleanup();
+        return AcceptedCallRecoveryResult.terminal;
+      }
       _acceptedRouteDiscarded = true;
       _clearPendingAcceptedIntent(
         inviteId: continuation.payload.inviteId,
@@ -3529,13 +3398,38 @@ class CallSessionManager {
     final acceptResult = await _acceptInviteTransactionWithRetry(
       payload,
       source: source,
+      lifecycleGeneration: lifecycleGeneration,
     );
     if (lifecycleGeneration != null &&
         !_canContinueAcceptedRouteGeneration(lifecycleGeneration)) {
       return _IncomingCandidateResult.ignored;
     }
-    if (acceptResult != _AcceptInviteResult.accepted &&
-        acceptResult != _AcceptInviteResult.alreadyAccepted) {
+    if (acceptResult.decision == _AcceptInviteDecision.superseded) {
+      return _IncomingCandidateResult.ignored;
+    }
+    if (acceptResult.decision == _AcceptInviteDecision.unavailable) {
+      return _IncomingCandidateResult.networkPending;
+    }
+    if (!acceptResult.accepted) {
+      final terminal = acceptResult.decision == _AcceptInviteDecision.missing ||
+          acceptResult.decision == _AcceptInviteDecision.terminal;
+      final watch = _acceptedNativeRouteWatch;
+      if (watch != null && watch.matchesIdentity(payload)) {
+        await _resolveAcceptedNativeRouteWatch(
+          watch,
+          reason: 'accept_transaction_${acceptResult.decision.name}',
+          deadlineReached: false,
+          markInviteFailed: false,
+        );
+      } else if (lifecycleGeneration != null) {
+        _releaseFailedIncomingGeneration(lifecycleGeneration);
+      }
+      return terminal
+          ? _IncomingCandidateResult.terminal
+          : _IncomingCandidateResult.ignored;
+    }
+    final authoritativePayload = acceptResult.authoritativePayload;
+    if (authoritativePayload == null) {
       if (lifecycleGeneration != null) {
         _releaseFailedIncomingGeneration(lifecycleGeneration);
       }
@@ -3548,13 +3442,20 @@ class CallSessionManager {
           inviteId: payload.inviteId,
           generation: lifecycleGeneration,
         )) {
+      _replaceAcceptedOwnershipPayload(
+        previous: payload,
+        authoritative: authoritativePayload,
+        generation: lifecycleGeneration,
+      );
       acceptedRouteContinuation.acceptanceConfirmed = true;
+      acceptedRouteContinuation.authoritativeStatus =
+          acceptResult.authoritativeStatus;
     }
     await _diagManager('accepted', meta: {
       'inviteId': payload.inviteId,
       'channel': payload.channel,
       'source': source,
-      'result': acceptResult.name,
+      'result': acceptResult.decision.name,
     });
     if (lifecycleGeneration != null &&
         !_canContinueAcceptedRouteGeneration(lifecycleGeneration)) {
@@ -3564,68 +3465,34 @@ class CallSessionManager {
       _callkitAcceptCount += 1;
     }
     await _markNativeInviteStateSafely(
-      payload,
+      authoritativePayload,
       state: 'accepted',
       reason: 'accept_invite_and_open',
     );
-
-    Map<String, dynamic>? latest;
-    try {
-      latest = await _readInviteData(payload.inviteId);
-    } catch (error) {
-      await _diagManager('accepted_verify_fallback', meta: {
-        'inviteId': payload.inviteId,
-        'channel': payload.channel,
-        'source': source,
-        'error': '$error',
-      });
-    }
     if (lifecycleGeneration != null &&
         !_canContinueAcceptedRouteGeneration(lifecycleGeneration)) {
       return _IncomingCandidateResult.ignored;
     }
-    final latestStatus = latest == null
-        ? CallInviteStatus.accepted
-        : _parseStatus(latest['status']);
-    if (!(latestStatus == CallInviteStatus.accepted ||
-        latestStatus == CallInviteStatus.joining ||
-        latestStatus == CallInviteStatus.connected ||
-        latestStatus == CallInviteStatus.ringing)) {
-      if (lifecycleGeneration != null) {
-        _releaseFailedIncomingGeneration(lifecycleGeneration);
-      }
-      await _endNativeCallForInvite(
-        inviteId: payload.inviteId,
-        channel: payload.channel,
-        callkitId: payload.acceptedCallkitId,
-        reason: 'accept_latest_terminal',
-      );
-      _acceptedRouteDiscarded = _acceptedRouteContinuation?.matches(
-            inviteId: payload.inviteId,
-            generation: lifecycleGeneration ?? _callLifecycleArbiter.generation,
-          ) ==
-          true;
-      _clearPendingAcceptedIntent(
-        inviteId: payload.inviteId,
-        claimedGeneration: lifecycleGeneration,
-      );
-      return _IncomingCandidateResult.ignored;
-    }
+    final latestStatus = acceptResult.authoritativeStatus;
+    _recordAcceptedRouteStage(
+      authoritativePayload,
+      CallV2PhysicalDiagnosticStage.acceptedContinuationOpenRequested,
+    );
 
     final generation = lifecycleGeneration ?? _callLifecycleArbiter.generation;
     final session = _CallSession(
-      inviteId: payload.inviteId,
-      channel: payload.channel,
-      isVideo: payload.isVideo,
+      inviteId: authoritativePayload.inviteId,
+      channel: authoritativePayload.channel,
+      isVideo: authoritativePayload.isVideo,
       isCaller: false,
-      otherUserId: payload.fromUid,
-      otherUserName: payload.fromName,
+      otherUserId: authoritativePayload.fromUid,
+      otherUserName: authoritativePayload.fromName,
       phase: CallSessionPhase.accepted,
       status: latestStatus == CallInviteStatus.ringing
           ? CallInviteStatus.accepted
           : latestStatus,
-      connectionSystem: payload.connectionSystem,
-      acceptedCallkitId: payload.acceptedCallkitId,
+      connectionSystem: authoritativePayload.connectionSystem,
+      acceptedCallkitId: authoritativePayload.acceptedCallkitId,
       lifecycleGeneration: generation,
     );
 
@@ -3638,46 +3505,48 @@ class CallSessionManager {
     );
     if (routeResult == _RouteOpenResult.opened) {
       final watch = _acceptedNativeRouteWatch;
-      if (watch != null && watch.matchesIdentity(payload)) {
+      if (watch != null && watch.matchesIdentity(authoritativePayload)) {
         await _transferAcceptedNativeWatchToRoute(watch);
       }
       await _markNativeInviteStateSafely(
-        payload,
+        authoritativePayload,
         state: 'active',
         reason: 'route_opened',
       );
       _pendingAcceptedContinuationCompleted =
-          _pendingAcceptedInviteIntent?.matchesIdentity(payload) == true;
+          _pendingAcceptedInviteIntent?.matchesIdentity(authoritativePayload) ==
+              true;
       _acceptedRouteOpened = _acceptedRouteContinuation?.matches(
             inviteId: payload.inviteId,
             generation: generation,
           ) ==
           true;
       _clearPendingAcceptedIntent(
-        inviteId: payload.inviteId,
+        inviteId: authoritativePayload.inviteId,
         claimedGeneration: generation,
       );
       return _IncomingCandidateResult.opened;
     }
     if (routeResult == _RouteOpenResult.alreadyOpenSameInvite) {
       final watch = _acceptedNativeRouteWatch;
-      if (watch != null && watch.matchesIdentity(payload)) {
+      if (watch != null && watch.matchesIdentity(authoritativePayload)) {
         await _transferAcceptedNativeWatchToRoute(watch);
       }
       await _markNativeInviteStateSafely(
-        payload,
+        authoritativePayload,
         state: 'active',
         reason: 'route_already_open',
       );
       _pendingAcceptedContinuationCompleted =
-          _pendingAcceptedInviteIntent?.matchesIdentity(payload) == true;
+          _pendingAcceptedInviteIntent?.matchesIdentity(authoritativePayload) ==
+              true;
       _acceptedRouteOpened = _acceptedRouteContinuation?.matches(
             inviteId: payload.inviteId,
             generation: generation,
           ) ==
           true;
       _clearPendingAcceptedIntent(
-        inviteId: payload.inviteId,
+        inviteId: authoritativePayload.inviteId,
         claimedGeneration: generation,
       );
       return _IncomingCandidateResult.alreadyOpen;
@@ -3720,13 +3589,24 @@ class CallSessionManager {
     }
   }
 
-  Future<_AcceptInviteResult> _acceptInviteTransactionWithRetry(
+  Future<_AcceptInviteTransactionResult> _acceptInviteTransactionWithRetry(
     CallInvitePayload payload, {
     required String source,
+    int? lifecycleGeneration,
   }) async {
     const maxAttempts = 3;
     Object? lastError;
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (lifecycleGeneration != null &&
+          !_canContinueAcceptedRouteGeneration(lifecycleGeneration)) {
+        return const _AcceptInviteTransactionResult(
+          decision: _AcceptInviteDecision.superseded,
+        );
+      }
+      _recordAcceptedRouteStage(
+        payload,
+        CallV2PhysicalDiagnosticStage.acceptedTransactionStarted,
+      );
       await _diagManager('accept_transaction_start', meta: {
         'inviteId': payload.inviteId,
         'channel': payload.channel,
@@ -3734,16 +3614,57 @@ class CallSessionManager {
         'attempt': attempt,
       });
       try {
-        final result =
-            await _db.runTransaction<_AcceptInviteResult>((tx) async {
+        await _beforeAcceptTransactionAttemptForTest?.call(attempt);
+        if (lifecycleGeneration != null &&
+            !_canContinueAcceptedRouteGeneration(lifecycleGeneration)) {
+          return const _AcceptInviteTransactionResult(
+            decision: _AcceptInviteDecision.superseded,
+          );
+        }
+        final result = await _db
+            .runTransaction<_AcceptInviteTransactionResult>((tx) async {
           final ref = _db.collection('callInvites').doc(payload.inviteId);
           final snap = await tx.get(ref);
-          if (!snap.exists) return _AcceptInviteResult.notAllowed;
+          if (!snap.exists) {
+            return const _AcceptInviteTransactionResult(
+              decision: _AcceptInviteDecision.missing,
+            );
+          }
           final data = snap.data() ?? const <String, dynamic>{};
           final status = _parseStatus(data['status']);
           final toUid = (data['toUid'] ?? '').toString().trim();
           final me = _currentUid.trim();
-          if (me.isEmpty || toUid != me) return _AcceptInviteResult.notAllowed;
+          if (me.isEmpty || toUid != me) {
+            return const _AcceptInviteTransactionResult(
+              decision: _AcceptInviteDecision.wrongRecipient,
+            );
+          }
+          if (_isTerminalStatus(status)) {
+            return _AcceptInviteTransactionResult(
+              decision: _AcceptInviteDecision.terminal,
+              authoritativeStatus: status,
+            );
+          }
+          if (status != CallInviteStatus.ringing &&
+              status != CallInviteStatus.accepted &&
+              status != CallInviteStatus.joining &&
+              status != CallInviteStatus.connected) {
+            return _AcceptInviteTransactionResult(
+              decision: _AcceptInviteDecision.invalidStatus,
+              authoritativeStatus: status,
+            );
+          }
+          final authoritativePayload = _authoritativeAcceptedPayload(
+            payload,
+            data,
+          );
+          if (authoritativePayload.channel.isEmpty ||
+              authoritativePayload.fromUid.isEmpty) {
+            return _AcceptInviteTransactionResult(
+              decision: _AcceptInviteDecision.invalidPayload,
+              authoritativeStatus: status,
+            );
+          }
           if (status == CallInviteStatus.ringing) {
             tx.set(
                 ref,
@@ -3754,14 +3675,17 @@ class CallSessionManager {
                   'calleeLastError': '',
                 },
                 SetOptions(merge: true));
-            return _AcceptInviteResult.accepted;
+            return _AcceptInviteTransactionResult(
+              decision: _AcceptInviteDecision.accepted,
+              authoritativePayload: authoritativePayload,
+              authoritativeStatus: CallInviteStatus.accepted,
+            );
           }
-          if (status == CallInviteStatus.accepted ||
-              status == CallInviteStatus.joining ||
-              status == CallInviteStatus.connected) {
-            return _AcceptInviteResult.alreadyAccepted;
-          }
-          return _AcceptInviteResult.notAllowed;
+          return _AcceptInviteTransactionResult(
+            decision: _AcceptInviteDecision.alreadyAccepted,
+            authoritativePayload: authoritativePayload,
+            authoritativeStatus: status,
+          );
         }).timeout(const Duration(seconds: 8));
 
         await _diagManager('accept_transaction_done', meta: {
@@ -3769,12 +3693,32 @@ class CallSessionManager {
           'channel': payload.channel,
           'source': source,
           'attempt': attempt,
-          'result': result.name,
+          'result': result.decision.name,
         });
+        if (result.accepted) {
+          _recordAcceptedRouteStage(
+            result.authoritativePayload ?? payload,
+            CallV2PhysicalDiagnosticStage.acceptedTransactionSucceeded,
+          );
+        } else if (result.decision == _AcceptInviteDecision.wrongRecipient) {
+          _recordAcceptedRouteStage(
+            payload,
+            CallV2PhysicalDiagnosticStage.acceptedTransactionRejectedRecipient,
+          );
+        } else {
+          _recordAcceptedRouteStage(
+            payload,
+            CallV2PhysicalDiagnosticStage.acceptedTransactionRejectedTerminal,
+          );
+        }
         return result;
       } catch (error) {
         lastError = error;
         final recoverable = FirestoreReadHelper.isRecoverableError(error);
+        _recordAcceptedRouteStage(
+          payload,
+          CallV2PhysicalDiagnosticStage.acceptedTransactionPendingNetwork,
+        );
         await _diagManager('accept_transaction_retry', meta: {
           'inviteId': payload.inviteId,
           'channel': payload.channel,
@@ -3784,6 +3728,12 @@ class CallSessionManager {
           'error': '$error',
         });
         if (!recoverable || attempt == maxAttempts) break;
+        if (lifecycleGeneration != null &&
+            !_canContinueAcceptedRouteGeneration(lifecycleGeneration)) {
+          return const _AcceptInviteTransactionResult(
+            decision: _AcceptInviteDecision.superseded,
+          );
+        }
         unawaited(FirestoreReadHelper.recoverNetwork(
           reason: 'accept_transaction',
           force: attempt >= 2,
@@ -3798,7 +3748,9 @@ class CallSessionManager {
       'source': source,
       'error': '$lastError',
     });
-    return _AcceptInviteResult.unavailable;
+    return const _AcceptInviteTransactionResult(
+      decision: _AcceptInviteDecision.unavailable,
+    );
   }
 
   Future<_RouteOpenResult> _activateSession(
@@ -4342,39 +4294,54 @@ class CallSessionManager {
       return;
     }
 
+    if (acceptedIntent != null) {
+      _clearPendingIncomingPrompt(claimedInviteId);
+      _incomingPromptActive = false;
+      _incomingPromptInviteId = null;
+      _incomingUiOwner = IncomingUiOwner.none;
+      _pendingAcceptedContinuationStarted = true;
+      _ownAcceptedRouteContinuation(
+        payload: effectivePayload,
+        claimedGeneration: pendingClaim.generation,
+      );
+      final accepted = _callLifecycleArbiter.incomingAccepted(
+        generation: pendingClaim.generation,
+        inviteId: claimedInviteId,
+      );
+      if (!accepted) return;
+      await _diagManager('pending_accept_continuation_started', meta: {
+        'pendingAcceptedClaimed': true,
+        'pendingAcceptedContinuationStarted': true,
+        'previousTeardownCompleted': true,
+        'callLifecycleState': _callLifecycleArbiter.state.name,
+      });
+      final result = await resumePendingAcceptedRouteIfReady(
+        source: '$effectiveSource:accepted_teardown_complete',
+      );
+      if (result == AcceptedCallRecoveryResult.opened ||
+          result == AcceptedCallRecoveryResult.alreadyOpen) {
+        await _diagManager('pending_accept_continuation_completed', meta: {
+          'pendingAcceptedContinuationCompleted': true,
+          'routeOpenCount': _routeOpenCount,
+          'rtcSetupOwnerCount': _rtcSetupOwnerCount,
+        });
+      }
+      return;
+    }
+
     Map<String, dynamic>? latest;
     try {
-      if (acceptedIntent != null) {
-        _recordAcceptedRouteStage(
-          effectivePayload,
-          CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadStarted,
-        );
-      }
       latest = await _readInviteData(claimedInviteId);
-      if (acceptedIntent != null) {
-        _recordAcceptedRouteStage(
-          effectivePayload,
-          CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadSucceeded,
-        );
-      }
     } catch (error) {
-      if (acceptedIntent != null) {
-        _recordAcceptedRouteStage(
-          effectivePayload,
-          CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadPendingNetwork,
-        );
-      }
       await _diagManager('incoming_pending_verify_error', meta: {
         'source': source,
         'errorType': error.runtimeType.toString(),
       });
-      if (acceptedIntent == null) {
-        _schedulePendingIncomingPrompt(
-          effectivePayload,
-          source: effectiveSource,
-          reason: 'claimed_verify_error',
-        );
-      }
+      _schedulePendingIncomingPrompt(
+        effectivePayload,
+        source: effectiveSource,
+        reason: 'claimed_verify_error',
+      );
       return;
     }
     if (!_callLifecycleArbiter.ownsIncoming(
@@ -4384,20 +4351,9 @@ class CallSessionManager {
       return;
     }
     final latestStatus = _parseStatus(latest?['status']);
-    final acceptedContinuationStatus =
-        latestStatus == CallInviteStatus.ringing ||
-            latestStatus == CallInviteStatus.accepted ||
-            latestStatus == CallInviteStatus.joining;
-    final canContinue = acceptedIntent == null
-        ? latest != null && latestStatus == CallInviteStatus.ringing
-        : latest != null && acceptedContinuationStatus;
+    final canContinue =
+        latest != null && latestStatus == CallInviteStatus.ringing;
     if (latest == null || !canContinue) {
-      if (acceptedIntent != null) {
-        _recordAcceptedRouteStage(
-          effectivePayload,
-          CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadTerminal,
-        );
-      }
       _incomingPromptActive = false;
       _incomingPromptInviteId = null;
       _incomingUiOwner = IncomingUiOwner.none;
@@ -4427,13 +4383,6 @@ class CallSessionManager {
       );
       return;
     }
-    if (acceptedIntent != null) {
-      _recordAcceptedRouteStage(
-        effectivePayload,
-        CallV2PhysicalDiagnosticStage.acceptedAuthoritativeReadOpenable,
-      );
-    }
-
     final payload = CallInvitePayload(
       inviteId: claimedInviteId,
       channel:
@@ -4453,45 +4402,6 @@ class CallSessionManager {
         generation: pendingClaim.generation,
         inviteId: claimedInviteId,
       );
-      return;
-    }
-
-    if (acceptedIntent != null) {
-      _clearPendingIncomingPrompt(claimedInviteId);
-      _incomingPromptActive = false;
-      _incomingPromptInviteId = null;
-      _incomingUiOwner = IncomingUiOwner.none;
-      _pendingAcceptedContinuationStarted = true;
-      _ownAcceptedRouteContinuation(
-        payload: payload,
-        claimedGeneration: pendingClaim.generation,
-      );
-      final accepted = _callLifecycleArbiter.incomingAccepted(
-        generation: pendingClaim.generation,
-        inviteId: claimedInviteId,
-      );
-      if (!accepted) return;
-      _recordAcceptedRouteStage(
-        payload,
-        CallV2PhysicalDiagnosticStage.acceptedContinuationOpenRequested,
-      );
-      await _diagManager('pending_accept_continuation_started', meta: {
-        'pendingAcceptedClaimed': true,
-        'pendingAcceptedContinuationStarted': true,
-        'previousTeardownCompleted': true,
-        'callLifecycleState': _callLifecycleArbiter.state.name,
-      });
-      final result = await resumePendingAcceptedRouteIfReady(
-        source: '$effectiveSource:accepted_teardown_complete',
-      );
-      if (result == AcceptedCallRecoveryResult.opened ||
-          result == AcceptedCallRecoveryResult.alreadyOpen) {
-        await _diagManager('pending_accept_continuation_completed', meta: {
-          'pendingAcceptedContinuationCompleted': true,
-          'routeOpenCount': _routeOpenCount,
-          'rtcSetupOwnerCount': _rtcSetupOwnerCount,
-        });
-      }
       return;
     }
 
