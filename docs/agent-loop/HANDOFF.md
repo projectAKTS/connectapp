@@ -2,116 +2,123 @@
 
 STATUS: `ready_for_review`
 
-STARTING_SHA: `e871a8bb70d06ac4c29efa616bf41f9d12d97276`
-IMPLEMENTATION_SHA: `9645d97e97257ded381e770b61c72f861ed38b04`
+STARTING_SHA: `41f8c89d934c698ef0b297867297f77588d1698f`
+IMPLEMENTATION_SHA: `59393f4cb484addf504b880aab0f392a20f4cb33`
 ENDING_SHA: `SELF`
 
-## Root Cause
+## Confirmed Root Cause
 
-The confirmed physical failure boundary moved after
-`acceptedOwnershipRecorded` and before `routeAttemptStarted`.
+Physical instrumentation proved that accepted native recovery repeatedly entered
+the standalone authoritative invite read, timed out, fell back to an empty or
+unusable cache, and returned `pendingNetwork` before the guarded accept
+transaction or route attempt. The accepted flow duplicated Firestore authority:
+a server/cache read was required before a transaction that independently read
+and validated the same invite.
 
-Most likely root cause class from source evidence: **A. NETWORK READ FAILURE**.
+## Authority Flow
 
-Exact source evidence:
+Old:
 
-- `CallSessionManager.handleRecoveredAcceptedInvite()` records accepted
-  ownership, then calls `_readInviteData(bridgePayload.inviteId)`.
-- If that read throws, the method returns
-  `AcceptedCallRecoveryResult.pendingNetwork` before `_acceptInviteAndOpen()`,
-  so no `routeAttemptStarted`, `navigatorReady`, `routeOpened`, or
-  `rtcSetupStarted` can appear.
-- `resumePendingAcceptedRouteIfReady()` follows the same authoritative
-  verification boundary through `_resumeAcceptedRouteContinuation()`.
-- `FirestoreReadHelper.getDoc()` uses `Source.serverAndCache` with the manager's
-  5 second timeout, then attempts a 2 second `Source.cache` fallback, and
-  triggers non-destructive `enableNetwork()` recovery on recoverable failures.
-- Caller-side invite creation uses a fresh `callInvites` auto-ID document and
-  initializes `status`, `callerStage`, `calleeStage`, `endReason`, and `endedBy`.
-  The current production path does not intentionally reuse the same invite
-  document for sequential calls.
+`native accept -> local ownership -> standalone server/cache read -> guarded
+accept transaction -> second standalone read -> route`
 
-This change does not claim the physical issue is fixed. It adds the missing safe
-trace so the next physical run can prove whether Call 2 is A, B, or C.
+New:
 
-## Call 2 Authoritative Read Trace
+`native accept -> local ownership -> guarded accept transaction -> typed
+authoritative result/payload -> route`
 
-Added safe diagnostic stages between accepted ownership and route attempt:
+The existing `_acceptInviteTransactionWithRetry()` remains the single trust
+boundary. Its Firestore transaction:
 
-- `acceptedAuthoritativeReadStarted`
-- `acceptedAuthoritativeReadSucceeded`
-- `acceptedAuthoritativeReadPendingNetwork`
-- `acceptedAuthoritativeReadTerminal`
-- `acceptedAuthoritativeReadOpenable`
-- `acceptedContinuationResumeStarted`
-- `acceptedContinuationPendingNetwork`
-- `acceptedContinuationInvalidGeneration`
-- `acceptedContinuationOpenRequested`
+- reads the exact `callInvites` document;
+- rejects a missing document;
+- requires `toUid` to equal the authenticated current user;
+- rejects terminal and unknown statuses;
+- permits `ringing`, `accepted`, `joining`, and `connected`;
+- requires authoritative channel and caller identity data;
+- atomically changes `ringing` to `accepted`; and
+- returns the authoritative payload and resulting status used by routing.
 
-These stages contain only stage names/counts/timing through the existing safe
-physical ledger. No invite ID, UUID, UID, channel, token, payload, or credential
-is rendered.
+## Removed Redundant Reads
 
-## Call Document Lifecycle Trace
+- `handleRecoveredAcceptedInvite()` no longer performs a mandatory standalone
+  read before accepted continuation.
+- `_resumeAcceptedRouteContinuation()` invokes the guarded transaction directly
+  until acceptance is confirmed, then reuses its typed result.
+- `_acceptInviteAndOpen()` no longer performs a second read after transaction
+  success.
+- `_continueClaimedPendingIncoming()` sends an already-accepted pending intent
+  directly through the same transaction authority path after teardown.
 
-Tests now prove:
+Unaccepted prompt display/validation, fallback presentation, active-state
+monitoring, terminal verification, and watchdog deadline reads are unchanged.
 
-- Fresh Call B authoritative read can see an openable document and route once.
-- A reused logical invite document must reset terminal fields before B can be
-  considered openable.
-- A temporary read failure preserves accepted ownership and later successful
-  read opens the same pending call.
-- A terminal authoritative read prevents route opening and native cleanup still
-  occurs.
-- A/B/C sequential calls in one process route once per call with one RTC owner
-  count per call.
+## Retry Semantics
 
-## Fix
+Recoverable transaction failures retry the same transaction up to three times,
+using the existing short `250 ms * attempt` delay and unchanged transaction
+timeout. Lifecycle generation ownership is checked before every attempt and
+after injected/asynchronous boundaries. Exhaustion returns `pendingNetwork` to
+the existing bounded NotificationService coordinator. Exact native terminal or
+watchdog completion invalidates the matching generation, prevents another
+transaction attempt, and cannot cancel a newer call.
 
-- Added safe physical ledger stages for accepted-route authoritative read and
-  continuation outcomes.
-- Instrumented all accepted-route verification paths:
-  `handleRecoveredAcceptedInvite()`, `_resumeAcceptedRouteContinuation()`, and
-  `_continueClaimedPendingIncoming()`.
-- Added deterministic regression tests for the physical-shaped boundary without
-  changing routing, RTC, native UUID allocation, PushKit/CallKit presentation,
-  Navigator architecture, watchdog duration, backend, packages, or deployment.
+## Security Invariants
+
+- PushKit payload data alone never authorizes a route.
+- Cache data never authorizes accepted recovery.
+- Missing, terminal, wrong-recipient, invalid-status, and invalid-payload
+  transaction results never open a route or create an RTC owner.
+- Route metadata comes from the transaction snapshot; the exact native CallKit
+  identity remains attached to the accepted ownership.
+- A terminal result awaits the existing native-watch cleanup before recovery
+  reports terminal.
+
+## Diagnostics
+
+Added safe stages:
+
+- `acceptedTransactionStarted`
+- `acceptedTransactionSucceeded`
+- `acceptedTransactionPendingNetwork`
+- `acceptedTransactionRejectedTerminal`
+- `acceptedTransactionRejectedRecipient`
+
+The physical ledger still contains only safe stage names, sequence/timing data,
+booleans, and counters. It exposes no invite ID, UUID, UID, channel, token,
+payload, or credential.
 
 ## Regression Tests
 
-- `accepted pending read trace reaches openable route request for Call B`:
-  models Call A teardown then Call B accepted; proves openable read -> route
-  request -> route opened.
-- `reused invite document must reset terminal fields before B routes`:
-  models stale terminal fields on a reused logical document and proves reset
-  fields allow B/openable rather than A/terminal.
-- `temporary accepted read failure preserves B then later opens`:
-  models one recoverable read failure; proves ownership survives and later read
-  opens once.
-- `terminal ended/cancelled/failed clears pending accepted intent`:
-  proves terminal read before claim produces terminal trace and no route.
-- `A B C accepted sequence records openable reads and one route each`:
-  proves sequential same-process calls get one route and one RTC owner count per
-  call.
-- Existing lifecycle tests continue covering stale generation invalidation and
-  no route/RTC owner on invalidated continuation.
+- `standalone read failure cannot block accepted transaction route` proves an
+  injected read timeout is never invoked and the server transaction routes with
+  authoritative metadata.
+- `accepted transaction retries recoverably then opens one route` proves one
+  generation survives a recoverable transaction failure and creates exactly
+  one route and RTC owner.
+- `accepted transaction rejects wrong recipient without route` proves recipient
+  validation remains inside the transaction boundary.
+- `stale cached ringing cannot override server terminal state` proves cache
+  cannot authorize a terminal server document.
+- `native terminal cancels blocked accepted transaction generation` proves
+  watchdog/native terminal ownership prevents later retry or route creation.
+- `accepted pending transaction reaches authoritative route request for B` and
+  the A/B/C accepted sequence prove teardown continuation and sequential reuse
+  route once per accepted transaction.
+- Notification ownership tests now synchronize duplicate, distinct exact-ID,
+  fallback-ID, and terminal-cancellation races at the transaction boundary,
+  not the removed read boundary.
 
 ## Validation Counts
 
 - `flutter analyze`: passed, no issues.
-- Focused accepted ownership tests:
-  `flutter test test/call_v2/real_flow/call_v2_notification_ownership_test.dart --no-pub`
-  passed, 38 tests.
-- Lifecycle manager tests:
-  `flutter test test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart --no-pub`
-  passed, 61 tests.
-- Full Call V2:
-  `flutter test test/call_v2 --no-pub`
-  passed, 2295 tests.
-- Foreground recovery:
-  `flutter test test/notification_foreground_recovery_test.dart --no-pub`
-  passed, 3 tests.
+- Notification ownership: passed, 38 tests.
+- Lifecycle manager and transaction authority: passed, 65 tests.
+- Physical diagnostic ledger: passed, 5 tests.
+- Full Call V2: passed, 2299 tests.
+- Foreground recovery: passed, 3 tests.
 - `git diff --check`: passed.
+- iOS RunnerTests: not run; native code was unchanged.
 
 Flutter tooling transiently rewrote `pubspec.lock`; it was restored. No
 dependency files remain changed.
@@ -120,18 +127,20 @@ dependency files remain changed.
 
 - `lib/call_v2/diagnostics/call_v2_physical_diagnostic_ledger.dart`
 - `lib/services/call_session_manager.dart`
+- `test/call_v2/real_flow/call_v2_notification_ownership_test.dart`
 - `test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart`
 
 ## Scope Check
 
-No changes were made to native UUID allocation, PushKit presentation, CallKit
-exact identity, Agora, Navigator architecture, watchdog timeout, package
-versions, deployment target, Firebase/backend functions, Firestore rules, or
-TestFlight. No deployment was performed and no physical-fix claim is made.
+No native code, UUID allocator, PushKit/CallKit presentation, Navigator
+architecture, Agora/RTC code, watchdog timeout, backend/schema, Firestore rules,
+dependency, Flutter version, or deployment configuration changed. No backend or
+Firebase deployment and no TestFlight build occurred. This is ready for source
+review; it is not claimed physically fixed.
 
 ## Next
 
-Run one exact physical diagnostic build from this branch and inspect whether
-Call 2 reports `acceptedAuthoritativeReadPendingNetwork`,
-`acceptedAuthoritativeReadTerminal`, or
-`acceptedContinuationInvalidGeneration` before the native watchdog fires.
+Install one physical diagnostic build from the reviewed branch and verify the
+accepted path records `acceptedTransactionSucceeded`,
+`acceptedContinuationOpenRequested`, and `routeOpened` before the unchanged
+native watchdog deadline.
