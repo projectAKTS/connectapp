@@ -1,10 +1,10 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "accepted_call_identity_provenance",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "e871a8bb70d06ac4c29efa616bf41f9d12d97276",
-  "starting_sha": "e871a8bb70d06ac4c29efa616bf41f9d12d97276",
+  "phase": "accepted_transaction_authority",
+  "status": "revision_required",
+  "accepted_checkpoint_sha": "41f8c89d934c698ef0b297867297f77588d1698f",
+  "starting_sha": "41f8c89d934c698ef0b297867297f77588d1698f",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
   "code_commit_sha": "9645d97e97257ded381e770b61c72f861ed38b04",
@@ -31,7 +31,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "Added safe accepted-route authoritative-read and continuation trace stages after acceptedOwnershipRecorded and before routeAttemptStarted. Source evidence points most strongly to A/network read failure as the physical Call 2 boundary; deterministic tests also prove stale terminal document and lifecycle invalidation classifications remain distinguishable. No routing, native, RTC, watchdog, backend, dependency, deployment, or TestFlight changes were made."
+    "decision": "revision_required",
+    "notes": "Physical instrumentation confirms accepted native recovery repeatedly times out in the standalone authoritative invite read before route continuation. Required revision: reuse the existing guarded Firestore accept transaction as the single acceptance authority and remove duplicated accepted-recovery pre-route reads while preserving server validation, bounded retry, exact generation ownership, and terminal cleanup."
   }
 }

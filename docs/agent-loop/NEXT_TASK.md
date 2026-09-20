@@ -1,33 +1,32 @@
-# Accepted Call Identity Provenance Revision
+# Accepted Transaction Authority Revision
 
-Starting SHA: `9087e450936aeecbf11c2836ae0e4196065c11b4`
+Starting SHA: `41f8c89d934c698ef0b297867297f77588d1698f`
 
-Physical Call 2 still reaches `acceptedRecoveryCoalescedSameCall` before local
-accepted ownership despite having a new native CallKit presentation. Trace the
-exact CallKit ID from native creation through NotificationService, retries,
-CallSessionManager ownership, routed session, and terminal cleanup. Identify
-the first path that can lose or reconstruct the exact ID.
-
-Also trace every await between `acceptedRecoveryOwnershipRequested` and
-`acceptedOwnershipRecorded`, and ensure retry ownership is invalidated after
-the exact accepted native call is terminal and verified ended.
+Physical instrumentation proves accepted native recovery repeatedly times out
+in the standalone `callInvites` read before route continuation. Reuse the
+existing guarded Firestore accept transaction as the single acceptance trust
+boundary and remove mandatory duplicate pre-route reads from native accepted
+recovery and its immediate continuation.
 
 Required invariants:
 
-- Different non-empty exact CallKit IDs are always distinct, even when the
-  invite ID is reused.
-- Invite fallback is allowed only when at least one exact ID is absent.
-- Stored recovery and retries preserve a known exact accepted ID.
-- A distinct exact call acquires recovery ownership before delayed network I/O.
-- Terminal verification cancels retries/futures for that exact generation.
-- Exact identity survives through routed terminal cleanup.
+- Exact local accepted ownership is recorded before network work.
+- Route opening requires a successful server transaction that validates the
+  invite exists, the authenticated user is the recipient, and the status is
+  openable.
+- The transaction result carries the authoritative payload needed by routing;
+  stale cache never authorizes acceptance.
+- Recoverable transaction failures retry the same generation without creating
+  another route or RTC owner.
+- Native terminal/watchdog completion cancels matching retries immediately and
+  cannot affect a newer generation.
+- Unrelated invite reads remain unchanged.
 
-Add deterministic integration-shaped tests for native bridge provenance,
-same-invite/different-exact-ID ownership, stored/retry reconstruction, fallback
-compatibility, delayed authoritative reads, post-terminal retry cancellation,
-and A/B/C sequential reuse in one process.
+Add deterministic tests for empty-cache acceptance, standalone-read failure
+with transaction success, transaction retry, terminal and wrong-recipient
+rejection, stale-cache/server-terminal authority, A/B/C sequential reuse, and
+watchdog cancellation during retry.
 
-Do not change Agora, PushKit presentation, the native watchdog or its timeout,
-native CallKit termination, Navigator architecture, Firebase/backend,
-Firestore schema/rules, dependencies, or deployment. Do not build or deploy,
-and do not claim the physical issue is fixed.
+Do not change native UUID allocation, PushKit/CallKit presentation, Navigator,
+Agora/RTC, watchdog duration, backend schema, Firestore rules, dependencies,
+deployment, or TestFlight. Do not claim the physical issue is fixed.
