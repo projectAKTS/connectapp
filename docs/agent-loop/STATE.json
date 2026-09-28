@@ -2,26 +2,25 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "exact_callkit_per_call_ownership",
-  "status": "revision_required",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "b766f93f94b38142fcf49fc2c6ac2c9b38a4df06",
   "starting_sha": "1693b63a832df5bc58282ba86f55bc9ba8b984e9",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "d04d2d6b5d6eb5e2357930a532b6cc7611fea3d7",
+  "code_commit_sha": "3eba03e82d6fdb6b3d42aa8fed4df2b037138612",
   "ending_sha": "SELF",
   "changed_files": [
     "ios/Runner/AppDelegate.swift",
-    "ios/RunnerTests/RunnerTests.swift",
-    "lib/screens/call/agora_call_screen.dart",
-    "lib/services/call_session_manager.dart",
-    "lib/services/notification_service.dart",
-    "test/call_v2/real_flow/call_v2_exact_callkit_ownership_test.dart",
-    "test/call_v2/real_flow/call_v2_notification_ownership_test.dart",
-    "test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart"
+    "ios/RunnerTests/RunnerTests.swift"
   ],
   "validation": {
-    "review_blocker": "permanent requester completion suppresses watchdog exact-end escalation",
-    "revision": "not started"
+    "ios_runner_tests": "passed, 21 tests",
+    "flutter_analyze": "passed, no issues",
+    "focused_exact_callkit_ownership": "passed, 10 tests",
+    "all_call_v2": "passed, 2309 tests",
+    "foreground_recovery": "passed, 3 tests",
+    "git_diff_check": "passed",
+    "dependency_files": "unchanged"
   },
   "safety": {
     "deployed": false,
@@ -31,7 +30,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "revision_required",
-    "notes": "CallV2ExactCallkitEndRequester permanently suppresses later requests after CXCallController accepts one transaction. Restore in-flight-only coalescing so the existing watchdog can issue its observer-driven second exact-end attempt. Preserve all accepted exact per-call ownership behavior and do not change watchdog timing or unrelated architecture."
+    "decision": "ready_for_review",
+    "notes": "CallV2ExactCallkitEndRequester now coalesces only concurrent in-flight requests. A later observer-driven retry submits a second exact CXEndCallAction, never targets another UUID, and preserves all accepted exact per-call ownership behavior. Physical testing is still required."
   }
 }
