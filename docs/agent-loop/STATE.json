@@ -2,9 +2,9 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "exact_callkit_per_call_ownership",
-  "status": "ready_for_review",
+  "status": "revision_required",
   "accepted_checkpoint_sha": "b766f93f94b38142fcf49fc2c6ac2c9b38a4df06",
-  "starting_sha": "b766f93f94b38142fcf49fc2c6ac2c9b38a4df06",
+  "starting_sha": "1693b63a832df5bc58282ba86f55bc9ba8b984e9",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
   "code_commit_sha": "d04d2d6b5d6eb5e2357930a532b6cc7611fea3d7",
@@ -20,16 +20,8 @@
     "test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart"
   ],
   "validation": {
-    "flutter_analyze": "passed, no issues",
-    "exact_callkit_ownership": "passed, 10 tests",
-    "notification_ownership": "passed, 38 tests",
-    "rapid_lifecycle": "passed, 65 tests",
-    "all_call_v2": "passed, 2309 tests",
-    "foreground_recovery": "passed, 3 tests",
-    "ios_runner_tests": "passed, 17 tests",
-    "format_check": "passed",
-    "git_diff_check": "passed",
-    "dependency_files": "unchanged"
+    "review_blocker": "permanent requester completion suppresses watchdog exact-end escalation",
+    "revision": "not started"
   },
   "safety": {
     "deployed": false,
@@ -39,7 +31,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "Exact accepted native CallKit UUID now reaches AgoraCallScreen, normal teardown ends only the exact owned native call through a Helperly CXEndCallAction path, accepted incoming setup avoids plugin synthetic Accept, and delayed A cleanup cannot mutate pending/accepted B. Accepted Firestore authority, routing, RTC/token behavior, PushKit presentation, watchdog timing, dependencies, backend, deployment, and TestFlight configuration remain unchanged. Physical repeat-call validation is still required; no physical-fix claim is made."
+    "decision": "revision_required",
+    "notes": "CallV2ExactCallkitEndRequester permanently suppresses later requests after CXCallController accepts one transaction. Restore in-flight-only coalescing so the existing watchdog can issue its observer-driven second exact-end attempt. Preserve all accepted exact per-call ownership behavior and do not change watchdog timing or unrelated architecture."
   }
 }
