@@ -2,17 +2,34 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "exact_callkit_per_call_ownership",
-  "status": "task_ready",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "b766f93f94b38142fcf49fc2c6ac2c9b38a4df06",
   "starting_sha": "b766f93f94b38142fcf49fc2c6ac2c9b38a4df06",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
+  "code_commit_sha": "d04d2d6b5d6eb5e2357930a532b6cc7611fea3d7",
   "ending_sha": "SELF",
-  "changed_files": [],
+  "changed_files": [
+    "ios/Runner/AppDelegate.swift",
+    "ios/RunnerTests/RunnerTests.swift",
+    "lib/screens/call/agora_call_screen.dart",
+    "lib/services/call_session_manager.dart",
+    "lib/services/notification_service.dart",
+    "test/call_v2/real_flow/call_v2_exact_callkit_ownership_test.dart",
+    "test/call_v2/real_flow/call_v2_notification_ownership_test.dart",
+    "test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart"
+  ],
   "validation": {
-    "authorization_metadata": "validated before authorization commit",
-    "implementation": "not started"
+    "flutter_analyze": "passed, no issues",
+    "exact_callkit_ownership": "passed, 10 tests",
+    "notification_ownership": "passed, 38 tests",
+    "rapid_lifecycle": "passed, 65 tests",
+    "all_call_v2": "passed, 2309 tests",
+    "foreground_recovery": "passed, 3 tests",
+    "ios_runner_tests": "passed, 17 tests",
+    "format_check": "passed",
+    "git_diff_check": "passed",
+    "dependency_files": "unchanged"
   },
   "safety": {
     "deployed": false,
@@ -22,7 +39,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "implementation_required",
-    "notes": "Authorize only the exact per-call CallKit ownership correction described in NEXT_TASK.md. Do not change accepted Firestore authority, routing architecture, RTC/token behavior, PushKit presentation, watchdog timing, dependencies, backend, deployment, or TestFlight configuration. No physical-fix claim is authorized."
+    "decision": "ready_for_review",
+    "notes": "Exact accepted native CallKit UUID now reaches AgoraCallScreen, normal teardown ends only the exact owned native call through a Helperly CXEndCallAction path, accepted incoming setup avoids plugin synthetic Accept, and delayed A cleanup cannot mutate pending/accepted B. Accepted Firestore authority, routing, RTC/token behavior, PushKit presentation, watchdog timing, dependencies, backend, deployment, and TestFlight configuration remain unchanged. Physical repeat-call validation is still required; no physical-fix claim is made."
   }
 }
