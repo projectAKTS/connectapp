@@ -157,6 +157,56 @@ final class CallV2NativeCallkitIdentityAllocator {
   }
 }
 
+final class CallV2ExactCallkitEndRequester {
+  typealias Request = (UUID, @escaping (Bool) -> Void) -> Void
+
+  private let request: Request
+  private let lock = NSLock()
+  private var completed: Set<UUID> = []
+  private var waiters: [UUID: [(Bool) -> Void]] = [:]
+
+  init(request: @escaping Request) {
+    self.request = request
+  }
+
+  func end(exactId: String, completion: @escaping (Bool) -> Void) {
+    guard let uuid = UUID(
+      uuidString: exactId.trimmingCharacters(in: .whitespacesAndNewlines)
+    ) else {
+      completion(false)
+      return
+    }
+
+    lock.lock()
+    if completed.contains(uuid) {
+      lock.unlock()
+      completion(true)
+      return
+    }
+    if waiters[uuid] != nil {
+      waiters[uuid]?.append(completion)
+      lock.unlock()
+      return
+    }
+    waiters[uuid] = [completion]
+    lock.unlock()
+
+    request(uuid) { [weak self] succeeded in
+      guard let self else {
+        completion(false)
+        return
+      }
+      lock.lock()
+      let completions = waiters.removeValue(forKey: uuid) ?? []
+      if succeeded {
+        completed.insert(uuid)
+      }
+      lock.unlock()
+      completions.forEach { $0(succeeded) }
+    }
+  }
+}
+
 final class CallV2NativeRouteSafetyWatchdog {
   private struct Watch {
     let workItem: DispatchWorkItem
@@ -301,8 +351,21 @@ final class CallV2NativeRouteSafetyWatchdog {
   private var voipRegistry: PKPushRegistry?
   private var pushTokenChannel: FlutterMethodChannel?
   private var callV2NativeAcceptedCallActive = false
+  private let callV2ExactCallController = CXCallController()
   private let callV2SafeDiagnosticLedger = CallV2SafeNativeDiagnosticLedger()
   private let callV2CallkitIdentityAllocator = CallV2NativeCallkitIdentityAllocator()
+  private lazy var callV2ExactCallkitEndRequester = CallV2ExactCallkitEndRequester(
+    request: { [weak self] uuid, completion in
+      guard let self else {
+        completion(false)
+        return
+      }
+      let transaction = CXTransaction(action: CXEndCallAction(call: uuid))
+      callV2ExactCallController.request(transaction) { error in
+        completion(error == nil)
+      }
+    }
+  )
   private lazy var callV2NativeSafetyWatchdog = CallV2NativeRouteSafetyWatchdog(
     record: { [weak self] exactKey, stage in
       self?.callV2SafeDiagnosticLedger.record(exactKey: exactKey, stage: stage)
@@ -412,8 +475,28 @@ final class CallV2NativeRouteSafetyWatchdog {
         }
 
         if call.method == "clearStoredAcceptedCall" {
-          self.clearStoredAcceptedCall()
-          result(true)
+          let args = call.arguments as? [String: Any]
+          let exactCallkitId = ((args?["callkitId"] as? String) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+          result(self.clearStoredAcceptedCall(
+            matchingCallkitId: exactCallkitId.isEmpty ? nil : exactCallkitId
+          ))
+          return
+        }
+
+        if call.method == "endExactCallkitCall" {
+          guard let args = call.arguments as? [String: Any] else {
+            result(false)
+            return
+          }
+          let exactCallkitId = ((args["callkitId"] as? String) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+          self.callV2ExactCallkitEndRequester.end(exactId: exactCallkitId) {
+            succeeded in
+            DispatchQueue.main.async {
+              result(succeeded)
+            }
+          }
           return
         }
 
@@ -1111,23 +1194,9 @@ final class CallV2NativeRouteSafetyWatchdog {
       exactKey: trimmedCallkitId,
       stage: "nativeCallEndRequested"
     )
-    SwiftFlutterCallkitIncomingPlugin.sharedInstance?.saveEndCall(trimmedCallkitId, 2)
-    let data = flutter_callkit_incoming.Data(
-      id: trimmedCallkitId,
-      nameCaller: "Helperly",
-      handle: channel.isEmpty ? "Call ended" : channel,
-      type: 0
-    )
-    data.extra = [
-      "id": trimmedCallkitId,
-      "callkitId": trimmedCallkitId,
-      "callId": rawCallId,
-      "inviteId": rawCallId,
-      "channel": channel,
-    ]
-    SwiftFlutterCallkitIncomingPlugin.sharedInstance?.endCall(data)
+    callV2ExactCallkitEndRequester.end(exactId: trimmedCallkitId) { _ in }
     verifyNativeCallEnded(exactKey: trimmedCallkitId)
-    clearStoredAcceptedCall()
+    clearStoredAcceptedCall(matchingCallkitId: trimmedCallkitId)
     storePushkitState(
       "terminal_push_end_requested",
       payloadType: payloadType,
@@ -1140,16 +1209,8 @@ final class CallV2NativeRouteSafetyWatchdog {
     guard !key.isEmpty else { return }
     callV2NativeAcceptedCallActive = false
     markCallkitPresentationState(callkitId: key, state: "terminal")
-    SwiftFlutterCallkitIncomingPlugin.sharedInstance?.saveEndCall(key, 2)
-    let data = flutter_callkit_incoming.Data(
-      id: key,
-      nameCaller: "Helperly",
-      handle: "Call ended",
-      type: 0
-    )
-    data.extra = ["id": key, "callkitId": key]
-    SwiftFlutterCallkitIncomingPlugin.sharedInstance?.endCall(data)
-    clearStoredAcceptedCall()
+    callV2ExactCallkitEndRequester.end(exactId: key) { _ in }
+    clearStoredAcceptedCall(matchingCallkitId: key)
   }
 
   private func verifyNativeCallEnded(exactKey: String) {
@@ -1168,8 +1229,22 @@ final class CallV2NativeRouteSafetyWatchdog {
     }
   }
 
-  private func clearStoredAcceptedCall() {
+  @discardableResult
+  private func clearStoredAcceptedCall(
+    matchingCallkitId expectedCallkitId: String? = nil
+  ) -> Bool {
     let defaults = UserDefaults.standard
+    if let expectedCallkitId {
+      let expected = expectedCallkitId
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased()
+      let stored = (defaults.string(forKey: lastCallkitAcceptedCallkitIdStoreKey) ?? "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased()
+      if expected.isEmpty || stored.isEmpty || expected != stored {
+        return false
+      }
+    }
     defaults.removeObject(forKey: lastCallkitAcceptedAtStoreKey)
     defaults.removeObject(forKey: lastCallkitAcceptedInviteIdStoreKey)
     defaults.removeObject(forKey: lastCallkitAcceptedChannelStoreKey)
@@ -1177,6 +1252,7 @@ final class CallV2NativeRouteSafetyWatchdog {
     defaults.removeObject(forKey: lastCallkitAcceptedFromNameStoreKey)
     defaults.removeObject(forKey: lastCallkitAcceptedFromUidStoreKey)
     defaults.removeObject(forKey: lastCallkitAcceptedIsVideoStoreKey)
+    return true
   }
 
   private func storeAcceptedCall(_ call: Call) {
@@ -1570,7 +1646,7 @@ final class CallV2NativeRouteSafetyWatchdog {
 
   func onDecline(_ call: Call, _ action: CXEndCallAction) {
     storeCallkitEvent("decline", call: call)
-    clearStoredAcceptedCall()
+    clearStoredAcceptedCall(matchingCallkitId: call.data.uuid)
     markCallkitPresentationState(callkitId: call.data.uuid, state: "terminal")
     callV2NativeAcceptedCallActive = false
     _ = callV2NativeSafetyWatchdog.terminal(exactKey: call.data.uuid)
@@ -1586,7 +1662,7 @@ final class CallV2NativeRouteSafetyWatchdog {
 
   func onEnd(_ call: Call, _ action: CXEndCallAction) {
     storeCallkitEvent("end", call: call)
-    clearStoredAcceptedCall()
+    clearStoredAcceptedCall(matchingCallkitId: call.data.uuid)
     markCallkitPresentationState(callkitId: call.data.uuid, state: "terminal")
     callV2NativeAcceptedCallActive = false
     _ = callV2NativeSafetyWatchdog.terminal(exactKey: call.data.uuid)
@@ -1602,7 +1678,7 @@ final class CallV2NativeRouteSafetyWatchdog {
 
   func onTimeOut(_ call: Call) {
     storeCallkitEvent("timeout", call: call)
-    clearStoredAcceptedCall()
+    clearStoredAcceptedCall(matchingCallkitId: call.data.uuid)
     markCallkitPresentationState(callkitId: call.data.uuid, state: "terminal")
     callV2NativeAcceptedCallActive = false
     _ = callV2NativeSafetyWatchdog.terminal(exactKey: call.data.uuid)

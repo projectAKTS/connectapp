@@ -56,6 +56,7 @@ void main() {
     return ({
       required String inviteId,
       required String channel,
+      required String acceptedCallkitId,
       required bool isVideo,
       required String otherUserName,
       required String? otherUserId,
@@ -70,6 +71,7 @@ void main() {
     return ({
       required String inviteId,
       required String channel,
+      required String acceptedCallkitId,
       required bool isVideo,
       required String otherUserName,
       required String? otherUserId,

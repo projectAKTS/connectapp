@@ -307,6 +307,7 @@ typedef NativeRouteOwnershipAcknowledger = Future<bool> Function(
 typedef CallScreenOpenRecorderForTest = Future<void> Function({
   required String inviteId,
   required String channel,
+  required String acceptedCallkitId,
   required bool isVideo,
   required String otherUserName,
   required String? otherUserId,
@@ -752,6 +753,7 @@ class CallSessionManager {
   Future<int> debugCreateHeldCallRouteForTest({
     required String inviteId,
     required String channel,
+    String acceptedCallkitId = '',
     CallInviteStatus status = CallInviteStatus.connected,
   }) async {
     if (!_debugTestAccessEnabled) {
@@ -776,6 +778,7 @@ class CallSessionManager {
       otherUserName: 'Test Remote',
       phase: CallSessionPhase.connected,
       status: status,
+      acceptedCallkitId: acceptedCallkitId,
       lifecycleGeneration: reservation.generation,
     );
     _callRouteActive = true;
@@ -1056,6 +1059,7 @@ class CallSessionManager {
       reason: 'signed_out',
       endCurrentNativeCall: true,
       endUnownedNativeCalls: true,
+      endAllNativeCallsForAppReset: true,
       clearStoredAcceptedRecovery: true,
       clearHandledInvites: true,
       forceClearUiFlags: true,
@@ -1065,8 +1069,19 @@ class CallSessionManager {
 
   Future<void> hardResetForNewCall({
     String reason = 'hard_reset_for_new_call',
+    String? expectedInviteId,
+    String? expectedCallkitId,
   }) async {
     try {
+      if (!_cleanupRequestOwnsCurrentSession(
+        expectedInviteId: expectedInviteId,
+        expectedCallkitId: expectedCallkitId,
+      )) {
+        await _diagManager('hard_reset_stale_owner_ignored', meta: {
+          'reason': reason,
+        });
+        return;
+      }
       final acceptedNativeWatch = _acceptedNativeRouteWatch;
       if (acceptedNativeWatch != null && !_callRouteActive) {
         await _resolveAcceptedNativeRouteWatch(
@@ -1087,6 +1102,7 @@ class CallSessionManager {
       if (session != null && (_callRouteActive || _openingCallRoute)) {
         _callLifecycleArbiter.beginTeardown(session.lifecycleGeneration);
         await _activeInviteSub?.cancel();
+        if (!identical(_current, session)) return;
         _activeInviteSub = null;
         _cancelSessionTimers();
         _terminalSignal.value = null;
@@ -1096,10 +1112,12 @@ class CallSessionManager {
             reason: '$reason:end_current_native',
           );
         }
+        if (!identical(_current, session)) return;
         await _endStaleNativeCalls(
           keepCallkitId: session.callkitId.isEmpty ? null : session.callkitId,
           reason: reason,
         );
+        if (!identical(_current, session)) return;
         await _clearStoredAcceptedCallRecoverySafely(
           reason,
           inviteId: session.inviteId,
@@ -1112,7 +1130,6 @@ class CallSessionManager {
         return;
       }
       if (session != null) {
-        _discardPendingAcceptedIntent();
         await _finalizeTerminalSessionCleanup(
           inviteId: session.inviteId,
           reason: reason,
@@ -1136,6 +1153,21 @@ class CallSessionManager {
     }
     await Future<void>.delayed(const Duration(milliseconds: 500));
     await _diagResourceCounts('hard_reset_done');
+  }
+
+  bool _cleanupRequestOwnsCurrentSession({
+    required String? expectedInviteId,
+    required String? expectedCallkitId,
+  }) {
+    final expectedInvite = (expectedInviteId ?? '').trim();
+    final expectedCallkit = (expectedCallkitId ?? '').trim().toLowerCase();
+    if (expectedInvite.isEmpty && expectedCallkit.isEmpty) return true;
+    final session = _current;
+    if (session == null) return false;
+    if (expectedCallkit.isNotEmpty) {
+      return session.callkitId.trim().toLowerCase() == expectedCallkit;
+    }
+    return session.inviteId == expectedInvite;
   }
 
   static String generateChannelName(String uid1, String uid2) {
@@ -3837,6 +3869,7 @@ class CallSessionManager {
         await testOpenRecorder(
           inviteId: session.inviteId,
           channel: session.channel,
+          acceptedCallkitId: session.acceptedCallkitId,
           isVideo: session.isVideo,
           otherUserName: session.otherUserName,
           otherUserId: session.otherUserId.isEmpty ? null : session.otherUserId,
@@ -3863,6 +3896,9 @@ class CallSessionManager {
             otherUserId:
                 session.otherUserId.isEmpty ? null : session.otherUserId,
             inviteId: session.inviteId,
+            acceptedCallkitId: session.acceptedCallkitId.isEmpty
+                ? null
+                : session.acceptedCallkitId,
             isCaller: session.isCaller,
             connectionSystem: session.connectionSystem,
             callV2FallbackUsed: session.callV2FallbackUsed,
@@ -4238,8 +4274,6 @@ class CallSessionManager {
       return;
     }
     _callLifecycleArbiter.beginTeardown(session.lifecycleGeneration);
-    final pendingPayload = _pendingIncomingPromptPayload;
-    final pendingSource = _pendingIncomingPromptSource;
     final preservePendingAcceptedRecovery =
         _pendingAcceptedInviteIntent != null;
     await _resetSessionState(
@@ -4250,6 +4284,12 @@ class CallSessionManager {
       forceClearUiFlags:
           forceClearUiFlags || (!_callRouteActive && !_openingCallRoute),
     );
+    if (_current != null ||
+        !_callLifecycleArbiter.ownsGeneration(session.lifecycleGeneration)) {
+      return;
+    }
+    final pendingPayload = _pendingIncomingPromptPayload;
+    final pendingSource = _pendingIncomingPromptSource;
     final pendingClaim = _callLifecycleArbiter.completeTeardownAndClaimPending(
       session.lifecycleGeneration,
     );
@@ -4444,6 +4484,7 @@ class CallSessionManager {
     String? onlyInviteId,
     bool endCurrentNativeCall = false,
     bool endUnownedNativeCalls = false,
+    bool endAllNativeCallsForAppReset = false,
     bool clearStoredAcceptedRecovery = false,
     bool clearHandledInvites = false,
     bool forceClearUiFlags = false,
@@ -4463,14 +4504,21 @@ class CallSessionManager {
                 rawId: normalizedInviteId,
                 fallback: session?.channel ?? '',
               ));
+    final ownerGeneration = _callLifecycleArbiter.generation;
 
     await _activeInviteSub?.cancel();
+    if (!identical(_current, session) ||
+        !_callLifecycleArbiter.ownsGeneration(ownerGeneration)) {
+      return;
+    }
     _activeInviteSub = null;
     _cancelSessionTimers();
     _pendingIncomingPromptRetryTimer?.cancel();
     _pendingIncomingPromptRetryTimer = null;
-    _pendingIncomingPromptPayload = null;
-    _pendingIncomingPromptSource = null;
+    if (!_callLifecycleArbiter.pendingIncomingPresent) {
+      _pendingIncomingPromptPayload = null;
+      _pendingIncomingPromptSource = null;
+    }
     _current = null;
     _terminalSignal.value = null;
 
@@ -4492,8 +4540,18 @@ class CallSessionManager {
         reason: '$reason:end_current_native',
       );
     }
-    if (endUnownedNativeCalls) {
+    if (_current != null ||
+        !_callLifecycleArbiter.ownsGeneration(ownerGeneration)) {
+      return;
+    }
+    if (endAllNativeCallsForAppReset) {
+      await _endAllNativeCallsForAppReset(reason: reason);
+    } else if (endUnownedNativeCalls) {
       await _endStaleNativeCalls(keepCallkitId: null, reason: reason);
+    }
+    if (_current != null ||
+        !_callLifecycleArbiter.ownsGeneration(ownerGeneration)) {
+      return;
     }
     if (clearStoredAcceptedRecovery) {
       await _clearStoredAcceptedCallRecoverySafely(
@@ -4743,11 +4801,91 @@ class CallSessionManager {
     final nativeCalls = await _listNativeCallsSafely();
     final keep = (keepCallkitId ?? '').trim();
     for (final call in nativeCalls) {
-      if (keep.isNotEmpty && call.callkitId == keep) continue;
+      if (_nativeCallHasOwnedIdentity(call, keepCallkitId: keep)) continue;
+      if (!await _nativeCallIsProvablyStale(call)) continue;
+      if (_nativeCallHasOwnedIdentity(call, keepCallkitId: keep)) continue;
       await _endNativeCallSafely(
         call.callkitId,
         reason: '$reason:end_stale_native',
       );
+    }
+  }
+
+  Future<void> _endAllNativeCallsForAppReset({required String reason}) async {
+    final nativeCalls = await _listNativeCallsSafely();
+    for (final call in nativeCalls) {
+      if (call.callkitId.trim().isEmpty) continue;
+      await _endNativeCallSafely(
+        call.callkitId,
+        reason: '$reason:end_app_reset_native',
+      );
+    }
+  }
+
+  bool _nativeCallHasOwnedIdentity(
+    NativeCallSnapshot call, {
+    required String keepCallkitId,
+  }) {
+    final callkitId = call.callkitId.trim().toLowerCase();
+    final protectedExactIds = <String>{
+      keepCallkitId.trim().toLowerCase(),
+      _current?.callkitId.trim().toLowerCase() ?? '',
+      _pendingAcceptedInviteIntent?.payload.acceptedCallkitId
+              .trim()
+              .toLowerCase() ??
+          '',
+      _acceptedRouteContinuation?.payload.acceptedCallkitId
+              .trim()
+              .toLowerCase() ??
+          '',
+      _acceptedNativeRouteWatch?.payload.acceptedCallkitId
+              .trim()
+              .toLowerCase() ??
+          '',
+    }..remove('');
+    if (callkitId.isNotEmpty && protectedExactIds.contains(callkitId)) {
+      return true;
+    }
+
+    final inviteId = call.inviteId.trim();
+    final channel = call.channel.trim();
+    final ownedPayloads = <CallInvitePayload?>[
+      _pendingIncomingPromptPayload,
+      _pendingAcceptedInviteIntent?.payload,
+      _acceptedRouteContinuation?.payload,
+      _acceptedNativeRouteWatch?.payload,
+    ];
+    if (inviteId.isNotEmpty &&
+        (_current?.inviteId == inviteId ||
+            _incomingPromptInviteId == inviteId ||
+            _nativeAcceptedCallInviteId == inviteId)) {
+      return true;
+    }
+    if (channel.isNotEmpty && _current?.channel == channel) return true;
+    for (final payload in ownedPayloads) {
+      if (payload == null) continue;
+      if (inviteId.isNotEmpty && payload.inviteId == inviteId) return true;
+      if (channel.isNotEmpty && payload.channel == channel) return true;
+    }
+    return call.accepted;
+  }
+
+  Future<bool> _nativeCallIsProvablyStale(NativeCallSnapshot call) async {
+    final inviteId = call.inviteId.trim();
+    if (inviteId.isEmpty) return false;
+    try {
+      final data = _readInviteDataForTest != null
+          ? await _readInviteDataForTest!(inviteId)
+          : (await _db
+                  .collection('callInvites')
+                  .doc(inviteId)
+                  .get(const GetOptions(source: Source.server))
+                  .timeout(const Duration(seconds: 5)))
+              .data();
+      if (data == null) return true;
+      return _isTerminalStatus(_parseStatus(data['status']));
+    } catch (_) {
+      return false;
     }
   }
 

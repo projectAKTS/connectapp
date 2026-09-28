@@ -411,7 +411,10 @@ class NotificationService with WidgetsBindingObserver {
     _invalidateAcceptedRecoveryCoordinator();
     if (!Platform.isIOS) return;
     try {
-      await _pushTokenChannel.invokeMethod('clearStoredAcceptedCall');
+      await _pushTokenChannel.invokeMethod('clearStoredAcceptedCall', {
+        'inviteId': inviteId.trim(),
+        'callkitId': callkitId.trim(),
+      });
     } catch (_) {}
   }
 
@@ -537,7 +540,13 @@ class NotificationService with WidgetsBindingObserver {
     });
     try {
       if (normalized.isNotEmpty) {
-        await FlutterCallkitIncoming.endCall(normalized);
+        final ended = await _pushTokenChannel.invokeMethod<bool>(
+          'endExactCallkitCall',
+          <String, Object?>{'callkitId': normalized},
+        );
+        if (ended != true) {
+          throw StateError('Exact native CallKit end was not accepted.');
+        }
       }
       if (aggressive) {
         await FlutterCallkitIncoming.endAllCalls();
@@ -552,7 +561,10 @@ class NotificationService with WidgetsBindingObserver {
         if (call.callkitId.isEmpty) continue;
         if (!aggressive && call.callkitId != normalized) continue;
         try {
-          await FlutterCallkitIncoming.endCall(call.callkitId);
+          await _pushTokenChannel.invokeMethod<bool>(
+            'endExactCallkitCall',
+            <String, Object?>{'callkitId': call.callkitId},
+          );
         } catch (_) {}
       }
       if (remaining.any((call) => aggressive || call.callkitId == normalized)) {

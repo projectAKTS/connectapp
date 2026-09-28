@@ -4,6 +4,35 @@ import XCTest
 @testable import Runner
 
 class RunnerTests: XCTestCase {
+  func testExactCallkitEndTargetsOnlySuppliedUuidDespiteNewerGlobalState() {
+    let exactA = UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!
+    let exactB = UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")!
+    var simulatedPluginGlobalUuid = exactB
+    var active = Set([exactA, exactB])
+    var requested: [UUID] = []
+    let requester = CallV2ExactCallkitEndRequester { uuid, completion in
+      requested.append(uuid)
+      active.remove(uuid)
+      completion(true)
+    }
+
+    var firstResult: Bool?
+    requester.end(exactId: exactA.uuidString) { firstResult = $0 }
+
+    XCTAssertEqual(firstResult, true)
+    XCTAssertEqual(requested, [exactA])
+    XCTAssertFalse(active.contains(exactA))
+    XCTAssertTrue(active.contains(exactB))
+    XCTAssertEqual(simulatedPluginGlobalUuid, exactB)
+
+    simulatedPluginGlobalUuid = exactB
+    var duplicateResult: Bool?
+    requester.end(exactId: exactA.uuidString) { duplicateResult = $0 }
+    XCTAssertEqual(duplicateResult, true)
+    XCTAssertEqual(requested, [exactA])
+    XCTAssertTrue(active.contains(exactB))
+  }
+
   func testNativeIdentityIgnoresStalePersistedAcceptedState() {
     var generated = ["exact-a", "exact-b"]
     let allocator = CallV2NativeCallkitIdentityAllocator {

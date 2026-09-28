@@ -149,6 +149,61 @@ class CallV2ScreenSetupCancellationOwner {
   }
 }
 
+typedef CallV2CallkitAction = Future<void> Function(String callkitId);
+typedef CallV2ExactNativeCallkitEnd = Future<bool> Function(String callkitId);
+
+class CallV2ScreenCallkitOwnership {
+  CallV2ScreenCallkitOwnership({
+    required String acceptedCallkitId,
+    required String inviteId,
+    required String channel,
+  })  : acceptedCallkitId = acceptedCallkitId.trim(),
+        ownedCallkitId = acceptedCallkitId.trim().isNotEmpty
+            ? acceptedCallkitId.trim()
+            : normalizeCallkitId(rawId: inviteId, fallback: channel);
+
+  final String acceptedCallkitId;
+  final String ownedCallkitId;
+
+  bool get hasExactAcceptedIdentity => acceptedCallkitId.isNotEmpty;
+  bool get usesPluginConnectedMarker => !hasExactAcceptedIdentity;
+}
+
+class CallV2ScreenCallkitController {
+  CallV2ScreenCallkitController({
+    required this.ownership,
+    required CallV2CallkitAction markPluginConnected,
+    required CallV2CallkitAction endPluginCall,
+    required CallV2ExactNativeCallkitEnd endExactNativeCall,
+  })  : _markPluginConnected = markPluginConnected,
+        _endPluginCall = endPluginCall,
+        _endExactNativeCall = endExactNativeCall;
+
+  final CallV2ScreenCallkitOwnership ownership;
+  final CallV2CallkitAction _markPluginConnected;
+  final CallV2CallkitAction _endPluginCall;
+  final CallV2ExactNativeCallkitEnd _endExactNativeCall;
+
+  Future<bool> markConnectedAfterRtcJoin() async {
+    if (!ownership.usesPluginConnectedMarker ||
+        ownership.ownedCallkitId.isEmpty) {
+      return false;
+    }
+    await _markPluginConnected(ownership.ownedCallkitId);
+    return true;
+  }
+
+  Future<bool> endOwnedCall({required bool useExactNativeEnd}) async {
+    final ownedCallkitId = ownership.ownedCallkitId;
+    if (ownedCallkitId.isEmpty) return false;
+    if (useExactNativeEnd) {
+      return _endExactNativeCall(ownedCallkitId);
+    }
+    await _endPluginCall(ownedCallkitId);
+    return true;
+  }
+}
+
 final class _CallV2TerminalSetupCancelled implements Exception {
   const _CallV2TerminalSetupCancelled(this.stage);
 
@@ -245,6 +300,7 @@ class AgoraCallScreen extends StatefulWidget {
   final String otherUserName;
   final String? otherUserId;
   final String? inviteId;
+  final String? acceptedCallkitId;
   final bool isCaller;
   final CallV2RealCallConnectionSystem connectionSystem;
   final bool callV2FallbackUsed;
@@ -257,6 +313,7 @@ class AgoraCallScreen extends StatefulWidget {
     required this.otherUserName,
     this.otherUserId,
     this.inviteId,
+    this.acceptedCallkitId,
     this.isCaller = false,
     this.connectionSystem = CallV2RealCallConnectionSystem.legacyV1,
     this.callV2FallbackUsed = false,
@@ -320,7 +377,6 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   bool _remoteEverJoined = false;
   bool _missedLogged = false;
   bool _callkitMarkedConnected = false;
-  bool _nativeAcceptedCallCleared = false;
   bool _callV2CallableAttempted = false;
   bool _callV2CallableReached = false;
   bool _callV2TokenReady = false;
@@ -354,6 +410,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   bool _nativeCleanupStillRunning = false;
   final CallV2ScreenSetupCancellationOwner _setupCancellation =
       CallV2ScreenSetupCancellationOwner();
+  late final CallV2ScreenCallkitController _callkitController;
 
   bool get _useFlutterTextureRenderer =>
       Platform.isIOS && _preferFlutterTextureRendererOnIOS;
@@ -385,51 +442,49 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   }
 
   String get _callkitId {
-    return normalizeCallkitId(
-      rawId: widget.inviteId ?? '',
-      fallback: widget.channelName,
+    return _callkitController.ownership.ownedCallkitId;
+  }
+
+  Future<bool> _endExactNativeCallkitCall(String callkitId) async {
+    final ended = await _pushTokenChannel.invokeMethod<bool>(
+      'endExactCallkitCall',
+      <String, Object?>{'callkitId': callkitId},
     );
+    return ended == true;
   }
 
   Future<void> _markCallkitConnected() async {
     if (_callkitMarkedConnected) return;
-    final id = _callkitId;
-    if (id.isEmpty) return;
     try {
-      await FlutterCallkitIncoming.setCallConnected(id);
+      final pluginMarkerUsed =
+          await _callkitController.markConnectedAfterRtcJoin();
       _callkitMarkedConnected = true;
-    } catch (_) {}
-  }
-
-  Future<void> _markCallkitConnectedForAcceptedCall() async {
-    if (widget.isCaller) return;
-    try {
-      await _markCallkitConnected();
-      if (_callkitMarkedConnected) {
-        await _diagCall('callkit_connected_marked', meta: {
-          'source': 'accepted_call_start',
-        });
-      }
-    } catch (e) {
-      await _diagCall('callkit_connected_error', meta: {
-        'source': 'accepted_call_start',
-        'error': '$e',
-      });
-    }
-  }
-
-  Future<void> _clearStoredAcceptedCallRecovery() async {
-    if (_nativeAcceptedCallCleared) return;
-    _nativeAcceptedCallCleared = true;
-    if (_testMode) return;
-    try {
-      await _pushTokenChannel.invokeMethod('clearStoredAcceptedCall');
+      await _diagCall(
+        pluginMarkerUsed
+            ? 'callkit_connected_marked'
+            : 'callkit_connected_marker_skipped_exact_accept',
+        meta: {'source': 'agora_join_success'},
+      );
     } catch (_) {}
   }
 
   @override
   void initState() {
     super.initState();
+    _callkitController = CallV2ScreenCallkitController(
+      ownership: CallV2ScreenCallkitOwnership(
+        acceptedCallkitId: widget.acceptedCallkitId ?? '',
+        inviteId: widget.inviteId ?? '',
+        channel: widget.channelName,
+      ),
+      markPluginConnected: (callkitId) async {
+        await FlutterCallkitIncoming.setCallConnected(callkitId);
+      },
+      endPluginCall: (callkitId) async {
+        await FlutterCallkitIncoming.endCall(callkitId);
+      },
+      endExactNativeCall: _endExactNativeCallkitCall,
+    );
     _callSequenceNumber = ++_nextCallSequenceNumber;
     _callV2BlockerCode = widget.callV2BlockerCode;
     CallSessionManager.instance.terminalSignal
@@ -525,98 +580,33 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     }
   }
 
-  Future<List<String>> _activeCallkitIds() async {
-    try {
-      final activeCalls = await FlutterCallkitIncoming.activeCalls();
-      if (activeCalls is! List) return const <String>[];
-      final ids = <String>[];
-      for (final raw in activeCalls) {
-        if (raw is! Map) continue;
-        final body = Map<String, dynamic>.from(raw);
-        final extraRaw = body['extra'];
-        final extra = extraRaw is Map
-            ? Map<String, dynamic>.from(extraRaw)
-            : const <String, dynamic>{};
-        final rawId = [
-          extra['id'],
-          extra['callkitId'],
-          body['id'],
-          body['callkitId'],
-          body['uuid'],
-          body['channel'],
-        ]
-            .whereType<String>()
-            .map((v) => v.trim())
-            .firstWhere((v) => v.isNotEmpty, orElse: () => '');
-        if (rawId.isEmpty) continue;
-        ids.add(normalizeCallkitId(rawId: rawId, fallback: widget.channelName));
-      }
-      return ids.toSet().where((id) => id.isNotEmpty).toList();
-    } catch (_) {
-      return const <String>[];
-    }
-  }
-
   Future<void> _cleanupCallkitUi({required String reason}) async {
     if (_testMode) {
       await _diagCall('callkit_cleanup_start', meta: {
         'reason': reason,
         'testMode': true,
       });
-      await _diagCall('callkit_active_before', meta: {
+      await _diagCall('callkit_exact_end_skipped', meta: {
         'reason': reason,
-        'count': 0,
-        'testMode': true,
-      });
-      await _diagCall('callkit_end_all_done', meta: {
-        'reason': reason,
-        'testMode': true,
-      });
-      await _diagCall('callkit_active_after', meta: {
-        'reason': reason,
-        'count': 0,
         'testMode': true,
       });
       return;
     }
     await _diagCall('callkit_cleanup_start', meta: {'reason': reason});
-    final before = await _activeCallkitIds();
-    await _diagCall('callkit_active_before', meta: {
-      'reason': reason,
-      'count': before.length,
-    });
-
-    final callkitId = _callkitId;
-    if (callkitId.isNotEmpty) {
-      try {
-        await FlutterCallkitIncoming.endCall(callkitId);
-      } catch (_) {}
-    }
     try {
-      await FlutterCallkitIncoming.endAllCalls();
-      await _diagCall('callkit_end_all_done', meta: {'reason': reason});
+      final ended = await _callkitController.endOwnedCall(
+        useExactNativeEnd: Platform.isIOS,
+      );
+      await _diagCall('callkit_exact_end_requested', meta: {
+        'reason': reason,
+        'requestAccepted': ended,
+      });
     } catch (e) {
-      await _diagCall('callkit_end_all_error', meta: {
+      await _diagCall('callkit_exact_end_error', meta: {
         'reason': reason,
         'error': '$e',
       });
     }
-
-    await Future<void>.delayed(const Duration(milliseconds: 400));
-    final remaining = await _activeCallkitIds();
-    for (final id in remaining) {
-      try {
-        await FlutterCallkitIncoming.endCall(id);
-      } catch (_) {}
-    }
-    if (remaining.isNotEmpty) {
-      await Future<void>.delayed(const Duration(milliseconds: 400));
-    }
-    final after = await _activeCallkitIds();
-    await _diagCall('callkit_active_after', meta: {
-      'reason': reason,
-      'count': after.length,
-    });
   }
 
   Future<void> _begin() async {
@@ -670,12 +660,6 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           CallV2ScreenSetupCancellationStage.callScreenBegan,
         );
       }
-      await _markCallkitConnectedForAcceptedCall();
-      _cancelSetupIfStale(
-        setupEpoch,
-        CallV2ScreenSetupCancellationStage.callkitSetup,
-      );
-
       final currentUserUid = HelperlyTestRuntime.currentUid ??
           FirebaseAuth.instance.currentUser?.uid;
       final requestedUid = _deriveRtcUidFromFirebaseUid(currentUserUid ?? '');
@@ -2684,11 +2668,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     await _diagCall('screen_auto_close', meta: {'reason': reason});
     try {
       final cleanupResult = await _awaitCleanupForUi(_cleanupEngine());
-      await _clearStoredAcceptedCallRecovery();
       await _cleanupCallkitUi(reason: 'screen_terminal_hard_reset');
       _updateCallV2LifecycleStatus(routeCleanupCompleted: true);
       await CallSessionManager.instance.hardResetForNewCall(
         reason: 'screen_terminal_hard_reset',
+        expectedInviteId: widget.inviteId,
+        expectedCallkitId: _callkitId,
       );
       _updateCallV2LifecycleStatus(sessionResetCompleted: true);
       _returnToAppAfterCall();
@@ -2756,11 +2741,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         );
       }
       final cleanupResult = await _awaitCleanupForUi(_cleanupEngine());
-      await _clearStoredAcceptedCallRecovery();
       await _cleanupCallkitUi(reason: 'manual_end_hard_reset');
       _updateCallV2LifecycleStatus(routeCleanupCompleted: true);
       await CallSessionManager.instance.hardResetForNewCall(
         reason: 'manual_end_hard_reset',
+        expectedInviteId: widget.inviteId,
+        expectedCallkitId: _callkitId,
       );
       _updateCallV2LifecycleStatus(sessionResetCompleted: true);
       _returnToAppAfterCall();
