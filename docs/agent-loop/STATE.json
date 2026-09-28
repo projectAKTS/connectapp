@@ -1,29 +1,18 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "accepted_transaction_authority",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "41f8c89d934c698ef0b297867297f77588d1698f",
-  "starting_sha": "41f8c89d934c698ef0b297867297f77588d1698f",
+  "phase": "exact_callkit_per_call_ownership",
+  "status": "task_ready",
+  "accepted_checkpoint_sha": "b766f93f94b38142fcf49fc2c6ac2c9b38a4df06",
+  "starting_sha": "b766f93f94b38142fcf49fc2c6ac2c9b38a4df06",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "59393f4cb484addf504b880aab0f392a20f4cb33",
+  "code_commit_sha": null,
   "ending_sha": "SELF",
-  "changed_files": [
-    "lib/call_v2/diagnostics/call_v2_physical_diagnostic_ledger.dart",
-    "lib/services/call_session_manager.dart",
-    "test/call_v2/real_flow/call_v2_notification_ownership_test.dart",
-    "test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart"
-  ],
+  "changed_files": [],
   "validation": {
-    "flutter_analyze": "passed",
-    "notification_ownership_tests": "passed, 38 tests",
-    "lifecycle_manager_tests": "passed, 65 tests",
-    "diagnostic_ledger_tests": "passed, 5 tests",
-    "all_call_v2_tests": "passed, 2299 tests",
-    "foreground_recovery_tests": "passed, 3 tests",
-    "ios_runner_tests": "not run, native source unchanged",
-    "git_diff_check": "passed"
+    "authorization_metadata": "validated before authorization commit",
+    "implementation": "not started"
   },
   "safety": {
     "deployed": false,
@@ -33,7 +22,7 @@
     "backend_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "Accepted native recovery now records exact local ownership and uses the existing guarded Firestore accept transaction as its single server authority. The typed transaction result carries validated route data, redundant accepted pre/post reads are removed, recoverable retries retain generation ownership, and terminal cleanup cancels matching work. All 2299 Call V2 tests pass. No physical-fix claim is made."
+    "decision": "implementation_required",
+    "notes": "Authorize only the exact per-call CallKit ownership correction described in NEXT_TASK.md. Do not change accepted Firestore authority, routing architecture, RTC/token behavior, PushKit presentation, watchdog timing, dependencies, backend, deployment, or TestFlight configuration. No physical-fix claim is authorized."
   }
 }
