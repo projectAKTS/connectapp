@@ -162,7 +162,6 @@ final class CallV2ExactCallkitEndRequester {
 
   private let request: Request
   private let lock = NSLock()
-  private var completed: Set<UUID> = []
   private var waiters: [UUID: [(Bool) -> Void]] = [:]
 
   init(request: @escaping Request) {
@@ -178,11 +177,6 @@ final class CallV2ExactCallkitEndRequester {
     }
 
     lock.lock()
-    if completed.contains(uuid) {
-      lock.unlock()
-      completion(true)
-      return
-    }
     if waiters[uuid] != nil {
       waiters[uuid]?.append(completion)
       lock.unlock()
@@ -198,9 +192,6 @@ final class CallV2ExactCallkitEndRequester {
       }
       lock.lock()
       let completions = waiters.removeValue(forKey: uuid) ?? []
-      if succeeded {
-        completed.insert(uuid)
-      }
       lock.unlock()
       completions.forEach { $0(succeeded) }
     }

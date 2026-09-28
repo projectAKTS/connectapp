@@ -4,7 +4,7 @@ import XCTest
 @testable import Runner
 
 class RunnerTests: XCTestCase {
-  func testExactCallkitEndTargetsOnlySuppliedUuidDespiteNewerGlobalState() {
+  func testExactCallkitEndRetryTargetsOnlySuppliedUuidDespiteNewerGlobalState() {
     let exactA = UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!
     let exactB = UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")!
     var simulatedPluginGlobalUuid = exactB
@@ -29,8 +29,102 @@ class RunnerTests: XCTestCase {
     var duplicateResult: Bool?
     requester.end(exactId: exactA.uuidString) { duplicateResult = $0 }
     XCTAssertEqual(duplicateResult, true)
-    XCTAssertEqual(requested, [exactA])
+    XCTAssertEqual(requested, [exactA, exactA])
     XCTAssertTrue(active.contains(exactB))
+  }
+
+  func testExactCallkitEndCoalescesConcurrentRequestsOnlyWhileInFlight() {
+    let exactA = UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!
+    var requested: [UUID] = []
+    var pendingCompletion: ((Bool) -> Void)?
+    var results: [Bool] = []
+    let requester = CallV2ExactCallkitEndRequester { uuid, completion in
+      requested.append(uuid)
+      pendingCompletion = completion
+    }
+
+    requester.end(exactId: exactA.uuidString) { results.append($0) }
+    requester.end(exactId: exactA.uuidString) { results.append($0) }
+
+    XCTAssertEqual(requested, [exactA])
+    XCTAssertTrue(results.isEmpty)
+    pendingCompletion?(true)
+    XCTAssertEqual(results, [true, true])
+  }
+
+  func testExactCallkitEndAllowsLaterRetryAfterSuccessfulRequest() {
+    let exactA = UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!
+    var requested: [UUID] = []
+    let requester = CallV2ExactCallkitEndRequester { uuid, completion in
+      requested.append(uuid)
+      completion(true)
+    }
+
+    requester.end(exactId: exactA.uuidString) { _ in }
+    requester.end(exactId: exactA.uuidString) { _ in }
+
+    XCTAssertEqual(requested, [exactA, exactA])
+  }
+
+  func testExactCallkitEndRejectsInvalidUuidWithoutNativeTransaction() {
+    var requestCount = 0
+    var result: Bool?
+    let requester = CallV2ExactCallkitEndRequester { _, completion in
+      requestCount += 1
+      completion(true)
+    }
+
+    requester.end(exactId: "not-a-uuid") { result = $0 }
+
+    XCTAssertEqual(result, false)
+    XCTAssertEqual(requestCount, 0)
+  }
+
+  func testWatchdogEscalationSubmitsSecondExactEndAfterObserverStillActive() {
+    let verified = expectation(description: "second exact end verifies absence")
+    let exactA = UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!
+    let exactB = UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")!
+    let queue = DispatchQueue(label: "CallV2ExactEndEscalationTests")
+    var active = Set([exactA, exactB])
+    var requested: [UUID] = []
+    var stages: [String] = []
+    var verifiedKeys: [String] = []
+    let requester = CallV2ExactCallkitEndRequester { uuid, completion in
+      requested.append(uuid)
+      if requested.filter({ $0 == exactA }).count == 2 {
+        active.remove(exactA)
+      }
+      completion(true)
+    }
+    let watchdog = CallV2NativeRouteSafetyWatchdog(
+      timeout: 0.01,
+      verificationDelay: 0.005,
+      queue: queue,
+      record: { _, stage in stages.append(stage) },
+      requestExactEnd: { exactKey in
+        requester.end(exactId: exactKey) { _ in }
+      },
+      exactCallIsActive: { exactKey in
+        guard let uuid = UUID(uuidString: exactKey) else { return false }
+        return active.contains(uuid)
+      },
+      exactEndVerified: { exactKey in
+        verifiedKeys.append(exactKey)
+        verified.fulfill()
+      }
+    )
+
+    XCTAssertTrue(watchdog.start(exactKey: exactA.uuidString))
+    wait(for: [verified], timeout: 0.2)
+
+    XCTAssertEqual(requested, [exactA, exactA])
+    XCTAssertFalse(requested.contains(exactB))
+    XCTAssertFalse(active.contains(exactA))
+    XCTAssertTrue(active.contains(exactB))
+    XCTAssertEqual(stages.filter { $0 == "nativeCallEnded" }.count, 1)
+    XCTAssertEqual(stages.filter { $0 == "nativeCallEndVerified" }.count, 1)
+    XCTAssertEqual(verifiedKeys.count, 1)
+    XCTAssertNotEqual(watchdog.blockerCode, "native_end_unverified")
   }
 
   func testNativeIdentityIgnoresStalePersistedAcceptedState() {
