@@ -1,36 +1,58 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "exact_callkit_per_call_ownership",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "b766f93f94b38142fcf49fc2c6ac2c9b38a4df06",
-  "starting_sha": "1693b63a832df5bc58282ba86f55bc9ba8b984e9",
+  "phase": "post_call_teardown_latency_investigation",
+  "status": "task_ready",
+  "accepted_checkpoint_sha": "cefa58beffb4f1fbcb1acd7a64d961a8813f5e04",
+  "starting_sha": "cefa58beffb4f1fbcb1acd7a64d961a8813f5e04",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
   "code_commit_sha": "3eba03e82d6fdb6b3d42aa8fed4df2b037138612",
   "ending_sha": "SELF",
   "changed_files": [
-    "ios/Runner/AppDelegate.swift",
-    "ios/RunnerTests/RunnerTests.swift"
+    "docs/agent-loop/HANDOFF.md",
+    "docs/agent-loop/NEXT_TASK.md",
+    "docs/agent-loop/STATE.json"
   ],
+  "physical_validation": {
+    "source_sha": "cefa58beffb4f1fbcb1acd7a64d961a8813f5e04",
+    "testflight_version": "1.0.2",
+    "testflight_build": "202607311859",
+    "devices": "two real iPhones",
+    "call_a": "passed",
+    "call_b": "passed",
+    "call_c": "passed",
+    "two_way_video": "passed for all three calls",
+    "two_way_audio": "passed for all three calls",
+    "normal_end": "passed for all three calls",
+    "force_quit_required": false,
+    "repeated_call_core": "physical pass",
+    "exact_callkit_ownership_and_repeated_routing": "physical pass",
+    "immediate_redial": "blocked approximately 5-10 seconds",
+    "remaining_classification": "teardown_latency"
+  },
+  "build_defines": {
+    "CALL_V2_REAL_FLOW_ENABLED": "true",
+    "CALL_V2_REAL_FLOW_DEV_CALLABLE": "true",
+    "CALL_V2_BUILD_COMMIT": "cefa58beffb4f1fbcb1acd7a64d961a8813f5e04"
+  },
   "validation": {
-    "ios_runner_tests": "passed, 21 tests",
-    "flutter_analyze": "passed, no issues",
-    "focused_exact_callkit_ownership": "passed, 10 tests",
-    "all_call_v2": "passed, 2309 tests",
-    "foreground_recovery": "passed, 3 tests",
+    "source": "user-provided physical validation",
+    "sequential_calls": "passed, 3",
+    "same_process": "passed",
     "git_diff_check": "passed",
     "dependency_files": "unchanged"
   },
   "safety": {
-    "deployed": false,
-    "testflight_built": false,
-    "production_services_contacted": false,
+    "backend_deployed": false,
     "firebase_changes": false,
-    "backend_changes": false
+    "backend_changes": false,
+    "production_code_changes": false,
+    "test_changes": false,
+    "testflight_build_recorded": true
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "CallV2ExactCallkitEndRequester now coalesces only concurrent in-flight requests. A later observer-driven retry submits a second exact CXEndCallAction, never targets another UUID, and preserves all accepted exact per-call ownership behavior. Physical testing is still required."
+    "decision": "task_ready",
+    "notes": "Three sequential physical calls passed without force quit, validating repeated-call ownership and routing. Immediate redial remains blocked for approximately 5-10 seconds and is classified separately as teardown latency. The next task is read-only timing investigation only."
   }
 }

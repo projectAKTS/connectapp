@@ -1,83 +1,75 @@
-# Active Revision — Exact CallKit End Retry Semantics
+# Next Task — Read-Only Post-Call Teardown Latency Investigation
 
 Branch: `call-v2`
 
-Starting SHA: `1693b63a832df5bc58282ba86f55bc9ba8b984e9`
+Starting SHA: `cefa58beffb4f1fbcb1acd7a64d961a8813f5e04`
+
+## Accepted Physical Baseline
+
+TestFlight version `1.0.2`, build `202607311859`, completed three sequential
+real calls on two iPhones in one app process. Calls A, B, and C all connected
+with two-way audio/video and ended normally without a force quit. Exact CallKit
+ownership and repeated routing are physically validated at the starting SHA.
+
+The remaining issue is distinct: an immediate outgoing redial can remain
+blocked by `Finishing previous call...` for approximately 5-10 seconds, after
+which the next call succeeds.
 
 ## Goal
 
-Restore the existing native watchdog's legitimate second exact-end attempt
-without weakening exact per-call CallKit ownership.
+Conduct a read-only investigation that identifies which awaited operation or
+operations account for the post-call teardown / outgoing-reservation latency.
+Do not optimize or alter behavior until timing evidence proves the bottleneck.
 
-`CallV2ExactCallkitEndRequester` may coalesce concurrent requests for the same
-UUID only while one native transaction request is in flight. A later explicit
-request for that UUID must submit a new `CXEndCallAction`, because successful
-`CXCallController.request` completion does not prove `CXCallObserver` no longer
-contains the call.
+## Required Trace
 
-## Authorized Scope
+Measure and correlate this exact path:
 
-1. Remove permanent successful-request suppression from
-   `CallV2ExactCallkitEndRequester`.
-2. Keep one in-flight request per exact UUID and fan its result out to concurrent
-   waiters.
-3. Remove in-flight ownership when the native request callback completes,
-   regardless of success or failure.
-4. Permit a later exact request for the same UUID to submit another native
-   transaction.
-5. Preserve exact UUID targeting and isolation from plugin-global PushKit state.
-6. Add native RunnerTests for concurrent coalescing, later retry, exact
-   isolation, invalid UUID rejection, and real watchdog escalation composition.
+1. User ends Call A.
+2. Firestore and local terminal handling execute.
+3. Agora leave/release executes.
+4. The engine cleanup gate settles.
+5. Exact CallKit end and verification settle.
+6. The Flutter call route pops.
+7. `hardResetForNewCall` settles.
+8. The lifecycle arbiter releases teardown ownership.
+9. A new outgoing reservation becomes available.
 
-## Required Watchdog Proof
+For every step, identify the current file/function, awaited operations,
+ordering (serial or parallel), timeout/delay constants, cancellation rules,
+and available runtime or test evidence. Produce a chronological table showing
+elapsed or bounded time attributable to each operation.
 
-Through the real watchdog/requester composition:
+## Required Conclusions
 
-- exact A remains active after the first accepted native end request;
-- observer verification causes a second exact A request;
-- A becomes inactive after the second request;
-- final verification emits `nativeCallEnded`, `nativeCallEndVerified`, and one
-  `exactEndVerified` callback;
-- `native_end_unverified` is absent; and
-- no request targets B.
+- State whether the 5-10 second window is proven to originate in one operation
+  or a serial combination.
+- Distinguish necessary correctness waits from avoidable latency.
+- Identify the precise guard that emits `Finishing previous call...`.
+- Confirm when outgoing reservation changes from blocked to available.
+- Keep the physically validated ownership/routing correction accepted and out
+  of scope.
+- If existing evidence cannot prove the bottleneck, report the exact
+  observability gap and propose a separately authorized diagnostic step. Do
+  not add instrumentation in this task.
 
-## Preserve Accepted Behavior
+## Read-Only Scope
 
-Do not change exact UUID propagation, screen exact-ID preference, normal screen
-removal of `endAllCalls()`, Helperly-owned `CXEndCallAction`, accepted incoming
-`setCallConnected()` suppression, delayed-A ownership guards, exact-scoped
-stored recovery clearing, stale-B protection, or provable orphan cleanup.
+- Inspect current source, existing tests, existing diagnostics, and supplied
+  physical evidence only.
+- Do not modify production code or tests.
+- Do not add instrumentation.
+- Do not change cleanup timing, retries, timeouts, or ordering.
+- Do not modify Agora, CallKit, Firestore, watchdog, Navigator, backend,
+  dependencies, or platform configuration.
+- Do not deploy, build, or upload TestFlight.
+- Do not claim immediate redial fixed.
 
-## Authorized Files
+Agent-loop handoff/state metadata may be updated after the investigation to
+record findings; no source implementation is authorized.
 
-- `ios/Runner/AppDelegate.swift`
-- `ios/RunnerTests/RunnerTests.swift`
-- agent-loop handoff/state metadata
+## Deliverable
 
-No Dart production change is authorized unless strictly required to compile,
-which is not expected.
-
-## Strict Non-Goals
-
-Do not change Firestore authority or accepted transactions, NotificationService
-recovery architecture, Navigator, PushKit presentation, watchdog duration or
-verification delay, Agora, RTC tokens, backend, dependencies, Flutter, plugin
-source, deployment, or TestFlight configuration.
-
-## Validation
-
-Run and pass:
-
-```bash
-xcodebuild test -workspace Runner.xcworkspace -scheme Runner \
-  -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.5' \
-  -only-testing:RunnerTests
-flutter analyze
-flutter test test/call_v2/real_flow/call_v2_exact_callkit_ownership_test.dart --no-pub
-flutter test test/call_v2 --no-pub
-flutter test test/notification_foreground_recovery_test.dart --no-pub
-git diff --check
-```
-
-Verify dependency files remain unchanged. Do not deploy, build TestFlight, or
-claim physical success.
+Return a source-grounded teardown chronology, the proven or unproven latency
+bottleneck, the exact outgoing reservation release condition, and one narrowly
+defined recommended next action. Stop without implementing that action.
