@@ -1,75 +1,61 @@
-# Next Task — Read-Only Post-Call Teardown Latency Investigation
+# Next Task — Post-Call Redial Gate Ordering Correction
 
 Branch: `call-v2`
 
-Starting SHA: `cefa58beffb4f1fbcb1acd7a64d961a8813f5e04`
+Starting SHA: `2d4882af94e90dc8dfbcc5fbc402a98e6bb65b07`
 
-## Accepted Physical Baseline
+## Accepted Findings
 
-TestFlight version `1.0.2`, build `202607311859`, completed three sequential
-real calls on two iPhones in one app process. Calls A, B, and C all connected
-with two-way audio/video and ended normally without a force quit. Exact CallKit
-ownership and repeated routing are physically validated at the starting SHA.
+The historical 5-10 second runtime wait was not causally identified. Source
+review nevertheless proved that outgoing reservation remains blocked after the
+old route and local Call A ownership are gone while exact-A-only platform
+cleanup still completes.
 
-The remaining issue is distinct: an immediate outgoing redial can remain
-blocked by `Finishing previous call...` for approximately 5-10 seconds, after
-which the next call succeeds.
+## Authorized Goal
 
-## Goal
+Move only exact-A-scoped native end verification and scoped persisted accepted
+recovery clearing outside the outgoing reservation gate. Preserve every
+ownership-critical step inside the gate:
 
-Conduct a read-only investigation that identifies which awaited operation or
-operations account for the post-call teardown / outgoing-reservation latency.
-Do not optimize or alter behavior until timing evidence proves the bottleneck.
+1. route closure;
+2. active-listener detach or equivalent fencing;
+3. timer and callback quiescence;
+4. local accepted-recovery invalidation;
+5. old session and UI ownership clearing;
+6. lifecycle generation verification;
+7. atomic pending-incoming claim, otherwise transition to idle.
 
-## Required Trace
+## Safety Requirements
 
-Measure and correlate this exact path:
+- Deferred work must capture immutable Call A identity before release.
+- Deferred work must never read mutable current-call state to target cleanup.
+- Late Call A completion must not end, clear, reset, or mutate Call B.
+- Pending incoming ownership retains priority over outgoing redial.
+- Exact CallKit ownership remains exact; do not use `endAllCalls()`.
+- Keep Firestore terminal semantics, accepted transactions, PushKit routing,
+  native UUID propagation, watchdog timing, Navigator architecture, and the
+  Agora process engine gate unchanged.
 
-1. User ends Call A.
-2. Firestore and local terminal handling execute.
-3. Agora leave/release executes.
-4. The engine cleanup gate settles.
-5. Exact CallKit end and verification settle.
-6. The Flutter call route pops.
-7. `hardResetForNewCall` settles.
-8. The lifecycle arbiter releases teardown ownership.
-9. A new outgoing reservation becomes available.
+## Required Tests
 
-For every step, identify the current file/function, awaited operations,
-ordering (serial or parallel), timeout/delay constants, cancellation rules,
-and available runtime or test evidence. Produce a chronological table showing
-elapsed or bounded time attributable to each operation.
+- blocked exact A native end does not block B reservation;
+- blocked exact A persisted-recovery clear does not block B;
+- late A cleanup cannot mutate current B;
+- pending incoming is claimed before outgoing can reserve;
+- stale A generation cannot release B;
+- normal teardown still performs exact cleanup and reaches idle;
+- all existing exact ownership, notification ownership, lifecycle, recovery,
+  Call V2, and iOS Runner tests remain passing.
 
-## Required Conclusions
+## Validation
 
-- State whether the 5-10 second window is proven to originate in one operation
-  or a serial combination.
-- Distinguish necessary correctness waits from avoidable latency.
-- Identify the precise guard that emits `Finishing previous call...`.
-- Confirm when outgoing reservation changes from blocked to available.
-- Keep the physically validated ownership/routing correction accepted and out
-  of scope.
-- If existing evidence cannot prove the bottleneck, report the exact
-  observability gap and propose a separately authorized diagnostic step. Do
-  not add instrumentation in this task.
+Run Flutter analysis, focused ownership/lifecycle/recovery tests, the complete
+Call V2 suite, foreground recovery tests, iOS RunnerTests, `git diff --check`,
+and dependency/lockfile diff inspection. Do not build TestFlight, deploy, or
+request physical testing in this task.
 
-## Read-Only Scope
+## Commit And Handoff
 
-- Inspect current source, existing tests, existing diagnostics, and supplied
-  physical evidence only.
-- Do not modify production code or tests.
-- Do not add instrumentation.
-- Do not change cleanup timing, retries, timeouts, or ordering.
-- Do not modify Agora, CallKit, Firestore, watchdog, Navigator, backend,
-  dependencies, or platform configuration.
-- Do not deploy, build, or upload TestFlight.
-- Do not claim immediate redial fixed.
-
-Agent-loop handoff/state metadata may be updated after the investigation to
-record findings; no source implementation is authorized.
-
-## Deliverable
-
-Return a source-grounded teardown chronology, the proven or unproven latency
-bottleneck, the exact outgoing reservation release condition, and one narrowly
-defined recommended next action. Stop without implementing that action.
+Commit the focused implementation and tests, record a `ready_for_review`
+handoff, push `origin/call-v2`, and stop. Do not claim that the historical
+runtime duration itself was proven.

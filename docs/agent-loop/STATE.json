@@ -1,18 +1,20 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "post_call_teardown_latency_investigation",
-  "status": "task_ready",
-  "accepted_checkpoint_sha": "cefa58beffb4f1fbcb1acd7a64d961a8813f5e04",
-  "starting_sha": "cefa58beffb4f1fbcb1acd7a64d961a8813f5e04",
+  "phase": "post_call_redial_gate_ordering_correction",
+  "status": "ready_for_review",
+  "accepted_checkpoint_sha": "2d4882af94e90dc8dfbcc5fbc402a98e6bb65b07",
+  "starting_sha": "2d4882af94e90dc8dfbcc5fbc402a98e6bb65b07",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "3eba03e82d6fdb6b3d42aa8fed4df2b037138612",
+  "code_commit_sha": "edc5c57d0516b06e8f4814932197f0822f8094ac",
   "ending_sha": "SELF",
   "changed_files": [
     "docs/agent-loop/HANDOFF.md",
     "docs/agent-loop/NEXT_TASK.md",
-    "docs/agent-loop/STATE.json"
+    "docs/agent-loop/STATE.json",
+    "lib/services/call_session_manager.dart",
+    "test/call_v2/real_flow/call_v2_exact_callkit_ownership_test.dart"
   ],
   "physical_validation": {
     "source_sha": "cefa58beffb4f1fbcb1acd7a64d961a8813f5e04",
@@ -37,9 +39,14 @@
     "CALL_V2_BUILD_COMMIT": "cefa58beffb4f1fbcb1acd7a64d961a8813f5e04"
   },
   "validation": {
-    "source": "user-provided physical validation",
-    "sequential_calls": "passed, 3",
-    "same_process": "passed",
+    "flutter_analyze": "passed",
+    "exact_callkit_ownership": "passed, 14 tests",
+    "notification_ownership": "passed, 38 tests",
+    "rapid_lifecycle_manager": "passed, 65 tests",
+    "repeated_call_lifecycle": "passed, 50 tests",
+    "foreground_recovery": "passed, 3 tests",
+    "all_call_v2": "passed, 2313 tests",
+    "ios_runner_tests": "passed, 21 tests",
     "git_diff_check": "passed",
     "dependency_files": "unchanged"
   },
@@ -47,12 +54,13 @@
     "backend_deployed": false,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": false,
-    "test_changes": false,
-    "testflight_build_recorded": true
+    "production_code_changes": true,
+    "test_changes": true,
+    "testflight_built": false,
+    "physical_fix_claimed": false
   },
   "review": {
-    "decision": "task_ready",
-    "notes": "Three sequential physical calls passed without force quit, validating repeated-call ownership and routing. Immediate redial remains blocked for approximately 5-10 seconds and is classified separately as teardown latency. The next task is read-only timing investigation only."
+    "decision": "ready_for_review",
+    "notes": "The source-proven lifecycle serialization was corrected. Route/listener/timer/session ownership and matching local recovery are detached before completeTeardownAndClaimPending atomically claims pending incoming work or releases to idle. Only immutable exact-A native end verification and scoped persisted recovery clearing may overlap a newer call; focused tests prove late A completion cannot mutate B. This does not claim the historical physical 5-10 second delay is fixed."
   }
 }
