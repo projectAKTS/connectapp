@@ -383,6 +383,18 @@ class _CallSession {
   }
 }
 
+class _DetachedCallSessionState {
+  const _DetachedCallSessionState({
+    required this.inviteId,
+    required this.callkitId,
+    required this.ownerGeneration,
+  });
+
+  final String inviteId;
+  final String callkitId;
+  final int ownerGeneration;
+}
+
 class CallSessionManager {
   CallSessionManager._();
 
@@ -4276,16 +4288,28 @@ class CallSessionManager {
     _callLifecycleArbiter.beginTeardown(session.lifecycleGeneration);
     final preservePendingAcceptedRecovery =
         _pendingAcceptedInviteIntent != null;
-    await _resetSessionState(
-      reason: reason,
+    final detached = await _detachSessionState(
       onlyInviteId: inviteId,
-      endCurrentNativeCall: true,
-      clearStoredAcceptedRecovery: !preservePendingAcceptedRecovery,
       forceClearUiFlags:
           forceClearUiFlags || (!_callRouteActive && !_openingCallRoute),
     );
+    if (detached == null) return;
     if (_current != null ||
         !_callLifecycleArbiter.ownsGeneration(session.lifecycleGeneration)) {
+      return;
+    }
+    _invalidateAcceptedRecoveryRequestForDetachedSession(detached);
+
+    final deferredExactCleanup = _beginOwnershipReleasedExactCleanup(
+      detached: detached,
+      reason: reason,
+      endCurrentNativeCall: true,
+      clearStoredAcceptedRecovery: !preservePendingAcceptedRecovery,
+    );
+    await _diagResourceCounts('reset_session_state_done');
+    if (_current != null ||
+        !_callLifecycleArbiter.ownsGeneration(session.lifecycleGeneration)) {
+      await deferredExactCleanup;
       return;
     }
     final pendingPayload = _pendingIncomingPromptPayload;
@@ -4293,12 +4317,16 @@ class CallSessionManager {
     final pendingClaim = _callLifecycleArbiter.completeTeardownAndClaimPending(
       session.lifecycleGeneration,
     );
-    await _continueClaimedPendingIncoming(
+    final pendingContinuation = _continueClaimedPendingIncoming(
       pendingClaim: pendingClaim,
       pendingPayload: pendingPayload,
       pendingSource: pendingSource,
       source: '$reason:teardown_complete',
     );
+    await Future.wait<void>(<Future<void>>[
+      deferredExactCleanup,
+      pendingContinuation,
+    ]);
   }
 
   Future<void> _continueClaimedPendingIncoming({
@@ -4479,13 +4507,8 @@ class CallSessionManager {
     ));
   }
 
-  Future<void> _resetSessionState({
-    required String reason,
+  Future<_DetachedCallSessionState?> _detachSessionState({
     String? onlyInviteId,
-    bool endCurrentNativeCall = false,
-    bool endUnownedNativeCalls = false,
-    bool endAllNativeCallsForAppReset = false,
-    bool clearStoredAcceptedRecovery = false,
     bool clearHandledInvites = false,
     bool forceClearUiFlags = false,
   }) async {
@@ -4494,7 +4517,7 @@ class CallSessionManager {
     if (normalizedInviteId.isNotEmpty &&
         session != null &&
         session.inviteId != normalizedInviteId) {
-      return;
+      return null;
     }
 
     final callkitId = session?.callkitId ??
@@ -4509,7 +4532,7 @@ class CallSessionManager {
     await _activeInviteSub?.cancel();
     if (!identical(_current, session) ||
         !_callLifecycleArbiter.ownsGeneration(ownerGeneration)) {
-      return;
+      return null;
     }
     _activeInviteSub = null;
     _cancelSessionTimers();
@@ -4534,6 +4557,32 @@ class CallSessionManager {
       _handledInviteExpiries.clear();
     }
 
+    return _DetachedCallSessionState(
+      inviteId: session?.inviteId ?? normalizedInviteId,
+      callkitId: callkitId,
+      ownerGeneration: ownerGeneration,
+    );
+  }
+
+  Future<void> _resetSessionState({
+    required String reason,
+    String? onlyInviteId,
+    bool endCurrentNativeCall = false,
+    bool endUnownedNativeCalls = false,
+    bool endAllNativeCallsForAppReset = false,
+    bool clearStoredAcceptedRecovery = false,
+    bool clearHandledInvites = false,
+    bool forceClearUiFlags = false,
+  }) async {
+    final detached = await _detachSessionState(
+      onlyInviteId: onlyInviteId,
+      clearHandledInvites: clearHandledInvites,
+      forceClearUiFlags: forceClearUiFlags,
+    );
+    if (detached == null) return;
+    final callkitId = detached.callkitId;
+    final ownerGeneration = detached.ownerGeneration;
+
     if (endCurrentNativeCall && callkitId.isNotEmpty) {
       await _endNativeCallSafely(
         callkitId,
@@ -4556,7 +4605,7 @@ class CallSessionManager {
     if (clearStoredAcceptedRecovery) {
       await _clearStoredAcceptedCallRecoverySafely(
         reason,
-        inviteId: session?.inviteId ?? normalizedInviteId,
+        inviteId: detached.inviteId,
         callkitId: callkitId,
       );
       _acceptedRecoveryPending = false;
@@ -4564,6 +4613,48 @@ class CallSessionManager {
       _acceptedRecoveryAttemptCount = 0;
     }
     await _diagResourceCounts('reset_session_state_done');
+  }
+
+  Future<void> _beginOwnershipReleasedExactCleanup({
+    required _DetachedCallSessionState detached,
+    required String reason,
+    required bool endCurrentNativeCall,
+    required bool clearStoredAcceptedRecovery,
+  }) {
+    final cleanups = <Future<void>>[];
+    if (endCurrentNativeCall && detached.callkitId.isNotEmpty) {
+      cleanups.add(_endNativeCallSafely(
+        detached.callkitId,
+        reason: '$reason:end_current_native',
+      ));
+    }
+    if (clearStoredAcceptedRecovery) {
+      cleanups.add(_clearStoredAcceptedCallRecoverySafely(
+        reason,
+        inviteId: detached.inviteId,
+        callkitId: detached.callkitId,
+      ));
+      _acceptedRecoveryPending = false;
+      _acceptedRecoveryAcknowledged = false;
+      _acceptedRecoveryAttemptCount = 0;
+    }
+    return Future.wait<void>(cleanups);
+  }
+
+  void _invalidateAcceptedRecoveryRequestForDetachedSession(
+    _DetachedCallSessionState detached,
+  ) {
+    if (!_matchesAcceptedCallIdentity(
+      firstInviteId: _acceptedRecoveryRequestInviteId,
+      firstCallkitId: _acceptedRecoveryRequestCallkitId,
+      secondInviteId: detached.inviteId,
+      secondCallkitId: detached.callkitId,
+    )) {
+      return;
+    }
+    _acceptedRecoveryRequestGeneration += 1;
+    _acceptedRecoveryRequestInviteId = '';
+    _acceptedRecoveryRequestCallkitId = '';
   }
 
   Future<void> _clearStoredAcceptedCallRecoverySafely(

@@ -363,4 +363,222 @@ void main() {
     expect(manager.activeInviteId, 'invite_b');
     expect(ended, isEmpty);
   });
+
+  testWidgets(
+      'blocked exact A end releases lifecycle and late completion preserves B',
+      (tester) async {
+    final endStarted = Completer<void>();
+    final releaseEnd = Completer<void>();
+    final ended = <String>[];
+    final cleared = <String>[];
+    manager.configure(
+      endNativeCall: (id) async {
+        ended.add(id);
+        if (id == exactA) {
+          if (!endStarted.isCompleted) endStarted.complete();
+          await releaseEnd.future;
+        }
+      },
+      clearStoredAcceptedCallRecovery: ({
+        required String inviteId,
+        required String callkitId,
+      }) async {
+        cleared.add(callkitId);
+      },
+    );
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'blocked_end_a',
+      channel: 'channel_blocked_end_a',
+      acceptedCallkitId: exactA,
+    );
+    await manager.debugMarkHeldRouteTerminalForTest('blocked_end_a');
+
+    var closeCompleted = false;
+    final closeA = manager.debugCloseHeldRouteForTest('blocked_end_a');
+    unawaited(closeA.whenComplete(() => closeCompleted = true));
+    await endStarted.future;
+    for (var attempt = 0;
+        attempt < 10 && manager.debugSnapshot()['callLifecycleState'] != 'idle';
+        attempt += 1) {
+      await tester.pump();
+    }
+
+    expect(manager.debugSnapshot()['callLifecycleState'], 'idle');
+    expect(closeCompleted, isFalse);
+    final bGeneration = await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'blocked_end_b',
+      channel: 'channel_blocked_end_b',
+      acceptedCallkitId: exactB,
+    );
+    expect(manager.activeInviteId, 'blocked_end_b');
+    expect(manager.debugSnapshot()['lifecycleGeneration'], bGeneration);
+    expect(manager.debugSnapshot()['callLifecycleState'], 'connected');
+    expect(manager.debugSnapshot()['callRouteActive'], isTrue);
+
+    releaseEnd.complete();
+    await closeA;
+    await tester.pump();
+
+    expect(ended, [exactA]);
+    expect(cleared, [exactA]);
+    expect(manager.activeInviteId, 'blocked_end_b');
+    expect(manager.debugSnapshot()['lifecycleGeneration'], bGeneration);
+    expect(manager.debugSnapshot()['callLifecycleState'], 'connected');
+    expect(manager.debugSnapshot()['callRouteActive'], isTrue);
+  });
+
+  testWidgets('blocked exact A stored recovery clear does not block or clear B',
+      (tester) async {
+    final clearStarted = Completer<void>();
+    final releaseClear = Completer<void>();
+    final ended = <String>[];
+    final cleared = <String>[];
+    manager.configure(
+      endNativeCall: (id) async => ended.add(id),
+      clearStoredAcceptedCallRecovery: ({
+        required String inviteId,
+        required String callkitId,
+      }) async {
+        cleared.add(callkitId);
+        if (callkitId == exactA) {
+          if (!clearStarted.isCompleted) clearStarted.complete();
+          await releaseClear.future;
+        }
+      },
+    );
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'blocked_clear_a',
+      channel: 'channel_blocked_clear_a',
+      acceptedCallkitId: exactA,
+    );
+    await manager.debugMarkHeldRouteTerminalForTest('blocked_clear_a');
+
+    var closeCompleted = false;
+    final closeA = manager.debugCloseHeldRouteForTest('blocked_clear_a');
+    unawaited(closeA.whenComplete(() => closeCompleted = true));
+    await clearStarted.future;
+    for (var attempt = 0;
+        attempt < 10 && manager.debugSnapshot()['callLifecycleState'] != 'idle';
+        attempt += 1) {
+      await tester.pump();
+    }
+
+    expect(manager.debugSnapshot()['callLifecycleState'], 'idle');
+    expect(closeCompleted, isFalse);
+    final bGeneration = await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'blocked_clear_b',
+      channel: 'channel_blocked_clear_b',
+      acceptedCallkitId: exactB,
+    );
+    expect(manager.activeInviteId, 'blocked_clear_b');
+
+    releaseClear.complete();
+    await closeA;
+    await tester.pump();
+
+    expect(ended, [exactA]);
+    expect(cleared, [exactA]);
+    expect(manager.activeInviteId, 'blocked_clear_b');
+    expect(manager.debugSnapshot()['lifecycleGeneration'], bGeneration);
+    expect(manager.debugSnapshot()['callLifecycleState'], 'connected');
+    expect(manager.debugSnapshot()['callRouteActive'], isTrue);
+  });
+
+  testWidgets('pending incoming is claimed before deferred A cleanup settles',
+      (tester) async {
+    final endStarted = Completer<void>();
+    final releaseEnd = Completer<void>();
+    manager.configure(
+      listNativeCalls: () async => const <NativeCallSnapshot>[
+        NativeCallSnapshot(
+          callkitId: exactB,
+          inviteId: 'pending_owner_b',
+          channel: 'channel_pending_owner_b',
+        ),
+      ],
+      endNativeCall: (id) async {
+        if (id == exactA) {
+          if (!endStarted.isCompleted) endStarted.complete();
+          await releaseEnd.future;
+        }
+      },
+      clearStoredAcceptedCallRecovery: ({
+        required String inviteId,
+        required String callkitId,
+      }) async {},
+    );
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'pending_owner_a',
+      channel: 'channel_pending_owner_a',
+      acceptedCallkitId: exactA,
+    );
+    await manager.debugMarkHeldRouteTerminalForTest('pending_owner_a');
+    await seedInvite('pending_owner_b');
+    await manager.handleNotificationInviteTap(
+      inviteId: 'pending_owner_b',
+      channel: 'channel_pending_owner_b',
+      isVideo: true,
+      fromName: 'Exact Caller',
+      fromUid: callerUid,
+      source: 'pending_priority_test',
+    );
+    expect(manager.debugSnapshot()['pendingIncomingPresent'], isTrue);
+
+    final closeA = manager.debugCloseHeldRouteForTest('pending_owner_a');
+    await endStarted.future;
+    for (var attempt = 0;
+        attempt < 10 &&
+            manager.debugSnapshot()['callLifecycleState'] != 'incomingPrompt';
+        attempt += 1) {
+      await tester.pump();
+    }
+
+    expect(manager.debugSnapshot()['callLifecycleState'], 'incomingPrompt');
+    expect(manager.debugSnapshot()['pendingIncomingPresent'], isFalse);
+    expect(
+        manager.debugSnapshot()['pendingClaimTransferredAtomically'], isTrue);
+    await expectLater(
+      manager.debugCreateHeldCallRouteForTest(
+        inviteId: 'outgoing_must_not_steal',
+        channel: 'channel_outgoing_must_not_steal',
+        acceptedCallkitId: exactC,
+      ),
+      throwsA(isA<StateError>()),
+    );
+
+    releaseEnd.complete();
+    await tester.pump(const Duration(milliseconds: 300));
+    await closeA;
+    expect(manager.debugSnapshot()['callLifecycleState'], 'incomingPrompt');
+  });
+
+  testWidgets('normal teardown performs exact cleanup and reaches idle',
+      (tester) async {
+    final ended = <String>[];
+    final cleared = <String>[];
+    manager.configure(
+      endNativeCall: (id) async => ended.add(id),
+      clearStoredAcceptedCallRecovery: ({
+        required String inviteId,
+        required String callkitId,
+      }) async {
+        cleared.add(callkitId);
+      },
+    );
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'normal_teardown_a',
+      channel: 'channel_normal_teardown_a',
+      acceptedCallkitId: exactA,
+    );
+    await manager.debugMarkHeldRouteTerminalForTest('normal_teardown_a');
+
+    await manager.debugCloseHeldRouteForTest('normal_teardown_a');
+    await tester.pump();
+
+    expect(ended, [exactA]);
+    expect(cleared, [exactA]);
+    expect(manager.activeInviteId, isNull);
+    expect(manager.debugSnapshot()['callLifecycleState'], 'idle');
+    expect(manager.debugSnapshot()['callRouteActive'], isFalse);
+  });
 }
