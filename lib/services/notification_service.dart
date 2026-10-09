@@ -244,6 +244,7 @@ class NotificationService with WidgetsBindingObserver {
   String? _pendingChatOpenOtherUserId;
   String? _pendingChatOpenChatId;
   bool _chatNavigationInFlight = false;
+  bool _chatNavigationDeferredForCall = false;
   static const bool _enableIosCallKit =
       bool.fromEnvironment('ENABLE_IOS_CALLKIT', defaultValue: true);
   static const bool _diagEnabled =
@@ -3192,6 +3193,9 @@ class NotificationService with WidgetsBindingObserver {
       ..._acceptedIdentityEvidence.toSafeMap(),
       'acceptedRouteResumeInFlight': _acceptedRouteResumeFuture != null,
       'acceptedBridgeReadinessKick': _acceptedBridgeReadinessKick,
+      'pendingChatOpen': (_pendingChatOpenOtherUserId ?? '').trim().isNotEmpty,
+      'chatNavigationInFlight': _chatNavigationInFlight,
+      'chatNavigationDeferredForCall': _chatNavigationDeferredForCall,
       'boundUid': _boundUid,
       'pushBindingGeneration': _pushBindingGeneration,
       'signOutPreparationInProgress': _signOutPreparationInProgress,
@@ -3285,6 +3289,11 @@ class NotificationService with WidgetsBindingObserver {
       for (var i = 0; i < 80; i++) {
         final otherUserId = (_pendingChatOpenOtherUserId ?? '').trim();
         if (otherUserId.isEmpty) return;
+        if (!CallSessionManager.instance.isSafeForDestructiveNavigation) {
+          _chatNavigationDeferredForCall = true;
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          continue;
+        }
         if (!await _isAppActuallyForeground()) {
           await Future<void>.delayed(const Duration(milliseconds: 100));
           continue;
@@ -3294,9 +3303,15 @@ class NotificationService with WidgetsBindingObserver {
           await Future<void>.delayed(const Duration(milliseconds: 100));
           continue;
         }
+        if (!CallSessionManager.instance.isSafeForDestructiveNavigation) {
+          _chatNavigationDeferredForCall = true;
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          continue;
+        }
         final chatId = (_pendingChatOpenChatId ?? '').trim();
         _pendingChatOpenOtherUserId = null;
         _pendingChatOpenChatId = null;
+        _chatNavigationDeferredForCall = false;
         await _diagPush('chat_open_from_tap', meta: {
           'otherUserId': otherUserId,
           if (chatId.isNotEmpty) 'chatId': chatId,

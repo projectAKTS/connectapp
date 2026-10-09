@@ -301,10 +301,15 @@ class AgoraCallScreen extends StatefulWidget {
   final String? otherUserId;
   final String? inviteId;
   final String? acceptedCallkitId;
+  final int lifecycleGeneration;
   final bool isCaller;
   final CallV2RealCallConnectionSystem connectionSystem;
   final bool callV2FallbackUsed;
   final String callV2BlockerCode;
+  final bool skipRuntimeSetupForTest;
+  final bool startLoadedForTest;
+  final bool startTerminalForTest;
+  final Future<void> Function(bool terminal)? managedRouteExitForTest;
 
   const AgoraCallScreen({
     super.key,
@@ -314,10 +319,15 @@ class AgoraCallScreen extends StatefulWidget {
     this.otherUserId,
     this.inviteId,
     this.acceptedCallkitId,
+    this.lifecycleGeneration = 0,
     this.isCaller = false,
     this.connectionSystem = CallV2RealCallConnectionSystem.legacyV1,
     this.callV2FallbackUsed = false,
     this.callV2BlockerCode = 'none',
+    this.skipRuntimeSetupForTest = false,
+    this.startLoadedForTest = false,
+    this.startTerminalForTest = false,
+    this.managedRouteExitForTest,
   });
 
   @override
@@ -351,6 +361,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   int? _remoteUid;
   bool _ended = false;
   bool _endingCall = false;
+  bool _routePopAuthorized = false;
   bool _isLoading = true;
   String? _fatalError;
   String _endedMessage = 'Call ended';
@@ -471,6 +482,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.skipRuntimeSetupForTest) {
+      _isLoading = !widget.startLoadedForTest;
+      _ended = widget.startTerminalForTest;
+    }
     _callkitController = CallV2ScreenCallkitController(
       ownership: CallV2ScreenCallkitOwnership(
         acceptedCallkitId: widget.acceptedCallkitId ?? '',
@@ -491,7 +506,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         .addListener(_handleManagerTerminalSignal);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _handleManagerTerminalSignal();
-      unawaited(_begin());
+      if (!widget.skipRuntimeSetupForTest) {
+        unawaited(_begin());
+      }
     });
   }
 
@@ -2650,8 +2667,13 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     return result;
   }
 
-  void _returnToAppAfterCall() {
+  Future<void> _returnToAppAfterCall() async {
     if (!mounted) return;
+    if (!_routePopAuthorized) {
+      setState(() => _routePopAuthorized = true);
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+    }
     final nav = Navigator.of(context);
     if (nav.canPop()) {
       nav.pop();
@@ -2676,7 +2698,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         expectedCallkitId: _callkitId,
       );
       _updateCallV2LifecycleStatus(sessionResetCompleted: true);
-      _returnToAppAfterCall();
+      await _returnToAppAfterCall();
       if (cleanupResult == null) {
         _setCallV2BlockerCode('cleanup_in_progress');
       } else if (!cleanupResult.succeeded) {
@@ -2704,7 +2726,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     _quiesceEngineCallbacksForTerminal();
     _ringTimeout?.cancel();
     _autoCloseTimer?.cancel();
-    unawaited(_cleanupEngine().then<void>((_) {}, onError: (_) {}));
+    if (!widget.skipRuntimeSetupForTest) {
+      unawaited(_cleanupEngine().then<void>((_) {}, onError: (_) {}));
+    }
     super.dispose();
   }
 
@@ -2727,7 +2751,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     setState(() {});
   }
 
-  Future<void> _endCall() async {
+  Future<void> _endCall({String source = 'end_button'}) async {
     if (_endingCall) return;
     _endingCall = true;
     _quiesceEngineCallbacksForTerminal();
@@ -2737,7 +2761,11 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       if (id.isNotEmpty) {
         await CallSessionManager.instance.endCallFromLocalUser(
           inviteId: id,
-          source: 'end_button',
+          source: source,
+          lifecycleGeneration: widget.lifecycleGeneration == 0
+              ? null
+              : widget.lifecycleGeneration,
+          acceptedCallkitId: widget.acceptedCallkitId ?? '',
         );
       }
       final cleanupResult = await _awaitCleanupForUi(_cleanupEngine());
@@ -2749,7 +2777,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         expectedCallkitId: _callkitId,
       );
       _updateCallV2LifecycleStatus(sessionResetCompleted: true);
-      _returnToAppAfterCall();
+      await _returnToAppAfterCall();
       if (cleanupResult == null) {
         _setCallV2BlockerCode('cleanup_in_progress');
       } else if (!cleanupResult.succeeded) {
@@ -2760,15 +2788,53 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     }
   }
 
+  Future<void> _requestManagedRouteExit() async {
+    if (_endingCall) return;
+    final terminalUi = _ended || _fatalError != null;
+    final testExit = widget.managedRouteExitForTest;
+    if (testExit != null) {
+      _endingCall = true;
+      try {
+        await testExit(terminalUi);
+        await _returnToAppAfterCall();
+      } finally {
+        _endingCall = false;
+      }
+      return;
+    }
+    final inviteId = (widget.inviteId ?? '').trim();
+    final terminalRouteOwned = terminalUi &&
+        inviteId.isNotEmpty &&
+        CallSessionManager.instance.isOwnedCallRouteTerminal(
+          inviteId: inviteId,
+          lifecycleGeneration: widget.lifecycleGeneration,
+          acceptedCallkitId: widget.acceptedCallkitId ?? '',
+        );
+    if (terminalRouteOwned) {
+      await _closeScreenAfterTerminalState('managed_terminal_route_exit');
+      return;
+    }
+    await _endCall(source: 'screen_closed');
+  }
+
   // ---------- UI ----------
 
   @override
   Widget build(BuildContext context) {
     final title = widget.isVideo ? 'Video Call' : 'Audio Call';
-
+    late final Widget content;
     if (_isLoading) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Connecting...')),
+      content = Scaffold(
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          leading: IconButton(
+            key: const Key('call-v2-route-close'),
+            tooltip: 'Close',
+            icon: const Icon(Icons.close),
+            onPressed: _requestManagedRouteExit,
+          ),
+          title: const Text('Connecting...'),
+        ),
         body: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -2779,28 +2845,31 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           ),
         ),
       );
-    }
-
-    if (_fatalError != null) {
-      return _ErrorScreen(
+    } else if (_fatalError != null) {
+      content = _ErrorScreen(
         title: title,
         message: _fatalError!,
-        onClose: () => _endCall(),
+        onClose: _requestManagedRouteExit,
         footer: _callV2SafeStatusPanel(),
       );
-    }
-
-    if (_ended) {
-      return _EndedScreen(
+    } else if (_ended) {
+      content = _EndedScreen(
         title: title,
         message: _endedMessage,
-        onClose: () => _endCall(),
+        onClose: _requestManagedRouteExit,
         footer: _callV2SafeStatusPanel(),
       );
+    } else {
+      content = widget.isVideo ? _videoLayout() : _audioLayout();
     }
-
-    if (widget.isVideo) return _videoLayout();
-    return _audioLayout();
+    return PopScope<Object?>(
+      key: const Key('call-v2-managed-route-exit-scope'),
+      canPop: _routePopAuthorized,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) unawaited(_requestManagedRouteExit());
+      },
+      child: content,
+    );
   }
 
   Widget _audioLayout() {
@@ -2812,6 +2881,13 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     return Scaffold(
       backgroundColor: AppColors.canvas,
       appBar: AppBar(
+        automaticallyImplyLeading: false,
+        leading: IconButton(
+          key: const Key('call-v2-route-close'),
+          tooltip: 'Close',
+          icon: const Icon(Icons.close),
+          onPressed: _requestManagedRouteExit,
+        ),
         backgroundColor: AppColors.canvas,
         elevation: 0,
         title: const Text('Audio call'),
@@ -3365,6 +3441,13 @@ class _EndedScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppColors.canvas,
       appBar: AppBar(
+        automaticallyImplyLeading: false,
+        leading: IconButton(
+          key: const Key('call-v2-route-close'),
+          tooltip: 'Close',
+          icon: const Icon(Icons.close),
+          onPressed: onClose,
+        ),
         title: Text(title),
         backgroundColor: AppColors.canvas,
       ),
@@ -3409,6 +3492,13 @@ class _ErrorScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppColors.canvas,
       appBar: AppBar(
+        automaticallyImplyLeading: false,
+        leading: IconButton(
+          key: const Key('call-v2-route-close'),
+          tooltip: 'Close',
+          icon: const Icon(Icons.close),
+          onPressed: onClose,
+        ),
         title: Text(title),
         backgroundColor: AppColors.canvas,
       ),

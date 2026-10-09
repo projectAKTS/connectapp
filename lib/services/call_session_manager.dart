@@ -355,6 +355,7 @@ class _CallSession {
   bool localJoined = false;
   bool remoteJoined = false;
   bool terminalSignalSent = false;
+  Future<void>? terminalTransitionFuture;
 
   bool get isTerminal => phase == CallSessionPhase.terminal;
   String get callkitId {
@@ -393,6 +394,43 @@ class _DetachedCallSessionState {
   final String inviteId;
   final String callkitId;
   final int ownerGeneration;
+}
+
+class _CallRouteOwner {
+  _CallRouteOwner(this.session)
+      : inviteId = session.inviteId,
+        acceptedCallkitId = session.acceptedCallkitId,
+        lifecycleGeneration = session.lifecycleGeneration;
+
+  final _CallSession session;
+  final String inviteId;
+  final String acceptedCallkitId;
+  final int lifecycleGeneration;
+
+  bool ownsSession(_CallSession? candidate) {
+    return identical(session, candidate) &&
+        candidate?.inviteId == inviteId &&
+        candidate?.acceptedCallkitId == acceptedCallkitId &&
+        candidate?.lifecycleGeneration == lifecycleGeneration;
+  }
+}
+
+class _AuthoritativeTerminalTransition {
+  const _AuthoritativeTerminalTransition({
+    required this.status,
+    required this.endReason,
+    required this.message,
+    required this.isError,
+    required this.writeApplied,
+    required this.preservedExistingTerminal,
+  });
+
+  final CallInviteStatus status;
+  final String endReason;
+  final String message;
+  final bool isError;
+  final bool writeApplied;
+  final bool preservedExistingTerminal;
 }
 
 class CallSessionManager {
@@ -434,6 +472,7 @@ class CallSessionManager {
   String _lastDiagMeta = '';
   bool _openingCallRoute = false;
   bool _callRouteActive = false;
+  _CallRouteOwner? _callRouteOwner;
   bool _incomingPromptActive = false;
   IncomingUiOwner _incomingUiOwner = IncomingUiOwner.none;
   String? _incomingPromptInviteId;
@@ -492,6 +531,8 @@ class CallSessionManager {
   int _callkitAcceptCount = 0;
   int _routeOpenCount = 0;
   int _rtcSetupOwnerCount = 0;
+  int _authoritativeTerminalWriteCount = 0;
+  int _staleRouteCompletionIgnoredCount = 0;
   bool _awaitingPushkit = false;
 
   ValueNotifier<CallTerminalSignal?> get terminalSignal => _terminalSignal;
@@ -507,6 +548,31 @@ class CallSessionManager {
       _current == null &&
       !hasActiveUi &&
       _terminalSignal.value == null;
+  bool get isSafeForDestructiveNavigation =>
+      _callLifecycleArbiter.isIdle &&
+      _current == null &&
+      !_openingCallRoute &&
+      !_callRouteActive &&
+      _callRouteOwner == null &&
+      !_incomingPromptActive &&
+      !hasPendingAcceptedRouteOwnership;
+  bool isOwnedCallRouteTerminal({
+    required String inviteId,
+    required int lifecycleGeneration,
+    required String acceptedCallkitId,
+  }) {
+    final session = _current;
+    return session != null &&
+        _sessionMatchesOwnership(
+          session,
+          inviteId: inviteId,
+          lifecycleGeneration:
+              lifecycleGeneration == 0 ? null : lifecycleGeneration,
+          acceptedCallkitId: acceptedCallkitId,
+        ) &&
+        (session.isTerminal || _isTerminalStatus(session.status));
+  }
+
   String get debugLastDiagStage => _lastDiagStage;
   String get debugLastDiagMeta => _lastDiagMeta;
   Map<String, dynamic> debugSnapshot() => _sessionSnapshot();
@@ -585,6 +651,7 @@ class CallSessionManager {
     _terminalSignal.value = null;
     _openingCallRoute = false;
     _callRouteActive = false;
+    _callRouteOwner = null;
     _incomingPromptActive = false;
     _incomingUiOwner = IncomingUiOwner.none;
     _incomingPromptInviteId = null;
@@ -635,6 +702,8 @@ class CallSessionManager {
     _callkitAcceptCount = 0;
     _routeOpenCount = 0;
     _rtcSetupOwnerCount = 0;
+    _authoritativeTerminalWriteCount = 0;
+    _staleRouteCompletionIgnoredCount = 0;
     _afterOutgoingInviteWriteForTest = null;
     _readInviteDataForTest = null;
     _beforeAcceptTransactionAttemptForTest = null;
@@ -767,6 +836,8 @@ class CallSessionManager {
     required String channel,
     String acceptedCallkitId = '',
     CallInviteStatus status = CallInviteStatus.connected,
+    bool isCaller = true,
+    bool isVideo = false,
   }) async {
     if (!_debugTestAccessEnabled) {
       throw StateError('debugCreateHeldCallRouteForTest is test-mode only');
@@ -781,11 +852,11 @@ class CallSessionManager {
     );
     if (!owned) throw StateError('Unable to own test lifecycle');
     _callLifecycleArbiter.markConnected(reservation.generation);
-    _current = _CallSession(
+    final session = _CallSession(
       inviteId: inviteId,
       channel: channel,
-      isVideo: false,
-      isCaller: true,
+      isVideo: isVideo,
+      isCaller: isCaller,
       otherUserId: 'test_remote',
       otherUserName: 'Test Remote',
       phase: CallSessionPhase.connected,
@@ -793,8 +864,23 @@ class CallSessionManager {
       acceptedCallkitId: acceptedCallkitId,
       lifecycleGeneration: reservation.generation,
     );
+    _current = session;
+    _callRouteOwner = _CallRouteOwner(session);
     _callRouteActive = true;
     return reservation.generation;
+  }
+
+  Future<void> Function() debugCaptureHeldRouteCompletionForTest({
+    String source = 'debug_route_completion',
+  }) {
+    if (!_debugTestAccessEnabled) {
+      throw StateError(
+        'debugCaptureHeldRouteCompletionForTest is test-mode only',
+      );
+    }
+    final owner = _callRouteOwner;
+    if (owner == null) throw StateError('No held call route owner');
+    return () => _completeCallRoute(owner, source: source);
   }
 
   Future<void> debugMarkHeldRouteTerminalForTest(String inviteId) async {
@@ -819,13 +905,13 @@ class CallSessionManager {
     if (!_debugTestAccessEnabled) {
       throw StateError('debugCloseHeldRouteForTest is test-mode only');
     }
-    _callRouteActive = false;
+    final owner = _callRouteOwner;
+    if (owner != null && owner.inviteId == inviteId) {
+      await _completeCallRoute(owner, source: 'debug_route_closed');
+      return;
+    }
     _openingCallRoute = false;
-    await _finalizeTerminalSessionCleanup(
-      inviteId: inviteId,
-      reason: 'debug_route_closed',
-      forceClearUiFlags: true,
-    );
+    await handleCallScreenClosed(inviteId);
   }
 
   void debugInvalidateLifecycleForTest() {
@@ -840,6 +926,7 @@ class CallSessionManager {
     if (hasActiveSession) return;
     _openingCallRoute = false;
     _callRouteActive = false;
+    _callRouteOwner = null;
     _incomingPromptActive = false;
     _incomingPromptInviteId = null;
     _clearPendingAcceptedIntent();
@@ -2058,44 +2145,63 @@ class CallSessionManager {
   Future<void> endCallFromLocalUser({
     required String inviteId,
     String source = 'local_end',
+    int? lifecycleGeneration,
+    String acceptedCallkitId = '',
   }) async {
     final session = _current;
-    if (session == null || session.inviteId != inviteId) return;
+    if (session == null ||
+        !_sessionMatchesOwnership(
+          session,
+          inviteId: inviteId,
+          lifecycleGeneration: lifecycleGeneration,
+          acceptedCallkitId: acceptedCallkitId,
+        )) {
+      return;
+    }
     if (session.isTerminal) return;
-
-    final status =
-        session.isCaller && session.status == CallInviteStatus.ringing
-            ? CallInviteStatus.cancelled
-            : CallInviteStatus.ended;
-    final message =
-        status == CallInviteStatus.cancelled ? 'Call cancelled' : 'Call ended';
 
     await _markTerminal(
       inviteId: inviteId,
-      status: status,
-      message: message,
+      status: CallInviteStatus.ended,
+      message: 'Call ended',
       isError: false,
       actorIsCaller: session.isCaller,
       endReason: source,
+      authoritativeLocalExit: true,
+      expectedSession: session,
     );
   }
 
-  Future<void> handleCallScreenClosed(String inviteId) async {
+  Future<void> handleCallScreenClosed(
+    String inviteId, {
+    int? lifecycleGeneration,
+    String acceptedCallkitId = '',
+  }) async {
     final session = _current;
-    if (session == null || session.inviteId != inviteId) return;
+    if (session == null ||
+        !_sessionMatchesOwnership(
+          session,
+          inviteId: inviteId,
+          lifecycleGeneration: lifecycleGeneration,
+          acceptedCallkitId: acceptedCallkitId,
+        )) {
+      return;
+    }
     if (!session.isTerminal) {
       await endCallFromLocalUser(
         inviteId: inviteId,
-        source: session.isCaller && session.status == CallInviteStatus.ringing
-            ? 'screen_closed_before_accept'
-            : 'screen_closed',
+        source: 'screen_closed',
+        lifecycleGeneration: session.lifecycleGeneration,
+        acceptedCallkitId: session.acceptedCallkitId,
       );
     }
-    if (_current?.inviteId == inviteId && _current!.isTerminal) {
+    if (identical(_current, session) && session.isTerminal) {
       await _finalizeTerminalSessionCleanup(
         inviteId: inviteId,
         reason: 'call_screen_closed',
         forceClearUiFlags: true,
+        expectedLifecycleGeneration: session.lifecycleGeneration,
+        expectedCallkitId: session.acceptedCallkitId,
       );
     }
   }
@@ -2538,13 +2644,14 @@ class CallSessionManager {
 
     if (watch.claimed &&
         _callLifecycleArbiter.ownsGeneration(watch.lifecycleGeneration)) {
-      if (_current?.inviteId == watch.payload.inviteId) {
+      final currentSession = _current;
+      if (currentSession != null && watch.matchesSession(currentSession)) {
         await _activeInviteSub?.cancel();
         _activeInviteSub = null;
         _cancelSessionTimers();
+        _clearCallRouteOwnershipForSession(currentSession);
         _current = null;
         _openingCallRoute = false;
-        _callRouteActive = false;
       }
       final pendingPayload = _pendingIncomingPromptPayload;
       final pendingSource = _pendingIncomingPromptSource;
@@ -3869,6 +3976,8 @@ class CallSessionManager {
       CallV2PhysicalDiagnosticLedger.instance.record(
         CallV2PhysicalDiagnosticStage.navigatorReady,
       );
+      final routeOwner = _CallRouteOwner(session);
+      _callRouteOwner = routeOwner;
       _callRouteActive = true;
       await _diagManager('route_push', meta: {
         'source': source,
@@ -3911,6 +4020,7 @@ class CallSessionManager {
             acceptedCallkitId: session.acceptedCallkitId.isEmpty
                 ? null
                 : session.acceptedCallkitId,
+            lifecycleGeneration: session.lifecycleGeneration,
             isCaller: session.isCaller,
             connectionSystem: session.connectionSystem,
             callV2FallbackUsed: session.callV2FallbackUsed,
@@ -3918,17 +4028,9 @@ class CallSessionManager {
           ),
         ),
       );
-      unawaited(routeFuture.whenComplete(() async {
-        _callRouteActive = false;
-        if (_current?.matchesAcceptedSession(session) == true) {
-          await _diagManager('route_pop', meta: {
-            'source': source,
-            'callV2Selected': session.connectionSystem ==
-                CallV2RealCallConnectionSystem.callV2Dev,
-          });
-          await handleCallScreenClosed(session.inviteId);
-        }
-      }));
+      unawaited(routeFuture.whenComplete(
+        () => _completeCallRoute(routeOwner, source: source),
+      ));
       _routeOpenCount += 1;
       _rtcSetupOwnerCount += 1;
       CallV2PhysicalDiagnosticLedger.instance.record(
@@ -3945,6 +4047,44 @@ class CallSessionManager {
     } finally {
       _openingCallRoute = false;
     }
+  }
+
+  Future<void> _completeCallRoute(
+    _CallRouteOwner owner, {
+    required String source,
+  }) async {
+    if (!identical(_callRouteOwner, owner)) {
+      _staleRouteCompletionIgnoredCount += 1;
+      await _diagManager('stale_route_completion_ignored', meta: {
+        'sameRouteOwner': false,
+        'callRouteActive': _callRouteActive,
+      });
+      return;
+    }
+
+    final session = _current;
+    if (!owner.ownsSession(session)) {
+      _staleRouteCompletionIgnoredCount += 1;
+      await _diagManager('stale_route_completion_ignored', meta: {
+        'sameRouteOwner': true,
+        'sameSessionOwner': false,
+        'callRouteActive': _callRouteActive,
+      });
+      return;
+    }
+
+    _callRouteOwner = null;
+    _callRouteActive = false;
+    await _diagManager('route_pop', meta: {
+      'source': source,
+      'callV2Selected':
+          session!.connectionSystem == CallV2RealCallConnectionSystem.callV2Dev,
+    });
+    await handleCallScreenClosed(
+      owner.inviteId,
+      lifecycleGeneration: owner.lifecycleGeneration,
+      acceptedCallkitId: owner.acceptedCallkitId,
+    );
   }
 
   void _acknowledgeAcceptedNativeRouteIfOwned(
@@ -3971,14 +4111,14 @@ class CallSessionManager {
     required String source,
     required _RouteOpenResult routeResult,
   }) async {
-    if (_current?.inviteId != session.inviteId) return;
+    if (!identical(_current, session)) return;
     await _activeInviteSub?.cancel();
     _activeInviteSub = null;
     _cancelSessionTimers();
     _terminalSignal.value = null;
     _current = null;
     _openingCallRoute = false;
-    _callRouteActive = false;
+    _clearCallRouteOwnershipForSession(session);
     await _diagManager('route_activation_rolled_back', meta: {
       'source': source,
       'routeResult': routeResult.name,
@@ -4064,79 +4204,219 @@ class CallSessionManager {
     required bool actorIsCaller,
     required String endReason,
     String? error,
+    bool authoritativeLocalExit = false,
+    _CallSession? expectedSession,
   }) async {
     final session = _current;
-    if (session == null || session.inviteId != inviteId) return;
+    if (session == null ||
+        session.inviteId != inviteId ||
+        (expectedSession != null && !identical(session, expectedSession))) {
+      return;
+    }
     if (session.isTerminal) return;
+    final existingTransition = session.terminalTransitionFuture;
+    if (existingTransition != null) {
+      await existingTransition;
+      return;
+    }
 
     _callLifecycleArbiter.beginEnding(session.lifecycleGeneration);
+    late final Future<void> transitionFuture;
+    transitionFuture = _performAuthoritativeTerminalTransition(
+      session: session,
+      requestedStatus: status,
+      requestedMessage: message,
+      requestedIsError: isError,
+      actorIsCaller: actorIsCaller,
+      requestedEndReason: endReason,
+      error: error,
+      authoritativeLocalExit: authoritativeLocalExit,
+    );
+    session.terminalTransitionFuture = transitionFuture;
+    try {
+      await transitionFuture;
+    } finally {
+      if (identical(session.terminalTransitionFuture, transitionFuture)) {
+        session.terminalTransitionFuture = null;
+      }
+    }
+  }
+
+  Future<void> _performAuthoritativeTerminalTransition({
+    required _CallSession session,
+    required CallInviteStatus requestedStatus,
+    required String requestedMessage,
+    required bool requestedIsError,
+    required bool actorIsCaller,
+    required String requestedEndReason,
+    required bool authoritativeLocalExit,
+    String? error,
+  }) async {
+    final transition = await _resolveAuthoritativeTerminalTransition(
+      session: session,
+      requestedStatus: requestedStatus,
+      requestedMessage: requestedMessage,
+      requestedIsError: requestedIsError,
+      actorIsCaller: actorIsCaller,
+      requestedEndReason: requestedEndReason,
+      error: error,
+      authoritativeLocalExit: authoritativeLocalExit,
+    );
+    if (!identical(_current, session) ||
+        !_callLifecycleArbiter.ownsGeneration(session.lifecycleGeneration)) {
+      return;
+    }
+
+    if (transition.writeApplied) {
+      _authoritativeTerminalWriteCount += 1;
+    }
     session.phase = CallSessionPhase.terminal;
-    session.status = status;
+    session.status = transition.status;
     _touchSession(session);
     _cancelSessionTimers();
 
-    final actorPrefix = actorIsCaller ? 'caller' : 'callee';
-    final update = <String, dynamic>{
-      'status': status.name,
-      '${actorPrefix}Stage': status.name,
-      'endedAt': FieldValue.serverTimestamp(),
-      'endedBy': _currentUid,
-      'endReason': endReason,
-      if (status == CallInviteStatus.accepted)
-        'acceptedAt': FieldValue.serverTimestamp(),
-      if (status == CallInviteStatus.joining)
-        'joiningAt': FieldValue.serverTimestamp(),
-      if (status == CallInviteStatus.connected)
-        'connectedAt': FieldValue.serverTimestamp(),
-      if (status == CallInviteStatus.declined)
-        'declinedAt': FieldValue.serverTimestamp(),
-      if (status == CallInviteStatus.missed)
-        'missedAt': FieldValue.serverTimestamp(),
-      if (status == CallInviteStatus.cancelled)
-        'cancelledAt': FieldValue.serverTimestamp(),
-      if (status == CallInviteStatus.failed)
-        'failedAt': FieldValue.serverTimestamp(),
-      if (error != null && error.isNotEmpty)
-        '${actorPrefix}LastError': _truncate(error),
-    };
-
-    try {
-      await _db
-          .collection('callInvites')
-          .doc(inviteId)
-          .set(update, SetOptions(merge: true));
-    } catch (_) {}
-
     await _diagManager(
-      status == CallInviteStatus.failed ? 'failed' : 'ended',
+      transition.status == CallInviteStatus.failed ? 'failed' : 'ended',
       meta: {
-        'inviteId': inviteId,
-        'status': status.name,
-        'message': message,
-        'endReason': endReason,
+        'inviteId': session.inviteId,
+        'status': transition.status.name,
+        'message': transition.message,
+        'endReason': transition.endReason,
+        'authoritativeTerminalWrite': transition.writeApplied,
+        'preservedExistingTerminal': transition.preservedExistingTerminal,
         if (error != null && error.isNotEmpty) 'error': error,
       },
     );
     await _markNativeInviteStateByIdsSafely(
-      inviteId: inviteId,
+      inviteId: session.inviteId,
       channel: session.channel,
       callkitId: session.callkitId,
       state: 'terminal',
-      reason: endReason,
+      reason: transition.endReason,
     );
     await _endNativeCallForInvite(
-      inviteId: inviteId,
+      inviteId: session.inviteId,
       channel: session.channel,
       callkitId: session.callkitId,
-      reason: endReason,
+      reason: transition.endReason,
     );
 
     await _emitTerminalSignal(
-      inviteId: inviteId,
-      status: status,
-      message: message,
-      isError: isError,
+      inviteId: session.inviteId,
+      status: transition.status,
+      message: transition.message,
+      isError: transition.isError,
     );
+  }
+
+  Future<_AuthoritativeTerminalTransition>
+      _resolveAuthoritativeTerminalTransition({
+    required _CallSession session,
+    required CallInviteStatus requestedStatus,
+    required String requestedMessage,
+    required bool requestedIsError,
+    required bool actorIsCaller,
+    required String requestedEndReason,
+    required bool authoritativeLocalExit,
+    String? error,
+  }) async {
+    final fallback = _AuthoritativeTerminalTransition(
+      status: requestedStatus,
+      endReason: requestedEndReason,
+      message: requestedMessage,
+      isError: requestedIsError,
+      writeApplied: false,
+      preservedExistingTerminal: false,
+    );
+    try {
+      return await _db.runTransaction<_AuthoritativeTerminalTransition>(
+        (tx) async {
+          final ref = _db.collection('callInvites').doc(session.inviteId);
+          final snap = await tx.get(ref);
+          if (!snap.exists) return fallback;
+          final data = snap.data() ?? const <String, dynamic>{};
+          final authoritativeStatus = _parseStatus(data['status']);
+          if (_isTerminalStatus(authoritativeStatus)) {
+            return _AuthoritativeTerminalTransition(
+              status: authoritativeStatus,
+              endReason: (data['endReason'] ?? requestedEndReason).toString(),
+              message: _terminalMessageForStatus(
+                authoritativeStatus,
+                data: data,
+              ),
+              isError: authoritativeStatus == CallInviteStatus.failed,
+              writeApplied: false,
+              preservedExistingTerminal: true,
+            );
+          }
+
+          final currentUid = _currentUid.trim();
+          final fromUid = (data['fromUid'] ?? '').toString().trim();
+          final toUid = (data['toUid'] ?? '').toString().trim();
+          final participantFieldsPresent =
+              fromUid.isNotEmpty || toUid.isNotEmpty;
+          if (currentUid.isEmpty ||
+              (participantFieldsPresent &&
+                  currentUid != fromUid &&
+                  currentUid != toUid)) {
+            return fallback;
+          }
+
+          var effectiveStatus = requestedStatus;
+          if (authoritativeLocalExit) {
+            effectiveStatus =
+                actorIsCaller && authoritativeStatus == CallInviteStatus.ringing
+                    ? CallInviteStatus.cancelled
+                    : CallInviteStatus.ended;
+          } else if (authoritativeStatus != CallInviteStatus.ringing &&
+              (requestedStatus == CallInviteStatus.cancelled ||
+                  requestedStatus == CallInviteStatus.declined ||
+                  requestedStatus == CallInviteStatus.missed)) {
+            effectiveStatus = CallInviteStatus.ended;
+          }
+
+          if (!_isProgressStatus(authoritativeStatus)) return fallback;
+          final actorPrefix = actorIsCaller ? 'caller' : 'callee';
+          final update = <String, dynamic>{
+            'status': effectiveStatus.name,
+            '${actorPrefix}Stage': effectiveStatus.name,
+            'endedAt': FieldValue.serverTimestamp(),
+            'endedBy': currentUid,
+            'endReason': requestedEndReason,
+            if (effectiveStatus == CallInviteStatus.declined)
+              'declinedAt': FieldValue.serverTimestamp(),
+            if (effectiveStatus == CallInviteStatus.missed)
+              'missedAt': FieldValue.serverTimestamp(),
+            if (effectiveStatus == CallInviteStatus.cancelled)
+              'cancelledAt': FieldValue.serverTimestamp(),
+            if (effectiveStatus == CallInviteStatus.failed)
+              'failedAt': FieldValue.serverTimestamp(),
+            if (error != null && error.isNotEmpty)
+              '${actorPrefix}LastError': _truncate(error),
+          };
+          tx.set(ref, update, SetOptions(merge: true));
+          return _AuthoritativeTerminalTransition(
+            status: effectiveStatus,
+            endReason: requestedEndReason,
+            message: effectiveStatus == requestedStatus
+                ? requestedMessage
+                : _terminalMessageForStatus(effectiveStatus),
+            isError: effectiveStatus == requestedStatus
+                ? requestedIsError
+                : effectiveStatus == CallInviteStatus.failed,
+            writeApplied: true,
+            preservedExistingTerminal: false,
+          );
+        },
+      );
+    } catch (error) {
+      await _diagManager('terminal_transaction_error', meta: {
+        'status': requestedStatus.name,
+        'endReason': requestedEndReason,
+        'recoverable': FirestoreReadHelper.isRecoverableError(error),
+      });
+      return fallback;
+    }
   }
 
   Future<void> _emitTerminalSignal({
@@ -4271,15 +4551,25 @@ class CallSessionManager {
     required String inviteId,
     required String reason,
     bool forceClearUiFlags = false,
+    int? expectedLifecycleGeneration,
+    String expectedCallkitId = '',
   }) async {
     final session = _current;
-    if (session == null || session.inviteId != inviteId) {
-      if (forceClearUiFlags) {
+    if (session == null) {
+      if (forceClearUiFlags && _callRouteOwner == null) {
         _openingCallRoute = false;
         _callRouteActive = false;
         _incomingPromptActive = false;
         _incomingPromptInviteId = null;
       }
+      return;
+    }
+    if (!_sessionMatchesOwnership(
+      session,
+      inviteId: inviteId,
+      lifecycleGeneration: expectedLifecycleGeneration,
+      acceptedCallkitId: expectedCallkitId,
+    )) {
       return;
     }
     if (!session.isTerminal && !_isTerminalStatus(session.status)) {
@@ -4547,7 +4837,7 @@ class CallSessionManager {
 
     if (forceClearUiFlags || !hasActiveSession) {
       _openingCallRoute = false;
-      _callRouteActive = false;
+      _clearCallRouteOwnershipForSession(session);
       _incomingPromptActive = false;
       _incomingPromptInviteId = null;
       _incomingUiOwner = IncomingUiOwner.none;
@@ -5056,6 +5346,9 @@ class CallSessionManager {
       'hasActiveSession': hasActiveSession,
       'openingCallRoute': _openingCallRoute,
       'callRouteActive': _callRouteActive,
+      'callRouteOwnerPresent': _callRouteOwner != null,
+      'callRouteOwnerMatchesCurrent':
+          _callRouteOwner?.ownsSession(session) ?? false,
       'incomingPromptActive': _incomingPromptActive,
       'incomingUiOwner': _incomingUiOwner.name,
       'iosCallkitOnlyPolicy': _iosCallkitOnlyIncomingUi,
@@ -5103,6 +5396,8 @@ class CallSessionManager {
       'acceptedRecoverySingleFlight': _routeOpenCount <= 1,
       'routeOpenCount': _routeOpenCount,
       'rtcSetupOwnerCount': _rtcSetupOwnerCount,
+      'authoritativeTerminalWriteCount': _authoritativeTerminalWriteCount,
+      'staleRouteCompletionIgnoredCount': _staleRouteCompletionIgnoredCount,
       'terminalSignal': _terminalSignal.value?.status ?? '',
       'nativeCallCount': nativeCalls?.length ?? 0,
       'matchingNativeCallCount': nativeCalls == null
@@ -5351,6 +5646,32 @@ class CallSessionManager {
     final current = _current;
     if (current == null) return false;
     return !current.isTerminal;
+  }
+
+  bool _sessionMatchesOwnership(
+    _CallSession? session, {
+    required String inviteId,
+    int? lifecycleGeneration,
+    String acceptedCallkitId = '',
+  }) {
+    if (session == null || session.inviteId != inviteId.trim()) return false;
+    if (lifecycleGeneration != null &&
+        session.lifecycleGeneration != lifecycleGeneration) {
+      return false;
+    }
+    final exactCallkitId = acceptedCallkitId.trim().toLowerCase();
+    if (exactCallkitId.isNotEmpty &&
+        session.acceptedCallkitId.trim().toLowerCase() != exactCallkitId) {
+      return false;
+    }
+    return true;
+  }
+
+  void _clearCallRouteOwnershipForSession(_CallSession? session) {
+    final owner = _callRouteOwner;
+    if (owner != null && !owner.ownsSession(session)) return;
+    _callRouteOwner = null;
+    _callRouteActive = false;
   }
 
   bool _canApplyMediaProgress(
