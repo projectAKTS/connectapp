@@ -1,66 +1,30 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "post_call_redial_gate_ordering_correction",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "2d4882af94e90dc8dfbcc5fbc402a98e6bb65b07",
-  "starting_sha": "2d4882af94e90dc8dfbcc5fbc402a98e6bb65b07",
+  "phase": "call_route_ownership_authoritative_terminal_transition",
+  "status": "task_ready",
+  "accepted_checkpoint_sha": "f6dedab4a0b60c60d6c1d0f9aac970fe6cb8d607",
+  "starting_sha": "f6dedab4a0b60c60d6c1d0f9aac970fe6cb8d607",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "edc5c57d0516b06e8f4814932197f0822f8094ac",
+  "code_commit_sha": null,
   "ending_sha": "SELF",
-  "changed_files": [
-    "docs/agent-loop/HANDOFF.md",
-    "docs/agent-loop/NEXT_TASK.md",
-    "docs/agent-loop/STATE.json",
-    "lib/services/call_session_manager.dart",
-    "test/call_v2/real_flow/call_v2_exact_callkit_ownership_test.dart"
-  ],
-  "physical_validation": {
-    "source_sha": "cefa58beffb4f1fbcb1acd7a64d961a8813f5e04",
-    "testflight_version": "1.0.2",
-    "testflight_build": "202607311859",
-    "devices": "two real iPhones",
-    "call_a": "passed",
-    "call_b": "passed",
-    "call_c": "passed",
-    "two_way_video": "passed for all three calls",
-    "two_way_audio": "passed for all three calls",
-    "normal_end": "passed for all three calls",
-    "force_quit_required": false,
-    "repeated_call_core": "physical pass",
-    "exact_callkit_ownership_and_repeated_routing": "physical pass",
-    "immediate_redial": "blocked approximately 5-10 seconds",
-    "remaining_classification": "teardown_latency"
-  },
-  "build_defines": {
-    "CALL_V2_REAL_FLOW_ENABLED": "true",
-    "CALL_V2_REAL_FLOW_DEV_CALLABLE": "true",
-    "CALL_V2_BUILD_COMMIT": "cefa58beffb4f1fbcb1acd7a64d961a8813f5e04"
-  },
+  "changed_files": [],
   "validation": {
-    "flutter_analyze": "passed",
-    "exact_callkit_ownership": "passed, 14 tests",
-    "notification_ownership": "passed, 38 tests",
-    "rapid_lifecycle_manager": "passed, 65 tests",
-    "repeated_call_lifecycle": "passed, 50 tests",
-    "foreground_recovery": "passed, 3 tests",
-    "all_call_v2": "passed, 2313 tests",
-    "ios_runner_tests": "passed, 21 tests",
-    "git_diff_check": "passed",
-    "dependency_files": "unchanged"
+    "authorization_metadata": "validated before authorization commit",
+    "implementation": "not started"
   },
   "safety": {
-    "backend_deployed": false,
+    "deployed": false,
+    "testflight_built": false,
+    "production_services_contacted": false,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": true,
-    "test_changes": true,
-    "testflight_built": false,
-    "physical_fix_claimed": false
+    "production_code_changes": false,
+    "test_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "The source-proven lifecycle serialization was corrected. Route/listener/timer/session ownership and matching local recovery are detached before completeTeardownAndClaimPending atomically claims pending incoming work or releases to idle. Only immutable exact-A native end verification and scoped persisted recovery clearing may overlap a newer call; focused tests prove late A completion cannot mutate B. This does not claim the historical physical 5-10 second delay is fixed."
+    "decision": "implementation_required",
+    "notes": "Authorize only managed call-route exits, authoritative terminal classification, exact route/session ownership, and deferred chat navigation described in NEXT_TASK.md. Preserve exact CallKit ownership, accepted recovery, redial-gate ordering, Agora behavior, PushKit/APNs, watchdog semantics, backend, dependencies, and package versions. No physical-fix claim is authorized."
   }
 }
