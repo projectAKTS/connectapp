@@ -2,17 +2,33 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "call_route_ownership_authoritative_terminal_transition",
-  "status": "task_ready",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "f6dedab4a0b60c60d6c1d0f9aac970fe6cb8d607",
   "starting_sha": "f6dedab4a0b60c60d6c1d0f9aac970fe6cb8d607",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
+  "code_commit_sha": "e4904c103938ba191bb5fee94b9251cdcab8302b",
   "ending_sha": "SELF",
-  "changed_files": [],
+  "changed_files": [
+    "lib/screens/call/agora_call_screen.dart",
+    "lib/services/call_session_manager.dart",
+    "lib/services/notification_service.dart",
+    "test/call_v2/real_flow/call_v2_route_ownership_terminal_transition_test.dart",
+    "docs/agent-loop/HANDOFF.md",
+    "docs/agent-loop/STATE.json"
+  ],
   "validation": {
-    "authorization_metadata": "validated before authorization commit",
-    "implementation": "not started"
+    "flutter_analyze": "passed, no issues",
+    "route_ownership_terminal_transition": "passed, 14 tests",
+    "exact_callkit_ownership": "passed, 14 tests",
+    "notification_ownership": "passed, 38 tests",
+    "rapid_lifecycle_manager": "passed, 65 tests",
+    "repeated_call_lifecycle": "passed, 50 tests",
+    "foreground_recovery": "passed, 3 tests",
+    "call_v2": "passed, 2327 tests",
+    "ios_runner_tests": "passed, 21 tests",
+    "git_diff_check": "passed",
+    "dependencies": "unchanged"
   },
   "safety": {
     "deployed": false,
@@ -20,11 +36,11 @@
     "production_services_contacted": false,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": false,
-    "test_changes": false
+    "production_code_changes": true,
+    "test_changes": true
   },
   "review": {
-    "decision": "implementation_required",
-    "notes": "Authorize only managed call-route exits, authoritative terminal classification, exact route/session ownership, and deferred chat navigation described in NEXT_TASK.md. Preserve exact CallKit ownership, accepted recovery, redial-gate ordering, Agora behavior, PushKit/APNs, watchdog semantics, backend, dependencies, and package versions. No physical-fix claim is authorized."
+    "decision": "review_required",
+    "notes": "Review managed call-route exits, authoritative Firestore terminal classification, exact route/session completion ownership, and deferred destructive chat navigation. Automated validation passed. Exact CallKit ownership, accepted recovery, redial-gate ordering, Agora behavior, PushKit/APNs, watchdog semantics, backend, dependencies, and package versions remain unchanged. No physical-fix claim is made."
   }
 }

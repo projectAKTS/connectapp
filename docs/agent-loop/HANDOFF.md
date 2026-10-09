@@ -1,111 +1,139 @@
-# Post-Call Redial Gate Ordering Correction Handoff
+# Call Route Ownership + Authoritative Terminal Transition Handoff
 
 STATUS: `ready_for_review`
 
-STARTING_SHA: `2d4882af94e90dc8dfbcc5fbc402a98e6bb65b07`
-IMPLEMENTATION_SHA: `edc5c57d0516b06e8f4814932197f0822f8094ac`
+STARTING_SHA: `9ed7df1ad8825390e5776a95b911f524c7a30491`
+IMPLEMENTATION_SHA: `e4904c103938ba191bb5fee94b9251cdcab8302b`
 ENDING_SHA: `SELF`
 
 ## Root Cause Being Fixed
 
-Terminal route cleanup kept the lifecycle arbiter in teardown while awaiting
-exact Call A native CallKit end/verification and scoped persisted accepted-
-recovery clearing. By that point the old route, listener, timers, session, and
-UI ownership could already be detached, so those exact-A-only waits
-unnecessarily serialized a new outgoing reservation.
+Call-screen exits were not uniformly owned by `CallSessionManager`: the Audio
+AppBar close action and some loading/error/back paths could pop without first
+performing managed terminal transition and teardown. Terminal classification
+also depended on local stage, so stale local `ringing` state could attempt a
+caller cancellation after Firestore had already advanced to
+`accepted`/`joining`/`connected`. Finally, a stale route completion could clear
+process-global route state belonging to a newer call, and destructive chat
+navigation could replace the route while call lifecycle still owned it.
 
-This corrects the source-proven ordering defect. It does not claim that this
-ordering was the sole cause of the previously observed physical 5-10 second
-redial window.
-
-## Ordering
+## Route Exit Model
 
 Old:
 
-`route closed -> local detach -> await exact A native/persisted cleanup -> arbiter release/claim`
+`UI close/back/error -> route pop may occur independently -> best-effort cleanup`
 
 New:
 
-`route closed -> detach listener/timers/session/UI -> invalidate matching local A recovery request -> verify A generation -> start immutable exact-A cleanup -> atomically claim pending incoming or release to idle -> await exact-A cleanup completion`
+`UI close/back/error -> exact route owner asks manager to terminate -> authoritative terminal transaction -> exact teardown -> pop is authorized`
 
-The exact arbiter release point is
-`CallV2CallLifecycleArbiter.completeTeardownAndClaimPending()` after all local
-Call A ownership is detached and generation-verified. A pending incoming invite
-is claimed by that same transition, so an outgoing reservation cannot steal it.
+`PopScope` now covers loading, active, error, and ended states. The Audio and
+Video variants share the same managed exit behavior. A route already proven
+terminal by its exact manager ownership may close without a second terminal
+write; an error label alone is not terminal authority.
 
-## Deferred Exact Cleanup
+## Authoritative Terminal Transition
 
-Only these operations may remain incomplete after arbiter release:
+The local-exit transaction reads the current invite and classifies from its
+authoritative Firestore state:
 
-- exact native CallKit end/verification for detached Call A;
-- scoped persisted accepted-recovery clearing for detached Call A.
+- `ringing` plus caller exit becomes `cancelled`;
+- `accepted`, `joining`, or `connected` plus participant exit becomes `ended`;
+- an already-terminal document keeps its existing status and reason;
+- a participant mismatch cannot mutate the invite;
+- stale local `ringing` cannot regress an advanced server state.
 
-Both receive immutable invite/CallKit identity captured before release. The
-native end path filters every retry/verification by that exact CallKit ID. The
-stored recovery clearer invalidates a matching Dart coordinator before its
-platform await and sends the same scoped identity to native. Neither completion
-reads `_current`, changes lifecycle generation, releases the arbiter, or resets
-Call B.
+The transition is single-flight per exact session. Existing terminal status and
+the existing Agora-derived terminal reason are preserved rather than
+overwritten by route-close cleanup.
+
+## Exact Route Owner
+
+`CallSessionManager` now records route ownership as exact session identity,
+invite identity, accepted CallKit identity, and lifecycle generation. Route
+completion clears route state only when that owner still matches. A delayed
+Call A route callback cannot clear or terminalize Call B, and duplicate route
+completion cannot perform a second terminal transition.
+
+This does not change exact CallKit UUID propagation or cleanup architecture.
+
+## Chat Navigation
+
+Pending destructive chat navigation remains queued while call lifecycle owns
+an active route. It is retried only after `CallSessionManager` reports that
+destructive navigation is safe, including a second safety check after Navigator
+availability. No chat request is discarded solely because call teardown is in
+progress.
 
 ## Files Changed
 
+- `lib/screens/call/agora_call_screen.dart`
 - `lib/services/call_session_manager.dart`
-- `test/call_v2/real_flow/call_v2_exact_callkit_ownership_test.dart`
+- `lib/services/notification_service.dart`
+- `test/call_v2/real_flow/call_v2_route_ownership_terminal_transition_test.dart`
 - `docs/agent-loop/HANDOFF.md`
-- `docs/agent-loop/NEXT_TASK.md`
 - `docs/agent-loop/STATE.json`
 
 The pre-existing untracked `docs/CALL_V2_ARCHITECTURE_DEEP_DIVE.md` remains
 untouched.
 
-## New Regression Tests
+## Regression Tests
 
-- `blocked exact A end releases lifecycle and late completion preserves B`
-- `blocked exact A stored recovery clear does not block or clear B`
-- `pending incoming is claimed before deferred A cleanup settles`
-- `normal teardown performs exact cleanup and reaches idle`
+The new focused file contains 14 passing tests covering:
 
-Existing tests also retain coverage for stale A cleanup against B, exact UUID
-ownership, notification ownership, rapid lifecycle generations, repeated-call
-cleanup, and accepted pending handoff.
+- stale local `ringing` with authoritative `accepted`, `joining`, or
+  `connected` transitions to `ended`;
+- caller exit from authoritative `ringing` transitions to `cancelled`;
+- every existing terminal state and Agora terminal reason is preserved;
+- active Audio close, loading close, system back, terminal UI-only close, and
+  Audio/Video parity use managed route ownership;
+- delayed Call A route completion cannot mutate Call B;
+- duplicate route completion produces one terminal transition;
+- destructive chat navigation defers while the call route is owned and resumes
+  when lifecycle becomes safe.
 
 ## Validation
 
 - `flutter analyze`: passed, no issues.
-- Exact CallKit ownership: passed, 14 tests.
-- Notification ownership: passed, 38 tests.
-- Rapid lifecycle manager: passed, 65 tests.
-- Repeated-call lifecycle: passed, 50 tests.
-- Foreground recovery: passed, 3 tests.
-- Full `test/call_v2`: passed, 2313 tests from the final tracked-clean tree.
-- iOS `RunnerTests`: passed, 21 tests.
+- New route ownership / terminal transition tests: passed, 14 tests.
+- Exact CallKit ownership tests: passed, 14 tests.
+- Notification ownership tests: passed, 38 tests.
+- Rapid lifecycle manager tests: passed, 65 tests.
+- Repeated-call lifecycle tests: passed, 50 tests.
+- Foreground recovery tests: passed, 3 tests.
+- Full `test/call_v2 --no-pub`: passed, 2327 tests.
+- `test/notification_foreground_recovery_test.dart --no-pub`: passed, 3 tests.
+- iOS `RunnerTests`: passed, 21 tests, 0 failed, 0 skipped.
 - `git diff --check`: passed.
-- `pubspec.yaml` / `pubspec.lock`: unchanged.
+- `pubspec.yaml`, `pubspec.lock`, `ios/Podfile`, and `ios/Podfile.lock`:
+  unchanged.
 
-The first unsigned simulator attempt could not launch because dyld rejected the
-unsigned embedded `aosl.framework`. The required normally signed simulator run
-then passed all RunnerTests; no project setting or source was changed.
+The full Call V2 run was performed with the preserved untracked architecture
+document temporarily outside the repository because four historical audit
+tests intentionally enumerate repository paths. The document was restored
+unchanged immediately afterward.
 
-## Adversarial Review
+## Adversarial Races
 
-For `A route close -> arbiter release -> B reserve -> late A completion`, late
-A work retains only immutable A identifiers and cannot end, clear, release, or
-mutate B. Tests hold each deferred future open until B owns a newer generation,
-then complete A and verify B remains current, connected, and route-active.
-
-For `A route close -> pending incoming B -> outgoing race`, the arbiter claims B
-atomically instead of entering idle. The focused regression verifies the
-pending slot is transferred and a competing outgoing reservation is rejected.
+- **A: stale local ringing versus accepted server state.** The transaction
+  uses authoritative status and writes `ended`, never a regressive
+  cancellation reason.
+- **B: delayed Call A route completion after Call B owns the route.** Exact
+  route-owner and generation checks leave B untouched.
+- **C: duplicate close/completion for one route.** The per-session single-flight
+  terminal transition and owner check allow one mutation and one teardown.
+- **D: destructive chat navigation during route ownership.** Navigation stays
+  queued until lifecycle is safe, then resumes once.
 
 ## Scope
 
-No Firestore terminal/acceptance behavior, PushKit, native UUID propagation,
-CallKit watchdog timing, Navigator architecture, Agora engine gate, backend,
-dependency, Flutter, or package version changed. No backend deployment or
-TestFlight build was performed.
+No PushKit/APNs behavior, exact CallKit UUID ownership, accepted-recovery or
+Firestore accept architecture, Navigator architecture, Agora media/token
+configuration, redial-gate ordering, watchdog timing, backend, dependencies,
+Flutter version, or plugin version changed. No backend deployment or TestFlight
+build was performed. This handoff does not claim physical validation.
 
 ## Next
 
-After review, perform one physical immediate-redial validation using the same
-two-device procedure. Do not claim the historical timing issue fixed until that
-physical result is captured.
+Review the implementation and automated evidence before authorizing any
+TestFlight build or physical validation.
