@@ -80,6 +80,7 @@ final class CallV2SafeNativeDiagnosticLedger {
 
   func safeSnapshot(
     nativeWatchActive: Bool,
+    mediaOwnedAck: Bool,
     routeOwnedAck: Bool,
     nativeCallActive: Bool,
     blockerCode: String
@@ -99,6 +100,7 @@ final class CallV2SafeNativeDiagnosticLedger {
         ]
       },
       "nativeWatchActive": nativeWatchActive,
+      "mediaOwnedAck": mediaOwnedAck,
       "routeOwnedAck": routeOwnedAck,
       "nativeCallActive": nativeCallActive,
       "blockerCode": blockerCode,
@@ -211,6 +213,9 @@ final class CallV2NativeRouteSafetyWatchdog {
   private let exactCallIsActive: (String) -> Bool
   private let exactEndVerified: (String) -> Void
   private var watches: [String: Watch] = [:]
+  private var mediaOwnedKeys: Set<String> = []
+  private var routeOwnedKeys: Set<String> = []
+  private(set) var mediaOwnedAck = false
   private(set) var routeOwnedAck = false
   private(set) var blockerCode = "none"
 
@@ -239,6 +244,9 @@ final class CallV2NativeRouteSafetyWatchdog {
     let key = normalized(exactKey)
     guard !key.isEmpty else { return false }
     if watches[key] != nil { return false }
+    mediaOwnedKeys.remove(key)
+    routeOwnedKeys.remove(key)
+    mediaOwnedAck = false
     routeOwnedAck = false
     blockerCode = "none"
     var workItem: DispatchWorkItem!
@@ -254,8 +262,13 @@ final class CallV2NativeRouteSafetyWatchdog {
   @discardableResult
   func acknowledgeRouteOwned(exactKey: String) -> Bool {
     let key = normalized(exactKey)
-    guard let watch = watches.removeValue(forKey: key) else { return false }
-    watch.workItem.cancel()
+    if routeOwnedKeys.contains(key) { return true }
+    if let watch = watches.removeValue(forKey: key) {
+      watch.workItem.cancel()
+    } else if !mediaOwnedKeys.contains(key) {
+      return false
+    }
+    routeOwnedKeys.insert(key)
     routeOwnedAck = true
     blockerCode = "none"
     record(key, "nativeRouteOwnedAckReceived")
@@ -263,10 +276,26 @@ final class CallV2NativeRouteSafetyWatchdog {
   }
 
   @discardableResult
-  func terminal(exactKey: String) -> Bool {
+  func acknowledgeMediaOwned(exactKey: String) -> Bool {
     let key = normalized(exactKey)
+    if mediaOwnedKeys.contains(key) || routeOwnedKeys.contains(key) { return true }
     guard let watch = watches.removeValue(forKey: key) else { return false }
     watch.workItem.cancel()
+    mediaOwnedKeys.insert(key)
+    mediaOwnedAck = true
+    blockerCode = "none"
+    record(key, "nativeMediaOwnedAckReceived")
+    return true
+  }
+
+  @discardableResult
+  func terminal(exactKey: String) -> Bool {
+    let key = normalized(exactKey)
+    let watch = watches.removeValue(forKey: key)
+    let mediaRemoved = mediaOwnedKeys.remove(key) != nil
+    let routeRemoved = routeOwnedKeys.remove(key) != nil
+    guard watch != nil || mediaRemoved || routeRemoved else { return false }
+    watch?.workItem.cancel()
     record(key, "terminalObserved")
     return true
   }
@@ -310,6 +339,45 @@ final class CallV2NativeRouteSafetyWatchdog {
   }
 }
 
+final class CallV2NativeAcceptedAudioSessionOwnership {
+  private var acceptedExactKeys: Set<String> = []
+  private(set) var audioSessionActive = false
+
+  func accepted(exactKey: String) -> String? {
+    let key = normalized(exactKey)
+    guard !key.isEmpty else { return nil }
+    acceptedExactKeys.insert(key)
+    return audioSessionActive ? exactOwner() : nil
+  }
+
+  func activated() -> String? {
+    audioSessionActive = true
+    return exactOwner()
+  }
+
+  func deactivated() -> [String] {
+    audioSessionActive = false
+    return acceptedExactKeys.sorted()
+  }
+
+  func terminal(exactKey: String) {
+    acceptedExactKeys.remove(normalized(exactKey))
+  }
+
+  func isReady(exactKey: String) -> Bool {
+    let key = normalized(exactKey)
+    return audioSessionActive && exactOwner() == key
+  }
+
+  private func exactOwner() -> String? {
+    return acceptedExactKeys.count == 1 ? acceptedExactKeys.first : nil
+  }
+
+  private func normalized(_ value: String) -> String {
+    return value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+  }
+}
+
 @main
 @objc class AppDelegate: FlutterAppDelegate, PKPushRegistryDelegate, CallkitIncomingAppDelegate {
   private let pushTokenChannelName = "connectapp/pushTokens"
@@ -345,6 +413,8 @@ final class CallV2NativeRouteSafetyWatchdog {
   private let callV2ExactCallController = CXCallController()
   private let callV2SafeDiagnosticLedger = CallV2SafeNativeDiagnosticLedger()
   private let callV2CallkitIdentityAllocator = CallV2NativeCallkitIdentityAllocator()
+  private let callV2AcceptedAudioSessionOwnership =
+    CallV2NativeAcceptedAudioSessionOwnership()
   private lazy var callV2ExactCallkitEndRequester = CallV2ExactCallkitEndRequester(
     request: { [weak self] uuid, completion in
       guard let self else {
@@ -369,6 +439,7 @@ final class CallV2NativeRouteSafetyWatchdog {
     },
     exactEndVerified: { [weak self] exactKey in
       self?.callV2CallkitIdentityAllocator.release(exactId: exactKey)
+      self?.callV2AcceptedAudioSessionOwnership.terminal(exactKey: exactKey)
       self?.notifyFlutterOfForegroundVoip(
         method: "callkitNativeSafetyTerminated",
         payload: ["callkitId": exactKey]
@@ -426,6 +497,10 @@ final class CallV2NativeRouteSafetyWatchdog {
             defaults.string(forKey: self.lastCallkitAcceptedFromUidStoreKey) ?? ""
           let lastCallkitAcceptedIsVideo =
             defaults.string(forKey: self.lastCallkitAcceptedIsVideoStoreKey) ?? ""
+          let lastCallkitAcceptedAudioSessionActive =
+            self.callV2AcceptedAudioSessionOwnership.isReady(
+              exactKey: lastCallkitAcceptedCallkitId
+            )
           let lastCallkitEvent =
             defaults.string(forKey: self.lastCallkitEventStoreKey) ?? ""
           let lastCallkitEventAt =
@@ -456,6 +531,8 @@ final class CallV2NativeRouteSafetyWatchdog {
             "lastCallkitAcceptedFromName": lastCallkitAcceptedFromName,
             "lastCallkitAcceptedFromUid": lastCallkitAcceptedFromUid,
             "lastCallkitAcceptedIsVideo": lastCallkitAcceptedIsVideo,
+            "lastCallkitAcceptedAudioSessionActive":
+              lastCallkitAcceptedAudioSessionActive,
             "lastCallkitEvent": lastCallkitEvent,
             "lastCallkitEventAt": lastCallkitEventAt,
             "lastCallkitEventCallkitId": lastCallkitEventCallkitId,
@@ -569,6 +646,7 @@ final class CallV2NativeRouteSafetyWatchdog {
         if call.method == "getCallV2SafeDiagnosticTimeline" {
           result(self.callV2SafeDiagnosticLedger.safeSnapshot(
             nativeWatchActive: self.callV2NativeSafetyWatchdog.activeCount > 0,
+            mediaOwnedAck: self.callV2NativeSafetyWatchdog.mediaOwnedAck,
             routeOwnedAck: self.callV2NativeSafetyWatchdog.routeOwnedAck,
             nativeCallActive: self.callV2NativeAcceptedCallActive,
             blockerCode: self.callV2NativeSafetyWatchdog.blockerCode
@@ -584,6 +662,19 @@ final class CallV2NativeRouteSafetyWatchdog {
           let exactKey = ((args["callkitId"] as? String) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
           result(self.callV2NativeSafetyWatchdog.acknowledgeRouteOwned(
+            exactKey: exactKey
+          ))
+          return
+        }
+
+        if call.method == "callkitMediaOwned" {
+          guard let args = call.arguments as? [String: Any] else {
+            result(false)
+            return
+          }
+          let exactKey = ((args["callkitId"] as? String) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+          result(self.callV2NativeSafetyWatchdog.acknowledgeMediaOwned(
             exactKey: exactKey
           ))
           return
@@ -927,6 +1018,7 @@ final class CallV2NativeRouteSafetyWatchdog {
     writeCallkitPresentationLedger(ledger)
     if normalizedState == "terminal" {
       callV2CallkitIdentityAllocator.release(exactId: key)
+      callV2AcceptedAudioSessionOwnership.terminal(exactKey: key)
     }
     return normalizedState
   }
@@ -1588,6 +1680,11 @@ final class CallV2NativeRouteSafetyWatchdog {
       stage: "nativeAcceptObserved"
     )
     _ = callV2NativeSafetyWatchdog.start(exactKey: call.data.uuid)
+    if let exactAudioOwner = callV2AcceptedAudioSessionOwnership.accepted(
+      exactKey: call.data.uuid
+    ) {
+      notifyCallkitAudioSessionChanged(exactKey: exactAudioOwner, active: true)
+    }
     callV2SafeDiagnosticLedger.record(
       exactKey: call.data.uuid,
       stage: "nativeCallStillActive"
@@ -1621,6 +1718,9 @@ final class CallV2NativeRouteSafetyWatchdog {
         "fromUid": fromUid,
         "isVideo": isVideo,
         "callkitId": call.data.uuid,
+        "audioSessionActive": callV2AcceptedAudioSessionOwnership.isReady(
+          exactKey: call.data.uuid
+        ),
         "diagnosticOrdinal": diagnosticMetadata?.ordinal ?? 0,
         "diagnosticStartedAtEpochMilliseconds":
           diagnosticMetadata?.startedAtEpochMilliseconds ?? 0,
@@ -1641,6 +1741,7 @@ final class CallV2NativeRouteSafetyWatchdog {
     markCallkitPresentationState(callkitId: call.data.uuid, state: "terminal")
     callV2NativeAcceptedCallActive = false
     _ = callV2NativeSafetyWatchdog.terminal(exactKey: call.data.uuid)
+    callV2AcceptedAudioSessionOwnership.terminal(exactKey: call.data.uuid)
     let inviteId = inviteIdFromCall(call)
     if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
       syncInviteStatus(inviteId: inviteId, status: "declined", additional: [
@@ -1657,6 +1758,7 @@ final class CallV2NativeRouteSafetyWatchdog {
     markCallkitPresentationState(callkitId: call.data.uuid, state: "terminal")
     callV2NativeAcceptedCallActive = false
     _ = callV2NativeSafetyWatchdog.terminal(exactKey: call.data.uuid)
+    callV2AcceptedAudioSessionOwnership.terminal(exactKey: call.data.uuid)
     let inviteId = inviteIdFromCall(call)
     if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
       syncInviteStatus(inviteId: inviteId, status: "ended", additional: [
@@ -1673,6 +1775,7 @@ final class CallV2NativeRouteSafetyWatchdog {
     markCallkitPresentationState(callkitId: call.data.uuid, state: "terminal")
     callV2NativeAcceptedCallActive = false
     _ = callV2NativeSafetyWatchdog.terminal(exactKey: call.data.uuid)
+    callV2AcceptedAudioSessionOwnership.terminal(exactKey: call.data.uuid)
     let inviteId = inviteIdFromCall(call)
     if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
       syncInviteStatus(inviteId: inviteId, status: "missed")
@@ -1682,11 +1785,27 @@ final class CallV2NativeRouteSafetyWatchdog {
 
   func didActivateAudioSession(_ audioSession: AVAudioSession) {
     storeCallkitEvent("audio_activated", call: nil)
+    if let exactAudioOwner = callV2AcceptedAudioSessionOwnership.activated() {
+      notifyCallkitAudioSessionChanged(exactKey: exactAudioOwner, active: true)
+    }
     NSLog("Helperly CallKit audio session activated")
   }
 
   func didDeactivateAudioSession(_ audioSession: AVAudioSession) {
     storeCallkitEvent("audio_deactivated", call: nil)
+    for exactAudioOwner in callV2AcceptedAudioSessionOwnership.deactivated() {
+      notifyCallkitAudioSessionChanged(exactKey: exactAudioOwner, active: false)
+    }
     NSLog("Helperly CallKit audio session deactivated")
+  }
+
+  private func notifyCallkitAudioSessionChanged(exactKey: String, active: Bool) {
+    notifyFlutterOfForegroundVoip(
+      method: "callkitAudioSessionChangedNative",
+      payload: [
+        "callkitId": exactKey,
+        "active": active,
+      ]
+    )
   }
 }

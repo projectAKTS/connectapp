@@ -5,8 +5,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../call_v2/diagnostics/call_v2_physical_diagnostic_ledger.dart';
+import '../call_v2/real_flow/call_v2_agora_media_runtime.dart';
 import '../call_v2/real_flow/call_v2_call_lifecycle_arbiter.dart';
 import '../call_v2/real_flow/call_v2_incoming_listener_backoff.dart';
+import '../call_v2/real_flow/call_v2_physical_media_owner.dart';
 import '../call_v2/real_flow/call_v2_real_call_flow_gate.dart';
 import '../screens/call/agora_call_screen.dart';
 import '../screens/call/incoming_call_screen.dart';
@@ -208,6 +210,7 @@ class _AcceptedNativeRouteWatch {
   Timer? timeoutTimer;
   Future<void>? cleanupFuture;
   bool routeOpened = false;
+  bool mediaOwned = false;
   bool terminal = false;
 
   bool matchesInvite(String inviteId) => payload.inviteId == inviteId.trim();
@@ -304,6 +307,9 @@ typedef AcceptedRouteReadinessCanceller = void Function();
 typedef NativeRouteOwnershipAcknowledger = Future<bool> Function(
   String exactNativeKey,
 );
+typedef NativeMediaOwnershipAcknowledger = Future<bool> Function(
+  String exactNativeKey,
+);
 typedef CallScreenOpenRecorderForTest = Future<void> Function({
   required String inviteId,
   required String channel,
@@ -382,6 +388,11 @@ class _CallSession {
       secondCallkitId: other.acceptedCallkitId,
     );
   }
+
+  bool ownsSameLifecycle(_CallSession other) {
+    return lifecycleGeneration == other.lifecycleGeneration &&
+        matchesAcceptedSession(other);
+  }
 }
 
 class _DetachedCallSessionState {
@@ -389,11 +400,13 @@ class _DetachedCallSessionState {
     required this.inviteId,
     required this.callkitId,
     required this.ownerGeneration,
+    required this.mediaKey,
   });
 
   final String inviteId;
   final String callkitId;
   final int ownerGeneration;
+  final CallV2PhysicalMediaKey? mediaKey;
 }
 
 class _CallRouteOwner {
@@ -524,6 +537,9 @@ class CallSessionManager {
   bool? _iosCallkitOnlyIncomingUiForTest;
   AcceptedRouteReadinessCanceller? _cancelAcceptedRouteReadiness;
   NativeRouteOwnershipAcknowledger? _acknowledgeNativeRouteOwnership;
+  NativeMediaOwnershipAcknowledger? _acknowledgeNativeMediaOwnership;
+  CallV2PhysicalMediaOwner _physicalMediaOwner =
+      CallV2PhysicalMediaOwner.instance;
   int _callkitFallbackRequestedCount = 0;
   int _callkitPresentationCount = 0;
   int _flutterIncomingPromptCount = 0;
@@ -709,10 +725,17 @@ class CallSessionManager {
     _beforeAcceptTransactionAttemptForTest = null;
     _callScreenOpenRecorderForTest = null;
     _acknowledgeNativeRouteOwnership = null;
+    _acknowledgeNativeMediaOwnership = null;
     _skipActiveInviteBindingForTest = false;
     _skipAcceptedNativeWatchBindingForTest = false;
     _iosCallkitOnlyIncomingUiForTest = null;
     _callLifecycleArbiter.forceIdleForTest();
+    final configuredMediaOwner = _physicalMediaOwner;
+    await configuredMediaOwner.resetForTest();
+    if (!identical(configuredMediaOwner, CallV2PhysicalMediaOwner.instance)) {
+      await CallV2PhysicalMediaOwner.instance.resetForTest();
+    }
+    _physicalMediaOwner = CallV2PhysicalMediaOwner.instance;
   }
 
   void debugConfigureAcceptedNativeRouteWatchForTest({
@@ -745,6 +768,74 @@ class CallSessionManager {
       _openingCallRoute || _callRouteActive || _incomingPromptActive;
   bool get hasActiveSession => _current != null && !_current!.isTerminal;
   bool get hasActiveUiOrSession => hasActiveUi || hasActiveSession;
+
+  Future<void> handleCallkitAudioSessionChanged({
+    required String callkitId,
+    required bool active,
+  }) async {
+    final exactId = callkitId.trim();
+    if (exactId.isEmpty) return;
+    if (active) {
+      _physicalMediaOwner.markAudioSessionReady(exactId);
+    } else {
+      _physicalMediaOwner.markAudioSessionUnavailable(exactId);
+    }
+    await _diagManager('callkit_audio_session_readiness', meta: {
+      'active': active,
+      'exactIdentityPresent': true,
+      'mediaOwnerPresent': _physicalMediaOwner.hasOwner,
+    });
+  }
+
+  CallV2PhysicalMediaAttachment? attachPhysicalMedia({
+    required String inviteId,
+    required String channel,
+    required bool isVideo,
+    required bool isCaller,
+    required String acceptedCallkitId,
+    required int lifecycleGeneration,
+    required CallV2RealCallConnectionSystem connectionSystem,
+  }) {
+    return _physicalMediaOwner.attach(CallV2PhysicalMediaKey(
+      inviteId: inviteId.trim(),
+      acceptedCallkitId: acceptedCallkitId.trim(),
+      lifecycleGeneration: lifecycleGeneration,
+      channel: channel.trim(),
+      isVideo: isVideo,
+      isCaller: isCaller,
+      connectionSystem: connectionSystem,
+    ));
+  }
+
+  Future<CallV2PhysicalMediaAttachment?> attachOrStartRouteFirstAudio({
+    required String inviteId,
+    required String channel,
+    required bool isCaller,
+    required String acceptedCallkitId,
+    required int lifecycleGeneration,
+    required CallV2RealCallConnectionSystem connectionSystem,
+  }) async {
+    final session = _current;
+    if (session == null ||
+        session.isVideo ||
+        !_sessionMatchesOwnership(
+          session,
+          inviteId: inviteId,
+          lifecycleGeneration:
+              lifecycleGeneration == 0 ? null : lifecycleGeneration,
+          acceptedCallkitId: acceptedCallkitId,
+        )) {
+      return null;
+    }
+    final existing = _physicalMediaOwner.attach(_mediaKeyForSession(session));
+    if (existing != null) return existing;
+    return _claimPhysicalAudioMedia(
+      session,
+      requireExactAudioSession: false,
+      allowPermissionRequest: true,
+    );
+  }
+
   bool get _iosCallkitOnlyIncomingUi {
     final override = _iosCallkitOnlyIncomingUiForTest;
     if (override != null) return override;
@@ -778,6 +869,8 @@ class CallSessionManager {
     bool? iosCallkitOnlyIncomingUiForTest,
     AcceptedRouteReadinessCanceller? cancelAcceptedRouteReadiness,
     NativeRouteOwnershipAcknowledger? acknowledgeNativeRouteOwnership,
+    NativeMediaOwnershipAcknowledger? acknowledgeNativeMediaOwnership,
+    CallV2PhysicalMediaOwner? physicalMediaOwnerForTest,
   }) {
     if (navigatorKey != null) {
       _navigatorKey = navigatorKey;
@@ -828,6 +921,12 @@ class CallSessionManager {
     }
     if (acknowledgeNativeRouteOwnership != null) {
       _acknowledgeNativeRouteOwnership = acknowledgeNativeRouteOwnership;
+    }
+    if (acknowledgeNativeMediaOwnership != null) {
+      _acknowledgeNativeMediaOwnership = acknowledgeNativeMediaOwnership;
+    }
+    if (physicalMediaOwnerForTest != null && _debugTestAccessEnabled) {
+      _physicalMediaOwner = physicalMediaOwnerForTest;
     }
   }
 
@@ -1936,7 +2035,107 @@ class CallSessionManager {
     );
   }
 
-  Future<void> reportCallScreenBegan({
+  CallV2PhysicalMediaKey _mediaKeyForSession(_CallSession session) {
+    return CallV2PhysicalMediaKey(
+      inviteId: session.inviteId,
+      acceptedCallkitId: session.acceptedCallkitId,
+      lifecycleGeneration: session.lifecycleGeneration,
+      channel: session.channel,
+      isVideo: session.isVideo,
+      isCaller: session.isCaller,
+      connectionSystem: session.connectionSystem,
+    );
+  }
+
+  Future<CallV2PhysicalMediaAttachment> _claimPhysicalAudioMedia(
+    _CallSession session, {
+    required bool requireExactAudioSession,
+    required bool allowPermissionRequest,
+  }) async {
+    final key = _mediaKeyForSession(session);
+    return _physicalMediaOwner.claim(CallV2PhysicalMediaClaim(
+      key: key,
+      authorityReady: true,
+      requiresExactAudioSession: requireExactAudioSession,
+      allowPermissionRequest: allowPermissionRequest,
+      runtimeConfig: CallV2AgoraMediaRuntimeConfig(
+        channel: session.channel,
+        inviteId: session.inviteId,
+        isVideo: false,
+        isCaller: session.isCaller,
+        connectionSystem: session.connectionSystem,
+        onMediaSetupBegan: () => reportMediaSetupBegan(
+          inviteId: session.inviteId,
+          isCaller: session.isCaller,
+        ),
+        onJoinSuccess: () => _handlePhysicalMediaJoinSuccess(key),
+        onRemoteJoined: () => reportRemoteJoined(
+          inviteId: session.inviteId,
+          isCaller: session.isCaller,
+        ),
+        onRemoteOffline: (wasConnected, reason) => reportRemoteOffline(
+          inviteId: session.inviteId,
+          wasConnected: wasConnected,
+          isCaller: session.isCaller,
+          reason: reason,
+        ),
+        onJoinTimeout: () => reportJoinTimeout(
+          inviteId: session.inviteId,
+          isCaller: session.isCaller,
+        ),
+        onFailure: (code) => reportCallFailure(
+          inviteId: session.inviteId,
+          isCaller: session.isCaller,
+          message: 'Call setup failed. Please try again.',
+          error: code,
+        ),
+        diagnostic: (stage, metadata) => _diagManager(
+          'media_runtime_$stage',
+          meta: metadata,
+        ),
+      ),
+      onPermissionUnavailable: (reason) => reportCallFailure(
+        inviteId: session.inviteId,
+        isCaller: session.isCaller,
+        message: 'Microphone permission is required for this call.',
+        error: reason,
+      ),
+      onEndRequested: () => endCallFromLocalUser(
+        inviteId: session.inviteId,
+        source: 'media_attachment_end',
+        lifecycleGeneration: session.lifecycleGeneration,
+        acceptedCallkitId: session.acceptedCallkitId,
+      ),
+    ));
+  }
+
+  Future<void> _handlePhysicalMediaJoinSuccess(
+    CallV2PhysicalMediaKey key,
+  ) async {
+    final session = _current;
+    if (session == null || !_mediaKeyForSession(session).matches(key)) return;
+    await reportAgoraJoinSuccess(
+      inviteId: session.inviteId,
+      isCaller: session.isCaller,
+    );
+    if (!_mediaKeyForSession(session).matches(key)) return;
+    final exactId = key.acceptedCallkitId.trim();
+    if (exactId.isEmpty) return;
+    final acknowledge = _acknowledgeNativeMediaOwnership;
+    if (acknowledge == null) return;
+    final acknowledged = await acknowledge(exactId);
+    if (!acknowledged ||
+        _current == null ||
+        !_mediaKeyForSession(_current!).matches(key)) {
+      return;
+    }
+    final watch = _acceptedNativeRouteWatch;
+    if (watch != null && watch.matchesSession(session)) {
+      await _transferAcceptedNativeWatchToMedia(watch);
+    }
+  }
+
+  Future<void> reportMediaSetupBegan({
     required String inviteId,
     required bool isCaller,
   }) async {
@@ -1984,6 +2183,16 @@ class CallSessionManager {
       'isCaller': isCaller,
     });
     _restartAcceptedJoiningTimeout();
+  }
+
+  Future<void> reportCallScreenBegan({
+    required String inviteId,
+    required bool isCaller,
+  }) {
+    return reportMediaSetupBegan(
+      inviteId: inviteId,
+      isCaller: isCaller,
+    );
   }
 
   Future<void> reportAgoraJoinSuccess({
@@ -2507,6 +2716,7 @@ class CallSessionManager {
   ) async {
     if (!identical(_acceptedNativeRouteWatch, watch) ||
         watch.routeOpened ||
+        watch.mediaOwned ||
         watch.terminal) {
       return;
     }
@@ -2531,6 +2741,7 @@ class CallSessionManager {
   ) async {
     if (!identical(_acceptedNativeRouteWatch, watch) ||
         watch.routeOpened ||
+        watch.mediaOwned ||
         watch.terminal) {
       return;
     }
@@ -2539,7 +2750,9 @@ class CallSessionManager {
     try {
       latest = await _readInviteData(watch.payload.inviteId);
     } catch (_) {}
-    if (!identical(_acceptedNativeRouteWatch, watch) || watch.routeOpened) {
+    if (!identical(_acceptedNativeRouteWatch, watch) ||
+        watch.routeOpened ||
+        watch.mediaOwned) {
       return;
     }
     final status = _parseStatus(latest?['status']);
@@ -2580,8 +2793,9 @@ class CallSessionManager {
     required bool deadlineReached,
     required bool markInviteFailed,
   }) async {
-    if (!identical(_acceptedNativeRouteWatch, watch) || watch.routeOpened)
-      return;
+    if (!identical(_acceptedNativeRouteWatch, watch) ||
+        watch.routeOpened ||
+        watch.mediaOwned) return;
     if (_callRouteActive && activeInviteId == watch.payload.inviteId) {
       await _transferAcceptedNativeWatchToRoute(watch);
       return;
@@ -2594,6 +2808,14 @@ class CallSessionManager {
     watch.subscription = null;
     if (subscription != null) unawaited(subscription.cancel());
     _cancelAcceptedRouteReadiness?.call();
+
+    final watchedSession = _current;
+    if (watchedSession != null && watch.matchesSession(watchedSession)) {
+      await _physicalMediaOwner.terminate(
+        _mediaKeyForSession(watchedSession),
+        reason: reason,
+      );
+    }
 
     if (watch.claimed &&
         _callLifecycleArbiter.ownsGeneration(watch.lifecycleGeneration)) {
@@ -2697,6 +2919,24 @@ class CallSessionManager {
       _acceptedNativeRouteWatch = null;
     }
     _acceptedNativeCleanupFuture = null;
+  }
+
+  Future<void> _transferAcceptedNativeWatchToMedia(
+    _AcceptedNativeRouteWatch watch,
+  ) async {
+    if (!identical(_acceptedNativeRouteWatch, watch) || watch.terminal) return;
+    watch.mediaOwned = true;
+    watch.timeoutTimer?.cancel();
+    watch.timeoutTimer = null;
+    final subscription = watch.subscription;
+    watch.subscription = null;
+    if (subscription != null) unawaited(subscription.cancel());
+    _acceptedNativeCleanupFuture = null;
+    await _diagManager('accepted_native_watch_transferred_to_media', meta: {
+      'mediaOwned': true,
+      'routeOwned': watch.routeOpened,
+      'exactIdentityPresent': watch.payload.acceptedCallkitId.isNotEmpty,
+    });
   }
 
   Future<void> _refreshAcceptedNativeMatchingCallCount(
@@ -3648,12 +3888,57 @@ class CallSessionManager {
     );
 
     _callLifecycleArbiter.markJoining(generation);
-    final routeResult = await _activateSession(
-      session,
-      openScreen: true,
-      source: source,
-      deferUntilNavigatorReady: preserveLifecycleOnNavigatorUnavailable,
-    );
+    final ownsBackgroundAudio = !session.isCaller &&
+        !session.isVideo &&
+        session.acceptedCallkitId.trim().isNotEmpty;
+    late final _RouteOpenResult routeResult;
+    if (ownsBackgroundAudio) {
+      final adopted = await _activateSession(
+        session,
+        openScreen: false,
+        source: '$source:media_adopt',
+      );
+      if (adopted != _RouteOpenResult.opened ||
+          !_callLifecycleArbiter.ownsGeneration(generation) ||
+          !identical(_current, session)) {
+        return _IncomingCandidateResult.ignored;
+      }
+      final foreground = await _isAppActuallyForeground();
+      try {
+        await _claimPhysicalAudioMedia(
+          session,
+          requireExactAudioSession: true,
+          allowPermissionRequest: foreground,
+        );
+      } catch (error) {
+        await _diagManager('physical_media_owner_rejected', meta: {
+          'audio': true,
+          'incoming': true,
+          'error': '$error',
+        });
+        await reportCallFailure(
+          inviteId: session.inviteId,
+          isCaller: false,
+          message: 'Call setup failed. Please try again.',
+          error: 'physical_media_owner_rejected',
+        );
+        return _IncomingCandidateResult.failed;
+      }
+      final nav = _navigatorKey?.currentState;
+      if (preserveLifecycleOnNavigatorUnavailable &&
+          (!foreground || nav == null || !nav.mounted)) {
+        routeResult = _RouteOpenResult.navigatorUnavailable;
+      } else {
+        routeResult = await _openCallScreen(session, source: source);
+      }
+    } else {
+      routeResult = await _activateSession(
+        session,
+        openScreen: true,
+        source: source,
+        deferUntilNavigatorReady: preserveLifecycleOnNavigatorUnavailable,
+      );
+    }
     if (routeResult == _RouteOpenResult.opened) {
       final watch = _acceptedNativeRouteWatch;
       if (watch != null && watch.matchesIdentity(authoritativePayload)) {
@@ -3910,9 +4195,11 @@ class CallSessionManager {
     required String source,
     bool deferUntilNavigatorReady = false,
   }) async {
-    if (openScreen &&
-        _callRouteActive &&
-        _current?.matchesAcceptedSession(session) == true) {
+    final existingSession = _current;
+    final reusesCurrentSession =
+        existingSession?.ownsSameLifecycle(session) == true;
+    final ownedSession = reusesCurrentSession ? existingSession! : session;
+    if (openScreen && _callRouteActive && reusesCurrentSession) {
       return _RouteOpenResult.alreadyOpenSameInvite;
     }
     if (openScreen && _openingCallRoute) {
@@ -3926,27 +4213,27 @@ class CallSessionManager {
       }
     }
 
-    if (_current?.matchesAcceptedSession(session) != true) {
+    if (!reusesCurrentSession) {
       await _activeInviteSub?.cancel();
       _activeInviteSub = null;
       _cancelSessionTimers();
       _terminalSignal.value = null;
     }
 
-    _current = session;
-    _touchSession(session);
-    _markInviteHandled(session.inviteId);
+    _current = ownedSession;
+    _touchSession(ownedSession);
+    _markInviteHandled(ownedSession.inviteId);
     if (!_debugTestAccessEnabled || !_skipActiveInviteBindingForTest) {
-      await _bindActiveInvite(session.inviteId);
+      await _bindActiveInvite(ownedSession.inviteId);
     }
-    _restartTimeoutsForStatus(session.status);
+    _restartTimeoutsForStatus(ownedSession.status);
 
     if (!openScreen) return _RouteOpenResult.opened;
-    final routeResult = await _openCallScreen(session, source: source);
+    final routeResult = await _openCallScreen(ownedSession, source: source);
     if (routeResult != _RouteOpenResult.opened &&
         routeResult != _RouteOpenResult.alreadyOpenSameInvite) {
       await _rollbackFailedRouteSession(
-        session,
+        ownedSession,
         source: source,
         routeResult: routeResult,
       );
@@ -4851,6 +5138,7 @@ class CallSessionManager {
       inviteId: session?.inviteId ?? normalizedInviteId,
       callkitId: callkitId,
       ownerGeneration: ownerGeneration,
+      mediaKey: session == null ? null : _mediaKeyForSession(session),
     );
   }
 
@@ -4872,6 +5160,11 @@ class CallSessionManager {
     if (detached == null) return;
     final callkitId = detached.callkitId;
     final ownerGeneration = detached.ownerGeneration;
+
+    final mediaKey = detached.mediaKey;
+    if (mediaKey != null) {
+      await _physicalMediaOwner.terminate(mediaKey, reason: reason);
+    }
 
     if (endCurrentNativeCall && callkitId.isNotEmpty) {
       await _endNativeCallSafely(
@@ -4912,6 +5205,10 @@ class CallSessionManager {
     required bool clearStoredAcceptedRecovery,
   }) {
     final cleanups = <Future<void>>[];
+    final mediaKey = detached.mediaKey;
+    if (mediaKey != null) {
+      cleanups.add(_physicalMediaOwner.terminate(mediaKey, reason: reason));
+    }
     if (endCurrentNativeCall && detached.callkitId.isNotEmpty) {
       cleanups.add(_endNativeCallSafely(
         detached.callkitId,

@@ -6,6 +6,13 @@ class _FakeNativeBridge implements CallV2NativeDiagnosticBridge {
   Object? timeline;
   bool acknowledgeResult = true;
   final List<String> acknowledged = <String>[];
+  final List<String> mediaAcknowledged = <String>[];
+
+  @override
+  Future<bool> acknowledgeMediaOwnership(String exactNativeKey) async {
+    mediaAcknowledged.add(exactNativeKey);
+    return acknowledgeResult;
+  }
 
   @override
   Future<bool> acknowledgeRouteOwnership(String exactNativeKey) async {
@@ -111,6 +118,28 @@ void main() {
     expect(ledger.safeState()['routeOwnedAck'], isTrue);
     expect(ledger.safeState()['nativeWatchActive'], isFalse);
     expect(ledger.buildSafeReport(), isNot(contains('private-native-key')));
+  });
+
+  test('media ownership acknowledgement is independent from route ownership',
+      () async {
+    final bridge = _FakeNativeBridge();
+    final ledger = CallV2PhysicalDiagnosticLedger(nativeBridge: bridge);
+    ledger.beginAcceptedNativeCall(
+      exactNativeKey: 'private-native-key',
+      nativeOrdinal: 1,
+    );
+
+    expect(await ledger.acknowledgeMediaJoined('private-native-key'), isTrue);
+    expect(bridge.mediaAcknowledged, <String>['private-native-key']);
+    expect(bridge.acknowledged, isEmpty);
+    expect(ledger.safeState()['mediaOwnedAck'], isTrue);
+    expect(ledger.safeState()['routeOwnedAck'], isFalse);
+    expect(ledger.safeState()['nativeWatchActive'], isFalse);
+    expect(ledger.buildSafeReport(), isNot(contains('private-native-key')));
+
+    expect(await ledger.acknowledgeRouteOpened('private-native-key'), isTrue);
+    expect(bridge.acknowledged, <String>['private-native-key']);
+    expect(ledger.safeState()['routeOwnedAck'], isTrue);
   });
 
   test('navigator-unavailable equivalent does not acknowledge native ownership',

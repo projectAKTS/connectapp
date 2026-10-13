@@ -40,6 +40,7 @@ enum CallV2PhysicalDiagnosticStage {
   nativeCallStillActive,
   terminalObserved,
   nativeSafetyWatchStarted,
+  nativeMediaOwnedAckReceived,
   nativeRouteOwnedAckReceived,
   nativeSafetyTimeoutFired,
   nativeCallEndRequested,
@@ -86,6 +87,8 @@ abstract interface class CallV2NativeDiagnosticBridge {
   Future<Object?> loadSafeTimeline();
 
   Future<bool> acknowledgeRouteOwnership(String exactNativeKey);
+
+  Future<bool> acknowledgeMediaOwnership(String exactNativeKey);
 }
 
 class MethodChannelCallV2NativeDiagnosticBridge
@@ -104,6 +107,16 @@ class MethodChannelCallV2NativeDiagnosticBridge
     if (exactNativeKey.trim().isEmpty) return false;
     final result = await _channel.invokeMethod<Object?>(
       'callkitRouteOwned',
+      <String, Object>{'callkitId': exactNativeKey},
+    );
+    return result == true;
+  }
+
+  @override
+  Future<bool> acknowledgeMediaOwnership(String exactNativeKey) async {
+    if (exactNativeKey.trim().isEmpty) return false;
+    final result = await _channel.invokeMethod<Object?>(
+      'callkitMediaOwned',
       <String, Object>{'callkitId': exactNativeKey},
     );
     return result == true;
@@ -132,6 +145,7 @@ class CallV2PhysicalDiagnosticLedger {
   String? _activeOwner;
   int _nextSyntheticOrdinal = 1;
   bool _nativeWatchActive = false;
+  bool _mediaOwnedAck = false;
   bool _routeOwnedAck = false;
   bool _nativeCallActive = false;
   int _routeOpenCount = 0;
@@ -161,6 +175,7 @@ class CallV2PhysicalDiagnosticLedger {
     _nativeOrdinalOwners[ordinal] = owner;
     _activeOwner = owner;
     _nativeWatchActive = true;
+    _mediaOwnedAck = false;
     _routeOwnedAck = false;
     _nativeCallActive = true;
     _blockerCode = 'none';
@@ -193,6 +208,9 @@ class CallV2PhysicalDiagnosticLedger {
       case CallV2PhysicalDiagnosticStage.nativeRouteOwnedAckReceived:
         _routeOwnedAck = true;
         _nativeWatchActive = false;
+      case CallV2PhysicalDiagnosticStage.nativeMediaOwnedAckReceived:
+        _mediaOwnedAck = true;
+        _nativeWatchActive = false;
       case CallV2PhysicalDiagnosticStage.nativeSafetyTimeoutFired:
         _blockerCode = 'native_route_timeout';
       case CallV2PhysicalDiagnosticStage.nativeCallEnded:
@@ -218,6 +236,24 @@ class CallV2PhysicalDiagnosticLedger {
       return acknowledged;
     } on Object {
       _blockerCode = 'native_ack_unavailable';
+      return false;
+    }
+  }
+
+  Future<bool> acknowledgeMediaJoined(String exactNativeKey) async {
+    final owner = exactNativeKey.trim();
+    if (owner.isEmpty || !_calls.containsKey(owner)) return false;
+    try {
+      final acknowledged = await _nativeBridge.acknowledgeMediaOwnership(owner);
+      if (acknowledged) {
+        record(
+          CallV2PhysicalDiagnosticStage.nativeMediaOwnedAckReceived,
+          exactNativeKey: owner,
+        );
+      }
+      return acknowledged;
+    } on Object {
+      _blockerCode = 'native_media_ack_unavailable';
       return false;
     }
   }
@@ -264,6 +300,7 @@ class CallV2PhysicalDiagnosticLedger {
 
   Map<String, Object> safeState() => <String, Object>{
         'nativeWatchActive': _nativeWatchActive,
+        'mediaOwnedAck': _mediaOwnedAck,
         'routeOwnedAck': _routeOwnedAck,
         'nativeCallActive': _nativeCallActive,
         'routeOpenCount': _routeOpenCount,
@@ -295,6 +332,7 @@ class CallV2PhysicalDiagnosticLedger {
     _activeOwner = null;
     _nextSyntheticOrdinal = 1;
     _nativeWatchActive = false;
+    _mediaOwnedAck = false;
     _routeOwnedAck = false;
     _nativeCallActive = false;
     _routeOpenCount = 0;
@@ -345,6 +383,7 @@ class CallV2PhysicalDiagnosticLedger {
       _trim();
     }
     _nativeWatchActive = normalized['nativeWatchActive'] == true;
+    _mediaOwnedAck = normalized['mediaOwnedAck'] == true;
     _routeOwnedAck = normalized['routeOwnedAck'] == true;
     _nativeCallActive = normalized['nativeCallActive'] == true;
     final blocker = normalized['blockerCode'];

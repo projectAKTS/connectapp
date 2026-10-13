@@ -9,17 +9,15 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:agora_rtc_engine/src/impl/agora_rtc_engine_impl.dart'
     as agora_internal;
-import 'package:connect_app/call_v2/firebase/call_v2_dev_callable_target.dart';
-import 'package:connect_app/call_v2/firebase/call_v2_token_provider.dart';
-import 'package:connect_app/call_v2/firebase/real_call_v2_token_provider.dart';
 import 'package:connect_app/call_v2/call_v2_api.dart';
+import 'package:connect_app/call_v2/firebase/call_v2_token_provider.dart';
+import 'package:connect_app/call_v2/real_flow/call_v2_agora_media_runtime.dart';
 import 'package:connect_app/call_v2/real_flow/call_v2_engine_cleanup_coordinator.dart';
+import 'package:connect_app/call_v2/real_flow/call_v2_physical_media_owner.dart';
 import 'package:connect_app/call_v2/real_flow/call_v2_real_call_flow_gate.dart';
-import 'package:connect_app/call_v2/runtime/call_v2_runtime_state.dart';
 import 'package:connect_app/theme/tokens.dart';
 import 'package:firebase_auth/firebase_auth.dart' hide UserInfo;
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connect_app/services/call_session_manager.dart';
 import 'package:connect_app/services/callkit_id.dart';
 import 'package:connect_app/services/diagnostic_service.dart';
@@ -27,24 +25,8 @@ import 'package:connect_app/services/helperly_test_runtime.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:path_provider/path_provider.dart';
 
-class AgoraJoinAuth {
-  final String token;
-  final String appId;
-  final String channelName;
-  final int uid;
-  final String userAccount;
-  final String tokenVersion;
-  final String identityMode;
-  const AgoraJoinAuth({
-    required this.token,
-    required this.appId,
-    required this.channelName,
-    required this.uid,
-    required this.userAccount,
-    required this.tokenVersion,
-    required this.identityMode,
-  });
-}
+export 'package:connect_app/call_v2/real_flow/call_v2_agora_media_runtime.dart'
+    show AgoraJoinAuth, fetchCallV2DevAgoraToken;
 
 const String _agoraFallbackAppId = 'dac900a04a87460c87c3d18b63cac65d';
 const String _agoraFlutterPluginVersion = '6.5.2';
@@ -213,87 +195,6 @@ final class _CallV2TerminalSetupCancelled implements Exception {
   String toString() => 'terminal_setup_cancelled';
 }
 
-/// ---- TOKEN + APPID FETCH ----
-Future<AgoraJoinAuth> fetchAgoraToken({
-  required String channelName,
-  required int uid,
-  required String userAccount,
-  String identityMode = 'uid',
-  bool allowUidZero = false,
-}) async {
-  final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
-      .httpsCallable('getAgoraRtcToken');
-  final resp = await callable.call({
-    'channelName': channelName,
-    'uid': uid,
-    'userAccount': userAccount,
-    'identityMode': identityMode,
-    'allowUidZero': allowUidZero,
-    'role': 'publisher',
-    'expireSeconds': 3600,
-  });
-  final data = (resp.data as Map?) ?? const {};
-  final token = (data['token'] as String?)?.trim();
-  final serverAppId = (data['appId'] as String?)?.trim();
-  final serverUidRaw = data['uid'];
-  final serverUserAccount = (data['userAccount'] as String?)?.trim();
-  final tokenVersion = (data['tokenVersion'] as String?)?.trim() ?? '';
-  final tokenIdentityMode =
-      (data['tokenIdentityMode'] as String?)?.trim() ?? identityMode;
-  final serverUid = serverUidRaw is num ? serverUidRaw.toInt() : uid;
-  if (token == null || token.isEmpty) {
-    throw Exception('Token service returned empty token');
-  }
-  final detectedVersion = tokenVersion.isNotEmpty
-      ? tokenVersion
-      : (token.length >= 3 ? token.substring(0, 3) : token);
-  return AgoraJoinAuth(
-    token: token,
-    appId: (serverAppId == null || serverAppId.isEmpty)
-        ? _agoraFallbackAppId
-        : serverAppId,
-    channelName: channelName,
-    uid: serverUid,
-    userAccount: (serverUserAccount == null || serverUserAccount.isEmpty)
-        ? userAccount
-        : serverUserAccount,
-    tokenVersion: detectedVersion,
-    identityMode: tokenIdentityMode,
-  );
-}
-
-Future<AgoraJoinAuth> fetchCallV2DevAgoraToken({
-  required String callIdentifier,
-  required String participantIdentifier,
-  required bool isVideo,
-  CallV2DevCallableTarget devCallableTarget =
-      const FirebaseCallV2DevCallableTarget(),
-}) async {
-  final transport = await devCallableTarget.createTransport();
-  final provider = RealCallV2TokenProvider(
-    allowRequests: true,
-    transport: transport,
-    defaultRequest: CallV2TokenBackendRequest(
-      callId: callIdentifier,
-      localParticipantUid: participantIdentifier,
-    ),
-  );
-  final result = await provider.resolveToken(
-    CallV2TokenRequest(
-      mode: isVideo ? CallV2RuntimeCallMode.video : CallV2RuntimeCallMode.audio,
-    ),
-  );
-  return AgoraJoinAuth(
-    token: result.token,
-    appId: result.appId,
-    channelName: result.channelAlias,
-    uid: result.rtcUid,
-    userAccount: result.rtcUid.toString(),
-    tokenVersion: 'v2',
-    identityMode: 'uid',
-  );
-}
-
 class AgoraCallScreen extends StatefulWidget {
   final String channelName;
   final bool isVideo;
@@ -338,7 +239,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   static const MethodChannel _pushTokenChannel =
       MethodChannel('connectapp/pushTokens');
   static final CallV2ProcessEngineCleanupGate _engineCleanupGate =
-      CallV2ProcessEngineCleanupGate();
+      callV2PhysicalEngineCleanupGate;
   static int _nextCallSequenceNumber = 0;
   static int _nextEngineGeneration = 0;
   static const bool _testMode =
@@ -422,6 +323,8 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   final CallV2ScreenSetupCancellationOwner _setupCancellation =
       CallV2ScreenSetupCancellationOwner();
   late final CallV2ScreenCallkitController _callkitController;
+  CallV2PhysicalMediaAttachment? _mediaAttachment;
+  VoidCallback? _mediaAttachmentListener;
 
   bool get _useFlutterTextureRenderer =>
       Platform.isIOS && _preferFlutterTextureRendererOnIOS;
@@ -507,9 +410,83 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _handleManagerTerminalSignal();
       if (!widget.skipRuntimeSetupForTest) {
-        unawaited(_begin());
+        unawaited(widget.isVideo ? _begin() : _beginSharedAudio());
       }
     });
+  }
+
+  Future<void> _beginSharedAudio() async {
+    try {
+      await _diagCall('begin_start', meta: {'isVideo': false});
+      if (_testMode) {
+        await _beginInTestMode(setupEpoch: _setupCancellation.beginSetup());
+        return;
+      }
+      final attachment =
+          await CallSessionManager.instance.attachOrStartRouteFirstAudio(
+        inviteId: (widget.inviteId ?? '').trim(),
+        channel: widget.channelName,
+        isCaller: widget.isCaller,
+        acceptedCallkitId: widget.acceptedCallkitId ?? '',
+        lifecycleGeneration: widget.lifecycleGeneration,
+        connectionSystem: widget.connectionSystem,
+      );
+      if (!mounted) {
+        attachment?.detach();
+        return;
+      }
+      if (attachment == null) {
+        throw StateError('No matching physical media owner.');
+      }
+      _mediaAttachment = attachment;
+      _mediaAttachmentListener = _applySharedAudioState;
+      attachment.state.addListener(_mediaAttachmentListener!);
+      _applySharedAudioState();
+      await _diagCall('shared_audio_attached', meta: {
+        'existingMediaOwner': true,
+        'routeFirst': widget.isCaller,
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _fatalError = 'Call connection failed. Please try again.';
+      });
+      await _diagCall('shared_audio_attach_failed', meta: {
+        'errorCategory': error.runtimeType.toString(),
+      });
+    }
+  }
+
+  void _applySharedAudioState() {
+    if (!mounted) return;
+    final state = _mediaAttachment?.state.value;
+    if (state == null) return;
+    final joinedNow = state.joined;
+    setState(() {
+      _joined = joinedNow;
+      _remoteUid = state.remoteParticipantPresent ? 1 : null;
+      _remoteEverJoined = _remoteEverJoined || state.remoteParticipantPresent;
+      _muted = state.muted;
+      _speakerOn = state.speakerEnabled;
+      _isLoading = state.phase != CallV2PhysicalMediaOwnerPhase.joined &&
+          state.phase != CallV2PhysicalMediaOwnerPhase.failed &&
+          state.phase != CallV2PhysicalMediaOwnerPhase.terminal;
+      if (state.phase == CallV2PhysicalMediaOwnerPhase.failed) {
+        _fatalError = 'Call connection failed. Please try again.';
+        _callV2BlockerCode = state.failureCode;
+      }
+      if (_callV2Selected) {
+        _callV2RtcInitialized = state.phase.index >=
+            CallV2PhysicalMediaOwnerPhase.engineReady.index;
+        _callV2JoinAttempted =
+            state.phase.index >= CallV2PhysicalMediaOwnerPhase.joining.index;
+        _callV2RtcJoined = state.joined;
+        _callV2RemoteJoined = state.remoteParticipantPresent;
+        _callV2MediaActive = state.mediaActive;
+      }
+    });
+    if (joinedNow) unawaited(_markCallkitConnected());
   }
 
   void _handleManagerTerminalSignal() {
@@ -2726,7 +2703,15 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     _quiesceEngineCallbacksForTerminal();
     _ringTimeout?.cancel();
     _autoCloseTimer?.cancel();
-    if (!widget.skipRuntimeSetupForTest) {
+    final attachment = _mediaAttachment;
+    final listener = _mediaAttachmentListener;
+    if (attachment != null && listener != null) {
+      attachment.state.removeListener(listener);
+    }
+    attachment?.detach();
+    _mediaAttachment = null;
+    _mediaAttachmentListener = null;
+    if (!widget.skipRuntimeSetupForTest && widget.isVideo) {
       unawaited(_cleanupEngine().then<void>((_) {}, onError: (_) {}));
     }
     super.dispose();
@@ -2734,14 +2719,26 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
   Future<void> _toggleMute() async {
     _muted = !_muted;
-    await _engine?.muteLocalAudioStream(_muted);
+    final attachment = _mediaAttachment;
+    if (!widget.isVideo && attachment != null) {
+      await attachment.setMuted(_muted);
+    } else {
+      await _engine?.muteLocalAudioStream(_muted);
+    }
+    if (!mounted) return;
     setState(() {});
   }
 
   Future<void> _toggleSpeaker() async {
     _speakerRouteExplicitlyChanged = true;
     _speakerOn = !_speakerOn;
-    await _engine?.setEnableSpeakerphone(_speakerOn);
+    final attachment = _mediaAttachment;
+    if (!widget.isVideo && attachment != null) {
+      await attachment.setSpeakerEnabled(_speakerOn);
+    } else {
+      await _engine?.setEnableSpeakerphone(_speakerOn);
+    }
+    if (!mounted) return;
     setState(() {});
   }
 

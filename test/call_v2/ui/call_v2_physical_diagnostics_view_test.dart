@@ -10,6 +10,9 @@ class _FakeNativeBridge implements CallV2NativeDiagnosticBridge {
   int loadCount = 0;
 
   @override
+  Future<bool> acknowledgeMediaOwnership(String exactNativeKey) async => true;
+
+  @override
   Future<bool> acknowledgeRouteOwnership(String exactNativeKey) async => true;
 
   @override

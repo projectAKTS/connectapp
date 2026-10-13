@@ -320,6 +320,71 @@ class RunnerTests: XCTestCase {
     wait(for: [timeoutDidFire], timeout: 0.08)
   }
 
+  func testMediaOwnershipAckCancelsExactWatchAndRouteAckRemainsIndependent() {
+    let timeoutDidFire = expectation(description: "media ownership cancels timeout")
+    timeoutDidFire.isInverted = true
+    let watchdog = makeWatchdog(
+      timeout: 0.04,
+      requestExactEnd: { _ in timeoutDidFire.fulfill() }
+    )
+
+    XCTAssertTrue(watchdog.start(exactKey: "private-native-key"))
+    XCTAssertFalse(watchdog.acknowledgeMediaOwned(exactKey: "different-native-key"))
+    XCTAssertTrue(watchdog.isWatching(exactKey: "private-native-key"))
+    XCTAssertTrue(watchdog.acknowledgeMediaOwned(exactKey: "private-native-key"))
+    XCTAssertEqual(watchdog.activeCount, 0)
+    XCTAssertTrue(watchdog.mediaOwnedAck)
+    XCTAssertFalse(watchdog.routeOwnedAck)
+
+    XCTAssertTrue(watchdog.acknowledgeRouteOwned(exactKey: "private-native-key"))
+    XCTAssertTrue(watchdog.routeOwnedAck)
+    wait(for: [timeoutDidFire], timeout: 0.08)
+  }
+
+  func testMediaOwnershipAckIsDuplicateSafeAndTerminalRejectsLateRouteAck() {
+    let watchdog = makeWatchdog(timeout: 1)
+
+    XCTAssertTrue(watchdog.start(exactKey: "private-native-key"))
+    XCTAssertTrue(watchdog.acknowledgeMediaOwned(exactKey: "private-native-key"))
+    XCTAssertTrue(watchdog.acknowledgeMediaOwned(exactKey: "private-native-key"))
+    XCTAssertTrue(watchdog.terminal(exactKey: "private-native-key"))
+    XCTAssertFalse(watchdog.acknowledgeRouteOwned(exactKey: "private-native-key"))
+  }
+
+  func testAcceptedAudioActivationBeforeAuthorityLatchesExactOwner() {
+    let ownership = CallV2NativeAcceptedAudioSessionOwnership()
+
+    XCTAssertNil(ownership.activated())
+    XCTAssertEqual(ownership.accepted(exactKey: "private-native-key"), "private-native-key")
+    XCTAssertTrue(ownership.isReady(exactKey: "private-native-key"))
+    XCTAssertFalse(ownership.isReady(exactKey: "different-native-key"))
+  }
+
+  func testAcceptedAudioAuthorityBeforeActivationUsesExactOwnerOnceReady() {
+    let ownership = CallV2NativeAcceptedAudioSessionOwnership()
+
+    XCTAssertNil(ownership.accepted(exactKey: "private-native-key"))
+    XCTAssertFalse(ownership.isReady(exactKey: "private-native-key"))
+    XCTAssertEqual(ownership.activated(), "private-native-key")
+    XCTAssertTrue(ownership.isReady(exactKey: "private-native-key"))
+    XCTAssertEqual(ownership.accepted(exactKey: "private-native-key"), "private-native-key")
+
+    ownership.terminal(exactKey: "private-native-key")
+    XCTAssertFalse(ownership.isReady(exactKey: "private-native-key"))
+  }
+
+  func testAcceptedAudioSequentialExactOwnersDoNotShareReadiness() {
+    let ownership = CallV2NativeAcceptedAudioSessionOwnership()
+
+    XCTAssertNil(ownership.accepted(exactKey: "private-native-key-a"))
+    XCTAssertEqual(ownership.activated(), "private-native-key-a")
+    ownership.terminal(exactKey: "private-native-key-a")
+
+    XCTAssertEqual(ownership.accepted(exactKey: "private-native-key-b"), "private-native-key-b")
+    XCTAssertFalse(ownership.isReady(exactKey: "private-native-key-a"))
+    XCTAssertTrue(ownership.isReady(exactKey: "private-native-key-b"))
+  }
+
   func testTimeoutEndsAndVerifiesExactNativeCall() {
     let verified = expectation(description: "exact native call verified absent")
     var active = Set(["private-native-key"])
@@ -444,6 +509,7 @@ class RunnerTests: XCTestCase {
 
     let snapshot = ledger.safeSnapshot(
       nativeWatchActive: true,
+      mediaOwnedAck: false,
       routeOwnedAck: false,
       nativeCallActive: true,
       blockerCode: "none"

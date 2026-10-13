@@ -162,6 +162,9 @@ class NotificationService with WidgetsBindingObserver {
       acknowledgeNativeRouteOwnership: HelperlyTestRuntime.isEnabled
           ? null
           : CallV2PhysicalDiagnosticLedger.instance.acknowledgeRouteOpened,
+      acknowledgeNativeMediaOwnership: HelperlyTestRuntime.isEnabled
+          ? null
+          : CallV2PhysicalDiagnosticLedger.instance.acknowledgeMediaJoined,
     );
   }
 
@@ -1304,6 +1307,21 @@ class NotificationService with WidgetsBindingObserver {
   }
 
   Future<dynamic> _handleNativePushMethodCall(MethodCall call) async {
+    if (call.method == 'callkitAudioSessionChangedNative') {
+      final rawArgs = call.arguments;
+      if (rawArgs is! Map) return true;
+      final data = Map<String, dynamic>.from(rawArgs.cast<dynamic, dynamic>());
+      final callkitId = (data['callkitId'] ?? '').toString().trim();
+      final active = data['active'] == true;
+      if (callkitId.isNotEmpty) {
+        await CallSessionManager.instance.handleCallkitAudioSessionChanged(
+          callkitId: callkitId,
+          active: active,
+        );
+      }
+      return true;
+    }
+
     if (call.method == 'callkitNativeSafetyTerminated') {
       final rawArgs = call.arguments;
       if (rawArgs is! Map) return true;
@@ -1337,6 +1355,7 @@ class NotificationService with WidgetsBindingObserver {
       final fromName = (data['fromName'] ?? 'Caller').toString();
       final fromUid = (data['fromUid'] ?? '').toString().trim();
       final callkitId = (data['callkitId'] ?? '').toString().trim();
+      final audioSessionActive = data['audioSessionActive'] == true;
       final diagnosticOrdinal = data['diagnosticOrdinal'];
       final diagnosticStartedAt = data['diagnosticStartedAtEpochMilliseconds'];
       final isVideo = _videoField(data, const <String, dynamic>{});
@@ -1358,6 +1377,13 @@ class NotificationService with WidgetsBindingObserver {
         'navigatorReady': navigatorKey?.currentState != null,
       }));
       if (channel.isEmpty || inviteId.isEmpty) return true;
+
+      if (audioSessionActive && callkitId.isNotEmpty) {
+        await CallSessionManager.instance.handleCallkitAudioSessionChanged(
+          callkitId: callkitId,
+          active: true,
+        );
+      }
 
       unawaited(
         Future<void>.microtask(() async {
@@ -1939,6 +1965,10 @@ class NotificationService with WidgetsBindingObserver {
           (raw['lastCallkitAcceptedFromUid'] ?? '').toString().trim();
       final lastCallkitAcceptedIsVideo =
           (raw['lastCallkitAcceptedIsVideo'] ?? '').toString().trim();
+      final lastCallkitAcceptedAudioSessionActive =
+          (raw['lastCallkitAcceptedAudioSessionActive'] ?? '')
+              .toString()
+              .trim();
       final lastCallkitEvent =
           (raw['lastCallkitEvent'] ?? '').toString().trim();
       final lastCallkitEventAt =
@@ -1969,6 +1999,8 @@ class NotificationService with WidgetsBindingObserver {
         'lastCallkitAcceptedFromName': lastCallkitAcceptedFromName,
         'lastCallkitAcceptedFromUid': lastCallkitAcceptedFromUid,
         'lastCallkitAcceptedIsVideo': lastCallkitAcceptedIsVideo,
+        'lastCallkitAcceptedAudioSessionActive':
+            lastCallkitAcceptedAudioSessionActive,
         'lastCallkitEvent': lastCallkitEvent,
         'lastCallkitEventAt': lastCallkitEventAt,
         'lastCallkitEventCallkitId': lastCallkitEventCallkitId,
@@ -2563,6 +2595,9 @@ class NotificationService with WidgetsBindingObserver {
           _normalizeTokenLikeValue(nativeTokens['lastCallkitAcceptedInviteId']);
       final acceptedCallkitId = _normalizeTokenLikeValue(
           nativeTokens['lastCallkitAcceptedCallkitId']);
+      final acceptedAudioSessionActive = _truthyValue(
+        nativeTokens['lastCallkitAcceptedAudioSessionActive'] ?? '',
+      );
       final lastCallkitEvent =
           _normalizeTokenLikeValue(nativeTokens['lastCallkitEvent'])
               .toLowerCase();
@@ -2609,6 +2644,12 @@ class NotificationService with WidgetsBindingObserver {
         final isVideo = _truthyValue(
           _normalizeTokenLikeValue(nativeTokens['lastCallkitAcceptedIsVideo']),
         );
+        if (acceptedAudioSessionActive && acceptedCallkitId.isNotEmpty) {
+          await CallSessionManager.instance.handleCallkitAudioSessionChanged(
+            callkitId: acceptedCallkitId,
+            active: true,
+          );
+        }
         await _recoverAcceptedCallkitEvent(
           inviteId: acceptedInviteId,
           channel: acceptedChannel,
