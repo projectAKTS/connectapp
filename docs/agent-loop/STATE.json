@@ -2,17 +2,43 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "background_accepted_audio_media_ownership",
-  "status": "task_ready",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "2906cd605c31679919fb961c7433668861ca3672",
   "starting_sha": "2906cd605c31679919fb961c7433668861ca3672",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
+  "code_commit_sha": "3e9628d8d224a5f7cb1667874e10211554b4fc23",
   "ending_sha": "SELF",
-  "changed_files": [],
+  "changed_files": [
+    "ios/Runner/AppDelegate.swift",
+    "ios/RunnerTests/RunnerTests.swift",
+    "lib/call_v2/diagnostics/call_v2_physical_diagnostic_ledger.dart",
+    "lib/call_v2/real_flow/call_v2_agora_media_runtime.dart",
+    "lib/call_v2/real_flow/call_v2_physical_media_owner.dart",
+    "lib/screens/call/agora_call_screen.dart",
+    "lib/services/call_session_manager.dart",
+    "lib/services/notification_service.dart",
+    "test/call_v2/diagnostics/call_v2_physical_diagnostic_ledger_test.dart",
+    "test/call_v2/real_flow/call_v2_background_audio_media_integration_test.dart",
+    "test/call_v2/real_flow/call_v2_physical_media_owner_test.dart",
+    "test/call_v2/ui/call_v2_physical_diagnostics_view_test.dart",
+    "docs/agent-loop/HANDOFF.md",
+    "docs/agent-loop/STATE.json"
+  ],
   "validation": {
-    "authorization_metadata": "validated before authorization commit",
-    "implementation": "not started"
+    "flutter_analyze": "passed, no issues",
+    "focused_background_audio": "passed, 33 tests",
+    "route_ownership": "passed, 14 tests",
+    "exact_callkit": "passed, 14 tests",
+    "notification_ownership": "passed, 38 tests",
+    "rapid_lifecycle": "passed, 65 tests",
+    "repeated_lifecycle": "passed, 50 tests",
+    "foreground_recovery": "passed, 3 tests",
+    "full_call_v2": "passed, 2343 tests",
+    "ios_runner_tests": "passed, 26 tests, 0 failed",
+    "format_check": "passed, 10 files checked, 0 changed",
+    "git_diff_check": "passed",
+    "dependency_diff": "none"
   },
   "safety": {
     "deployed": false,
@@ -20,11 +46,11 @@
     "production_services_contacted": false,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": false,
-    "test_changes": false
+    "production_code_changes": true,
+    "test_changes": true
   },
   "review": {
-    "decision": "implementation_required",
-    "notes": "Authorize only the background accepted audio media ownership implementation described in NEXT_TASK.md: one exact media owner, extraction of the validated AgoraCallScreen runtime, exact CallKit audio-session readiness, later route attachment, distinct media-owned and route-owned acknowledgments, and shared cleanup-gate ownership. Preserve video and outgoing-audio route-first sequencing, accepted transaction authority, route/redial corrections, PushKit/APNs, backend, dependencies, and package versions. No physical-fix claim is authorized."
+    "decision": "ready_for_review",
+    "notes": "Implemented one exact manager-owned background accepted-audio media owner using the extracted production Agora runtime and the existing process cleanup gate. Exact native audio-session readiness and media-owned ACK are distinct from route-owned ACK. Later screen attachment reuses the same runtime/session; widget disposal detaches only. Video and outgoing audio remain route-first. Automated suites pass; no physical-fix claim, TestFlight build, or deployment was performed."
   }
 }

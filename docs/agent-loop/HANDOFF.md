@@ -1,139 +1,136 @@
-# Call Route Ownership + Authoritative Terminal Transition Handoff
+# Background Accepted Audio Media Ownership Handoff
 
 STATUS: `ready_for_review`
 
-STARTING_SHA: `9ed7df1ad8825390e5776a95b911f524c7a30491`
-IMPLEMENTATION_SHA: `e4904c103938ba191bb5fee94b9251cdcab8302b`
+STARTING_HEAD: `970b0a1f736969da71f405713ee7e3d005cf4e17`
+ACCEPTED_CHECKPOINT_SHA: `2906cd605c31679919fb961c7433668861ca3672`
+IMPLEMENTATION_SHA: `3e9628d8d224a5f7cb1667874e10211554b4fc23`
 ENDING_SHA: `SELF`
 
-## Root Cause Being Fixed
+## Implementation
 
-Call-screen exits were not uniformly owned by `CallSessionManager`: the Audio
-AppBar close action and some loading/error/back paths could pop without first
-performing managed terminal transition and teardown. Terminal classification
-also depended on local stage, so stale local `ringing` state could attempt a
-caller cancellation after Firestore had already advanced to
-`accepted`/`joining`/`connected`. Finally, a stale route completion could clear
-process-global route state belonging to a newer call, and destructive chat
-navigation could replace the route while call lifecycle still owned it.
+Incoming authoritatively accepted audio calls can now acquire one exact,
+manager-owned physical media session before a Flutter route exists. The owner
+is keyed by invite identity, exact accepted CallKit identity, lifecycle
+generation, channel, media type, direction, and connection system.
 
-## Route Exit Model
+The production Agora setup previously embedded in `AgoraCallScreen` is shared
+through `CallV2AgoraMediaRuntime`. A later audio screen attaches to the exact
+existing owner and does not fetch a second token, create another engine,
+register another handler, or join again. Screen disposal detaches observation
+only; exact manager lifecycle termination owns media cleanup.
 
-Old:
+Video and outgoing audio remain route-first.
 
-`UI close/back/error -> route pop may occur independently -> best-effort cleanup`
+## Native Ownership
 
-New:
+- Exact CallKit audio-session readiness converges whether activation or
+  authoritative acceptance arrives first.
+- `callkitMediaOwned` is sent only after the exact runtime joins RTC and the
+  lifecycle generation is still current.
+- The media-owned acknowledgment satisfies the native no-owner safety watch
+  without asserting route ownership.
+- `callkitRouteOwned` remains independent and is sent only after a real route
+  opens.
+- Duplicate, mismatched, terminal, and late acknowledgments are exact-ID safe.
+- Native watchdog duration and termination semantics are unchanged.
 
-`UI close/back/error -> exact route owner asks manager to terminate -> authoritative terminal transaction -> exact teardown -> pop is authorized`
+## Lifecycle And Cleanup
 
-`PopScope` now covers loading, active, error, and ended states. The Audio and
-Video variants share the same managed exit behavior. A route already proven
-terminal by its exact manager ownership may close without a second terminal
-write; an error label alone is not terminal authority.
-
-## Authoritative Terminal Transition
-
-The local-exit transaction reads the current invite and classifies from its
-authoritative Firestore state:
-
-- `ringing` plus caller exit becomes `cancelled`;
-- `accepted`, `joining`, or `connected` plus participant exit becomes `ended`;
-- an already-terminal document keeps its existing status and reason;
-- a participant mismatch cannot mutate the invite;
-- stale local `ringing` cannot regress an advanced server state.
-
-The transition is single-flight per exact session. Existing terminal status and
-the existing Agora-derived terminal reason are preserved rather than
-overwritten by route-close cleanup.
-
-## Exact Route Owner
-
-`CallSessionManager` now records route ownership as exact session identity,
-invite identity, accepted CallKit identity, and lifecycle generation. Route
-completion clears route state only when that owner still matches. A delayed
-Call A route callback cannot clear or terminalize Call B, and duplicate route
-completion cannot perform a second terminal transition.
-
-This does not change exact CallKit UUID propagation or cleanup architecture.
-
-## Chat Navigation
-
-Pending destructive chat navigation remains queued while call lifecycle owns
-an active route. It is retried only after `CallSessionManager` reports that
-destructive navigation is safe, including a second safety check after Navigator
-availability. No chat request is discarded solely because call teardown is in
-progress.
+- Headless joining, joined, remote-presence, offline, timeout, and failure
+  progress flow through existing `CallSessionManager` lifecycle APIs.
+- The later route reuses the exact existing manager session, preserving
+  headless `joining` or `connected` state rather than replacing it with an
+  older accepted snapshot.
+- Token, engine, handler, join, and cleanup are single-flight per exact media
+  key.
+- Runtime callbacks validate media identity and engine generation.
+- Terminal-before-start and terminal-during-token completion cannot create or
+  join a late engine.
+- Audio and existing video runtime cleanup use the same process-wide
+  `callV2PhysicalEngineCleanupGate`.
+- Late Call A callbacks, acknowledgments, route attachment, or cleanup cannot
+  mutate or release Call B.
 
 ## Files Changed
 
+- `ios/Runner/AppDelegate.swift`
+- `ios/RunnerTests/RunnerTests.swift`
+- `lib/call_v2/diagnostics/call_v2_physical_diagnostic_ledger.dart`
+- `lib/call_v2/real_flow/call_v2_agora_media_runtime.dart`
+- `lib/call_v2/real_flow/call_v2_physical_media_owner.dart`
 - `lib/screens/call/agora_call_screen.dart`
 - `lib/services/call_session_manager.dart`
 - `lib/services/notification_service.dart`
-- `test/call_v2/real_flow/call_v2_route_ownership_terminal_transition_test.dart`
+- `test/call_v2/diagnostics/call_v2_physical_diagnostic_ledger_test.dart`
+- `test/call_v2/real_flow/call_v2_background_audio_media_integration_test.dart`
+- `test/call_v2/real_flow/call_v2_physical_media_owner_test.dart`
+- `test/call_v2/ui/call_v2_physical_diagnostics_view_test.dart`
 - `docs/agent-loop/HANDOFF.md`
 - `docs/agent-loop/STATE.json`
 
-The pre-existing untracked `docs/CALL_V2_ARCHITECTURE_DEEP_DIVE.md` remains
-untouched.
+The pre-existing untracked
+`docs/CALL_V2_ARCHITECTURE_DEEP_DIVE.md` remains untouched.
 
-## Regression Tests
+## Test Evidence
 
-The new focused file contains 14 passing tests covering:
-
-- stale local `ringing` with authoritative `accepted`, `joining`, or
-  `connected` transitions to `ended`;
-- caller exit from authoritative `ringing` transitions to `cancelled`;
-- every existing terminal state and Agora terminal reason is preserved;
-- active Audio close, loading close, system back, terminal UI-only close, and
-  Audio/Video parity use managed route ownership;
-- delayed Call A route completion cannot mutate Call B;
-- duplicate route completion produces one terminal transition;
-- destructive chat navigation defers while the call route is owned and resumes
-  when lifecycle becomes safe.
-
-## Validation
-
-- `flutter analyze`: passed, no issues.
-- New route ownership / terminal transition tests: passed, 14 tests.
-- Exact CallKit ownership tests: passed, 14 tests.
-- Notification ownership tests: passed, 38 tests.
-- Rapid lifecycle manager tests: passed, 65 tests.
-- Repeated-call lifecycle tests: passed, 50 tests.
-- Foreground recovery tests: passed, 3 tests.
-- Full `test/call_v2 --no-pub`: passed, 2327 tests.
-- `test/notification_foreground_recovery_test.dart --no-pub`: passed, 3 tests.
-- iOS `RunnerTests`: passed, 21 tests, 0 failed, 0 skipped.
+- Focused background-audio/media/diagnostic/wiring set: 33 passed.
+  - Physical media owner: 11 passed.
+  - Background manager and real screen integration: 4 passed.
+  - Physical diagnostic ledger: 6 passed.
+  - Remaining diagnostics-view and real-flow wiring coverage passed in the
+    combined focused run.
+- Route ownership / authoritative terminal transition: 14 passed.
+- Exact CallKit ownership: 14 passed.
+- Notification ownership: 38 passed.
+- Rapid lifecycle manager: 65 passed.
+- Repeated-call lifecycle and cleanup/redial ownership: 50 passed.
+- Foreground recovery: 3 passed.
+- Full isolated Call V2 suite: 2,343 passed.
+- iOS RunnerTests: 26 passed, 0 failed.
+- `flutter analyze`: passed with no issues.
+- Dart format check: 10 files checked, 0 changed.
 - `git diff --check`: passed.
-- `pubspec.yaml`, `pubspec.lock`, `ios/Podfile`, and `ios/Podfile.lock`:
-  unchanged.
+- Dependency diff: none for `pubspec.yaml`, `pubspec.lock`,
+  `ios/Podfile`, or `ios/Podfile.lock`.
 
-The full Call V2 run was performed with the preserved untracked architecture
-document temporarily outside the repository because four historical audit
-tests intentionally enumerate repository paths. The document was restored
-unchanged immediately afterward.
+Four historical phase-isolation tests enumerate all untracked repository paths.
+For the final full-suite run, the pre-existing architecture document was moved
+temporarily outside the repository and restored immediately afterward. Its
+SHA-256 was identical before and after:
+`d33b3bf300a4980807b863d6c4b29465548284b1c6004638dcfa7fbcb2eda0f3`.
 
 ## Adversarial Races
 
-- **A: stale local ringing versus accepted server state.** The transaction
-  uses authoritative status and writes `ended`, never a regressive
-  cancellation reason.
-- **B: delayed Call A route completion after Call B owns the route.** Exact
-  route-owner and generation checks leave B untouched.
-- **C: duplicate close/completion for one route.** The per-session single-flight
-  terminal transition and owner check allow one mutation and one teardown.
-- **D: destructive chat navigation during route ownership.** Navigation stays
-  queued until lifecycle is safe, then resumes once.
+- **A: activation before authority.** Exact readiness latches and starts the
+  owner once after authoritative acceptance.
+- **B: authority before activation.** No engine starts until matching exact
+  native audio readiness arrives.
+- **C: duplicate activation or accepted recovery.** One owner and one start
+  future produce one token, engine, handler, and join.
+- **D: foreground during token acquisition.** The route attaches to the
+  in-flight owner without starting another runtime.
+- **E: terminal before or during startup.** Epoch and ownership checks suppress
+  late token/engine/join completion and clean the exact owner.
+- **F: late Call A work after Call B owns media.** Immutable key, lifecycle
+  generation, and engine generation checks leave B untouched.
+- **G: screen disposal while audio remains active.** UI detaches; manager-owned
+  media survives until exact lifecycle cleanup.
+- **H: rapid audio -> video -> audio.** The shared process cleanup gate
+  serializes engine cleanup and creation while video remains route-first.
 
 ## Scope
 
-No PushKit/APNs behavior, exact CallKit UUID ownership, accepted-recovery or
-Firestore accept architecture, Navigator architecture, Agora media/token
-configuration, redial-gate ordering, watchdog timing, backend, dependencies,
-Flutter version, or plugin version changed. No backend deployment or TestFlight
-build was performed. This handoff does not claim physical validation.
+No APNs/PushKit delivery architecture, incoming presentation policy,
+authoritative accept transaction, Firestore retry/schema/rules, route ownership
+correction, redial-gate ordering, backend function, dependency, Flutter/Agora/
+CallKit package version, or native watchdog timeout changed. No backend or
+Firebase deployment and no TestFlight build were performed.
+
+This handoff does not claim physical validation or that the physical audio issue
+is fixed.
 
 ## Next
 
-Review the implementation and automated evidence before authorizing any
-TestFlight build or physical validation.
+Review the implementation and automated evidence. Do not request physical
+testing or create TestFlight before review acceptance.
