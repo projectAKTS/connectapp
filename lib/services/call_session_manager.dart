@@ -310,6 +310,7 @@ typedef NativeRouteOwnershipAcknowledger = Future<bool> Function(
 typedef NativeMediaOwnershipAcknowledger = Future<bool> Function(
   String exactNativeKey,
 );
+typedef BeforeAgoraJoinProgressForTest = Future<void> Function();
 typedef CallScreenOpenRecorderForTest = Future<void> Function({
   required String inviteId,
   required String channel,
@@ -466,6 +467,7 @@ class CallSessionManager {
   Future<Map<String, dynamic>?> Function(String inviteId)?
       _readInviteDataForTest;
   Future<void> Function(int attempt)? _beforeAcceptTransactionAttemptForTest;
+  BeforeAgoraJoinProgressForTest? _beforeAgoraJoinProgressForTest;
   CallScreenOpenRecorderForTest? _callScreenOpenRecorderForTest;
   bool _skipActiveInviteBindingForTest = false;
   bool _skipAcceptedNativeWatchBindingForTest = false;
@@ -723,6 +725,7 @@ class CallSessionManager {
     _afterOutgoingInviteWriteForTest = null;
     _readInviteDataForTest = null;
     _beforeAcceptTransactionAttemptForTest = null;
+    _beforeAgoraJoinProgressForTest = null;
     _callScreenOpenRecorderForTest = null;
     _acknowledgeNativeRouteOwnership = null;
     _acknowledgeNativeMediaOwnership = null;
@@ -863,6 +866,7 @@ class CallSessionManager {
     Future<Map<String, dynamic>?> Function(String inviteId)?
         readInviteDataForTest,
     Future<void> Function(int attempt)? beforeAcceptTransactionAttemptForTest,
+    BeforeAgoraJoinProgressForTest? beforeAgoraJoinProgressForTest,
     CallScreenOpenRecorderForTest? callScreenOpenRecorderForTest,
     bool? skipActiveInviteBindingForTest,
     bool? skipAcceptedNativeWatchBindingForTest,
@@ -902,6 +906,9 @@ class CallSessionManager {
     if (beforeAcceptTransactionAttemptForTest != null) {
       _beforeAcceptTransactionAttemptForTest =
           beforeAcceptTransactionAttemptForTest;
+    }
+    if (beforeAgoraJoinProgressForTest != null) {
+      _beforeAgoraJoinProgressForTest = beforeAgoraJoinProgressForTest;
     }
     if (callScreenOpenRecorderForTest != null) {
       _callScreenOpenRecorderForTest = callScreenOpenRecorderForTest;
@@ -2114,25 +2121,31 @@ class CallSessionManager {
   ) async {
     final session = _current;
     if (session == null || !_mediaKeyForSession(session).matches(key)) return;
-    await reportAgoraJoinSuccess(
-      inviteId: session.inviteId,
-      isCaller: session.isCaller,
-    );
-    if (!_mediaKeyForSession(session).matches(key)) return;
     final exactId = key.acceptedCallkitId.trim();
-    if (exactId.isEmpty) return;
-    final acknowledge = _acknowledgeNativeMediaOwnership;
-    if (acknowledge == null) return;
-    final acknowledged = await acknowledge(exactId);
-    if (!acknowledged ||
-        _current == null ||
-        !_mediaKeyForSession(_current!).matches(key)) {
-      return;
+    if (exactId.isNotEmpty) {
+      final acknowledge = _acknowledgeNativeMediaOwnership;
+      if (acknowledge != null) {
+        var acknowledged = false;
+        try {
+          acknowledged = await acknowledge(exactId);
+        } catch (_) {}
+        final current = _current;
+        if (current == null || !_mediaKeyForSession(current).matches(key)) {
+          return;
+        }
+        final watch = _acceptedNativeRouteWatch;
+        if (acknowledged &&
+            watch != null &&
+            watch.lifecycleGeneration == key.lifecycleGeneration &&
+            watch.matchesSession(current)) {
+          await _transferAcceptedNativeWatchToMedia(watch);
+        }
+      }
     }
-    final watch = _acceptedNativeRouteWatch;
-    if (watch != null && watch.matchesSession(session)) {
-      await _transferAcceptedNativeWatchToMedia(watch);
-    }
+    await reportAgoraJoinSuccess(
+      inviteId: key.inviteId,
+      isCaller: key.isCaller,
+    );
   }
 
   Future<void> reportMediaSetupBegan({
@@ -2202,6 +2215,16 @@ class CallSessionManager {
     final session = _current;
     if (!_canApplyMediaProgress(session, inviteId: inviteId)) return;
     final generation = session!.lifecycleGeneration;
+    final beforeProgress = _beforeAgoraJoinProgressForTest;
+    if (_debugTestAccessEnabled && beforeProgress != null) {
+      await beforeProgress();
+      if (!_canApplyMediaProgressForGeneration(
+        inviteId: inviteId,
+        generation: generation,
+      )) {
+        return;
+      }
+    }
     CallV2PhysicalDiagnosticLedger.instance.record(
       CallV2PhysicalDiagnosticStage.agoraJoinAttempted,
     );
@@ -5683,6 +5706,8 @@ class CallSessionManager {
       'acceptedRouteTerminalObserved': _acceptedRouteTerminalObserved,
       'nativeAcceptedCallActive': _nativeAcceptedCallInviteId != null,
       'acceptedNativeWatchActive': _acceptedNativeRouteWatch != null,
+      'acceptedNativeWatchMediaOwned':
+          _acceptedNativeRouteWatch?.mediaOwned ?? false,
       'acceptedNativeWatchTerminalObserved':
           _acceptedNativeWatchTerminalObserved,
       'acceptedNativeWatchDeadlineReached': _acceptedNativeWatchDeadlineReached,

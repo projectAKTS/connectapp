@@ -31,6 +31,7 @@ void main() {
   late List<String> routes;
   late List<NativeCallSnapshot> nativeCalls;
   late bool appForeground;
+  late bool autoJoinSuccess;
 
   Future<void> seedInvite(String inviteId, {bool isVideo = false}) async {
     await firestore.collection('callInvites').doc(inviteId).set({
@@ -123,9 +124,13 @@ void main() {
     routes = <String>[];
     nativeCalls = <NativeCallSnapshot>[];
     appForeground = false;
+    autoJoinSuccess = true;
     mediaOwner = CallV2PhysicalMediaOwner(
       runtimeFactory: (config) {
-        final runtime = _ManagerFakeMediaRuntime(config);
+        final runtime = _ManagerFakeMediaRuntime(
+          config,
+          autoJoinSuccess: autoJoinSuccess,
+        );
         runtimes.add(runtime);
         return runtime;
       },
@@ -178,6 +183,176 @@ void main() {
     expect(mediaAcks, <String>[exactId]);
     expect(routeAcks, isEmpty);
     expect(manager.debugSnapshot()['acceptedNativeWatchActive'], isTrue);
+    await manager.forceIdleForTest();
+    await tester.pump();
+  });
+
+  testWidgets(
+      'media ACK and watch transfer precede blocked Firestore join progress',
+      (tester) async {
+    final progressEntered = Completer<void>();
+    final releaseProgress = Completer<void>();
+    manager.debugConfigureAcceptedNativeRouteWatchForTest(
+      timeout: const Duration(milliseconds: 20),
+    );
+    manager.configure(
+      beforeAgoraJoinProgressForTest: () async {
+        if (!progressEntered.isCompleted) progressEntered.complete();
+        await releaseProgress.future;
+      },
+    );
+    await seedInvite('blocked_join_progress');
+    nativeCalls.add(const NativeCallSnapshot(
+      callkitId: exactId,
+      inviteId: 'blocked_join_progress',
+      channel: 'channel_blocked_join_progress',
+      accepted: true,
+    ));
+    await manager.handleCallkitAudioSessionChanged(
+      callkitId: exactId,
+      active: true,
+    );
+
+    expect(
+      await manager.handleRecoveredAcceptedInvite(
+        inviteId: 'blocked_join_progress',
+        channel: 'channel_blocked_join_progress',
+        isVideo: false,
+        fromName: 'Background Caller',
+        fromUid: callerUid,
+        callkitId: exactId,
+      ),
+      AcceptedCallRecoveryResult.pendingNavigator,
+    );
+    await progressEntered.future.timeout(const Duration(seconds: 1));
+
+    expect(mediaAcks, <String>[exactId]);
+    expect(routeAcks, isEmpty);
+    expect(
+      manager.debugSnapshot()['acceptedNativeWatchMediaOwned'],
+      isTrue,
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(
+      manager.debugSnapshot()['acceptedNativeWatchDeadlineReached'],
+      isFalse,
+    );
+
+    releaseProgress.complete();
+    for (var i = 0; i < 100; i += 1) {
+      await tester.pump(const Duration(milliseconds: 5));
+      final invite = await firestore
+          .collection('callInvites')
+          .doc('blocked_join_progress')
+          .get();
+      if (invite.data()?['calleeStage'] == 'joined_local') break;
+    }
+    final invite = await firestore
+        .collection('callInvites')
+        .doc('blocked_join_progress')
+        .get();
+    expect(invite.data()?['calleeStage'], 'joined_local');
+    expect(mediaAcks, <String>[exactId]);
+    expect(routeAcks, isEmpty);
+    await manager.forceIdleForTest();
+    await tester.pump();
+  });
+
+  testWidgets('stale media key before join success sends no media ACK',
+      (tester) async {
+    autoJoinSuccess = false;
+    await seedInvite('stale_before_join');
+    await manager.handleCallkitAudioSessionChanged(
+      callkitId: exactId,
+      active: true,
+    );
+    expect(
+      await manager.handleRecoveredAcceptedInvite(
+        inviteId: 'stale_before_join',
+        channel: 'channel_stale_before_join',
+        isVideo: false,
+        fromName: 'Background Caller',
+        fromUid: callerUid,
+        callkitId: exactId,
+      ),
+      AcceptedCallRecoveryResult.pendingNavigator,
+    );
+    await waitUntil(tester, () => runtimes.isNotEmpty);
+    final staleRuntime = runtimes.single;
+
+    await manager.forceIdleForTest();
+    configureManager();
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'newer_call',
+      channel: 'channel_newer_call',
+      acceptedCallkitId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      status: CallInviteStatus.connected,
+      isCaller: false,
+    );
+    await staleRuntime.fireJoinSuccess();
+
+    expect(mediaAcks, isEmpty);
+    expect(manager.activeInviteId, 'newer_call');
+    expect(manager.debugSnapshot()['phase'], CallSessionPhase.connected.name);
+    await manager.forceIdleForTest();
+    await tester.pump();
+  });
+
+  testWidgets('late media ACK completion cannot transfer or mutate newer call',
+      (tester) async {
+    autoJoinSuccess = false;
+    final ackEntered = Completer<void>();
+    final releaseAck = Completer<bool>();
+    manager.configure(
+      acknowledgeNativeMediaOwnership: (id) async {
+        mediaAcks.add(id);
+        if (!ackEntered.isCompleted) ackEntered.complete();
+        return releaseAck.future;
+      },
+    );
+    await seedInvite('late_ack_call_a');
+    await manager.handleCallkitAudioSessionChanged(
+      callkitId: exactId,
+      active: true,
+    );
+    expect(
+      await manager.handleRecoveredAcceptedInvite(
+        inviteId: 'late_ack_call_a',
+        channel: 'channel_late_ack_call_a',
+        isVideo: false,
+        fromName: 'Background Caller',
+        fromUid: callerUid,
+        callkitId: exactId,
+      ),
+      AcceptedCallRecoveryResult.pendingNavigator,
+    );
+    await waitUntil(tester, () => runtimes.isNotEmpty);
+    final lateJoin = runtimes.single.fireJoinSuccess();
+    await ackEntered.future.timeout(const Duration(seconds: 1));
+
+    await manager.forceIdleForTest();
+    configureManager();
+    await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'late_ack_call_b',
+      channel: 'channel_late_ack_call_b',
+      acceptedCallkitId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      status: CallInviteStatus.connected,
+      isCaller: false,
+    );
+    releaseAck.complete(true);
+    await lateJoin;
+
+    expect(mediaAcks, <String>[exactId]);
+    expect(routeAcks, isEmpty);
+    expect(manager.activeInviteId, 'late_ack_call_b');
+    expect(manager.debugSnapshot()['phase'], CallSessionPhase.connected.name);
+    expect(
+      manager.debugSnapshot()['acceptedNativeWatchMediaOwned'],
+      isFalse,
+    );
+    final callA =
+        await firestore.collection('callInvites').doc('late_ack_call_a').get();
+    expect(callA.data()?['calleeStage'], isNot('joined_local'));
     await manager.forceIdleForTest();
     await tester.pump();
   });
@@ -315,9 +490,13 @@ void main() {
 }
 
 class _ManagerFakeMediaRuntime implements CallV2PhysicalMediaRuntime {
-  _ManagerFakeMediaRuntime(this.config);
+  _ManagerFakeMediaRuntime(
+    this.config, {
+    required this.autoJoinSuccess,
+  });
 
   final CallV2AgoraMediaRuntimeConfig config;
+  final bool autoJoinSuccess;
   final ValueNotifier<CallV2AgoraMediaState> _state =
       ValueNotifier<CallV2AgoraMediaState>(
     const CallV2AgoraMediaState.idle(),
@@ -354,8 +533,10 @@ class _ManagerFakeMediaRuntime implements CallV2PhysicalMediaRuntime {
       phase: CallV2AgoraMediaPhase.joined,
       mediaActive: true,
     );
-    await config.onJoinSuccess();
+    if (autoJoinSuccess) await fireJoinSuccess();
   }
+
+  Future<void> fireJoinSuccess() => config.onJoinSuccess();
 
   @override
   Future<void> cleanup() async {
