@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -23,8 +25,113 @@ class _MemoryStore implements CallV2DurableDiagnosticStore {
   }
 }
 
+class _BlockingStore implements CallV2DurableDiagnosticStore {
+  final Completer<void> writeStarted = Completer<void>();
+  final Completer<void> releaseWrite = Completer<void>();
+  String? encoded;
+
+  @override
+  Future<String?> read() async => encoded;
+
+  @override
+  Future<void> write(String value) async {
+    if (!writeStarted.isCompleted) writeStarted.complete();
+    await releaseWrite.future;
+    encoded = value;
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  group('file durable store atomic replacement', () {
+    late Directory temporaryDirectory;
+    late File target;
+
+    setUp(() async {
+      temporaryDirectory =
+          await Directory.systemTemp.createTemp('call-v2-diagnostics-');
+      target = File('${temporaryDirectory.path}/diagnostics.json');
+    });
+
+    tearDown(() async {
+      if (await temporaryDirectory.exists()) {
+        await temporaryDirectory.delete(recursive: true);
+      }
+    });
+
+    test('replacement failure before commit preserves previous valid file',
+        () async {
+      const previous = '{"version":1,"events":[{"sequence":1}]}';
+      const replacement = '{"version":1,"events":[{"sequence":2}]}';
+      await target.writeAsString(previous, flush: true);
+      final store = CallV2FileDurableDiagnosticStore.debugForTest(
+        targetFile: target,
+        beforeReplace: (preparedSnapshot, targetFile) async {
+          expect(await preparedSnapshot.readAsString(), replacement);
+          expect(await targetFile.readAsString(), previous);
+          throw StateError('simulated pre-commit replacement failure');
+        },
+      );
+
+      await expectLater(store.write(replacement), throwsStateError);
+
+      expect(await target.readAsString(), previous);
+      expect(jsonDecode(await target.readAsString()), isA<Map>());
+      expect(
+        (await temporaryDirectory.list().toList())
+            .where((entity) => entity.path != target.path),
+        isEmpty,
+      );
+    });
+
+    test('partial prepared write cannot expose a truncated target', () async {
+      const previous = '{"version":1,"events":[{"sequence":1}]}';
+      const replacement =
+          '{"version":1,"events":[{"sequence":1},{"sequence":2}]}';
+      await target.writeAsString(previous, flush: true);
+      final store = CallV2FileDurableDiagnosticStore.debugForTest(
+        targetFile: target,
+        beforeReplace: (preparedSnapshot, targetFile) async {
+          await preparedSnapshot.writeAsString('{"version":', flush: true);
+          expect(await targetFile.readAsString(), previous);
+          throw StateError('simulated interrupted staging write');
+        },
+      );
+
+      await expectLater(store.write(replacement), throwsStateError);
+
+      final persisted = await target.readAsString();
+      expect(persisted, previous);
+      expect(jsonDecode(persisted), isA<Map>());
+      expect(persisted, isNot(equals('{"version":')));
+      expect(
+        (await temporaryDirectory.list().toList())
+            .where((entity) => entity.path != target.path),
+        isEmpty,
+      );
+    });
+
+    test('successful real filesystem replacement publishes full snapshot',
+        () async {
+      const previous = '{"version":1,"events":[{"sequence":1}]}';
+      const replacement =
+          '{"version":1,"events":[{"sequence":1},{"sequence":2}]}';
+      await target.writeAsString(previous, flush: true);
+      final store = CallV2FileDurableDiagnosticStore.debugForTest(
+        targetFile: target,
+      );
+
+      await store.write(replacement);
+
+      expect(await target.readAsString(), replacement);
+      expect(
+        (jsonDecode(await target.readAsString())
+            as Map<String, dynamic>)['events'],
+        hasLength(2),
+      );
+    });
+  });
 
   test('process restart preserves ordered A B C histories independently',
       () async {
@@ -254,7 +361,8 @@ void main() {
     );
   });
 
-  test('storage failure never escapes into call handling', () async {
+  test('failed storage is not reported as persisted in memory or after restart',
+      () async {
     final store = _MemoryStore()..failWrites = true;
     final recorder = CallV2DurableDiagnosticRecorder(
       store: store,
@@ -273,7 +381,101 @@ void main() {
     await recorder.flush();
 
     expect(acceptanceContinued, isTrue);
-    expect(await recorder.readPersisted(), hasLength(1));
+    expect(await recorder.readPersisted(), isEmpty);
+    final restarted = CallV2DurableDiagnosticRecorder(
+      store: store,
+      appLifecycleState: () => 'resumed',
+    );
+    expect(await restarted.readPersisted(), isEmpty);
+  });
+
+  test('failed append preserves A B C and a later write continues from commit',
+      () async {
+    final store = _MemoryStore();
+    final recorder = CallV2DurableDiagnosticRecorder(
+      store: store,
+      appLifecycleState: () => 'resumed',
+    );
+    for (final identity in <String>['call-a', 'call-b', 'call-c']) {
+      recorder.record(
+        CallV2DurableDiagnosticStage.acceptedContinuationClaimed,
+        inviteIdentity: identity,
+      );
+    }
+    await recorder.flush();
+    final committedBeforeFailure = store.encoded;
+
+    store.failWrites = true;
+    recorder.record(
+      CallV2DurableDiagnosticStage.transactionFailed,
+      inviteIdentity: 'failed-call',
+    );
+    await recorder.flush();
+
+    expect(store.encoded, committedBeforeFailure);
+    var events = await recorder.readPersisted();
+    expect(
+        events.map((event) => event.sequence), orderedEquals(<int>[1, 2, 3]));
+    expect(
+      events.map((event) => event.callFingerprint),
+      orderedEquals(<String>[
+        CallV2DurableDiagnosticRecorder.fingerprint(
+          'call-a',
+          namespace: 'call',
+        ),
+        CallV2DurableDiagnosticRecorder.fingerprint(
+          'call-b',
+          namespace: 'call',
+        ),
+        CallV2DurableDiagnosticRecorder.fingerprint(
+          'call-c',
+          namespace: 'call',
+        ),
+      ]),
+    );
+
+    store.failWrites = false;
+    recorder.record(
+      CallV2DurableDiagnosticStage.transactionCompleted,
+      inviteIdentity: 'call-d',
+    );
+    await recorder.flush();
+
+    events = await recorder.readPersisted();
+    expect(
+      events.map((event) => event.sequence),
+      orderedEquals(<int>[1, 2, 3, 4]),
+    );
+    final restarted = CallV2DurableDiagnosticRecorder(
+      store: store,
+      appLifecycleState: () => 'resumed',
+    );
+    expect(
+      (await restarted.readPersisted()).map((event) => event.sequence),
+      orderedEquals(<int>[1, 2, 3, 4]),
+    );
+  });
+
+  test('record returns while durable storage is still blocked', () async {
+    final store = _BlockingStore();
+    final recorder = CallV2DurableDiagnosticRecorder(
+      store: store,
+      appLifecycleState: () => 'resumed',
+    );
+
+    var callPathContinued = false;
+    recorder.record(
+      CallV2DurableDiagnosticStage.flutterAcceptBridgeReceived,
+      inviteIdentity: 'private-invite',
+    );
+    callPathContinued = true;
+    await store.writeStarted.future;
+
+    expect(callPathContinued, isTrue);
+    expect(store.encoded, isNull);
+    store.releaseWrite.complete();
+    await recorder.flush();
+    expect(store.encoded, isNotNull);
   });
 
   testWidgets(

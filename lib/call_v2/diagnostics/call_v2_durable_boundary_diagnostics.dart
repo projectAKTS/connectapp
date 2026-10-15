@@ -142,13 +142,32 @@ abstract interface class CallV2DurableDiagnosticStore {
   Future<void> write(String encoded);
 }
 
+typedef CallV2BeforeDiagnosticSnapshotReplace = Future<void> Function(
+  File preparedSnapshot,
+  File target,
+);
+
 class CallV2FileDurableDiagnosticStore implements CallV2DurableDiagnosticStore {
-  const CallV2FileDurableDiagnosticStore();
+  const CallV2FileDurableDiagnosticStore()
+      : _targetFileForTest = null,
+        _beforeReplaceForTest = null;
+
+  CallV2FileDurableDiagnosticStore.debugForTest({
+    required File targetFile,
+    CallV2BeforeDiagnosticSnapshotReplace? beforeReplace,
+  })  : _targetFileForTest = targetFile,
+        _beforeReplaceForTest = beforeReplace;
 
   static const String relativePath =
       'call_v2_diagnostics/flutter_accepted_boundaries.json';
+  static int _temporaryFileSequence = 0;
+
+  final File? _targetFileForTest;
+  final CallV2BeforeDiagnosticSnapshotReplace? _beforeReplaceForTest;
 
   Future<File> _file() async {
+    final targetFileForTest = _targetFileForTest;
+    if (targetFileForTest != null) return targetFileForTest;
     final support = await getApplicationSupportDirectory();
     return File('${support.path}/$relativePath');
   }
@@ -164,7 +183,46 @@ class CallV2FileDurableDiagnosticStore implements CallV2DurableDiagnosticStore {
   Future<void> write(String encoded) async {
     final file = await _file();
     await file.parent.create(recursive: true);
-    await file.writeAsString(encoded, flush: true);
+    final preparedSnapshot = await _createTemporaryFile(file);
+    try {
+      await preparedSnapshot.writeAsString(encoded, flush: true);
+      final beforeReplaceForTest = _beforeReplaceForTest;
+      if (beforeReplaceForTest != null) {
+        await beforeReplaceForTest(preparedSnapshot, file);
+      }
+
+      // The temporary file shares the target directory. On iOS/macOS,
+      // dart:io delegates this operation to same-filesystem POSIX rename,
+      // which atomically replaces an existing file.
+      await preparedSnapshot.rename(file.path);
+    } on Object {
+      await _deleteTemporaryFile(preparedSnapshot);
+      rethrow;
+    }
+  }
+
+  Future<File> _createTemporaryFile(File target) async {
+    for (var attempt = 0; attempt < 8; attempt += 1) {
+      final sequence = _temporaryFileSequence++;
+      final candidate = File(
+        '${target.path}.tmp.$pid.'
+        '${DateTime.now().microsecondsSinceEpoch}.$sequence',
+      );
+      try {
+        return await candidate.create(exclusive: true);
+      } on FileSystemException {
+        if (attempt == 7) rethrow;
+      }
+    }
+    throw StateError('Unable to create diagnostic snapshot file.');
+  }
+
+  Future<void> _deleteTemporaryFile(File file) async {
+    try {
+      if (await file.exists()) await file.delete();
+    } on Object {
+      // Preserve the original write failure; a later write uses a unique file.
+    }
   }
 }
 
@@ -277,17 +335,22 @@ class CallV2DurableDiagnosticRecorder {
   }
 
   Future<void> _append(_PendingDurableDiagnosticEvent pending) async {
-    final events = await _load();
-    final nextSequence = events.isEmpty ? 1 : events.last.sequence + 1;
-    events.add(pending.materialize(nextSequence));
-    _trim(events, pending.occurredAtUtc);
-    var encoded = _encode(events);
-    while (events.length > 1 &&
+    final committedEvents = await _load();
+    final candidateEvents = List<CallV2DurableDiagnosticEvent>.of(
+      committedEvents,
+    );
+    final nextSequence =
+        candidateEvents.isEmpty ? 1 : candidateEvents.last.sequence + 1;
+    candidateEvents.add(pending.materialize(nextSequence));
+    _trim(candidateEvents, pending.occurredAtUtc);
+    var encoded = _encode(candidateEvents);
+    while (candidateEvents.length > 1 &&
         utf8.encode(encoded).length > maximumEncodedBytes) {
-      events.removeAt(0);
-      encoded = _encode(events);
+      candidateEvents.removeAt(0);
+      encoded = _encode(candidateEvents);
     }
     await _store.write(encoded);
+    _events = candidateEvents;
   }
 
   Future<List<CallV2DurableDiagnosticEvent>> _load() async {
