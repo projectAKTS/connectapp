@@ -1,35 +1,18 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "durable_accepted_call_boundary_diagnostics",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "f2654d9bbd28adc95471add25bf86d819f623991",
-  "starting_sha": "f2654d9bbd28adc95471add25bf86d819f623991",
+  "phase": "durable_diagnostic_storage_atomicity_revision",
+  "status": "revision_required",
+  "accepted_checkpoint_sha": "b017ab007308fe31837174f2e06269f5dd7202c5",
+  "starting_sha": "1aeb7c41b5931dd67442b80f838fbc03c825f9ba",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "b017ab007308fe31837174f2e06269f5dd7202c5",
+  "code_commit_sha": null,
   "ending_sha": "SELF",
-  "changed_files": [
-    "ios/Runner/AppDelegate.swift",
-    "ios/RunnerTests/RunnerTests.swift",
-    "lib/call_v2/diagnostics/call_v2_durable_boundary_diagnostics.dart",
-    "lib/call_v2/real_flow/call_v2_agora_media_runtime.dart",
-    "lib/services/call_session_manager.dart",
-    "lib/services/notification_service.dart",
-    "test/call_v2/diagnostics/call_v2_durable_boundary_diagnostics_test.dart",
-    "docs/agent-loop/NEXT_TASK.md",
-    "docs/agent-loop/STATE.json",
-    "docs/agent-loop/HANDOFF.md"
-  ],
+  "changed_files": [],
   "validation": {
-    "durable_diagnostics": "passed: 10",
-    "focused_ownership_and_lifecycle": "passed: 205",
-    "foreground_recovery": "passed: 3",
-    "all_call_v2": "passed: 2356",
-    "ios_runner_tests": "passed: 30",
-    "flutter_analyze": "passed: no issues",
-    "git_diff_check": "passed",
-    "dependency_diff": "none"
+    "authorization_metadata": "pending validation",
+    "implementation": "not started"
   },
   "safety": {
     "deployed": false,
@@ -37,11 +20,11 @@
     "production_services_contacted": false,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": true,
-    "test_changes": true
+    "production_code_changes": false,
+    "test_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "Bounded device-local native and Dart recorders now independently preserve exact CallKit callback, bridge dispatch, Flutter receipt, accepted transaction, lifecycle, media ownership, cleanup, and idle checkpoints using safe fingerprints only. Writes are nonblocking and failure-isolated; the existing CallKit, Firestore, transaction, route, media, watchdog, retry, timeout, terminal, dependency, and backend behavior is unchanged. No root-cause or physical-fix claim is made."
+    "decision": "revision_required",
+    "notes": "Correct only atomic file replacement and last-successful-snapshot cache ordering in the Dart durable diagnostic recorder. Preserve all accepted native, CallKit, recovery, Firestore, media, timeout, retry, dependency, backend, and call behavior."
   }
 }
