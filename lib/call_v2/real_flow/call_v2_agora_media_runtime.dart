@@ -11,6 +11,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../diagnostics/call_v2_durable_boundary_diagnostics.dart';
 import '../call_v2_api.dart';
 import '../firebase/call_v2_dev_callable_target.dart';
 import '../firebase/call_v2_token_provider.dart';
@@ -284,13 +285,31 @@ class CallV2AgoraMediaRuntime implements CallV2PhysicalMediaRuntime {
 
   Future<void> _start(int epoch) async {
     try {
+      CallV2DurableDiagnosticRecorder.instance.record(
+        CallV2DurableDiagnosticStage.mediaRuntimeStarted,
+        inviteIdentity: config.inviteId,
+      );
       _emit(_state.value.copyWith(phase: CallV2AgoraMediaPhase.preparing));
+      CallV2DurableDiagnosticRecorder.instance.record(
+        CallV2DurableDiagnosticStage.cleanupGateRequested,
+        inviteIdentity: config.inviteId,
+      );
       final readiness =
           await callV2PhysicalEngineCleanupGate.prepareNextEngine();
       _ensureCurrent(epoch);
       if (!readiness.nextEngineAllowed) {
+        CallV2DurableDiagnosticRecorder.instance.record(
+          CallV2DurableDiagnosticStage.cleanupGateBlocked,
+          inviteIdentity: config.inviteId,
+          outcome: CallV2DurableDiagnosticOutcome.blocked,
+        );
         throw StateError(readiness.blockerCode);
       }
+      CallV2DurableDiagnosticRecorder.instance.record(
+        CallV2DurableDiagnosticStage.cleanupGatePermitted,
+        inviteIdentity: config.inviteId,
+        outcome: CallV2DurableDiagnosticOutcome.allowed,
+      );
       await config.onMediaSetupBegan();
       _ensureCurrent(epoch);
 
@@ -299,6 +318,10 @@ class CallV2AgoraMediaRuntime implements CallV2PhysicalMediaRuntime {
           '';
       final requestedUid = _deriveRtcUid(firebaseUid);
       final requestedAccount = requestedUid.toString();
+      CallV2DurableDiagnosticRecorder.instance.record(
+        CallV2DurableDiagnosticStage.tokenRequestStarted,
+        inviteIdentity: config.inviteId,
+      );
       final auth =
           config.connectionSystem == CallV2RealCallConnectionSystem.callV2Dev
               ? await fetchCallV2DevAgoraToken(
@@ -418,6 +441,11 @@ class CallV2AgoraMediaRuntime implements CallV2PhysicalMediaRuntime {
         if (!_accepts(generation)) return;
         _joinWatchdog?.cancel();
         _emit(_state.value.copyWith(phase: CallV2AgoraMediaPhase.joined));
+        CallV2DurableDiagnosticRecorder.instance.record(
+          CallV2DurableDiagnosticStage.agoraJoinCallbackReceived,
+          inviteIdentity: config.inviteId,
+          outcome: CallV2DurableDiagnosticOutcome.completed,
+        );
         unawaited(_diag('join_success', <String, Object?>{
           'elapsedMs': elapsed,
         }));
@@ -536,6 +564,10 @@ class CallV2AgoraMediaRuntime implements CallV2PhysicalMediaRuntime {
   }
 
   Future<void> _cleanup() async {
+    CallV2DurableDiagnosticRecorder.instance.record(
+      CallV2DurableDiagnosticStage.mediaCleanupStarted,
+      inviteIdentity: config.inviteId,
+    );
     _epoch += 1;
     _acceptCallbacks = false;
     _joinWatchdog?.cancel();
@@ -545,6 +577,11 @@ class CallV2AgoraMediaRuntime implements CallV2PhysicalMediaRuntime {
     final generation = _engineGeneration;
     if (ownedEngine == null) {
       _emit(_state.value.copyWith(phase: CallV2AgoraMediaPhase.terminal));
+      CallV2DurableDiagnosticRecorder.instance.record(
+        CallV2DurableDiagnosticStage.mediaCleanupCompleted,
+        inviteIdentity: config.inviteId,
+        outcome: CallV2DurableDiagnosticOutcome.completed,
+      );
       return;
     }
     bool stillOwns() =>
@@ -584,6 +621,13 @@ class CallV2AgoraMediaRuntime implements CallV2PhysicalMediaRuntime {
       mediaActive: false,
       failureCode: result.succeeded ? 'none' : 'cleanup_failed',
     ));
+    CallV2DurableDiagnosticRecorder.instance.record(
+      CallV2DurableDiagnosticStage.mediaCleanupCompleted,
+      inviteIdentity: config.inviteId,
+      outcome: result.succeeded
+          ? CallV2DurableDiagnosticOutcome.completed
+          : CallV2DurableDiagnosticOutcome.nonRecoverableFailure,
+    );
   }
 
   Future<bool> _forceDispose(RtcEngine engine) async {

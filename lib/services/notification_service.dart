@@ -13,6 +13,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:uuid/uuid.dart';
 
+import '../call_v2/diagnostics/call_v2_durable_boundary_diagnostics.dart';
 import '../call_v2/diagnostics/call_v2_physical_diagnostic_ledger.dart';
 import 'call_session_manager.dart';
 import 'callkit_id.dart';
@@ -1359,6 +1360,11 @@ class NotificationService with WidgetsBindingObserver {
       final diagnosticOrdinal = data['diagnosticOrdinal'];
       final diagnosticStartedAt = data['diagnosticStartedAtEpochMilliseconds'];
       final isVideo = _videoField(data, const <String, dynamic>{});
+      CallV2DurableDiagnosticRecorder.instance.record(
+        CallV2DurableDiagnosticStage.flutterAcceptBridgeReceived,
+        inviteIdentity: inviteId,
+        exactCallkitIdentity: callkitId,
+      );
       CallV2PhysicalDiagnosticLedger.instance.beginAcceptedNativeCall(
         exactNativeKey: callkitId,
         nativeOrdinal: diagnosticOrdinal is int ? diagnosticOrdinal : null,
@@ -1458,6 +1464,13 @@ class NotificationService with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    final acceptedOwner = _acceptedCallkitRecoveryOwnerPayload;
+    CallV2DurableDiagnosticRecorder.instance.record(
+      CallV2DurableDiagnosticStage.appLifecycleChanged,
+      inviteIdentity: acceptedOwner?.inviteId ?? '',
+      exactCallkitIdentity: acceptedOwner?.callkitId ?? '',
+      appLifecycleState: state.name,
+    );
     DiagnosticService.logLifecycle(
       state,
       uid: _currentPushAuthUid,
@@ -2785,6 +2798,20 @@ class NotificationService with WidgetsBindingObserver {
       _recoveringAcceptedCall && active != null ? active : currentOwner,
       nextPayload,
     );
+    final identityOutcome = switch (_acceptedIdentityEvidence.coalesceReason) {
+      'same_exact_id' => CallV2DurableDiagnosticOutcome.exactIdentityMatch,
+      'fallback_missing_exact_id' =>
+        CallV2DurableDiagnosticOutcome.fallbackIdentityMatch,
+      _ when currentOwner == null && active == null =>
+        CallV2DurableDiagnosticOutcome.ownerMissing,
+      _ => CallV2DurableDiagnosticOutcome.distinctIdentity,
+    };
+    CallV2DurableDiagnosticRecorder.instance.record(
+      CallV2DurableDiagnosticStage.acceptedRecoveryIdentityClassified,
+      inviteIdentity: inviteId,
+      exactCallkitIdentity: callkitId,
+      outcome: identityOutcome,
+    );
     if (!allowDistinctPreemption &&
         currentOwner != null &&
         !currentOwner.matchesIdentity(nextPayload)) {
@@ -2828,6 +2855,11 @@ class NotificationService with WidgetsBindingObserver {
     _activeAcceptedCallkitRecoveryPayload = nextPayload;
     _recoveringAcceptedCall = true;
     try {
+      CallV2DurableDiagnosticRecorder.instance.record(
+        CallV2DurableDiagnosticStage.acceptedRecoveryHandoffStarted,
+        inviteIdentity: inviteId,
+        exactCallkitIdentity: callkitId,
+      );
       CallV2PhysicalDiagnosticLedger.instance.record(
         CallV2PhysicalDiagnosticStage.acceptedRecoveryOwnershipRequested,
         exactNativeKey: callkitId,

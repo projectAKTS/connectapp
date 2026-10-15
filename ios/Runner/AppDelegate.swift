@@ -9,6 +9,7 @@ import UserNotifications
 import flutter_callkit_incoming
 import AVFAudio
 import CallKit
+import CryptoKit
 
 final class CallV2SafeNativeDiagnosticLedger {
   private struct Entry {
@@ -106,6 +107,168 @@ final class CallV2SafeNativeDiagnosticLedger {
       "blockerCode": blockerCode,
     ]
   }
+}
+
+final class CallV2DurableNativeDiagnosticRecorder {
+  private let storeKey = "connectapp.callV2DurableAcceptedBoundaryEvents"
+  private let sequenceKey = "connectapp.callV2DurableAcceptedBoundarySequence"
+  private let defaults: UserDefaults
+  private let queue: DispatchQueue
+  private let now: () -> Date
+  private let appLifecycleState: () -> String
+  private let maximumEvents: Int
+  private let maximumEncodedBytes: Int
+  private let maximumAge: TimeInterval
+
+  init(
+    defaults: UserDefaults = .standard,
+    queue: DispatchQueue = DispatchQueue(
+      label: "connectapp.call-v2-durable-native-diagnostics",
+      qos: .utility
+    ),
+    now: @escaping () -> Date = Date.init,
+    appLifecycleState: @escaping () -> String = {
+      switch UIApplication.shared.applicationState {
+      case .active:
+        return "active"
+      case .inactive:
+        return "inactive"
+      case .background:
+        return "background"
+      @unknown default:
+        return "unknown"
+      }
+    },
+    maximumEvents: Int = 384,
+    maximumEncodedBytes: Int = 128 * 1024,
+    maximumAge: TimeInterval = 14 * 24 * 60 * 60
+  ) {
+    self.defaults = defaults
+    self.queue = queue
+    self.now = now
+    self.appLifecycleState = appLifecycleState
+    self.maximumEvents = maximumEvents
+    self.maximumEncodedBytes = maximumEncodedBytes
+    self.maximumAge = maximumAge
+  }
+
+  func record(
+    stage: String,
+    inviteIdentity: String = "",
+    exactIdentity: String = "",
+    outcome: String = "NONE",
+    attempt: Int? = nil,
+    generationCurrent: Bool? = nil
+  ) {
+    let capturedAt = now()
+    let lifecycle = safeLifecycle(appLifecycleState())
+    let safeStage = safeToken(stage)
+    let safeOutcome = safeToken(outcome)
+    queue.async { [weak self] in
+      self?.persist(
+        stage: safeStage,
+        inviteIdentity: inviteIdentity,
+        exactIdentity: exactIdentity,
+        outcome: safeOutcome,
+        attempt: attempt,
+        generationCurrent: generationCurrent,
+        capturedAt: capturedAt,
+        lifecycle: lifecycle
+      )
+    }
+  }
+
+  func flushForTest() {
+    queue.sync {}
+  }
+
+  func safeEventsForTest() -> [[String: Any]] {
+    return queue.sync {
+      defaults.array(forKey: storeKey) as? [[String: Any]] ?? []
+    }
+  }
+
+  private func persist(
+    stage: String,
+    inviteIdentity: String,
+    exactIdentity: String,
+    outcome: String,
+    attempt: Int?,
+    generationCurrent: Bool?,
+    capturedAt: Date,
+    lifecycle: String
+  ) {
+    var events = defaults.array(forKey: storeKey) as? [[String: Any]] ?? []
+    let sequence = defaults.integer(forKey: sequenceKey) + 1
+    var event: [String: Any] = [
+      "sequence": sequence,
+      "occurredAtUtc": Self.utcFormatter.string(from: capturedAt),
+      "stage": stage,
+      "appLifecycleState": lifecycle,
+      "callFingerprint": fingerprint(inviteIdentity, namespace: "call"),
+      "exactFingerprint": fingerprint(exactIdentity, namespace: "exact"),
+      "outcome": outcome,
+    ]
+    if let attempt {
+      event["attempt"] = attempt
+    }
+    if let generationCurrent {
+      event["generationCurrent"] = generationCurrent
+    }
+    events.append(event)
+
+    let cutoff = capturedAt.addingTimeInterval(-maximumAge)
+    events.removeAll { raw in
+      guard let value = raw["occurredAtUtc"] as? String,
+        let timestamp = Self.utcFormatter.date(from: value)
+      else { return true }
+      return timestamp < cutoff
+    }
+    if events.count > maximumEvents {
+      events.removeFirst(events.count - maximumEvents)
+    }
+    while events.count > 1,
+      (try? JSONSerialization.data(withJSONObject: events).count) ?? 0 >
+        maximumEncodedBytes
+    {
+      events.removeFirst()
+    }
+    defaults.set(events, forKey: storeKey)
+    defaults.set(sequence, forKey: sequenceKey)
+  }
+
+  private func fingerprint(_ raw: String, namespace: String) -> String {
+    let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    guard !normalized.isEmpty else { return "" }
+    let input = "helperly-call-v2-diagnostics-v1|\(namespace)|\(normalized)"
+    let digest = SHA256.hash(data: Data(input.utf8))
+    return digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+  }
+
+  private func safeLifecycle(_ raw: String) -> String {
+    switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+    case "active", "inactive", "background", "unknown":
+      return raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    default:
+      return "unknown"
+    }
+  }
+
+  private func safeToken(_ raw: String) -> String {
+    let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+      .uppercased()
+    guard !normalized.isEmpty, normalized.count <= 64,
+      normalized.range(of: "^[A-Z0-9_]+$", options: .regularExpression) != nil
+    else { return "UNKNOWN" }
+    return normalized
+  }
+
+  private static let utcFormatter: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
+  }()
 }
 
 final class CallV2NativeCallkitIdentityAllocator {
@@ -412,6 +575,8 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
   private var callV2NativeAcceptedCallActive = false
   private let callV2ExactCallController = CXCallController()
   private let callV2SafeDiagnosticLedger = CallV2SafeNativeDiagnosticLedger()
+  private let callV2DurableNativeDiagnostics =
+    CallV2DurableNativeDiagnosticRecorder()
   private let callV2CallkitIdentityAllocator = CallV2NativeCallkitIdentityAllocator()
   private let callV2AcceptedAudioSessionOwnership =
     CallV2NativeAcceptedAudioSessionOwnership()
@@ -430,6 +595,7 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
   private lazy var callV2NativeSafetyWatchdog = CallV2NativeRouteSafetyWatchdog(
     record: { [weak self] exactKey, stage in
       self?.callV2SafeDiagnosticLedger.record(exactKey: exactKey, stage: stage)
+      self?.recordDurableWatchdogStage(exactKey: exactKey, stage: stage)
     },
     requestExactEnd: { [weak self] exactKey in
       self?.endAcceptedCallkitForSafety(exactKey: exactKey)
@@ -661,9 +827,17 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
           }
           let exactKey = ((args["callkitId"] as? String) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-          result(self.callV2NativeSafetyWatchdog.acknowledgeRouteOwned(
+          let acknowledged = self.callV2NativeSafetyWatchdog.acknowledgeRouteOwned(
             exactKey: exactKey
-          ))
+          )
+          if acknowledged {
+            self.callV2DurableNativeDiagnostics.record(
+              stage: "NATIVE_ROUTE_OWNED_ACK",
+              exactIdentity: exactKey,
+              outcome: "COMPLETED"
+            )
+          }
+          result(acknowledged)
           return
         }
 
@@ -674,9 +848,17 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
           }
           let exactKey = ((args["callkitId"] as? String) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-          result(self.callV2NativeSafetyWatchdog.acknowledgeMediaOwned(
+          let acknowledged = self.callV2NativeSafetyWatchdog.acknowledgeMediaOwned(
             exactKey: exactKey
-          ))
+          )
+          if acknowledged {
+            self.callV2DurableNativeDiagnostics.record(
+              stage: "NATIVE_MEDIA_OWNED_ACK",
+              exactIdentity: exactKey,
+              outcome: "COMPLETED"
+            )
+          }
+          result(acknowledged)
           return
         }
 
@@ -1216,11 +1398,44 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
 
   private func notifyFlutterOfForegroundVoip(
     method: String,
-    payload: [String: Any]
+    payload: [String: Any],
+    dispatchAttempted: (() -> Void)? = nil,
+    completion: ((String) -> Void)? = nil
   ) {
     DispatchQueue.main.async {
-      self.pushTokenChannel?.invokeMethod(method, arguments: payload)
+      dispatchAttempted?()
+      guard let channel = self.pushTokenChannel else {
+        completion?("CHANNEL_UNAVAILABLE")
+        return
+      }
+      channel.invokeMethod(method, arguments: payload) { response in
+        completion?(response is FlutterError ? "FLUTTER_ERROR" : "COMPLETED")
+      }
     }
+  }
+
+  private func recordDurableWatchdogStage(exactKey: String, stage: String) {
+    let durableStage: String
+    switch stage {
+    case "nativeSafetyWatchStarted":
+      durableStage = "NATIVE_SAFETY_WATCH_STARTED"
+    case "nativeSafetyTimeoutFired":
+      durableStage = "NATIVE_SAFETY_WATCH_DEADLINE"
+    case "nativeCallEndRequested":
+      durableStage = "NATIVE_EXACT_CALL_END_REQUESTED"
+    case "nativeCallEnded":
+      durableStage = "NATIVE_EXACT_CALL_ENDED"
+    case "nativeCallEndVerified":
+      durableStage = "NATIVE_EXACT_CALL_END_VERIFIED"
+    case "terminalObserved":
+      durableStage = "NATIVE_TERMINAL_OBSERVED"
+    default:
+      return
+    }
+    callV2DurableNativeDiagnostics.record(
+      stage: durableStage,
+      exactIdentity: exactKey
+    )
   }
 
   private func showIncomingFallbackNotification(
@@ -1528,6 +1743,11 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
       fromPushKit: fromPushKit
     )
     markCallkitPresentationState(callkitId: callkitId, state: "presented")
+    callV2DurableNativeDiagnostics.record(
+      stage: "NATIVE_CALLKIT_PRESENTED",
+      inviteIdentity: rawCallId,
+      exactIdentity: callkitId
+    )
     callV2SafeDiagnosticLedger.record(
       exactKey: callkitId,
       stage: "callkitPresented"
@@ -1671,7 +1891,18 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
   }
 
   func onAccept(_ call: Call, _ action: CXAnswerCallAction) {
+    let inviteId = inviteIdFromCall(call)
+    callV2DurableNativeDiagnostics.record(
+      stage: "NATIVE_ACCEPT_CALLBACK_EXECUTED",
+      inviteIdentity: inviteId,
+      exactIdentity: call.data.uuid
+    )
     storeAcceptedCall(call)
+    callV2DurableNativeDiagnostics.record(
+      stage: "NATIVE_ACCEPT_IDENTITY_STORED",
+      inviteIdentity: inviteId,
+      exactIdentity: call.data.uuid
+    )
     storeCallkitEvent("accept", call: call)
     markCallkitPresentationState(callkitId: call.data.uuid, state: "accepted")
     callV2NativeAcceptedCallActive = true
@@ -1683,6 +1914,12 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
     if let exactAudioOwner = callV2AcceptedAudioSessionOwnership.accepted(
       exactKey: call.data.uuid
     ) {
+      callV2DurableNativeDiagnostics.record(
+        stage: "NATIVE_AUDIO_SESSION_ACTIVATED",
+        inviteIdentity: inviteId,
+        exactIdentity: exactAudioOwner,
+        outcome: "LATCHED"
+      )
       notifyCallkitAudioSessionChanged(exactKey: exactAudioOwner, active: true)
     }
     callV2SafeDiagnosticLedger.record(
@@ -1690,7 +1927,6 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
       stage: "nativeCallStillActive"
     )
     let extra = call.data.extra as? [String: Any]
-    let inviteId = inviteIdFromCall(call)
     let channel = ((extra?["channel"] as? String) ?? "")
       .trimmingCharacters(in: .whitespacesAndNewlines)
     let fromName = ((extra?["fromName"] as? String) ?? "Caller")
@@ -1724,7 +1960,22 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
         "diagnosticOrdinal": diagnosticMetadata?.ordinal ?? 0,
         "diagnosticStartedAtEpochMilliseconds":
           diagnosticMetadata?.startedAtEpochMilliseconds ?? 0,
-      ]
+      ],
+      dispatchAttempted: { [weak self] in
+        self?.callV2DurableNativeDiagnostics.record(
+          stage: "ACCEPT_BRIDGE_DISPATCHED",
+          inviteIdentity: inviteId,
+          exactIdentity: call.data.uuid
+        )
+      },
+      completion: { [weak self] outcome in
+        self?.callV2DurableNativeDiagnostics.record(
+          stage: "ACCEPT_BRIDGE_DISPATCH_COMPLETED",
+          inviteIdentity: inviteId,
+          exactIdentity: call.data.uuid,
+          outcome: outcome
+        )
+      }
     )
     if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
       syncInviteStatus(inviteId: inviteId, status: "accepted", additional: [
@@ -1733,6 +1984,11 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
     }
     NSLog("Helperly CallKit onAccept identifier_present=true")
     action.fulfill()
+    callV2DurableNativeDiagnostics.record(
+      stage: "NATIVE_ANSWER_ACTION_FULFILLED",
+      inviteIdentity: inviteId,
+      exactIdentity: call.data.uuid
+    )
   }
 
   func onDecline(_ call: Call, _ action: CXEndCallAction) {
@@ -1750,6 +2006,12 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
     }
     NSLog("Helperly CallKit onDecline identifier_present=true")
     action.fulfill()
+    callV2DurableNativeDiagnostics.record(
+      stage: "NATIVE_EXACT_CALL_ENDED",
+      inviteIdentity: inviteId,
+      exactIdentity: call.data.uuid,
+      outcome: "DECLINED"
+    )
   }
 
   func onEnd(_ call: Call, _ action: CXEndCallAction) {
@@ -1767,6 +2029,12 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
     }
     NSLog("Helperly CallKit onEnd identifier_present=true")
     action.fulfill()
+    callV2DurableNativeDiagnostics.record(
+      stage: "NATIVE_EXACT_CALL_ENDED",
+      inviteIdentity: inviteId,
+      exactIdentity: call.data.uuid,
+      outcome: "ENDED"
+    )
   }
 
   func onTimeOut(_ call: Call) {
@@ -1780,12 +2048,22 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
     if !inviteId.isEmpty && shouldSyncInviteStatusFromNative() {
       syncInviteStatus(inviteId: inviteId, status: "missed")
     }
+    callV2DurableNativeDiagnostics.record(
+      stage: "NATIVE_EXACT_CALL_ENDED",
+      inviteIdentity: inviteId,
+      exactIdentity: call.data.uuid,
+      outcome: "TIMEOUT"
+    )
     NSLog("Helperly CallKit onTimeOut identifier_present=true")
   }
 
   func didActivateAudioSession(_ audioSession: AVAudioSession) {
     storeCallkitEvent("audio_activated", call: nil)
     if let exactAudioOwner = callV2AcceptedAudioSessionOwnership.activated() {
+      callV2DurableNativeDiagnostics.record(
+        stage: "NATIVE_AUDIO_SESSION_ACTIVATED",
+        exactIdentity: exactAudioOwner
+      )
       notifyCallkitAudioSessionChanged(exactKey: exactAudioOwner, active: true)
     }
     NSLog("Helperly CallKit audio session activated")
@@ -1794,6 +2072,10 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
   func didDeactivateAudioSession(_ audioSession: AVAudioSession) {
     storeCallkitEvent("audio_deactivated", call: nil)
     for exactAudioOwner in callV2AcceptedAudioSessionOwnership.deactivated() {
+      callV2DurableNativeDiagnostics.record(
+        stage: "NATIVE_AUDIO_SESSION_DEACTIVATED",
+        exactIdentity: exactAudioOwner
+      )
       notifyCallkitAudioSessionChanged(exactKey: exactAudioOwner, active: false)
     }
     NSLog("Helperly CallKit audio session deactivated")

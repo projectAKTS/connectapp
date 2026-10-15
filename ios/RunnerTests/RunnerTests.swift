@@ -521,6 +521,173 @@ class RunnerTests: XCTestCase {
     XCTAssertTrue(description.contains("callkitPresented"))
   }
 
+  func testDurableNativeAcceptCheckpointsPersistInOrderAcrossRecorderRestart() {
+    let suiteName = "RunnerTests.DurableNativeAccept.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let recorder = CallV2DurableNativeDiagnosticRecorder(
+      defaults: defaults,
+      queue: DispatchQueue(label: "RunnerTests.DurableNativeAccept"),
+      appLifecycleState: { "background" }
+    )
+
+    recorder.record(
+      stage: "NATIVE_CALLKIT_PRESENTED",
+      inviteIdentity: "private-invite",
+      exactIdentity: "private-exact"
+    )
+    recorder.record(
+      stage: "NATIVE_ACCEPT_CALLBACK_EXECUTED",
+      inviteIdentity: "private-invite",
+      exactIdentity: "private-exact"
+    )
+    recorder.record(
+      stage: "NATIVE_ACCEPT_IDENTITY_STORED",
+      inviteIdentity: "private-invite",
+      exactIdentity: "private-exact"
+    )
+    recorder.record(
+      stage: "NATIVE_SAFETY_WATCH_STARTED",
+      exactIdentity: "private-exact"
+    )
+    recorder.record(
+      stage: "ACCEPT_BRIDGE_DISPATCHED",
+      inviteIdentity: "private-invite",
+      exactIdentity: "private-exact"
+    )
+    recorder.record(
+      stage: "NATIVE_ANSWER_ACTION_FULFILLED",
+      inviteIdentity: "private-invite",
+      exactIdentity: "private-exact"
+    )
+    recorder.flushForTest()
+
+    let restarted = CallV2DurableNativeDiagnosticRecorder(
+      defaults: defaults,
+      queue: DispatchQueue(label: "RunnerTests.DurableNativeAccept.Restarted"),
+      appLifecycleState: { "active" }
+    )
+    let events = restarted.safeEventsForTest()
+    let stages = events.compactMap { $0["stage"] as? String }
+    let sequences = events.compactMap { $0["sequence"] as? Int }
+
+    XCTAssertEqual(stages, [
+      "NATIVE_CALLKIT_PRESENTED",
+      "NATIVE_ACCEPT_CALLBACK_EXECUTED",
+      "NATIVE_ACCEPT_IDENTITY_STORED",
+      "NATIVE_SAFETY_WATCH_STARTED",
+      "ACCEPT_BRIDGE_DISPATCHED",
+      "NATIVE_ANSWER_ACTION_FULFILLED",
+    ])
+    XCTAssertEqual(sequences, [1, 2, 3, 4, 5, 6])
+    XCTAssertEqual(events.first?["appLifecycleState"] as? String, "background")
+  }
+
+  func testDurableNativeDispatchDoesNotFabricateFlutterReceipt() {
+    let suiteName = "RunnerTests.DurableDispatch.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let recorder = CallV2DurableNativeDiagnosticRecorder(
+      defaults: defaults,
+      queue: DispatchQueue(label: "RunnerTests.DurableDispatch"),
+      appLifecycleState: { "inactive" }
+    )
+
+    recorder.record(
+      stage: "ACCEPT_BRIDGE_DISPATCHED",
+      inviteIdentity: "private-invite",
+      exactIdentity: "private-exact"
+    )
+    recorder.record(
+      stage: "ACCEPT_BRIDGE_DISPATCH_COMPLETED",
+      inviteIdentity: "private-invite",
+      exactIdentity: "private-exact",
+      outcome: "COMPLETED"
+    )
+    recorder.flushForTest()
+
+    let stages = recorder.safeEventsForTest().compactMap { $0["stage"] as? String }
+    XCTAssertEqual(stages, [
+      "ACCEPT_BRIDGE_DISPATCHED",
+      "ACCEPT_BRIDGE_DISPATCH_COMPLETED",
+    ])
+    XCTAssertFalse(stages.contains("FLUTTER_ACCEPT_BRIDGE_RECEIVED"))
+  }
+
+  func testDurableNativeRecorderIsNonBlockingBeforeCallkitFulfillment() {
+    let suiteName = "RunnerTests.DurableNonBlocking.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let queue = DispatchQueue(label: "RunnerTests.DurableNonBlocking")
+    queue.suspend()
+    let recorder = CallV2DurableNativeDiagnosticRecorder(
+      defaults: defaults,
+      queue: queue,
+      appLifecycleState: { "background" }
+    )
+
+    let started = Date()
+    recorder.record(
+      stage: "NATIVE_ACCEPT_CALLBACK_EXECUTED",
+      inviteIdentity: "private-invite",
+      exactIdentity: "private-exact"
+    )
+    var answerFulfilled = false
+    answerFulfilled = true
+    let elapsed = Date().timeIntervalSince(started)
+
+    XCTAssertTrue(answerFulfilled)
+    XCTAssertLessThan(elapsed, 0.05)
+    XCTAssertNil(
+      defaults.array(forKey: "connectapp.callV2DurableAcceptedBoundaryEvents")
+    )
+    queue.resume()
+    recorder.flushForTest()
+    XCTAssertEqual(recorder.safeEventsForTest().count, 1)
+  }
+
+  func testDurableNativeHistoryIsBoundedAndContainsOnlyFingerprints() {
+    let suiteName = "RunnerTests.DurablePrivacy.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    var now = Date(timeIntervalSince1970: 1_000)
+    let recorder = CallV2DurableNativeDiagnosticRecorder(
+      defaults: defaults,
+      queue: DispatchQueue(label: "RunnerTests.DurablePrivacy"),
+      now: { now },
+      appLifecycleState: { "active" },
+      maximumEvents: 6,
+      maximumEncodedBytes: 4_096,
+      maximumAge: 60
+    )
+
+    for index in 0..<3 {
+      recorder.record(
+        stage: "NATIVE_CALLKIT_PRESENTED",
+        inviteIdentity: "private-invite-\(index)",
+        exactIdentity: "private-exact-\(index)"
+      )
+      recorder.record(
+        stage: "NATIVE_ACCEPT_CALLBACK_EXECUTED",
+        inviteIdentity: "private-invite-\(index)",
+        exactIdentity: "private-exact-\(index)"
+      )
+      now = now.addingTimeInterval(1)
+    }
+    recorder.flushForTest()
+
+    let events = recorder.safeEventsForTest()
+    let encoded = String(data: try! JSONSerialization.data(withJSONObject: events), encoding: .utf8)!
+    XCTAssertEqual(events.count, 6)
+    XCTAssertFalse(encoded.contains("private-invite"))
+    XCTAssertFalse(encoded.contains("private-exact"))
+    XCTAssertFalse(encoded.lowercased().contains("token"))
+    XCTAssertFalse(encoded.lowercased().contains("channel"))
+    XCTAssertFalse(encoded.lowercased().contains("payload"))
+    XCTAssertEqual(Set(events.compactMap { $0["callFingerprint"] as? String }).count, 3)
+    XCTAssertEqual(Set(events.compactMap { $0["exactFingerprint"] as? String }).count, 3)
+  }
+
   private func makeWatchdog(
     timeout: TimeInterval = 1,
     record: @escaping (String, String) -> Void = { _, _ in },

@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../call_v2/diagnostics/call_v2_durable_boundary_diagnostics.dart';
 import '../call_v2/diagnostics/call_v2_physical_diagnostic_ledger.dart';
 import '../call_v2/real_flow/call_v2_agora_media_runtime.dart';
 import '../call_v2/real_flow/call_v2_call_lifecycle_arbiter.dart';
@@ -467,6 +469,8 @@ class CallSessionManager {
   Future<Map<String, dynamic>?> Function(String inviteId)?
       _readInviteDataForTest;
   Future<void> Function(int attempt)? _beforeAcceptTransactionAttemptForTest;
+  Future<void> Function(int attempt)?
+      _afterAcceptTransactionCallbackEnteredForTest;
   BeforeAgoraJoinProgressForTest? _beforeAgoraJoinProgressForTest;
   CallScreenOpenRecorderForTest? _callScreenOpenRecorderForTest;
   bool _skipActiveInviteBindingForTest = false;
@@ -725,6 +729,7 @@ class CallSessionManager {
     _afterOutgoingInviteWriteForTest = null;
     _readInviteDataForTest = null;
     _beforeAcceptTransactionAttemptForTest = null;
+    _afterAcceptTransactionCallbackEnteredForTest = null;
     _beforeAgoraJoinProgressForTest = null;
     _callScreenOpenRecorderForTest = null;
     _acknowledgeNativeRouteOwnership = null;
@@ -783,6 +788,23 @@ class CallSessionManager {
     } else {
       _physicalMediaOwner.markAudioSessionUnavailable(exactId);
     }
+    final session = _current;
+    CallV2DurableDiagnosticRecorder.instance.record(
+      active
+          ? CallV2DurableDiagnosticStage.audioSessionReadinessKnown
+          : CallV2DurableDiagnosticStage.audioSessionReadinessWaiting,
+      inviteIdentity: session?.inviteId ?? '',
+      exactCallkitIdentity: exactId,
+      outcome: active
+          ? CallV2DurableDiagnosticOutcome.allowed
+          : CallV2DurableDiagnosticOutcome.waiting,
+      lifecycleGeneration: session?.lifecycleGeneration,
+      generationCurrent: session == null
+          ? null
+          : _callLifecycleArbiter.ownsGeneration(
+              session.lifecycleGeneration,
+            ),
+    );
     await _diagManager('callkit_audio_session_readiness', meta: {
       'active': active,
       'exactIdentityPresent': true,
@@ -866,6 +888,8 @@ class CallSessionManager {
     Future<Map<String, dynamic>?> Function(String inviteId)?
         readInviteDataForTest,
     Future<void> Function(int attempt)? beforeAcceptTransactionAttemptForTest,
+    Future<void> Function(int attempt)?
+        afterAcceptTransactionCallbackEnteredForTest,
     BeforeAgoraJoinProgressForTest? beforeAgoraJoinProgressForTest,
     CallScreenOpenRecorderForTest? callScreenOpenRecorderForTest,
     bool? skipActiveInviteBindingForTest,
@@ -906,6 +930,10 @@ class CallSessionManager {
     if (beforeAcceptTransactionAttemptForTest != null) {
       _beforeAcceptTransactionAttemptForTest =
           beforeAcceptTransactionAttemptForTest;
+    }
+    if (afterAcceptTransactionCallbackEnteredForTest != null) {
+      _afterAcceptTransactionCallbackEnteredForTest =
+          afterAcceptTransactionCallbackEnteredForTest;
     }
     if (beforeAgoraJoinProgressForTest != null) {
       _beforeAgoraJoinProgressForTest = beforeAgoraJoinProgressForTest;
@@ -2060,60 +2088,94 @@ class CallSessionManager {
     required bool allowPermissionRequest,
   }) async {
     final key = _mediaKeyForSession(session);
-    return _physicalMediaOwner.claim(CallV2PhysicalMediaClaim(
-      key: key,
-      authorityReady: true,
-      requiresExactAudioSession: requireExactAudioSession,
-      allowPermissionRequest: allowPermissionRequest,
-      runtimeConfig: CallV2AgoraMediaRuntimeConfig(
-        channel: session.channel,
-        inviteId: session.inviteId,
-        isVideo: false,
-        isCaller: session.isCaller,
-        connectionSystem: session.connectionSystem,
-        onMediaSetupBegan: () => reportMediaSetupBegan(
-          inviteId: session.inviteId,
-          isCaller: session.isCaller,
-        ),
-        onJoinSuccess: () => _handlePhysicalMediaJoinSuccess(key),
-        onRemoteJoined: () => reportRemoteJoined(
-          inviteId: session.inviteId,
-          isCaller: session.isCaller,
-        ),
-        onRemoteOffline: (wasConnected, reason) => reportRemoteOffline(
-          inviteId: session.inviteId,
-          wasConnected: wasConnected,
-          isCaller: session.isCaller,
-          reason: reason,
-        ),
-        onJoinTimeout: () => reportJoinTimeout(
-          inviteId: session.inviteId,
-          isCaller: session.isCaller,
-        ),
-        onFailure: (code) => reportCallFailure(
-          inviteId: session.inviteId,
-          isCaller: session.isCaller,
-          message: 'Call setup failed. Please try again.',
-          error: code,
-        ),
-        diagnostic: (stage, metadata) => _diagManager(
-          'media_runtime_$stage',
-          meta: metadata,
-        ),
-      ),
-      onPermissionUnavailable: (reason) => reportCallFailure(
-        inviteId: session.inviteId,
-        isCaller: session.isCaller,
-        message: 'Microphone permission is required for this call.',
-        error: reason,
-      ),
-      onEndRequested: () => endCallFromLocalUser(
-        inviteId: session.inviteId,
-        source: 'media_attachment_end',
+    if (requireExactAudioSession) {
+      CallV2DurableDiagnosticRecorder.instance.record(
+        CallV2DurableDiagnosticStage.audioSessionReadinessWaiting,
+        inviteIdentity: session.inviteId,
+        exactCallkitIdentity: session.acceptedCallkitId,
+        outcome: CallV2DurableDiagnosticOutcome.waiting,
         lifecycleGeneration: session.lifecycleGeneration,
-        acceptedCallkitId: session.acceptedCallkitId,
-      ),
-    ));
+        generationCurrent:
+            _callLifecycleArbiter.ownsGeneration(session.lifecycleGeneration),
+      );
+    }
+    try {
+      final attachment = _physicalMediaOwner.claim(CallV2PhysicalMediaClaim(
+        key: key,
+        authorityReady: true,
+        requiresExactAudioSession: requireExactAudioSession,
+        allowPermissionRequest: allowPermissionRequest,
+        runtimeConfig: CallV2AgoraMediaRuntimeConfig(
+          channel: session.channel,
+          inviteId: session.inviteId,
+          isVideo: false,
+          isCaller: session.isCaller,
+          connectionSystem: session.connectionSystem,
+          onMediaSetupBegan: () => reportMediaSetupBegan(
+            inviteId: session.inviteId,
+            isCaller: session.isCaller,
+          ),
+          onJoinSuccess: () => _handlePhysicalMediaJoinSuccess(key),
+          onRemoteJoined: () => reportRemoteJoined(
+            inviteId: session.inviteId,
+            isCaller: session.isCaller,
+          ),
+          onRemoteOffline: (wasConnected, reason) => reportRemoteOffline(
+            inviteId: session.inviteId,
+            wasConnected: wasConnected,
+            isCaller: session.isCaller,
+            reason: reason,
+          ),
+          onJoinTimeout: () => reportJoinTimeout(
+            inviteId: session.inviteId,
+            isCaller: session.isCaller,
+          ),
+          onFailure: (code) => reportCallFailure(
+            inviteId: session.inviteId,
+            isCaller: session.isCaller,
+            message: 'Call setup failed. Please try again.',
+            error: code,
+          ),
+          diagnostic: (stage, metadata) => _diagManager(
+            'media_runtime_$stage',
+            meta: metadata,
+          ),
+        ),
+        onPermissionUnavailable: (reason) => reportCallFailure(
+          inviteId: session.inviteId,
+          isCaller: session.isCaller,
+          message: 'Microphone permission is required for this call.',
+          error: reason,
+        ),
+        onEndRequested: () => endCallFromLocalUser(
+          inviteId: session.inviteId,
+          source: 'media_attachment_end',
+          lifecycleGeneration: session.lifecycleGeneration,
+          acceptedCallkitId: session.acceptedCallkitId,
+        ),
+      ));
+      CallV2DurableDiagnosticRecorder.instance.record(
+        CallV2DurableDiagnosticStage.physicalMediaOwnerClaimed,
+        inviteIdentity: session.inviteId,
+        exactCallkitIdentity: session.acceptedCallkitId,
+        outcome: CallV2DurableDiagnosticOutcome.allowed,
+        lifecycleGeneration: session.lifecycleGeneration,
+        generationCurrent:
+            _callLifecycleArbiter.ownsGeneration(session.lifecycleGeneration),
+      );
+      return attachment;
+    } on Object {
+      CallV2DurableDiagnosticRecorder.instance.record(
+        CallV2DurableDiagnosticStage.physicalMediaOwnerRejected,
+        inviteIdentity: session.inviteId,
+        exactCallkitIdentity: session.acceptedCallkitId,
+        outcome: CallV2DurableDiagnosticOutcome.blocked,
+        lifecycleGeneration: session.lifecycleGeneration,
+        generationCurrent:
+            _callLifecycleArbiter.ownsGeneration(session.lifecycleGeneration),
+      );
+      rethrow;
+    }
   }
 
   Future<void> _handlePhysicalMediaJoinSuccess(
@@ -2132,6 +2194,16 @@ class CallSessionManager {
         final current = _current;
         if (current == null || !_mediaKeyForSession(current).matches(key)) {
           return;
+        }
+        if (acknowledged) {
+          CallV2DurableDiagnosticRecorder.instance.record(
+            CallV2DurableDiagnosticStage.mediaOwnedAckCompleted,
+            inviteIdentity: key.inviteId,
+            exactCallkitIdentity: key.acceptedCallkitId,
+            outcome: CallV2DurableDiagnosticOutcome.completed,
+            lifecycleGeneration: key.lifecycleGeneration,
+            generationCurrent: true,
+          );
         }
         final watch = _acceptedNativeRouteWatch;
         if (acknowledged &&
@@ -2606,6 +2678,15 @@ class CallSessionManager {
     _acceptedRouteDiscarded = false;
     _acceptedRouteAppResumed = false;
     _acceptedOwnershipRecorded = true;
+    CallV2DurableDiagnosticRecorder.instance.record(
+      CallV2DurableDiagnosticStage.acceptedContinuationClaimed,
+      inviteIdentity: payload.inviteId,
+      exactCallkitIdentity: payload.acceptedCallkitId,
+      outcome: CallV2DurableDiagnosticOutcome.allowed,
+      lifecycleGeneration: claimedGeneration,
+      generationCurrent:
+          _callLifecycleArbiter.ownsGeneration(claimedGeneration),
+    );
     CallV2PhysicalDiagnosticLedger.instance.record(
       CallV2PhysicalDiagnosticStage.acceptedOwnershipRecorded,
       exactNativeKey: payload.acceptedCallkitId,
@@ -4056,12 +4137,41 @@ class CallSessionManager {
     const maxAttempts = 3;
     Object? lastError;
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
-      if (lifecycleGeneration != null &&
-          !_canContinueAcceptedRouteGeneration(lifecycleGeneration)) {
+      final generationCurrent = lifecycleGeneration == null ||
+          _canContinueAcceptedRouteGeneration(lifecycleGeneration);
+      CallV2DurableDiagnosticRecorder.instance.record(
+        CallV2DurableDiagnosticStage.lifecycleGenerationChecked,
+        inviteIdentity: payload.inviteId,
+        exactCallkitIdentity: payload.acceptedCallkitId,
+        outcome: generationCurrent
+            ? CallV2DurableDiagnosticOutcome.allowed
+            : CallV2DurableDiagnosticOutcome.superseded,
+        attempt: attempt,
+        lifecycleGeneration: lifecycleGeneration,
+        generationCurrent: generationCurrent,
+      );
+      if (!generationCurrent) {
+        CallV2DurableDiagnosticRecorder.instance.record(
+          CallV2DurableDiagnosticStage.transactionResultReturned,
+          inviteIdentity: payload.inviteId,
+          exactCallkitIdentity: payload.acceptedCallkitId,
+          outcome: CallV2DurableDiagnosticOutcome.superseded,
+          attempt: attempt,
+          lifecycleGeneration: lifecycleGeneration,
+          generationCurrent: false,
+        );
         return const _AcceptInviteTransactionResult(
           decision: _AcceptInviteDecision.superseded,
         );
       }
+      CallV2DurableDiagnosticRecorder.instance.record(
+        CallV2DurableDiagnosticStage.transactionAttemptStarted,
+        inviteIdentity: payload.inviteId,
+        exactCallkitIdentity: payload.acceptedCallkitId,
+        attempt: attempt,
+        lifecycleGeneration: lifecycleGeneration,
+        generationCurrent: true,
+      );
       _recordAcceptedRouteStage(
         payload,
         CallV2PhysicalDiagnosticStage.acceptedTransactionStarted,
@@ -4076,14 +4186,57 @@ class CallSessionManager {
         await _beforeAcceptTransactionAttemptForTest?.call(attempt);
         if (lifecycleGeneration != null &&
             !_canContinueAcceptedRouteGeneration(lifecycleGeneration)) {
+          CallV2DurableDiagnosticRecorder.instance.record(
+            CallV2DurableDiagnosticStage.transactionResultReturned,
+            inviteIdentity: payload.inviteId,
+            exactCallkitIdentity: payload.acceptedCallkitId,
+            outcome: CallV2DurableDiagnosticOutcome.superseded,
+            attempt: attempt,
+            lifecycleGeneration: lifecycleGeneration,
+            generationCurrent: false,
+          );
           return const _AcceptInviteTransactionResult(
             decision: _AcceptInviteDecision.superseded,
           );
         }
+        CallV2DurableDiagnosticRecorder.instance.record(
+          CallV2DurableDiagnosticStage.transactionRunInvoked,
+          inviteIdentity: payload.inviteId,
+          exactCallkitIdentity: payload.acceptedCallkitId,
+          attempt: attempt,
+          lifecycleGeneration: lifecycleGeneration,
+          generationCurrent: true,
+        );
         final result = await _db
             .runTransaction<_AcceptInviteTransactionResult>((tx) async {
+          CallV2DurableDiagnosticRecorder.instance.record(
+            CallV2DurableDiagnosticStage.transactionCallbackEntered,
+            inviteIdentity: payload.inviteId,
+            exactCallkitIdentity: payload.acceptedCallkitId,
+            attempt: attempt,
+            lifecycleGeneration: lifecycleGeneration,
+            generationCurrent: lifecycleGeneration == null ||
+                _canContinueAcceptedRouteGeneration(lifecycleGeneration),
+          );
+          final afterCallbackEntered =
+              _afterAcceptTransactionCallbackEnteredForTest;
+          if (afterCallbackEntered != null) {
+            await afterCallbackEntered(attempt);
+          }
           final ref = _db.collection('callInvites').doc(payload.inviteId);
           final snap = await tx.get(ref);
+          CallV2DurableDiagnosticRecorder.instance.record(
+            CallV2DurableDiagnosticStage.transactionSnapshotObtained,
+            inviteIdentity: payload.inviteId,
+            exactCallkitIdentity: payload.acceptedCallkitId,
+            outcome: snap.exists
+                ? CallV2DurableDiagnosticOutcome.allowed
+                : CallV2DurableDiagnosticOutcome.missing,
+            attempt: attempt,
+            lifecycleGeneration: lifecycleGeneration,
+            generationCurrent: lifecycleGeneration == null ||
+                _canContinueAcceptedRouteGeneration(lifecycleGeneration),
+          );
           if (!snap.exists) {
             return const _AcceptInviteTransactionResult(
               decision: _AcceptInviteDecision.missing,
@@ -4091,6 +4244,16 @@ class CallSessionManager {
           }
           final data = snap.data() ?? const <String, dynamic>{};
           final status = _parseStatus(data['status']);
+          CallV2DurableDiagnosticRecorder.instance.record(
+            CallV2DurableDiagnosticStage.transactionStatusClassified,
+            inviteIdentity: payload.inviteId,
+            exactCallkitIdentity: payload.acceptedCallkitId,
+            outcome: _durableOutcomeForStatus(status),
+            attempt: attempt,
+            lifecycleGeneration: lifecycleGeneration,
+            generationCurrent: lifecycleGeneration == null ||
+                _canContinueAcceptedRouteGeneration(lifecycleGeneration),
+          );
           final toUid = (data['toUid'] ?? '').toString().trim();
           final me = _currentUid.trim();
           if (me.isEmpty || toUid != me) {
@@ -4147,6 +4310,17 @@ class CallSessionManager {
           );
         }).timeout(const Duration(seconds: 8));
 
+        CallV2DurableDiagnosticRecorder.instance.record(
+          CallV2DurableDiagnosticStage.transactionCompleted,
+          inviteIdentity: payload.inviteId,
+          exactCallkitIdentity: payload.acceptedCallkitId,
+          outcome: _durableOutcomeForAcceptDecision(result.decision),
+          attempt: attempt,
+          lifecycleGeneration: lifecycleGeneration,
+          generationCurrent: lifecycleGeneration == null ||
+              _canContinueAcceptedRouteGeneration(lifecycleGeneration),
+        );
+
         await _diagManager('accept_transaction_done', meta: {
           'inviteId': payload.inviteId,
           'channel': payload.channel,
@@ -4170,10 +4344,34 @@ class CallSessionManager {
             CallV2PhysicalDiagnosticStage.acceptedTransactionRejectedTerminal,
           );
         }
+        CallV2DurableDiagnosticRecorder.instance.record(
+          CallV2DurableDiagnosticStage.transactionResultReturned,
+          inviteIdentity: payload.inviteId,
+          exactCallkitIdentity: payload.acceptedCallkitId,
+          outcome: _durableOutcomeForAcceptDecision(result.decision),
+          attempt: attempt,
+          lifecycleGeneration: lifecycleGeneration,
+          generationCurrent: lifecycleGeneration == null ||
+              _canContinueAcceptedRouteGeneration(lifecycleGeneration),
+        );
         return result;
       } catch (error) {
         lastError = error;
         final recoverable = FirestoreReadHelper.isRecoverableError(error);
+        final failureOutcome = _durableOutcomeForTransactionError(
+          error,
+          recoverable: recoverable,
+        );
+        CallV2DurableDiagnosticRecorder.instance.record(
+          CallV2DurableDiagnosticStage.transactionFailed,
+          inviteIdentity: payload.inviteId,
+          exactCallkitIdentity: payload.acceptedCallkitId,
+          outcome: failureOutcome,
+          attempt: attempt,
+          lifecycleGeneration: lifecycleGeneration,
+          generationCurrent: lifecycleGeneration == null ||
+              _canContinueAcceptedRouteGeneration(lifecycleGeneration),
+        );
         _recordAcceptedRouteStage(
           payload,
           CallV2PhysicalDiagnosticStage.acceptedTransactionPendingNetwork,
@@ -4197,6 +4395,15 @@ class CallSessionManager {
           reason: 'accept_transaction',
           force: attempt >= 2,
         ));
+        CallV2DurableDiagnosticRecorder.instance.record(
+          CallV2DurableDiagnosticStage.transactionRetryEntered,
+          inviteIdentity: payload.inviteId,
+          exactCallkitIdentity: payload.acceptedCallkitId,
+          outcome: failureOutcome,
+          attempt: attempt,
+          lifecycleGeneration: lifecycleGeneration,
+          generationCurrent: true,
+        );
         await Future<void>.delayed(Duration(milliseconds: 250 * attempt));
       }
     }
@@ -4207,9 +4414,80 @@ class CallSessionManager {
       'source': source,
       'error': '$lastError',
     });
+    CallV2DurableDiagnosticRecorder.instance.record(
+      CallV2DurableDiagnosticStage.transactionResultReturned,
+      inviteIdentity: payload.inviteId,
+      exactCallkitIdentity: payload.acceptedCallkitId,
+      outcome: CallV2DurableDiagnosticOutcome.unavailable,
+      lifecycleGeneration: lifecycleGeneration,
+      generationCurrent: lifecycleGeneration == null ||
+          _canContinueAcceptedRouteGeneration(lifecycleGeneration),
+    );
     return const _AcceptInviteTransactionResult(
       decision: _AcceptInviteDecision.unavailable,
     );
+  }
+
+  CallV2DurableDiagnosticOutcome _durableOutcomeForStatus(
+    CallInviteStatus status,
+  ) {
+    return switch (status) {
+      CallInviteStatus.ringing => CallV2DurableDiagnosticOutcome.ringing,
+      CallInviteStatus.accepted => CallV2DurableDiagnosticOutcome.accepted,
+      CallInviteStatus.joining => CallV2DurableDiagnosticOutcome.joining,
+      CallInviteStatus.connected => CallV2DurableDiagnosticOutcome.connected,
+      CallInviteStatus.declined ||
+      CallInviteStatus.missed ||
+      CallInviteStatus.cancelled ||
+      CallInviteStatus.ended ||
+      CallInviteStatus.failed =>
+        CallV2DurableDiagnosticOutcome.terminal,
+      CallInviteStatus.unknown => CallV2DurableDiagnosticOutcome.invalidStatus,
+    };
+  }
+
+  CallV2DurableDiagnosticOutcome _durableOutcomeForAcceptDecision(
+    _AcceptInviteDecision decision,
+  ) {
+    return switch (decision) {
+      _AcceptInviteDecision.accepted => CallV2DurableDiagnosticOutcome.accepted,
+      _AcceptInviteDecision.alreadyAccepted =>
+        CallV2DurableDiagnosticOutcome.alreadyAccepted,
+      _AcceptInviteDecision.missing => CallV2DurableDiagnosticOutcome.missing,
+      _AcceptInviteDecision.wrongRecipient =>
+        CallV2DurableDiagnosticOutcome.wrongRecipient,
+      _AcceptInviteDecision.terminal => CallV2DurableDiagnosticOutcome.terminal,
+      _AcceptInviteDecision.invalidStatus =>
+        CallV2DurableDiagnosticOutcome.invalidStatus,
+      _AcceptInviteDecision.invalidPayload =>
+        CallV2DurableDiagnosticOutcome.invalidPayload,
+      _AcceptInviteDecision.superseded =>
+        CallV2DurableDiagnosticOutcome.superseded,
+      _AcceptInviteDecision.unavailable =>
+        CallV2DurableDiagnosticOutcome.unavailable,
+    };
+  }
+
+  CallV2DurableDiagnosticOutcome _durableOutcomeForTransactionError(
+    Object error, {
+    required bool recoverable,
+  }) {
+    if (error is TimeoutException) {
+      return CallV2DurableDiagnosticOutcome.timeout;
+    }
+    if (error is FirebaseException) {
+      return switch (error.code.trim().toLowerCase()) {
+        'deadline-exceeded' => CallV2DurableDiagnosticOutcome.timeout,
+        'unavailable' => CallV2DurableDiagnosticOutcome.firebaseUnavailable,
+        'permission-denied' =>
+          CallV2DurableDiagnosticOutcome.firebasePermissionDenied,
+        'aborted' => CallV2DurableDiagnosticOutcome.firebaseAborted,
+        _ => CallV2DurableDiagnosticOutcome.firebaseOther,
+      };
+    }
+    return recoverable
+        ? CallV2DurableDiagnosticOutcome.recoverableFailure
+        : CallV2DurableDiagnosticOutcome.nonRecoverableFailure;
   }
 
   Future<_RouteOpenResult> _activateSession(
@@ -4927,6 +5205,16 @@ class CallSessionManager {
       deferredExactCleanup,
       pendingContinuation,
     ]);
+    if (!pendingClaim.claimed && _callLifecycleArbiter.isIdle) {
+      CallV2DurableDiagnosticRecorder.instance.record(
+        CallV2DurableDiagnosticStage.lifecycleReturnedIdle,
+        inviteIdentity: session.inviteId,
+        exactCallkitIdentity: session.acceptedCallkitId,
+        outcome: CallV2DurableDiagnosticOutcome.completed,
+        lifecycleGeneration: session.lifecycleGeneration,
+        generationCurrent: false,
+      );
+    }
   }
 
   Future<void> _continueClaimedPendingIncoming({
