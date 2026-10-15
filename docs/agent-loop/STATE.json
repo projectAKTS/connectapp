@@ -2,17 +2,27 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "durable_diagnostic_storage_atomicity_revision",
-  "status": "revision_required",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "b017ab007308fe31837174f2e06269f5dd7202c5",
   "starting_sha": "1aeb7c41b5931dd67442b80f838fbc03c825f9ba",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
+  "code_commit_sha": "f3932e66d7d56663bf2744238d155117b2f21948",
   "ending_sha": "SELF",
-  "changed_files": [],
+  "changed_files": [
+    "lib/call_v2/diagnostics/call_v2_durable_boundary_diagnostics.dart",
+    "test/call_v2/diagnostics/call_v2_durable_boundary_diagnostics_test.dart"
+  ],
   "validation": {
-    "authorization_metadata": "pending validation",
-    "implementation": "not started"
+    "focused_diagnostics": "15 passed",
+    "focused_ownership_lifecycle": "181 passed",
+    "focused_background_media": "18 passed",
+    "foreground_recovery": "3 passed",
+    "full_call_v2": "2361 passed",
+    "flutter_analyze": "passed with no issues",
+    "git_diff_check": "passed",
+    "dependency_diff": "none",
+    "runner_tests": "not rerun; native code unchanged; reviewed baseline 30 passed"
   },
   "safety": {
     "deployed": false,
@@ -20,11 +30,11 @@
     "production_services_contacted": false,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": false,
-    "test_changes": false
+    "production_code_changes": true,
+    "test_changes": true
   },
   "review": {
-    "decision": "revision_required",
-    "notes": "Correct only atomic file replacement and last-successful-snapshot cache ordering in the Dart durable diagnostic recorder. Preserve all accepted native, CallKit, recovery, Firestore, media, timeout, retry, dependency, backend, and call behavior."
+    "decision": "ready_for_review",
+    "notes": "Durable diagnostics now use a flushed same-directory atomic snapshot replacement, and the recorder cache advances only after successful persistence. Real filesystem failure tests preserve prior valid history; all focused and full Call V2 validation passes."
   }
 }
