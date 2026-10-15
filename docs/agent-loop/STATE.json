@@ -1,35 +1,18 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "background_audio_media_ack_ordering_revision",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "3e9628d8d224a5f7cb1667874e10211554b4fc23",
-  "starting_sha": "76eca6691d219abbf1a1a7cde411c76332ab02a3",
+  "phase": "durable_accepted_call_boundary_diagnostics",
+  "status": "task_ready",
+  "accepted_checkpoint_sha": "f2654d9bbd28adc95471add25bf86d819f623991",
+  "starting_sha": "f2654d9bbd28adc95471add25bf86d819f623991",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "7683578ac5a83fc4b8524173294a3c285c73d44a",
+  "code_commit_sha": null,
   "ending_sha": "SELF",
-  "changed_files": [
-    "lib/services/call_session_manager.dart",
-    "test/call_v2/real_flow/call_v2_background_audio_media_integration_test.dart",
-    "docs/agent-loop/NEXT_TASK.md",
-    "docs/agent-loop/STATE.json",
-    "docs/agent-loop/HANDOFF.md"
-  ],
+  "changed_files": [],
   "validation": {
-    "focused_background_audio_integration": "passed: 7",
-    "physical_media_owner": "passed: 11",
-    "route_ownership": "passed: 14",
-    "exact_callkit_ownership": "passed: 14",
-    "notification_ownership": "passed: 38",
-    "rapid_lifecycle": "passed: 65",
-    "repeated_lifecycle": "passed: 50",
-    "foreground_recovery": "passed: 3",
-    "all_call_v2": "passed: 2346",
-    "ios_runner_tests": "passed: 26",
-    "flutter_analyze": "passed: no issues",
-    "git_diff_check": "passed",
-    "dependency_diff": "none"
+    "authorization_metadata": "validated before authorization commit",
+    "implementation": "not started"
   },
   "safety": {
     "deployed": false,
@@ -37,11 +20,11 @@
     "production_services_contacted": false,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": true,
-    "test_changes": true
+    "production_code_changes": false,
+    "test_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "After actual Agora join success, exact native media ownership is acknowledged and the still-matching accepted-native watch is transferred before awaited Firestore join-progress reporting. Exact identity and generation are revalidated after the acknowledgment await; stale and late Call A work cannot acknowledge or mutate Call B. Required Firestore progress, route ACK semantics, watchdog timing, and all accepted architecture remain unchanged."
+    "decision": "implementation_required",
+    "notes": "Authorize only bounded durable accepted-call boundary diagnostics: independently persist native answer callback, bridge dispatch, Flutter receipt, authoritative transaction progress/results, and narrowly relevant media ownership checkpoints. Preserve all accepted CallKit, Firestore, media, watchdog, route, redial, terminal, backend, dependency, and runtime behavior. No common-root-cause or physical-fix claim is authorized."
   }
 }

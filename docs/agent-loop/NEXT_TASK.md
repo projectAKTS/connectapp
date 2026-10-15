@@ -1,79 +1,177 @@
-# Active Task - Media-Owned ACK Ordering Revision
+# Active Task - Durable Accepted-Call Boundary Diagnostics
 
 Branch: `call-v2`
 
-Starting SHA: `76eca6691d219abbf1a1a7cde411c76332ab02a3`
-
-Implementation under review:
-`3e9628d8d224a5f7cb1667874e10211554b4fc23`
+Starting SHA: `f2654d9bbd28adc95471add25bf86d819f623991`
 
 ## Goal
 
-Correct one ordering defect in physical media join success: once Agora
-`onJoinChannelSuccess` has fired and the exact physical media/session
-generation is still current, acknowledge exact native media ownership and
-transfer the matching accepted-native watch before awaiting Firestore join
-progress.
+Add bounded, durable, privacy-safe diagnostics for the two unresolved physical
+acceptance boundaries without changing call behavior:
 
-## Required Ordering
+- Audio B reached `accept_transaction_start`, but no authoritative transaction
+  outcome was retained.
+- Video C reached native CallKit presentation and the user reported tapping
+  Accept, but retained evidence could not prove native answer-callback execution
+  or Flutter bridge receipt.
 
-1. Receive actual Agora join-success callback.
-2. Validate the exact current `CallV2PhysicalMediaKey`, lifecycle generation,
-   and accepted CallKit identity.
-3. If an exact accepted CallKit identity exists, call
-   `acknowledgeNativeMediaOwnership`.
-4. Revalidate exact media/session ownership after that await.
-5. If acknowledgment succeeded and the exact accepted-native watch still
-   matches, transfer that watch to media-owned.
-6. Call the existing `reportAgoraJoinSuccess` manager/Firestore progress path.
+Do not assume these failures share a root cause.
 
-Firestore progress remains required but must not keep a successfully joined,
-exactly owned native call eligible for the no-owner watchdog.
+## Authorized Scope
 
-## Failure Semantics
+### Durable Local Recorder
 
-- Never acknowledge before actual Agora join success.
-- A stale media key before join success sends no acknowledgment.
-- If ownership becomes stale while native acknowledgment is awaiting, its late
-  completion cannot transfer a watch or mutate a newer call.
-- Do not remove or weaken `reportAgoraJoinSuccess`.
-- Do not fabricate route ownership.
-- Existing terminal cleanup remains authoritative.
+- Add the smallest device-local recorder that survives Flutter process
+  termination and restart.
+- Persist UTC time, monotonic event order where available, safe stage, app
+  lifecycle state, and privacy-safe fingerprints for invite and exact CallKit
+  identity.
+- Retain enough bounded history for at least three consecutive calls.
+- Bound storage by event count, encoded size, and age.
+- Keep storage inspectable through the existing device-container extraction
+  workflow.
+- Recorder failures must be swallowed and must never alter call handling.
+- No diagnostic write may be awaited before CallKit fulfillment, Firestore
+  transaction execution, media startup, or native ownership acknowledgment.
 
-## Required Tests
+### Native Accept Boundary
 
-- Block `reportAgoraJoinSuccess`/Firestore progress deterministically after
-  actual join success and prove, while blocked:
-  - one exact media-owned acknowledgment has already occurred;
-  - the exact accepted-native watch is media-owned/no longer deadline-eligible;
-  - no route-owned acknowledgment occurred.
-- Release progress and prove normal lifecycle reporting completes without a
-  duplicate media acknowledgment.
-- A stale media key before join success produces zero acknowledgment.
-- If exact ownership changes while native acknowledgment is awaiting, late
-  completion cannot transfer or mutate newer Call B.
+Instrument the existing native path with independently durable checkpoints for:
+
+- fresh CallKit presentation;
+- `CXAnswerCallAction` callback entry;
+- accepted identity storage;
+- native safety-watch start;
+- Flutter MethodChannel dispatch attempt and completion/result when available;
+- CallKit answer fulfillment;
+- CallKit audio activation/deactivation;
+- native route-owned and media-owned acknowledgment;
+- safety-watch deadline;
+- exact native-call termination.
+
+Native callback execution, bridge dispatch, and Flutter receipt must remain
+separate facts. Never infer receipt from dispatch.
+
+### Flutter Accept Boundary
+
+- Persist receipt immediately when `callkitAcceptedNative` enters
+  `NotificationService._handleNativePushMethodCall`.
+- Persist safe identity-match classification and accepted-recovery handoff.
+- A lightweight native diagnostic receipt acknowledgment is allowed only if it
+  is non-blocking and cannot affect acceptance behavior.
+
+### Authoritative Accept Transaction
+
+Instrument `_acceptInviteTransactionWithRetry()` without changing authority,
+retry, timeout, or status-transition behavior. Capture:
+
+- accepted continuation claimed and current lifecycle generation;
+- attempt start and `runTransaction` invocation;
+- transaction callback entry and snapshot acquisition;
+- safe authoritative-status classification;
+- transaction completion;
+- timeout/Firebase failure using a normalized safe category;
+- retry entry;
+- typed accepted/already-accepted/rejected/unavailable result.
+
+The existing eight-second timeout must remain unchanged. App lifecycle changes
+around this operation may be persisted where existing platform callbacks expose
+them.
+
+### Post-Accept Media Boundary
+
+Add only safe stages for:
+
+- exact audio readiness known/waiting;
+- physical media ownership claimed/rejected;
+- process cleanup gate requested/permitted/blocked;
+- token request start;
+- media runtime start;
+- Agora join callback;
+- media-owned acknowledgment completion;
+- media cleanup start/completion;
+- lifecycle return to idle.
 
 ## Allowed Files
 
+Modify or add only files strictly required from:
+
+- `lib/call_v2/diagnostics/**`
+- `lib/services/notification_service.dart`
 - `lib/services/call_session_manager.dart`
+- `lib/call_v2/real_flow/**` only for diagnostic checkpoints
+- `lib/screens/call/agora_call_screen.dart` only for diagnostic checkpoints
+- `ios/Runner/AppDelegate.swift`
 - focused tests under `test/call_v2/**`
+- `test/notification_foreground_recovery_test.dart` only if required
+- `ios/RunnerTests/RunnerTests.swift`
 - `docs/agent-loop/HANDOFF.md`
 - `docs/agent-loop/STATE.json`
 - this task file
 
+## Privacy And Retention
+
+Persist no raw APNs/Agora token, personal name, phone number, user ID,
+authorization credential, invite ID, channel, payload, exact CallKit UUID, or
+Agora credential. Correlation fingerprints must be stable enough for local
+ordering but non-reversible and must not expose source values.
+
+Do not write diagnostics to `callInvites`, Cloud Functions, or any backend.
+Make no dependency changes.
+
 ## Strict Non-Goals
 
-Do not change the physical media owner/runtime architecture, screen attachment,
-widget detach, video or outgoing-audio route-first behavior, CallKit audio
-activation latching, native watchdog duration, route-owned ACK behavior,
-accepted transaction architecture, route/redial ownership, PushKit/APNs,
-backend, dependencies, or native code.
+Do not change:
+
+- native CallKit Accept or incoming presentation behavior;
+- accepted transaction implementation, authority, retry, or timeout;
+- exact CallKit ownership;
+- PushKit/APNs delivery;
+- physical media owner or Agora runtime behavior;
+- video or outgoing-audio route-first sequencing;
+- native safety-watch duration;
+- route-owned or media-owned acknowledgment semantics;
+- redial ordering or terminal transitions;
+- backend, Firestore protocol/rules, dependencies, Flutter, Agora, or plugin
+  versions.
+
+Do not deploy, build TestFlight, request another physical call, or claim a root
+cause or physical fix.
+
+## Required Tests
+
+1. Native Accept checkpoints persist in order.
+2. Native dispatch and Flutter receipt are represented independently.
+3. Missing Flutter receipt is never fabricated.
+4. A blocked Firestore transaction retains its last entered checkpoint.
+5. A completed transaction retains its typed result.
+6. Timeout/exception stores only a safe normalized category.
+7. Process restart preserves bounded diagnostic history.
+8. Call A/B/C histories remain independently correlated.
+9. Old-call cleanup cannot overwrite newer-call identity.
+10. Storage failures do not affect CallKit acceptance, Firestore, or media.
+11. Persisted diagnostics contain no sensitive raw values.
+12. Diagnostic persistence does not delay native answer fulfillment.
 
 ## Validation
 
-Run the focused race test, background media tests, route ownership, exact
-CallKit, notification ownership, rapid lifecycle, repeated lifecycle,
-foreground recovery, full `test/call_v2 --no-pub`, iOS RunnerTests,
-`flutter analyze`, `git diff --check`, and dependency diff inspection.
+Run focused diagnostics, accepted-recovery, route-ownership, exact-CallKit,
+background-media, rapid-lifecycle, and repeated-call tests, then:
 
-Do not build TestFlight, deploy, or claim physical success.
+```bash
+flutter analyze
+flutter test test/call_v2 --no-pub
+flutter test test/notification_foreground_recovery_test.dart --no-pub
+git diff --check
+```
+
+Run iOS RunnerTests because native diagnostics are authorized. Inspect dependency
+diffs and confirm no dependency metadata changed.
+
+## Commit And Handoff
+
+Create one focused instrumentation commit. Then replace `HANDOFF.md`, set
+`STATE.json` to `ready_for_review` with exact validation evidence, commit the
+metadata separately, push `origin/call-v2`, and stop.
+
+Do not build TestFlight or request physical validation in this task.
