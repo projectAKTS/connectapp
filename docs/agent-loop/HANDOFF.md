@@ -1,84 +1,100 @@
-# Durable Diagnostic Storage Atomicity Revision Handoff
+# Post-Terminal Accepted Continuation Replay Handoff
 
 STATUS: `ready_for_review`
 
-STARTING_SHA: `1aeb7c41b5931dd67442b80f838fbc03c825f9ba`
-AUTHORIZATION_SHA: `1a48d9c80f7bdfaf1990d9b8a964daddf78cb2ab`
-IMPLEMENTATION_SHA: `f3932e66d7d56663bf2744238d155117b2f21948`
+STARTING_SHA: `f1e0499bf93cb294374efaa789510a97d1679d01`
+IMPLEMENTATION_SHA: `d994cdba749afac10da97542a2739e35e0c6195b`
 ENDING_SHA: `SELF`
+
+## Root Cause
+
+An accepted-route continuation could remain owned after its call terminalized.
+`CallV2CallLifecycleArbiter.ownsGeneration()` still recognizes the last
+generation after the arbiter returns to idle, so generation-only readiness
+checks allowed a delayed continuation to recreate `_current`, open a route, and
+claim a second physical audio runtime for the terminated call. The route path
+also continued after `markJoining()` rejected the stale transition.
 
 ## Correction
 
-`CallV2FileDurableDiagnosticStore.write()` now creates a unique temporary file
-beside the Application Support target, writes and flushes the complete encoded
-snapshot, and then replaces the target with same-directory `File.rename`.
-Dart's VM delegates file rename on Apple platforms to POSIX rename; keeping both
-paths in one directory gives the iOS filesystem an atomic replacement boundary.
-Preparation failures leave the previous target untouched. Failed staging files
-are removed asynchronously where possible without replacing the original error.
-
-The recorder now treats `_events` as the last successfully persisted snapshot.
-Each append copies that snapshot, applies retention to the candidate, writes the
-candidate, and publishes it to `_events` only after the store succeeds. A failed
-write therefore remains absent from both the current recorder and a new recorder,
-and the next successful write resumes from the last committed sequence.
-
-Record submission remains serialized and fire-and-forget. No synchronous file
-operation or diagnostic storage await was added to a call-critical path.
+- Terminal cleanup invalidates only the continuation matching the session's
+  invite, lifecycle generation, and accepted native CallKit identity.
+- Exact invalidation cancels the matching accepted-route readiness work.
+- Continuations can proceed only while they remain the identical owned object,
+  retain their lifecycle generation, and the arbiter is `joining` or
+  `connected`.
+- Accepted continuation ownership is rechecked after foreground readiness,
+  subscription cancellation/binding, Navigator readiness, and immediately
+  before a route is counted or opened.
+- Rejected `markJoining()` transitions stop activation.
+- Route activation uses exact attempt/session tokens so late Call A completion
+  cannot clear Call B's opening state, subscription, current session, route, or
+  accepted continuation.
+- Terminal watch and rollback cleanup recheck exact ownership after awaited
+  cancellation before mutating shared state.
+- Legitimate foreground attachment while an accepted audio call is still
+  joining/connected reuses the existing physical media owner.
 
 ## Files Changed
 
-- `lib/call_v2/diagnostics/call_v2_durable_boundary_diagnostics.dart`
-- `test/call_v2/diagnostics/call_v2_durable_boundary_diagnostics_test.dart`
-- `docs/agent-loop/HANDOFF.md`
+- `lib/services/call_session_manager.dart`
+- `test/call_v2/real_flow/call_v2_background_audio_media_integration_test.dart`
+- `docs/agent-loop/NEXT_TASK.md`
 - `docs/agent-loop/STATE.json`
-
-Authorization metadata was committed separately in
-`1a48d9c80f7bdfaf1990d9b8a964daddf78cb2ab`.
+- `docs/agent-loop/HANDOFF.md`
 
 The pre-existing untracked
 `docs/CALL_V2_ARCHITECTURE_DEEP_DIVE.md` remains unchanged with SHA-256
 `d33b3bf300a4980807b863d6c4b29465548284b1c6004638dcfa7fbcb2eda0f3`.
 
-## Test Proof
+## Regression Proof
 
-- Real temporary-filesystem pre-commit failure preserves the prior valid JSON.
-- A deliberately truncated staging file is never exposed at the target path.
-- Real same-directory replacement publishes one complete valid snapshot.
-- Failed persistence is absent from the current recorder and a new recorder.
-- A/B/C history and sequence ordering survive a failed append.
-- A later successful append continues at sequence 4 from the committed snapshot.
-- Existing retention and fingerprint privacy assertions remain green.
-- A blocked store proves `record()` returns before persistence completes.
+- `background accepted audio terminalizes before foreground and never restarts media`
+  proves terminal cleanup reaches idle and late readiness creates no route,
+  token request, engine, join, session, continuation, or second media owner.
+- `terminal during awaited foreground readiness cannot reopen the call` uses a
+  controlled readiness barrier and proves no route or media restart after the
+  terminal event wins.
+- `late Call A readiness cannot mutate active Call B` proves delayed A work
+  cannot replace, cancel, or terminate B.
+- `foreground route attaches after headless join without second RTC` preserves
+  the valid background-audio-to-foreground attachment path.
+- `audio then audio then video stay single-owner across terminal cleanup`
+  proves sequential reuse with one route and one RTC owner per call.
+- Existing exact CallKit, route ownership, accepted recovery, physical media,
+  rapid lifecycle, repeated-call, and foreground recovery regressions remain
+  green.
 
 ## Validation
 
-- Focused durable diagnostics: 15 passed.
-- Focused CallKit ownership/repeated lifecycle/route ownership: 181 passed.
-- Focused background audio/media ownership: 18 passed.
+- Background audio integration: 11 passed.
 - Foreground recovery: 3 passed.
-- Full isolated Call V2 suite: 2,361 passed.
+- Accepted recovery, route ownership, exact CallKit ownership, physical media,
+  rapid lifecycle, and repeated-call focused suites: 192 passed.
+- Full clean-tree Call V2 suite: 2,365 passed.
 - `flutter analyze`: passed, no issues.
+- Formatting check: passed.
 - `git diff --check`: passed.
-- Dependency diff: none for `pubspec.yaml`, `pubspec.lock`, `ios/Podfile`, or
-  `ios/Podfile.lock`.
-- iOS RunnerTests: not rerun because no native source or test changed; the
-  reviewed baseline result remains 30 passed, 0 failed.
+- Dependency diff: none for `pubspec.yaml` or `pubspec.lock`; no platform,
+  backend, or package files changed.
+- iOS RunnerTests: not rerun because no native production or test file changed.
 
-The full suite's historical working-tree isolation audits were run after the
-implementation commit. The architecture document was moved outside the
-repository only for that run and restored with an identical SHA-256.
+The full suite's historical working-tree allowlist audits require a clean tree.
+The agent-loop metadata was temporarily stashed and the pre-existing untracked
+architecture document temporarily moved for that validation only; both were
+restored afterward, and the architecture document hash remained identical.
 
 ## Safety
 
-No native CallKit, accepted recovery, Firestore transaction, timeout, retry,
-Agora/media ownership, engine cleanup, PushKit/APNs, backend, dependency, or
-audio/video behavior changed. No backend/Firebase deployment, TestFlight build,
-or physical call was performed.
+No caller connected-marker timing, close-screen UX, Firestore acceptance
+transaction/retry/timeout, native watchdog, PushKit/APNs, Agora token/runtime,
+backend, dependency, video/outgoing-audio sequencing, media-owner architecture,
+or cleanup-gate architecture changed. No backend/Firebase deployment,
+TestFlight build, or physical call was performed.
 
-ROOT_CAUSE_CLAIM: `NONE`
+PHYSICAL_FIX_CLAIM: `NONE`
 
 ## Next
 
-Review the durable storage atomicity and committed-snapshot correction before
-authorizing any TestFlight build.
+Review the exact post-terminal continuation invalidation and asynchronous
+ownership guards before authorizing any physical build.

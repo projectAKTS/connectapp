@@ -1,79 +1,74 @@
-# Active Revision - Durable Diagnostic Storage Atomicity
+# Active Task - Post-Terminal Accepted Continuation Replay
 
 Branch: `call-v2`
 
-Starting SHA: `1aeb7c41b5931dd67442b80f838fbc03c825f9ba`
-
-Reviewed implementation SHA: `b017ab007308fe31837174f2e06269f5dd7202c5`
+Starting SHA: `f1e0499bf93cb294374efaa789510a97d1679d01`
 
 ## Goal
 
-Correct only two reviewed durability defects in the Dart durable accepted-call
-diagnostic recorder:
-
-1. Replace direct JSON overwrite with an atomic same-directory snapshot
-   replacement that preserves the previous valid target when preparation or
-   replacement fails.
-2. Commit `_events` cache state only after durable-store write succeeds, so a
-   failed write is never reported as persisted and later writes resume from the
-   last committed snapshot.
+Correct the source- and runtime-proven replay where a background accepted audio
+call reaches terminal cleanup and lifecycle idle, but its retained accepted-route
+continuation later recreates the Flutter route and a second physical media owner.
 
 ## Allowed Files
 
-- `lib/call_v2/diagnostics/call_v2_durable_boundary_diagnostics.dart`
-- `test/call_v2/diagnostics/call_v2_durable_boundary_diagnostics_test.dart`
-- directly relevant new tests under `test/call_v2/diagnostics/**` only if needed
+- `lib/services/call_session_manager.dart`
+- `lib/services/notification_service.dart` only if exact readiness cancellation
+  requires it
+- directly relevant tests under `test/call_v2/**`
 - `docs/agent-loop/NEXT_TASK.md`
 - `docs/agent-loop/STATE.json`
 - `docs/agent-loop/HANDOFF.md`
 
 ## Required Implementation
 
-- Write the full encoded snapshot to a temporary file in the target directory.
-- Flush the temporary file before replacement.
-- Use a verified filesystem operation appropriate to the iOS Application
-  Support filesystem to atomically replace the target.
-- Preserve the previous valid target on failures before replacement.
-- Remove temporary artifacts on failure where safe.
-- Keep all writes asynchronous and serialized; no call-critical path may await
-  diagnostic persistence.
-- Build candidate events from a copy of the last committed cache.
-- Update the in-memory cache only after `_store.write()` succeeds.
-- A failed write must leave both disk and cache at the last committed snapshot.
-- Later successful writes must continue from that committed snapshot.
+- Terminal cleanup must invalidate only the accepted continuation matching the
+  exact invite, lifecycle generation, and available accepted CallKit identity.
+- Matching accepted-route readiness work must be cancelled or invalidated so
+  delayed callbacks cannot revive the terminated call.
+- Accepted continuation callbacks must revalidate exact ownership and lifecycle
+  state after awaited work and immediately before session assignment/route push.
+- `_resumeAcceptedRouteContinuation()` and `_openConfirmedAcceptedRoute()` must
+  require a valid nonterminal lifecycle state, not generation equality alone.
+- A rejected `markJoining()` transition must prevent session activation.
+- Late Call A work must not clear, cancel, terminate, or replace Call B.
+- Legitimate foreground attachment must keep using the existing physical media
+  owner without a second token, engine, or join.
 
 ## Required Tests
 
-- Real temporary-filesystem proof that pre-commit failure preserves a valid
-  previous target and never exposes partial JSON.
-- Failed write does not expose an uncommitted event through the current or a
-  newly constructed recorder.
-- Recovery after failure preserves prior A/B/C ordering.
-- A later successful write continues from the last committed sequence.
-- Retention and fingerprint privacy remain unchanged.
-- Record submission remains nonblocking and storage failures remain isolated.
+- Background accepted audio terminalizes before foreground and never restarts
+  media.
+- Terminal during awaited Navigator readiness cannot push a route or start media.
+- Late Call A continuation cannot mutate active Call B.
+- Legitimate foreground attachment reuses one media owner/runtime.
+- Audio -> audio -> video sequential behavior remains intact.
+- A media-owned native watch still receives exact terminal continuation cleanup.
+- Prefer Completer-controlled races over sleep-based timing.
 
 ## Strict Non-Goals
 
-Do not change native CallKit, accepted recovery, Firestore transaction logic,
-timeouts, retries, Agora/media ownership, engine cleanup, audio/video behavior,
-PushKit/APNs, backend, dependencies, or any native source/test file.
+Do not change caller CallKit connected-marker timing, caller close-screen UX,
+Firestore acceptance transactions/retries/timeouts, native watchdog behavior,
+APNs/PushKit, Agora token/backend services, dependencies, media-owner architecture,
+video/outgoing-audio sequencing, or cleanup-gate architecture.
 
 Preserve the pre-existing untracked
 `docs/CALL_V2_ARCHITECTURE_DEEP_DIVE.md` unchanged.
 
-No deployment, TestFlight build, physical call, root-cause claim, or physical-fix
-claim is authorized.
+No deployment, TestFlight build, physical call, or physical-fix claim is
+authorized.
 
 ## Validation
 
-Run focused diagnostics tests, focused ownership/recovery tests, the full Call
-V2 suite, `flutter analyze`, `git diff --check`, and dependency diff inspection.
-Report iOS RunnerTests accurately; native code is unchanged and they need not be
-rerun for this revision.
+Run the new deterministic regressions, background-audio integration tests,
+accepted-recovery tests, route-ownership tests, native exact-ownership tests,
+physical-media-owner tests, rapid lifecycle tests, repeated-call tests,
+foreground-recovery tests, the full Call V2 suite, `flutter analyze`, dependency
+diff inspection, and `git diff --check`.
 
 ## Commit And Handoff
 
-Commit the focused implementation separately. Then replace `HANDOFF.md`, set
-`STATE.json` to `ready_for_review` with exact results, commit metadata
-separately, push `origin/call-v2`, and stop.
+Commit implementation and tests separately from the final agent-loop handoff.
+Then replace `HANDOFF.md`, set `STATE.json` to `ready_for_review`, commit metadata,
+push `origin/call-v2`, and stop.

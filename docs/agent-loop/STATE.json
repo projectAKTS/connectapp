@@ -1,28 +1,28 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "durable_diagnostic_storage_atomicity_revision",
+  "phase": "post_terminal_accepted_continuation_replay",
   "status": "ready_for_review",
-  "accepted_checkpoint_sha": "b017ab007308fe31837174f2e06269f5dd7202c5",
-  "starting_sha": "1aeb7c41b5931dd67442b80f838fbc03c825f9ba",
+  "accepted_checkpoint_sha": "f1e0499bf93cb294374efaa789510a97d1679d01",
+  "starting_sha": "f1e0499bf93cb294374efaa789510a97d1679d01",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "f3932e66d7d56663bf2744238d155117b2f21948",
+  "code_commit_sha": "d994cdba749afac10da97542a2739e35e0c6195b",
   "ending_sha": "SELF",
   "changed_files": [
-    "lib/call_v2/diagnostics/call_v2_durable_boundary_diagnostics.dart",
-    "test/call_v2/diagnostics/call_v2_durable_boundary_diagnostics_test.dart"
+    "lib/services/call_session_manager.dart",
+    "test/call_v2/real_flow/call_v2_background_audio_media_integration_test.dart"
   ],
   "validation": {
-    "focused_diagnostics": "15 passed",
-    "focused_ownership_lifecycle": "181 passed",
-    "focused_background_media": "18 passed",
+    "background_audio_integration": "11 passed",
     "foreground_recovery": "3 passed",
-    "full_call_v2": "2361 passed",
-    "flutter_analyze": "passed with no issues",
+    "focused_ownership_and_lifecycle": "192 passed",
+    "full_call_v2": "2365 passed",
+    "flutter_analyze": "passed, no issues",
+    "format": "passed",
     "git_diff_check": "passed",
     "dependency_diff": "none",
-    "runner_tests": "not rerun; native code unchanged; reviewed baseline 30 passed"
+    "ios_runner_tests": "not rerun; native files unchanged"
   },
   "safety": {
     "deployed": false,
@@ -35,6 +35,6 @@
   },
   "review": {
     "decision": "ready_for_review",
-    "notes": "Durable diagnostics now use a flushed same-directory atomic snapshot replacement, and the recorder cache advances only after successful persistence. Real filesystem failure tests preserve prior valid history; all focused and full Call V2 validation passes."
+    "notes": "Exact terminal continuation invalidation, post-await ownership guards, markJoining rejection handling, and deterministic stale-readiness regressions are complete. No physical-fix claim; no build or deployment was performed."
   }
 }
