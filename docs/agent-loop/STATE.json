@@ -1,23 +1,23 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "post_terminal_accepted_continuation_replay",
+  "phase": "post_terminal_pre_push_guard_revision",
   "status": "ready_for_review",
-  "accepted_checkpoint_sha": "f1e0499bf93cb294374efaa789510a97d1679d01",
-  "starting_sha": "f1e0499bf93cb294374efaa789510a97d1679d01",
+  "accepted_checkpoint_sha": "c5528da10fa485a237fd2940fa635acd1609c535",
+  "starting_sha": "c5528da10fa485a237fd2940fa635acd1609c535",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "d994cdba749afac10da97542a2739e35e0c6195b",
+  "code_commit_sha": "1732e261343640481bb90faf87aca9017e872b71",
   "ending_sha": "SELF",
   "changed_files": [
     "lib/services/call_session_manager.dart",
     "test/call_v2/real_flow/call_v2_background_audio_media_integration_test.dart"
   ],
   "validation": {
-    "background_audio_integration": "11 passed",
-    "foreground_recovery": "3 passed",
-    "focused_ownership_and_lifecycle": "192 passed",
-    "full_call_v2": "2365 passed",
+    "production_pre_push_regression": "1 passed",
+    "background_audio_integration": "12 passed",
+    "focused_ownership_and_lifecycle": "195 passed",
+    "full_call_v2": "2366 passed",
     "flutter_analyze": "passed, no issues",
     "format": "passed",
     "git_diff_check": "passed",
@@ -35,6 +35,6 @@
   },
   "review": {
     "decision": "ready_for_review",
-    "notes": "Exact terminal continuation invalidation, post-await ownership guards, markJoining rejection handling, and deterministic stale-readiness regressions are complete. No physical-fix claim; no build or deployment was performed."
+    "notes": "The production route branch now revalidates exact session, accepted continuation, route attempt, and route owner immediately before Navigator.push. A deterministic real-Navigator regression proves late A cannot push over or clear B. No physical-fix claim; no build or deployment was performed."
   }
 }
