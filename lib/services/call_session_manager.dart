@@ -88,6 +88,7 @@ enum _RouteOpenResult {
   alreadyOpenSameInvite,
   navigatorUnavailable,
   routeBusy,
+  staleOwnership,
   failed,
 }
 
@@ -269,9 +270,15 @@ class _AcceptedRouteContinuation {
   bool matches({
     required String inviteId,
     required int generation,
+    String acceptedCallkitId = '',
   }) {
-    return payload.inviteId == inviteId.trim() &&
-        claimedGeneration == generation;
+    if (payload.inviteId != inviteId.trim() ||
+        claimedGeneration != generation) {
+      return false;
+    }
+    final expectedExactId = acceptedCallkitId.trim().toLowerCase();
+    if (expectedExactId.isEmpty) return true;
+    return payload.acceptedCallkitId.trim().toLowerCase() == expectedExactId;
   }
 }
 
@@ -490,6 +497,7 @@ class CallSessionManager {
   String _lastDiagStage = '';
   String _lastDiagMeta = '';
   bool _openingCallRoute = false;
+  Object? _openingCallRouteAttempt;
   bool _callRouteActive = false;
   _CallRouteOwner? _callRouteOwner;
   bool _incomingPromptActive = false;
@@ -672,6 +680,7 @@ class CallSessionManager {
     _current = null;
     _terminalSignal.value = null;
     _openingCallRoute = false;
+    _openingCallRouteAttempt = null;
     _callRouteActive = false;
     _callRouteOwner = null;
     _incomingPromptActive = false;
@@ -1045,6 +1054,7 @@ class CallSessionManager {
       return;
     }
     _openingCallRoute = false;
+    _openingCallRouteAttempt = null;
     await handleCallScreenClosed(inviteId);
   }
 
@@ -1059,6 +1069,7 @@ class CallSessionManager {
   void clearStaleUiFlags() {
     if (hasActiveSession) return;
     _openingCallRoute = false;
+    _openingCallRouteAttempt = null;
     _callRouteActive = false;
     _callRouteOwner = null;
     _incomingPromptActive = false;
@@ -2622,29 +2633,79 @@ class CallSessionManager {
     return claimed;
   }
 
-  void _clearPendingAcceptedIntent({
+  bool _clearPendingAcceptedIntent({
     String? inviteId,
     int? claimedGeneration,
+    String acceptedCallkitId = '',
   }) {
+    var cleared = false;
     final current = _pendingAcceptedInviteIntent;
     if (current != null) {
-      if (inviteId != null && !current.matchesInvite(inviteId)) return;
-      if (claimedGeneration != null &&
-          current.claimedGeneration != claimedGeneration) {
-        return;
+      final inviteMatches = inviteId == null || current.matchesInvite(inviteId);
+      final generationMatches = claimedGeneration == null ||
+          current.claimedGeneration == claimedGeneration;
+      final exactId = acceptedCallkitId.trim().toLowerCase();
+      final identityMatches = exactId.isEmpty ||
+          current.payload.acceptedCallkitId.trim().toLowerCase() == exactId;
+      if (inviteMatches && generationMatches && identityMatches) {
+        _pendingAcceptedInviteIntent = null;
+        cleared = true;
       }
-      _pendingAcceptedInviteIntent = null;
     }
     final continuation = _acceptedRouteContinuation;
-    if (continuation == null) return;
-    if (inviteId != null && continuation.payload.inviteId != inviteId.trim()) {
-      return;
+    if (continuation != null &&
+        (inviteId == null ||
+            continuation.payload.inviteId == inviteId.trim()) &&
+        (claimedGeneration == null ||
+            continuation.claimedGeneration == claimedGeneration) &&
+        (acceptedCallkitId.trim().isEmpty ||
+            continuation.matches(
+              inviteId: inviteId ?? continuation.payload.inviteId,
+              generation: claimedGeneration ?? continuation.claimedGeneration,
+              acceptedCallkitId: acceptedCallkitId,
+            ))) {
+      _acceptedRouteContinuation = null;
+      cleared = true;
     }
-    if (claimedGeneration != null &&
-        continuation.claimedGeneration != claimedGeneration) {
-      return;
+    return cleared;
+  }
+
+  bool _acceptedRouteContinuationCanProceed(
+    _AcceptedRouteContinuation continuation,
+  ) {
+    if (!identical(_acceptedRouteContinuation, continuation) ||
+        !_canContinueAcceptedRouteGeneration(
+          continuation.claimedGeneration,
+        )) {
+      return false;
     }
-    _acceptedRouteContinuation = null;
+    final state = _callLifecycleArbiter.state;
+    return state == CallV2CallLifecycleState.joining ||
+        state == CallV2CallLifecycleState.connected;
+  }
+
+  bool _invalidateAcceptedRouteContinuationForSession(
+    _CallSession session,
+  ) {
+    final continuation = _acceptedRouteContinuation;
+    if (continuation == null ||
+        !continuation.matches(
+          inviteId: session.inviteId,
+          generation: session.lifecycleGeneration,
+          acceptedCallkitId: session.acceptedCallkitId,
+        )) {
+      return false;
+    }
+    final cleared = _clearPendingAcceptedIntent(
+      inviteId: session.inviteId,
+      claimedGeneration: session.lifecycleGeneration,
+      acceptedCallkitId: session.acceptedCallkitId,
+    );
+    if (cleared) {
+      _acceptedRouteDiscarded = true;
+      _cancelAcceptedRouteReadiness?.call();
+    }
+    return cleared;
   }
 
   void _discardPendingAcceptedIntent() {
@@ -2963,6 +3024,7 @@ class CallSessionManager {
     _clearPendingAcceptedIntent(
       inviteId: watch.payload.inviteId,
       claimedGeneration: watch.claimed ? watch.lifecycleGeneration : null,
+      acceptedCallkitId: watch.payload.acceptedCallkitId,
     );
     _acceptedRouteDiscarded = true;
     _acceptedRecoveryPending = false;
@@ -2972,12 +3034,23 @@ class CallSessionManager {
         _callLifecycleArbiter.ownsGeneration(watch.lifecycleGeneration)) {
       final currentSession = _current;
       if (currentSession != null && watch.matchesSession(currentSession)) {
-        await _activeInviteSub?.cancel();
-        _activeInviteSub = null;
-        _cancelSessionTimers();
-        _clearCallRouteOwnershipForSession(currentSession);
-        _current = null;
-        _openingCallRoute = false;
+        final activeSubscription = _activeInviteSub;
+        await activeSubscription?.cancel();
+        if (identical(_acceptedNativeRouteWatch, watch) &&
+            identical(_current, currentSession) &&
+            watch.matchesSession(currentSession) &&
+            _callLifecycleArbiter.ownsGeneration(
+              watch.lifecycleGeneration,
+            )) {
+          if (identical(_activeInviteSub, activeSubscription)) {
+            _activeInviteSub = null;
+          }
+          _cancelSessionTimers();
+          _clearCallRouteOwnershipForSession(currentSession);
+          _current = null;
+          _openingCallRoute = false;
+          _openingCallRouteAttempt = null;
+        }
       }
       final pendingPayload = _pendingIncomingPromptPayload;
       final pendingSource = _pendingIncomingPromptSource;
@@ -3193,6 +3266,7 @@ class CallSessionManager {
     _clearPendingAcceptedIntent(
       inviteId: payload.inviteId,
       claimedGeneration: continuation?.claimedGeneration,
+      acceptedCallkitId: payload.acceptedCallkitId,
     );
     await _markNativeInviteStateSafely(
       payload,
@@ -3247,19 +3321,31 @@ class CallSessionManager {
       continuation.payload,
       CallV2PhysicalDiagnosticStage.acceptedContinuationResumeStarted,
     );
-    if (!identical(_acceptedRouteContinuation, continuation) ||
-        !_callLifecycleArbiter.ownsGeneration(
-          continuation.claimedGeneration,
-        )) {
+    if (!_acceptedRouteContinuationCanProceed(continuation)) {
+      final watch = _acceptedNativeRouteWatch;
+      final matchingTerminalCleanup = watch != null &&
+          watch.matchesIdentity(continuation.payload) &&
+          (watch.terminal || watch.cleanupFuture != null);
+      if (matchingTerminalCleanup) {
+        await _resolveAcceptedNativeRouteWatch(
+          watch,
+          reason: 'accepted_continuation_terminal_cleanup',
+          deadlineReached: false,
+          markInviteFailed: false,
+        );
+        return AcceptedCallRecoveryResult.terminal;
+      }
       _recordAcceptedRouteStage(
         continuation.payload,
         CallV2PhysicalDiagnosticStage.acceptedContinuationInvalidGeneration,
       );
       _acceptedRouteDiscarded = true;
-      _clearPendingAcceptedIntent(
+      final cleared = _clearPendingAcceptedIntent(
         inviteId: continuation.payload.inviteId,
         claimedGeneration: continuation.claimedGeneration,
+        acceptedCallkitId: continuation.payload.acceptedCallkitId,
       );
+      if (cleared) _cancelAcceptedRouteReadiness?.call();
       return AcceptedCallRecoveryResult.invalid;
     }
     if (_callRouteActive && activeInviteId == continuation.payload.inviteId) {
@@ -3272,6 +3358,7 @@ class CallSessionManager {
       _clearPendingAcceptedIntent(
         inviteId: continuation.payload.inviteId,
         claimedGeneration: continuation.claimedGeneration,
+        acceptedCallkitId: continuation.payload.acceptedCallkitId,
       );
       return AcceptedCallRecoveryResult.alreadyOpen;
     }
@@ -3301,6 +3388,7 @@ class CallSessionManager {
       _clearPendingAcceptedIntent(
         inviteId: continuation.payload.inviteId,
         claimedGeneration: continuation.claimedGeneration,
+        acceptedCallkitId: continuation.payload.acceptedCallkitId,
       );
       await _clearStoredAcceptedCallRecoverySafely(
         'accepted_route_opened',
@@ -3349,6 +3437,7 @@ class CallSessionManager {
       _clearPendingAcceptedIntent(
         inviteId: continuation.payload.inviteId,
         claimedGeneration: continuation.claimedGeneration,
+        acceptedCallkitId: continuation.payload.acceptedCallkitId,
       );
       return AcceptedCallRecoveryResult.invalid;
     }
@@ -3360,10 +3449,7 @@ class CallSessionManager {
     required CallInviteStatus latestStatus,
     required String source,
   }) async {
-    if (!identical(_acceptedRouteContinuation, continuation) ||
-        !_callLifecycleArbiter.ownsGeneration(
-          continuation.claimedGeneration,
-        )) {
+    if (!_acceptedRouteContinuationCanProceed(continuation)) {
       return _IncomingCandidateResult.ignored;
     }
     final payload = continuation.payload;
@@ -3382,12 +3468,25 @@ class CallSessionManager {
       acceptedCallkitId: payload.acceptedCallkitId,
       lifecycleGeneration: continuation.claimedGeneration,
     );
-    _callLifecycleArbiter.markJoining(continuation.claimedGeneration);
+    final lifecycleState = _callLifecycleArbiter.state;
+    if (lifecycleState == CallV2CallLifecycleState.joining) {
+      if (!_callLifecycleArbiter.markJoining(
+        continuation.claimedGeneration,
+      )) {
+        return _IncomingCandidateResult.ignored;
+      }
+    } else if (lifecycleState != CallV2CallLifecycleState.connected) {
+      return _IncomingCandidateResult.ignored;
+    }
+    if (!_acceptedRouteContinuationCanProceed(continuation)) {
+      return _IncomingCandidateResult.ignored;
+    }
     final routeResult = await _activateSession(
       session,
       openScreen: true,
       source: '$source:confirmed_accepted_route',
       deferUntilNavigatorReady: true,
+      acceptedRouteContinuation: continuation,
     );
     if (routeResult == _RouteOpenResult.opened ||
         routeResult == _RouteOpenResult.alreadyOpenSameInvite) {
@@ -3405,6 +3504,7 @@ class CallSessionManager {
       _clearPendingAcceptedIntent(
         inviteId: payload.inviteId,
         claimedGeneration: continuation.claimedGeneration,
+        acceptedCallkitId: payload.acceptedCallkitId,
       );
       return routeResult == _RouteOpenResult.alreadyOpenSameInvite
           ? _IncomingCandidateResult.alreadyOpen
@@ -3413,6 +3513,9 @@ class CallSessionManager {
     if (routeResult == _RouteOpenResult.navigatorUnavailable ||
         routeResult == _RouteOpenResult.routeBusy) {
       return _IncomingCandidateResult.pending;
+    }
+    if (routeResult == _RouteOpenResult.staleOwnership) {
+      return _IncomingCandidateResult.ignored;
     }
     return _IncomingCandidateResult.failed;
   }
@@ -3991,7 +4094,14 @@ class CallSessionManager {
       lifecycleGeneration: generation,
     );
 
-    _callLifecycleArbiter.markJoining(generation);
+    final lifecycleState = _callLifecycleArbiter.state;
+    if (lifecycleState == CallV2CallLifecycleState.joining) {
+      if (!_callLifecycleArbiter.markJoining(generation)) {
+        return _IncomingCandidateResult.ignored;
+      }
+    } else if (lifecycleState != CallV2CallLifecycleState.connected) {
+      return _IncomingCandidateResult.ignored;
+    }
     final ownsBackgroundAudio = !session.isCaller &&
         !session.isVideo &&
         session.acceptedCallkitId.trim().isNotEmpty;
@@ -4001,6 +4111,7 @@ class CallSessionManager {
         session,
         openScreen: false,
         source: '$source:media_adopt',
+        acceptedRouteContinuation: acceptedRouteContinuation,
       );
       if (adopted != _RouteOpenResult.opened ||
           !_callLifecycleArbiter.ownsGeneration(generation) ||
@@ -4028,12 +4139,22 @@ class CallSessionManager {
         );
         return _IncomingCandidateResult.failed;
       }
+      if (acceptedRouteContinuation != null &&
+          !_acceptedRouteContinuationCanProceed(
+            acceptedRouteContinuation,
+          )) {
+        return _IncomingCandidateResult.ignored;
+      }
       final nav = _navigatorKey?.currentState;
       if (preserveLifecycleOnNavigatorUnavailable &&
           (!foreground || nav == null || !nav.mounted)) {
         routeResult = _RouteOpenResult.navigatorUnavailable;
       } else {
-        routeResult = await _openCallScreen(session, source: source);
+        routeResult = await _openCallScreen(
+          session,
+          source: source,
+          acceptedRouteContinuation: acceptedRouteContinuation,
+        );
       }
     } else {
       routeResult = await _activateSession(
@@ -4041,6 +4162,7 @@ class CallSessionManager {
         openScreen: true,
         source: source,
         deferUntilNavigatorReady: preserveLifecycleOnNavigatorUnavailable,
+        acceptedRouteContinuation: acceptedRouteContinuation,
       );
     }
     if (routeResult == _RouteOpenResult.opened) {
@@ -4059,11 +4181,13 @@ class CallSessionManager {
       _acceptedRouteOpened = _acceptedRouteContinuation?.matches(
             inviteId: payload.inviteId,
             generation: generation,
+            acceptedCallkitId: authoritativePayload.acceptedCallkitId,
           ) ==
           true;
       _clearPendingAcceptedIntent(
         inviteId: authoritativePayload.inviteId,
         claimedGeneration: generation,
+        acceptedCallkitId: authoritativePayload.acceptedCallkitId,
       );
       return _IncomingCandidateResult.opened;
     }
@@ -4083,11 +4207,13 @@ class CallSessionManager {
       _acceptedRouteOpened = _acceptedRouteContinuation?.matches(
             inviteId: payload.inviteId,
             generation: generation,
+            acceptedCallkitId: authoritativePayload.acceptedCallkitId,
           ) ==
           true;
       _clearPendingAcceptedIntent(
         inviteId: authoritativePayload.inviteId,
         claimedGeneration: generation,
+        acceptedCallkitId: authoritativePayload.acceptedCallkitId,
       );
       return _IncomingCandidateResult.alreadyOpen;
     }
@@ -4099,6 +4225,9 @@ class CallSessionManager {
     if (preserveLifecycleOnNavigatorUnavailable &&
         routeResult == _RouteOpenResult.failed) {
       return _IncomingCandidateResult.failed;
+    }
+    if (routeResult == _RouteOpenResult.staleOwnership) {
+      return _IncomingCandidateResult.ignored;
     }
     _releaseFailedIncomingGeneration(generation);
     return routeResult == _RouteOpenResult.navigatorUnavailable
@@ -4495,10 +4624,23 @@ class CallSessionManager {
     required bool openScreen,
     required String source,
     bool deferUntilNavigatorReady = false,
+    _AcceptedRouteContinuation? acceptedRouteContinuation,
   }) async {
+    bool acceptedOwnershipIsCurrent() =>
+        acceptedRouteContinuation == null ||
+        _acceptedRouteContinuationCanProceed(acceptedRouteContinuation);
+
+    if (!acceptedOwnershipIsCurrent()) {
+      return _RouteOpenResult.staleOwnership;
+    }
     final existingSession = _current;
     final reusesCurrentSession =
         existingSession?.ownsSameLifecycle(session) == true;
+    if (acceptedRouteContinuation != null &&
+        existingSession != null &&
+        !reusesCurrentSession) {
+      return _RouteOpenResult.staleOwnership;
+    }
     final ownedSession = reusesCurrentSession ? existingSession! : session;
     if (openScreen && _callRouteActive && reusesCurrentSession) {
       return _RouteOpenResult.alreadyOpenSameInvite;
@@ -4508,6 +4650,9 @@ class CallSessionManager {
     }
     if (openScreen && deferUntilNavigatorReady) {
       final appReady = await _isAppActuallyForeground();
+      if (!acceptedOwnershipIsCurrent()) {
+        return _RouteOpenResult.staleOwnership;
+      }
       final nav = _navigatorKey?.currentState;
       if (!appReady || nav == null || !nav.mounted) {
         return _RouteOpenResult.navigatorUnavailable;
@@ -4515,29 +4660,74 @@ class CallSessionManager {
     }
 
     if (!reusesCurrentSession) {
-      await _activeInviteSub?.cancel();
-      _activeInviteSub = null;
+      final previousSubscription = _activeInviteSub;
+      await previousSubscription?.cancel();
+      if (!acceptedOwnershipIsCurrent() ||
+          (_current != null && !identical(_current, existingSession))) {
+        return _RouteOpenResult.staleOwnership;
+      }
+      if (identical(_activeInviteSub, previousSubscription)) {
+        _activeInviteSub = null;
+      }
       _cancelSessionTimers();
       _terminalSignal.value = null;
     }
 
+    if (!acceptedOwnershipIsCurrent()) {
+      return _RouteOpenResult.staleOwnership;
+    }
     _current = ownedSession;
     _touchSession(ownedSession);
     _markInviteHandled(ownedSession.inviteId);
     if (!_debugTestAccessEnabled || !_skipActiveInviteBindingForTest) {
-      await _bindActiveInvite(ownedSession.inviteId);
+      final bound = await _bindActiveInvite(ownedSession);
+      if (!bound ||
+          !identical(_current, ownedSession) ||
+          !acceptedOwnershipIsCurrent()) {
+        if (identical(_current, ownedSession)) {
+          if (ownedSession.isTerminal ||
+              _isTerminalStatus(ownedSession.status)) {
+            await _finalizeTerminalSessionCleanup(
+              inviteId: ownedSession.inviteId,
+              reason: '$source:terminal_during_active_binding',
+              expectedLifecycleGeneration: ownedSession.lifecycleGeneration,
+              expectedCallkitId: ownedSession.acceptedCallkitId,
+            );
+          } else {
+            await _rollbackFailedRouteSession(
+              ownedSession,
+              source: source,
+              routeResult: _RouteOpenResult.staleOwnership,
+            );
+          }
+        }
+        return _RouteOpenResult.staleOwnership;
+      }
     }
     _restartTimeoutsForStatus(ownedSession.status);
 
     if (!openScreen) return _RouteOpenResult.opened;
-    final routeResult = await _openCallScreen(ownedSession, source: source);
+    final routeResult = await _openCallScreen(
+      ownedSession,
+      source: source,
+      acceptedRouteContinuation: acceptedRouteContinuation,
+    );
     if (routeResult != _RouteOpenResult.opened &&
         routeResult != _RouteOpenResult.alreadyOpenSameInvite) {
-      await _rollbackFailedRouteSession(
-        ownedSession,
-        source: source,
-        routeResult: routeResult,
-      );
+      if (ownedSession.isTerminal || _isTerminalStatus(ownedSession.status)) {
+        await _finalizeTerminalSessionCleanup(
+          inviteId: ownedSession.inviteId,
+          reason: '$source:terminal_during_route_open',
+          expectedLifecycleGeneration: ownedSession.lifecycleGeneration,
+          expectedCallkitId: ownedSession.acceptedCallkitId,
+        );
+      } else {
+        await _rollbackFailedRouteSession(
+          ownedSession,
+          source: source,
+          routeResult: routeResult,
+        );
+      }
     }
     return routeResult;
   }
@@ -4545,25 +4735,46 @@ class CallSessionManager {
   Future<_RouteOpenResult> _openCallScreen(
     _CallSession session, {
     required String source,
+    _AcceptedRouteContinuation? acceptedRouteContinuation,
   }) async {
+    bool routeOwnershipIsCurrent() {
+      if (!identical(_current, session)) return false;
+      return acceptedRouteContinuation == null ||
+          _acceptedRouteContinuationCanProceed(acceptedRouteContinuation);
+    }
+
+    if (!routeOwnershipIsCurrent()) {
+      return _RouteOpenResult.staleOwnership;
+    }
     if (_openingCallRoute) return _RouteOpenResult.routeBusy;
     if (_callRouteActive && _current?.matchesAcceptedSession(session) == true) {
       return _RouteOpenResult.alreadyOpenSameInvite;
     }
 
+    final routeAttempt = Object();
     _openingCallRoute = true;
+    _openingCallRouteAttempt = routeAttempt;
     try {
       CallV2PhysicalDiagnosticLedger.instance.record(
         CallV2PhysicalDiagnosticStage.routeAttemptStarted,
       );
       await _waitForAppResumed();
+      if (!routeOwnershipIsCurrent()) {
+        return _RouteOpenResult.staleOwnership;
+      }
       final nav = await _waitForNavigator();
+      if (!routeOwnershipIsCurrent()) {
+        return _RouteOpenResult.staleOwnership;
+      }
       if (nav == null || !nav.mounted) {
         return _RouteOpenResult.navigatorUnavailable;
       }
       CallV2PhysicalDiagnosticLedger.instance.record(
         CallV2PhysicalDiagnosticStage.navigatorReady,
       );
+      if (!routeOwnershipIsCurrent()) {
+        return _RouteOpenResult.staleOwnership;
+      }
       final routeOwner = _CallRouteOwner(session);
       _callRouteOwner = routeOwner;
       _callRouteActive = true;
@@ -4587,6 +4798,11 @@ class CallSessionManager {
           callV2FallbackUsed: session.callV2FallbackUsed,
           callV2BlockerCode: session.callV2BlockerCode,
         );
+        if (!routeOwnershipIsCurrent() ||
+            !identical(_callRouteOwner, routeOwner)) {
+          _clearCallRouteOwnershipForSession(session);
+          return _RouteOpenResult.staleOwnership;
+        }
         _routeOpenCount += 1;
         _rtcSetupOwnerCount += 1;
         CallV2PhysicalDiagnosticLedger.instance.record(
@@ -4633,7 +4849,10 @@ class CallSessionManager {
       });
       return _RouteOpenResult.failed;
     } finally {
-      _openingCallRoute = false;
+      if (identical(_openingCallRouteAttempt, routeAttempt)) {
+        _openingCallRoute = false;
+        _openingCallRouteAttempt = null;
+      }
     }
   }
 
@@ -4700,12 +4919,17 @@ class CallSessionManager {
     required _RouteOpenResult routeResult,
   }) async {
     if (!identical(_current, session)) return;
-    await _activeInviteSub?.cancel();
-    _activeInviteSub = null;
+    final activeSubscription = _activeInviteSub;
+    await activeSubscription?.cancel();
+    if (!identical(_current, session)) return;
+    if (identical(_activeInviteSub, activeSubscription)) {
+      _activeInviteSub = null;
+    }
     _cancelSessionTimers();
     _terminalSignal.value = null;
     _current = null;
     _openingCallRoute = false;
+    _openingCallRouteAttempt = null;
     _clearCallRouteOwnershipForSession(session);
     await _diagManager('route_activation_rolled_back', meta: {
       'source': source,
@@ -4713,16 +4937,22 @@ class CallSessionManager {
     });
   }
 
-  Future<void> _bindActiveInvite(String inviteId) async {
-    await _activeInviteSub?.cancel();
-    _activeInviteSub = _db
+  Future<bool> _bindActiveInvite(_CallSession owner) async {
+    final previousSubscription = _activeInviteSub;
+    await previousSubscription?.cancel();
+    if (!identical(_current, owner)) return false;
+    if (identical(_activeInviteSub, previousSubscription)) {
+      _activeInviteSub = null;
+    }
+    final subscription = _db
         .collection('callInvites')
-        .doc(inviteId)
+        .doc(owner.inviteId)
         .snapshots()
         .listen((snap) async {
+      if (!identical(_current, owner)) return;
       if (!snap.exists) {
         await _emitTerminalSignal(
-          inviteId: inviteId,
+          inviteId: owner.inviteId,
           status: CallInviteStatus.ended,
           message: 'Call ended',
           isError: false,
@@ -4731,12 +4961,12 @@ class CallSessionManager {
       }
       final data = snap.data() ?? const <String, dynamic>{};
       final status = _parseStatus(data['status']);
-      final session = _current;
-      if (session == null || session.inviteId != inviteId) return;
+      if (!identical(_current, owner)) return;
+      final session = owner;
 
       if (_isTerminalStatus(status)) {
         await _emitTerminalSignal(
-          inviteId: inviteId,
+          inviteId: owner.inviteId,
           status: status,
           message: _terminalMessageForStatus(status, data: data),
           isError: status == CallInviteStatus.failed,
@@ -4745,7 +4975,7 @@ class CallSessionManager {
       }
 
       if (_isProgressStatus(status) &&
-          !_canApplyMediaProgress(session, inviteId: inviteId)) {
+          !_canApplyMediaProgress(session, inviteId: owner.inviteId)) {
         return;
       }
 
@@ -4782,6 +5012,12 @@ class CallSessionManager {
         _restartTimeoutsForStatus(status);
       }
     });
+    if (!identical(_current, owner)) {
+      await subscription.cancel();
+      return false;
+    }
+    _activeInviteSub = subscription;
+    return true;
   }
 
   Future<void> _markTerminal({
@@ -5146,6 +5382,7 @@ class CallSessionManager {
     if (session == null) {
       if (forceClearUiFlags && _callRouteOwner == null) {
         _openingCallRoute = false;
+        _openingCallRouteAttempt = null;
         _callRouteActive = false;
         _incomingPromptActive = false;
         _incomingPromptInviteId = null;
@@ -5164,6 +5401,7 @@ class CallSessionManager {
       return;
     }
     _callLifecycleArbiter.beginTeardown(session.lifecycleGeneration);
+    _invalidateAcceptedRouteContinuationForSession(session);
     final preservePendingAcceptedRecovery =
         _pendingAcceptedInviteIntent != null;
     final detached = await _detachSessionState(
@@ -5435,6 +5673,7 @@ class CallSessionManager {
 
     if (forceClearUiFlags || !hasActiveSession) {
       _openingCallRoute = false;
+      _openingCallRouteAttempt = null;
       _clearCallRouteOwnershipForSession(session);
       _incomingPromptActive = false;
       _incomingPromptInviteId = null;

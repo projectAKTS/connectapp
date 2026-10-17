@@ -32,6 +32,7 @@ void main() {
   late List<NativeCallSnapshot> nativeCalls;
   late bool appForeground;
   late bool autoJoinSuccess;
+  late int readinessCancelCount;
 
   Future<void> seedInvite(String inviteId, {bool isVideo = false}) async {
     await firestore.collection('callInvites').doc(inviteId).set({
@@ -82,6 +83,9 @@ void main() {
         routeAcks.add(id);
         return true;
       },
+      cancelAcceptedRouteReadiness: () {
+        readinessCancelCount += 1;
+      },
       callScreenOpenRecorderForTest: ({
         required String inviteId,
         required String channel,
@@ -125,6 +129,7 @@ void main() {
     nativeCalls = <NativeCallSnapshot>[];
     appForeground = false;
     autoJoinSuccess = true;
+    readinessCancelCount = 0;
     mediaOwner = CallV2PhysicalMediaOwner(
       runtimeFactory: (config) {
         final runtime = _ManagerFakeMediaRuntime(
@@ -358,6 +363,200 @@ void main() {
   });
 
   testWidgets(
+      'background accepted audio terminalizes before foreground and never restarts media',
+      (tester) async {
+    const inviteId = 'terminal_before_foreground';
+    await seedInvite(inviteId);
+    nativeCalls.add(const NativeCallSnapshot(
+      callkitId: exactId,
+      inviteId: inviteId,
+      channel: 'channel_terminal_before_foreground',
+      accepted: true,
+    ));
+    await manager.handleCallkitAudioSessionChanged(
+      callkitId: exactId,
+      active: true,
+    );
+
+    expect(
+      await manager.handleRecoveredAcceptedInvite(
+        inviteId: inviteId,
+        channel: 'channel_terminal_before_foreground',
+        isVideo: false,
+        fromName: 'Background Caller',
+        fromUid: callerUid,
+        callkitId: exactId,
+      ),
+      AcceptedCallRecoveryResult.pendingNavigator,
+    );
+    await waitUntil(tester, () => mediaAcks.isNotEmpty);
+    expect(
+      manager.debugSnapshot()['acceptedNativeWatchMediaOwned'],
+      isTrue,
+    );
+
+    await manager.endCallFromLocalUser(
+      inviteId: inviteId,
+      source: 'test_terminal_before_foreground',
+      acceptedCallkitId: exactId,
+    );
+
+    expect(manager.debugSnapshot()['callLifecycleState'], 'idle');
+    expect(manager.debugSnapshot()['acceptedRoutePending'], isFalse);
+    expect(manager.debugSnapshot()['sessionIdle'], isTrue);
+    expect(readinessCancelCount, 1);
+    expect(runtimes, hasLength(1));
+    expect(runtimes.single.cleaned, isTrue);
+
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navigatorKey,
+      home: const Scaffold(body: Text('home')),
+    ));
+    appForeground = true;
+    final resumed = await manager.resumePendingAcceptedRouteIfReady(
+      source: 'test_late_foreground_after_terminal',
+    );
+    await tester.pump(const Duration(milliseconds: 20));
+
+    expect(resumed, AcceptedCallRecoveryResult.invalid);
+    expect(routes, isEmpty);
+    expect(runtimes, hasLength(1));
+    expect(manager.debugSnapshot()['routeOpenCount'], 0);
+    expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 0);
+  });
+
+  testWidgets(
+      'terminal during awaited foreground readiness cannot reopen the call',
+      (tester) async {
+    const inviteId = 'terminal_during_foreground_wait';
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navigatorKey,
+      home: const Scaffold(body: Text('home')),
+    ));
+    await seedInvite(inviteId);
+    await manager.handleCallkitAudioSessionChanged(
+      callkitId: exactId,
+      active: true,
+    );
+    expect(
+      await manager.handleRecoveredAcceptedInvite(
+        inviteId: inviteId,
+        channel: 'channel_terminal_during_foreground_wait',
+        isVideo: false,
+        fromName: 'Background Caller',
+        fromUid: callerUid,
+        callkitId: exactId,
+      ),
+      AcceptedCallRecoveryResult.pendingNavigator,
+    );
+    await waitUntil(tester, () => mediaAcks.isNotEmpty);
+
+    final readinessEntered = Completer<void>();
+    final releaseReadiness = Completer<bool>();
+    var foregroundChecks = 0;
+    manager.configure(appForegroundProvider: () {
+      foregroundChecks += 1;
+      // resumePendingAcceptedRouteIfReady and _activateSession consume the
+      // first two checks. Hold the third check inside _openCallScreen.
+      if (foregroundChecks == 3) {
+        readinessEntered.complete();
+        return releaseReadiness.future;
+      }
+      return Future<bool>.value(true);
+    });
+
+    final resume = manager.resumePendingAcceptedRouteIfReady(
+      source: 'test_terminal_during_wait',
+    );
+    await readinessEntered.future.timeout(const Duration(seconds: 1));
+    await manager.endCallFromLocalUser(
+      inviteId: inviteId,
+      source: 'test_terminal_while_awaited',
+      acceptedCallkitId: exactId,
+    );
+    releaseReadiness.complete(true);
+
+    expect(
+      await resume.timeout(const Duration(seconds: 1)),
+      AcceptedCallRecoveryResult.invalid,
+    );
+    expect(routes, isEmpty);
+    expect(runtimes, hasLength(1));
+    expect(runtimes.single.cleaned, isTrue);
+    expect(manager.debugSnapshot()['acceptedRoutePending'], isFalse);
+    expect(manager.debugSnapshot()['sessionIdle'], isTrue);
+  });
+
+  testWidgets('late Call A readiness cannot mutate active Call B',
+      (tester) async {
+    const inviteA = 'late_continuation_call_a';
+    const inviteB = 'active_call_b';
+    const exactB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navigatorKey,
+      home: const Scaffold(body: Text('home')),
+    ));
+    await seedInvite(inviteA);
+    await manager.handleCallkitAudioSessionChanged(
+      callkitId: exactId,
+      active: true,
+    );
+    expect(
+      await manager.handleRecoveredAcceptedInvite(
+        inviteId: inviteA,
+        channel: 'channel_late_continuation_call_a',
+        isVideo: false,
+        fromName: 'Background Caller',
+        fromUid: callerUid,
+        callkitId: exactId,
+      ),
+      AcceptedCallRecoveryResult.pendingNavigator,
+    );
+    await waitUntil(tester, () => mediaAcks.isNotEmpty);
+
+    final readinessEntered = Completer<void>();
+    final releaseReadiness = Completer<bool>();
+    var foregroundChecks = 0;
+    manager.configure(appForegroundProvider: () {
+      foregroundChecks += 1;
+      if (foregroundChecks == 2) {
+        readinessEntered.complete();
+        return releaseReadiness.future;
+      }
+      return Future<bool>.value(true);
+    });
+    final staleResume = manager.resumePendingAcceptedRouteIfReady(
+      source: 'test_late_call_a',
+    );
+    await readinessEntered.future.timeout(const Duration(seconds: 1));
+
+    await manager.endCallFromLocalUser(
+      inviteId: inviteA,
+      source: 'test_end_call_a',
+      acceptedCallkitId: exactId,
+    );
+    final generationB = await manager.debugCreateHeldCallRouteForTest(
+      inviteId: inviteB,
+      channel: 'channel_active_call_b',
+      acceptedCallkitId: exactB,
+      status: CallInviteStatus.connected,
+      isCaller: false,
+    );
+    releaseReadiness.complete(true);
+
+    expect(
+      await staleResume.timeout(const Duration(seconds: 1)),
+      AcceptedCallRecoveryResult.invalid,
+    );
+    expect(manager.activeInviteId, inviteB);
+    expect(manager.debugSnapshot()['lifecycleGeneration'], generationB);
+    expect(manager.debugSnapshot()['callRouteActive'], isTrue);
+    expect(manager.debugSnapshot()['phase'], CallSessionPhase.connected.name);
+    expect(routes, isEmpty);
+    expect(runtimes, hasLength(1));
+  });
+
+  testWidgets(
       'foreground route attaches after headless join without second RTC',
       (tester) async {
     await tester.pumpWidget(MaterialApp(
@@ -404,6 +603,94 @@ void main() {
     expect(manager.debugSnapshot()['phase'], CallSessionPhase.joining.name);
     await manager.forceIdleForTest();
     await tester.pump();
+  });
+
+  testWidgets(
+      'audio then audio then video stay single-owner across terminal cleanup',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navigatorKey,
+      home: const Scaffold(body: Text('home')),
+    ));
+
+    Future<void> runAcceptedCall({
+      required String inviteId,
+      required String callkitId,
+      required bool isVideo,
+    }) async {
+      await seedInvite(inviteId, isVideo: isVideo);
+      nativeCalls.add(NativeCallSnapshot(
+        callkitId: callkitId,
+        inviteId: inviteId,
+        channel: 'channel_$inviteId',
+        accepted: true,
+      ));
+      await manager.handleCallkitAudioSessionChanged(
+        callkitId: callkitId,
+        active: true,
+      );
+      appForeground = isVideo;
+      final accepted = await manager.handleRecoveredAcceptedInvite(
+        inviteId: inviteId,
+        channel: 'channel_$inviteId',
+        isVideo: isVideo,
+        fromName: 'Background Caller',
+        fromUid: callerUid,
+        callkitId: callkitId,
+      );
+      if (isVideo) {
+        expect(accepted, AcceptedCallRecoveryResult.opened);
+      } else {
+        expect(accepted, AcceptedCallRecoveryResult.pendingNavigator);
+        await waitUntil(tester, () => mediaAcks.contains(callkitId));
+        appForeground = true;
+        expect(
+          await manager.resumePendingAcceptedRouteIfReady(
+            source: 'test_sequential_foreground',
+          ),
+          AcceptedCallRecoveryResult.opened,
+        );
+      }
+
+      await manager.endCallFromLocalUser(
+        inviteId: inviteId,
+        source: 'test_sequential_end',
+        acceptedCallkitId: callkitId,
+      );
+      await manager.handleCallScreenClosed(
+        inviteId,
+        acceptedCallkitId: callkitId,
+      );
+      expect(manager.debugSnapshot()['sessionIdle'], isTrue);
+    }
+
+    await runAcceptedCall(
+      inviteId: 'sequential_audio_a',
+      callkitId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
+      isVideo: false,
+    );
+    await runAcceptedCall(
+      inviteId: 'sequential_audio_b',
+      callkitId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2',
+      isVideo: false,
+    );
+    await runAcceptedCall(
+      inviteId: 'sequential_video_c',
+      callkitId: 'cccccccc-cccc-4ccc-8ccc-ccccccccccc3',
+      isVideo: true,
+    );
+
+    expect(routes, <String>[
+      'sequential_audio_a',
+      'sequential_audio_b',
+      'sequential_video_c',
+    ]);
+    expect(runtimes, hasLength(2));
+    expect(runtimes.every((runtime) => runtime.startCount == 1), isTrue);
+    expect(runtimes.every((runtime) => runtime.joinCount == 1), isTrue);
+    expect(runtimes.every((runtime) => runtime.cleaned), isTrue);
+    expect(manager.debugSnapshot()['routeOpenCount'], 3);
+    expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 3);
   });
 
   testWidgets(
