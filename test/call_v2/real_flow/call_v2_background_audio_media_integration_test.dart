@@ -106,6 +106,40 @@ void main() {
     );
   }
 
+  void configureManagerForProductionRoute({
+    required Future<void> Function() beforeProductionRoutePush,
+  }) {
+    manager.configure(
+      navigatorKey: navigatorKey,
+      appForegroundProvider: () async => appForeground,
+      listNativeCalls: () async => List<NativeCallSnapshot>.of(nativeCalls),
+      endNativeCall: (id) async {
+        nativeCalls.removeWhere((call) => call.callkitId == id);
+      },
+      markNativeInviteState: ({
+        required String inviteId,
+        required String channel,
+        required String callkitId,
+        required String state,
+      }) async {},
+      acknowledgeNativeMediaOwnership: (id) async {
+        mediaAcks.add(id);
+        return true;
+      },
+      acknowledgeNativeRouteOwnership: (id) async {
+        routeAcks.add(id);
+        return true;
+      },
+      cancelAcceptedRouteReadiness: () {
+        readinessCancelCount += 1;
+      },
+      beforeProductionRoutePushForTest: beforeProductionRoutePush,
+      skipActiveInviteBindingForTest: true,
+      skipAcceptedNativeWatchBindingForTest: true,
+      physicalMediaOwnerForTest: mediaOwner,
+    );
+  }
+
   setUp(() async {
     firestore = FakeFirebaseFirestore();
     HelperlyTestRuntime.configureForTest(
@@ -557,6 +591,98 @@ void main() {
   });
 
   testWidgets(
+      'production push revalidates ownership after diagnostics before Navigator push',
+      (tester) async {
+    const inviteA = 'production_push_call_a';
+    const inviteB = 'production_push_call_b';
+    const exactB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    final pushBarrierEntered = Completer<void>();
+    final releasePushBarrier = Completer<void>();
+    final observer = _RoutePushObserver();
+
+    await manager.forceIdleForTest();
+    HelperlyTestRuntime.configureForTest(
+      firestore: firestore,
+      currentUid: calleeUid,
+      currentDisplayName: 'Background Callee',
+    );
+    configureManagerForProductionRoute(
+      beforeProductionRoutePush: () async {
+        if (!pushBarrierEntered.isCompleted) {
+          pushBarrierEntered.complete();
+        }
+        await releasePushBarrier.future;
+      },
+    );
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navigatorKey,
+      navigatorObservers: <NavigatorObserver>[observer],
+      home: const Scaffold(body: Text('home')),
+    ));
+    await tester.pump();
+    final baselinePushes = observer.pushCount;
+
+    await seedInvite(inviteA);
+    await manager.handleCallkitAudioSessionChanged(
+      callkitId: exactId,
+      active: true,
+    );
+    expect(
+      await manager.handleRecoveredAcceptedInvite(
+        inviteId: inviteA,
+        channel: 'channel_production_push_call_a',
+        isVideo: false,
+        fromName: 'Background Caller',
+        fromUid: callerUid,
+        callkitId: exactId,
+      ),
+      AcceptedCallRecoveryResult.pendingNavigator,
+    );
+    await waitUntil(tester, () => mediaAcks.isNotEmpty);
+
+    appForeground = true;
+    final staleResume = manager.resumePendingAcceptedRouteIfReady(
+      source: 'test_production_pre_push_race',
+    );
+    await pushBarrierEntered.future.timeout(const Duration(seconds: 1));
+
+    await manager.endCallFromLocalUser(
+      inviteId: inviteA,
+      source: 'test_terminal_at_production_push_boundary',
+      acceptedCallkitId: exactId,
+    );
+    await manager.handleCallScreenClosed(
+      inviteA,
+      acceptedCallkitId: exactId,
+    );
+    final generationB = await manager.debugCreateHeldCallRouteForTest(
+      inviteId: inviteB,
+      channel: 'channel_production_push_call_b',
+      acceptedCallkitId: exactB,
+      status: CallInviteStatus.connected,
+      isCaller: false,
+    );
+
+    releasePushBarrier.complete();
+    expect(
+      await staleResume.timeout(const Duration(seconds: 1)),
+      AcceptedCallRecoveryResult.invalid,
+    );
+    await tester.pump();
+
+    expect(observer.pushCount, baselinePushes);
+    expect(find.byType(AgoraCallScreen), findsNothing);
+    expect(manager.activeInviteId, inviteB);
+    expect(manager.debugSnapshot()['lifecycleGeneration'], generationB);
+    expect(manager.debugSnapshot()['callRouteActive'], isTrue);
+    expect(manager.debugSnapshot()['phase'], CallSessionPhase.connected.name);
+    expect(manager.debugSnapshot()['routeOpenCount'], 0);
+    expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 0);
+    expect(runtimes, hasLength(1));
+    expect(runtimes.single.cleaned, isTrue);
+  });
+
+  testWidgets(
       'foreground route attaches after headless join without second RTC',
       (tester) async {
     await tester.pumpWidget(MaterialApp(
@@ -774,6 +900,16 @@ void main() {
     await manager.forceIdleForTest();
     await tester.pump();
   });
+}
+
+final class _RoutePushObserver extends NavigatorObserver {
+  int pushCount = 0;
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    pushCount += 1;
+    super.didPush(route, previousRoute);
+  }
 }
 
 class _ManagerFakeMediaRuntime implements CallV2PhysicalMediaRuntime {

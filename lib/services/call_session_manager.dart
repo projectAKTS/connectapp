@@ -320,6 +320,7 @@ typedef NativeMediaOwnershipAcknowledger = Future<bool> Function(
   String exactNativeKey,
 );
 typedef BeforeAgoraJoinProgressForTest = Future<void> Function();
+typedef BeforeProductionRoutePushForTest = Future<void> Function();
 typedef CallScreenOpenRecorderForTest = Future<void> Function({
   required String inviteId,
   required String channel,
@@ -479,6 +480,7 @@ class CallSessionManager {
   Future<void> Function(int attempt)?
       _afterAcceptTransactionCallbackEnteredForTest;
   BeforeAgoraJoinProgressForTest? _beforeAgoraJoinProgressForTest;
+  BeforeProductionRoutePushForTest? _beforeProductionRoutePushForTest;
   CallScreenOpenRecorderForTest? _callScreenOpenRecorderForTest;
   bool _skipActiveInviteBindingForTest = false;
   bool _skipAcceptedNativeWatchBindingForTest = false;
@@ -740,6 +742,7 @@ class CallSessionManager {
     _beforeAcceptTransactionAttemptForTest = null;
     _afterAcceptTransactionCallbackEnteredForTest = null;
     _beforeAgoraJoinProgressForTest = null;
+    _beforeProductionRoutePushForTest = null;
     _callScreenOpenRecorderForTest = null;
     _acknowledgeNativeRouteOwnership = null;
     _acknowledgeNativeMediaOwnership = null;
@@ -900,6 +903,7 @@ class CallSessionManager {
     Future<void> Function(int attempt)?
         afterAcceptTransactionCallbackEnteredForTest,
     BeforeAgoraJoinProgressForTest? beforeAgoraJoinProgressForTest,
+    BeforeProductionRoutePushForTest? beforeProductionRoutePushForTest,
     CallScreenOpenRecorderForTest? callScreenOpenRecorderForTest,
     bool? skipActiveInviteBindingForTest,
     bool? skipAcceptedNativeWatchBindingForTest,
@@ -946,6 +950,9 @@ class CallSessionManager {
     }
     if (beforeAgoraJoinProgressForTest != null) {
       _beforeAgoraJoinProgressForTest = beforeAgoraJoinProgressForTest;
+    }
+    if (beforeProductionRoutePushForTest != null && _debugTestAccessEnabled) {
+      _beforeProductionRoutePushForTest = beforeProductionRoutePushForTest;
     }
     if (callScreenOpenRecorderForTest != null) {
       _callScreenOpenRecorderForTest = callScreenOpenRecorderForTest;
@@ -4810,6 +4817,16 @@ class CallSessionManager {
         );
         _acknowledgeAcceptedNativeRouteIfOwned(session);
         return _RouteOpenResult.opened;
+      }
+      final beforeProductionPush =
+          _debugTestAccessEnabled ? _beforeProductionRoutePushForTest : null;
+      if (beforeProductionPush != null) {
+        await beforeProductionPush();
+      }
+      if (!routeOwnershipIsCurrent() ||
+          !identical(_openingCallRouteAttempt, routeAttempt) ||
+          !identical(_callRouteOwner, routeOwner)) {
+        return _RouteOpenResult.staleOwnership;
       }
       final routeFuture = nav.push(
         MaterialPageRoute(
