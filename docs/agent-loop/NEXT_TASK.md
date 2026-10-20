@@ -1,56 +1,55 @@
-# Active Task - Fast Hangup UI With Owned Background Cleanup
+# Active Revision - Final Fast Hangup Safety
 
 Branch: `call-v2`
 
-Starting SHA: `1937701449ca5ab6d7f5fd30938b938b7183c4d8`
+Starting SHA: `15828dbc5fdd94e69d0d75d15359ecc63e930b45`
 
 ## Goal
 
-Make local-hangup and remote-terminal call routes leave the screen promptly and
-deterministically once exact-call termination owns the lifecycle, while the
-strictly owned teardown continues asynchronously behind the existing cleanup
-gate.
+Preserve prompt owned call-route dismissal while closing two source-reviewed
+safety gaps: revalidate exact route ownership at the final synchronous boundary
+before navigation, and start exact active-media teardown without waiting for the
+authoritative Firestore terminal transaction.
 
 ## Allowed Files
 
 - `lib/screens/call/agora_call_screen.dart`
-- `lib/services/call_session_manager.dart`
-- directly relevant Call V2 diagnostics or cleanup-owner files only when the
-  source trace proves they are required
+- `lib/services/call_session_manager.dart` only if an exact ownership API or
+  deterministic test hook is strictly required
 - directly relevant tests under `test/call_v2/**`
 - `docs/agent-loop/NEXT_TASK.md`
 - `docs/agent-loop/STATE.json`
 - `docs/agent-loop/HANDOFF.md`
 
-## Required Investigation And Implementation
+## Required Corrections
 
-- Trace local hangup and remote-terminal route-exit awaits and identify the
-  source-proven operations that block `Navigator.pop`.
-- Add privacy-safe monotonic diagnostics for terminal ownership, Firestore
-  transition, engine cleanup, exact native cleanup, hard reset, route-pop,
-  disposal, and cleanup-gate readiness.
-- Decouple visual route dismissal from slow teardown only after exact-call
-  terminal or local-hangup ownership is established.
-- Keep eventual Firestore, RTC, native CallKit, accepted-continuation, and hard
-  reset cleanup strictly owned and idempotent.
-- Preserve the process-wide cleanup gate so a later call cannot create or join
-  RTC until prior teardown has actually completed.
-- Revalidate exact invite, CallKit identity, lifecycle generation, session, and
-  route ownership across asynchronous boundaries so late Call A work cannot
-  mutate or dismiss Call B.
-- Add deterministic Completer-driven regressions for prompt local and remote
-  exits, overlapping terminal signals, background cleanup, sequential calls,
-  and late-cleanup isolation.
-- Investigate Video C only from existing diagnostics and source. Do not modify
-  its Agora, PushKit, token, Firebase, native CallKit, or media path without a
-  separately proven and approved cause.
+1. Immediately before production `Navigator.pop`, synchronously revalidate the
+   exact active session, invite, lifecycle generation, accepted CallKit
+   identity, route owner, route attempt, and current `ModalRoute`. No await may
+   separate this final check from navigation.
+2. On valid local hangup, establish exact ending ownership and begin shutdown
+   of the matching active RTC/physical audio owner without waiting for the
+   Firestore terminal transaction.
+3. Keep the authoritative terminal transaction mandatory and independently
+   awaited by eventual cleanup.
+4. Preserve exact native CallKit cleanup, hard reset, accepted-continuation
+   cancellation, idempotence, and the existing process-wide cleanup gate.
+5. A late Call A route or cleanup continuation must never pop, terminate,
+   reset, or otherwise mutate Call B.
+6. Cleanup failure must still attempt exact native cleanup and must not
+   incorrectly release the next-engine gate.
+7. Add deterministic production-path tests using controlled asynchronous
+   barriers for the final pre-pop race, Firestore-blocked media shutdown,
+   cleanup-gate exclusion, eventual authoritative/native cleanup, duplicate
+   exits, and sequential Audio A -> Audio B -> Video C viability.
 
 ## Strict Non-Goals
 
-Do not change CallKit connected timing, Agora/token/media initialization,
-PushKit/APNs, accepted Firestore authority, backend services, dependencies,
-watchdog timing, or cleanup-gate safety. Do not add arbitrary sleeps or shorten
-timeouts. Preserve managed `PopScope` route ownership.
+Do not change connection setup, Agora tokens, backend, Firestore acceptance
+semantics, PushKit/APNs, native CallKit implementation, camera/video setup,
+audio join timing, cleanup-gate policy, watchdog timing, dependencies, build
+flags, post-terminal continuation, or Navigator push guards. Video C remains
+unproven and receives no speculative fix.
 
 Preserve all untracked files, including
 `docs/CALL_V2_ARCHITECTURE_DEEP_DIVE.md` and Aider artifacts, unchanged.
@@ -60,11 +59,10 @@ authorized.
 
 ## Validation
 
-Run the new navigation-latency regressions, relevant route-exit UI suites,
-background accepted audio, cleanup coordinator and process-wide gate tests,
-accepted recovery and exact CallKit ownership, repeated-call and rapid lifecycle
-tests, sequential audio/audio/video regression, the full Call V2 suite,
-`flutter analyze`, formatting, dependency diff inspection, and
+Run focused final pre-pop, media-owner, cleanup-coordinator/gate, exact CallKit,
+accepted-recovery, rapid-lifecycle, repeated-call, route-ownership, background
+audio, and sequential audio/audio/video regressions. Then run the full Call V2
+suite, `flutter analyze`, formatting, dependency diff inspection, and
 `git diff --check`.
 
 ## Commit And Handoff
