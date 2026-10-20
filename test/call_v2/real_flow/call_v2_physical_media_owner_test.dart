@@ -18,6 +18,7 @@ void main() {
   late int permissionRequestCount;
   late bool permissionGranted;
   late Completer<void>? startGate;
+  late Completer<void>? cleanupGate;
   late CallV2PhysicalMediaOwner owner;
 
   CallV2PhysicalMediaKey key({
@@ -82,9 +83,14 @@ void main() {
     permissionRequestCount = 0;
     permissionGranted = true;
     startGate = null;
+    cleanupGate = null;
     owner = CallV2PhysicalMediaOwner(
       runtimeFactory: (config) {
-        final runtime = _FakeMediaRuntime(config, startGate: startGate);
+        final runtime = _FakeMediaRuntime(
+          config,
+          startGate: startGate,
+          cleanupGate: cleanupGate,
+        );
         runtimes.add(runtime);
         return runtime;
       },
@@ -260,6 +266,37 @@ void main() {
     expect(runtimes[1].cleanupCount, 0);
   });
 
+  test('different call cannot claim media while exact A cleanup is held',
+      () async {
+    cleanupGate = Completer<void>();
+    final keyA = key();
+    owner.markAudioSessionReady(exactA);
+    owner.claim(claim(keyA));
+    await flush();
+
+    final terminatingA = owner.terminate(keyA, reason: 'a_terminal');
+    await flush();
+    final keyB = key(
+      inviteId: 'invite_b',
+      callkitId: exactB,
+      generation: 2,
+    );
+
+    expect(owner.hasOwner, isTrue);
+    expect(() => owner.claim(claim(keyB)), throwsStateError);
+
+    cleanupGate!.complete();
+    await terminatingA;
+    owner.markAudioSessionReady(exactB);
+    owner.claim(claim(keyB));
+    await flush();
+
+    expect(owner.activeKey?.matches(keyB), isTrue);
+    expect(runtimes, hasLength(2));
+    expect(runtimes.first.cleanupCount, 1);
+    expect(runtimes.last.startCount, 1);
+  });
+
   test('route-first outgoing audio starts only after explicit route claim',
       () async {
     final outgoingKey = key(
@@ -305,10 +342,15 @@ void main() {
 }
 
 class _FakeMediaRuntime implements CallV2PhysicalMediaRuntime {
-  _FakeMediaRuntime(this.config, {this.startGate});
+  _FakeMediaRuntime(
+    this.config, {
+    this.startGate,
+    this.cleanupGate,
+  });
 
   final CallV2AgoraMediaRuntimeConfig config;
   final Completer<void>? startGate;
+  final Completer<void>? cleanupGate;
   final ValueNotifier<CallV2AgoraMediaState> _state =
       ValueNotifier<CallV2AgoraMediaState>(
     const CallV2AgoraMediaState.idle(),
@@ -360,6 +402,7 @@ class _FakeMediaRuntime implements CallV2PhysicalMediaRuntime {
       remoteParticipantPresent: false,
       clearRemoteUid: true,
     );
+    if (cleanupGate != null) await cleanupGate!.future;
   }
 
   @override

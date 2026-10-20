@@ -870,6 +870,137 @@ void main() {
     expect(runtimes.single.cleaned, isTrue);
   });
 
+  testWidgets(
+      'hangup starts exact audio teardown while Firestore terminal write waits',
+      (tester) async {
+    const inviteId = 'hangup_media_before_firestore';
+    final transactionEntered = Completer<void>();
+    final releaseTransaction = Completer<void>();
+    final cleanupStarted = Completer<void>();
+    final releaseCleanup = Completer<void>();
+    HelperlyTestRuntime.configureForTest(
+      firestore: firestore,
+      currentUid: callerUid,
+      currentDisplayName: 'Background Caller',
+    );
+    mediaOwner = CallV2PhysicalMediaOwner(
+      runtimeFactory: (config) {
+        final runtime = _ManagerFakeMediaRuntime(
+          config,
+          autoJoinSuccess: true,
+          cleanupStarted: cleanupStarted,
+          cleanupRelease: releaseCleanup,
+        );
+        runtimes.add(runtime);
+        return runtime;
+      },
+      microphonePermissionStatus: () async => true,
+      microphonePermissionRequest: () async => true,
+    );
+    configureManager();
+    manager.configure(beforeTerminalTransactionForTest: () async {
+      if (!transactionEntered.isCompleted) transactionEntered.complete();
+      await releaseTransaction.future;
+    });
+    await seedInvite(inviteId);
+    await firestore.collection('callInvites').doc(inviteId).update({
+      'status': CallInviteStatus.connected.name,
+      'callerStage': CallInviteStatus.connected.name,
+      'calleeStage': CallInviteStatus.connected.name,
+    });
+    final seededInvite =
+        await firestore.collection('callInvites').doc(inviteId).get();
+    expect(seededInvite.data()?['status'], CallInviteStatus.connected.name);
+    nativeCalls.add(const NativeCallSnapshot(
+      callkitId: exactId,
+      inviteId: inviteId,
+      channel: 'channel_hangup_media_before_firestore',
+      accepted: true,
+    ));
+    final generation = await manager.debugCreateHeldCallRouteForTest(
+      inviteId: inviteId,
+      channel: 'channel_$inviteId',
+      acceptedCallkitId: exactId,
+      status: CallInviteStatus.connected,
+      isCaller: true,
+    );
+    final initialAttachment = await manager.attachOrStartRouteFirstAudio(
+      inviteId: inviteId,
+      channel: 'channel_$inviteId',
+      isCaller: true,
+      acceptedCallkitId: exactId,
+      lifecycleGeneration: generation,
+      connectionSystem: CallV2RealCallConnectionSystem.legacyV1,
+    );
+    expect(initialAttachment, isNotNull);
+    await waitUntil(tester, () => runtimes.isNotEmpty);
+    initialAttachment!.detach();
+
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(
+        builder: (context) => Scaffold(
+          body: TextButton(
+            key: const Key('open-owned-audio'),
+            onPressed: () => Navigator.of(context).push<void>(
+              MaterialPageRoute<void>(
+                builder: (_) => AgoraCallScreen(
+                  channelName: 'channel_$inviteId',
+                  isVideo: false,
+                  otherUserName: 'Background Callee',
+                  inviteId: inviteId,
+                  acceptedCallkitId: exactId,
+                  lifecycleGeneration: generation,
+                  isCaller: true,
+                  skipRuntimeSetupForTest: true,
+                  startLoadedForTest: true,
+                ),
+              ),
+            ),
+            child: const Text('Home'),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.byKey(const Key('open-owned-audio')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    try {
+      await tester.tap(find.byKey(const Key('call-v2-hangup')));
+      await tester.pump();
+
+      await transactionEntered.future;
+      await cleanupStarted.future;
+      await waitUntil(
+        tester,
+        () => find.byKey(const Key('call-v2-hangup')).evaluate().isEmpty,
+      );
+
+      expect(find.byKey(const Key('open-owned-audio')), findsOne);
+      expect(releaseTransaction.isCompleted, isFalse);
+      expect(releaseCleanup.isCompleted, isFalse);
+      expect(runtimes.single.state.value.mediaActive, isFalse);
+      expect(runtimes.single.cleaned, isFalse);
+      expect(mediaOwner.hasOwner, isTrue);
+      expect(nativeCalls, hasLength(1));
+      expect(
+        manager.debugSnapshot()['authoritativeTerminalWriteCount'],
+        0,
+      );
+
+      releaseCleanup.complete();
+      await waitUntil(tester, () => !mediaOwner.hasOwner);
+      expect(runtimes.single.cleaned, isTrue);
+      expect(releaseTransaction.isCompleted, isFalse);
+
+      releaseTransaction.complete();
+      await waitUntil(tester, () => nativeCalls.isEmpty);
+      expect(manager.debugSnapshot()['phase'], CallSessionPhase.terminal.name);
+    } finally {
+      if (!releaseCleanup.isCompleted) releaseCleanup.complete();
+      if (!releaseTransaction.isCompleted) releaseTransaction.complete();
+    }
+  });
+
   testWidgets('background accepted video remains route-first', (tester) async {
     await seedInvite('background_video', isVideo: true);
     nativeCalls.add(const NativeCallSnapshot(
@@ -916,10 +1047,14 @@ class _ManagerFakeMediaRuntime implements CallV2PhysicalMediaRuntime {
   _ManagerFakeMediaRuntime(
     this.config, {
     required this.autoJoinSuccess,
+    this.cleanupStarted,
+    this.cleanupRelease,
   });
 
   final CallV2AgoraMediaRuntimeConfig config;
   final bool autoJoinSuccess;
+  final Completer<void>? cleanupStarted;
+  final Completer<void>? cleanupRelease;
   final ValueNotifier<CallV2AgoraMediaState> _state =
       ValueNotifier<CallV2AgoraMediaState>(
     const CallV2AgoraMediaState.idle(),
@@ -927,6 +1062,7 @@ class _ManagerFakeMediaRuntime implements CallV2PhysicalMediaRuntime {
   int startCount = 0;
   int joinCount = 0;
   bool cleaned = false;
+  Future<void>? _cleanupFuture;
 
   @override
   RtcEngine? get engine => null;
@@ -962,13 +1098,21 @@ class _ManagerFakeMediaRuntime implements CallV2PhysicalMediaRuntime {
   Future<void> fireJoinSuccess() => config.onJoinSuccess();
 
   @override
-  Future<void> cleanup() async {
-    if (cleaned) return;
-    cleaned = true;
+  Future<void> cleanup() {
+    return _cleanupFuture ??= _cleanup();
+  }
+
+  Future<void> _cleanup() async {
+    if (!(cleanupStarted?.isCompleted ?? true)) {
+      cleanupStarted!.complete();
+    }
     _state.value = _state.value.copyWith(
       phase: CallV2AgoraMediaPhase.terminal,
       mediaActive: false,
     );
+    final release = cleanupRelease;
+    if (release != null) await release.future;
+    cleaned = true;
   }
 
   @override

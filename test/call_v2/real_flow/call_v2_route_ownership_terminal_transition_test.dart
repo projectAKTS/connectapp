@@ -110,6 +110,8 @@ void main() {
     required String inviteId,
     required String acceptedCallkitId,
     bool isVideo = false,
+    GlobalKey<NavigatorState>? navigatorKey,
+    Future<void> Function()? beforeFinalNavigatorPop,
   }) async {
     final generation = await manager.debugCreateHeldCallRouteForTest(
       inviteId: inviteId,
@@ -120,6 +122,7 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
+        navigatorKey: navigatorKey,
         home: Builder(
           builder: (context) => Scaffold(
             body: TextButton(
@@ -138,6 +141,7 @@ void main() {
                       isCaller: true,
                       skipRuntimeSetupForTest: true,
                       startLoadedForTest: true,
+                      beforeFinalNavigatorPopForTest: beforeFinalNavigatorPop,
                     ),
                   ),
                 );
@@ -493,6 +497,60 @@ void main() {
 
     expect(find.byKey(const Key('call-v2-hangup')), findsOne);
     expect(manager.activeInviteId, 'owned_b');
+    expect(manager.debugSnapshot()['lifecycleGeneration'], generationB);
+    expect(manager.debugSnapshot()['callRouteActive'], isTrue);
+    expect(manager.debugSnapshot()['callRouteOwnerMatchesCurrent'], isTrue);
+  });
+
+  testWidgets(
+      'final pre-pop guard prevents delayed Call A from dismissing Call B',
+      (tester) async {
+    final navigatorKey = GlobalKey<NavigatorState>();
+    final finalBoundaryEntered = Completer<void>();
+    final releaseFinalBoundary = Completer<void>();
+    await seedInvite('final_pop_a', status: CallInviteStatus.connected);
+    await showOwnedCallScreen(
+      tester,
+      inviteId: 'final_pop_a',
+      acceptedCallkitId: 'exact_final_pop_a',
+      navigatorKey: navigatorKey,
+      beforeFinalNavigatorPop: () async {
+        if (!finalBoundaryEntered.isCompleted) {
+          finalBoundaryEntered.complete();
+        }
+        await releaseFinalBoundary.future;
+      },
+    );
+
+    await tester.tap(find.byKey(const Key('call-v2-hangup')));
+    await tester.pump();
+    await finalBoundaryEntered.future;
+
+    await manager.forceIdleForTest();
+    final generationB = await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'final_pop_b',
+      channel: 'channel_final_pop_b',
+      acceptedCallkitId: 'exact_final_pop_b',
+      status: CallInviteStatus.connected,
+    );
+    unawaited(navigatorKey.currentState!.push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => const Scaffold(
+          key: Key('final-pop-call-b-route'),
+          body: Text('Call B'),
+        ),
+      ),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('final-pop-call-b-route')), findsOne);
+
+    releaseFinalBoundary.complete();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.byKey(const Key('final-pop-call-b-route')), findsOne);
+    expect(manager.activeInviteId, 'final_pop_b');
     expect(manager.debugSnapshot()['lifecycleGeneration'], generationB);
     expect(manager.debugSnapshot()['callRouteActive'], isTrue);
     expect(manager.debugSnapshot()['callRouteOwnerMatchesCurrent'], isTrue);

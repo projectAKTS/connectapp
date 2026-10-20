@@ -373,6 +373,7 @@ class _CallSession {
   bool remoteJoined = false;
   bool terminalSignalSent = false;
   Future<void>? terminalTransitionFuture;
+  Future<void>? physicalMediaTeardownFuture;
 
   bool get isTerminal => phase == CallSessionPhase.terminal;
   String get callkitId {
@@ -2502,7 +2503,17 @@ class CallSessionManager {
       lifecycleGeneration: lifecycleGeneration,
       acceptedCallkitId: acceptedCallkitId,
     );
-    if (completion != null) await completion;
+    if (completion == null) return;
+    final mediaTeardown = beginOwnedPhysicalMediaTeardown(
+      inviteId: inviteId,
+      source: source,
+      lifecycleGeneration: lifecycleGeneration,
+      acceptedCallkitId: acceptedCallkitId,
+    );
+    await Future.wait<void>(<Future<void>>[
+      completion,
+      if (mediaTeardown != null) mediaTeardown,
+    ]);
   }
 
   Future<void>? beginEndCallFromLocalUser({
@@ -2533,6 +2544,61 @@ class CallSessionManager {
       authoritativeLocalExit: true,
       expectedSession: session,
     );
+  }
+
+  Future<void>? beginOwnedPhysicalMediaTeardown({
+    required String inviteId,
+    String source = 'local_end',
+    int? lifecycleGeneration,
+    String acceptedCallkitId = '',
+  }) {
+    final session = _current;
+    if (session == null ||
+        !_sessionMatchesOwnership(
+          session,
+          inviteId: inviteId,
+          lifecycleGeneration: lifecycleGeneration,
+          acceptedCallkitId: acceptedCallkitId,
+        ) ||
+        !_callLifecycleArbiter.ownsGeneration(session.lifecycleGeneration)) {
+      return null;
+    }
+    final existing = session.physicalMediaTeardownFuture;
+    if (existing != null) return existing;
+
+    final teardown = _terminateOwnedPhysicalMedia(
+      session,
+      reason: source,
+    );
+    session.physicalMediaTeardownFuture = teardown;
+    return teardown;
+  }
+
+  Future<void> _terminateOwnedPhysicalMedia(
+    _CallSession session, {
+    required String reason,
+  }) async {
+    unawaited(_diagManager('physical_media_teardown_start', meta: {
+      'exactIdentityPresent': session.callkitId.isNotEmpty,
+      'lifecycleOwned':
+          _callLifecycleArbiter.ownsGeneration(session.lifecycleGeneration),
+    }));
+    var succeeded = false;
+    try {
+      await _physicalMediaOwner.terminate(
+        _mediaKeyForSession(session),
+        reason: reason,
+      );
+      succeeded = true;
+    } catch (_) {
+      await _diagManager('physical_media_teardown_error', meta: {
+        'cleanupFailed': true,
+      });
+    } finally {
+      await _diagManager('physical_media_teardown_complete', meta: {
+        'cleanupSucceeded': succeeded,
+      });
+    }
   }
 
   Future<void> handleCallScreenClosed(
