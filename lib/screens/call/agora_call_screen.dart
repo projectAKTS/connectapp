@@ -210,6 +210,8 @@ class AgoraCallScreen extends StatefulWidget {
   final bool skipRuntimeSetupForTest;
   final bool startLoadedForTest;
   final bool startTerminalForTest;
+
+  /// Test-only owned teardown substitute. Production never supplies this.
   final Future<void> Function(bool terminal)? managedRouteExitForTest;
 
   const AgoraCallScreen({
@@ -325,6 +327,8 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   late final CallV2ScreenCallkitController _callkitController;
   CallV2PhysicalMediaAttachment? _mediaAttachment;
   VoidCallback? _mediaAttachmentListener;
+  Stopwatch? _teardownElapsed;
+  Future<void>? _backgroundTeardownFuture;
 
   bool get _useFlutterTextureRenderer =>
       Platform.isIOS && _preferFlutterTextureRendererOnIOS;
@@ -500,6 +504,11 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       return;
     }
     _seenTerminalInviteStatus = signal.status;
+    _startTeardownTimeline();
+    unawaited(_diagTeardown('remote_terminal_observed', meta: {
+      'terminalStatus': signal.status,
+      'terminalIsError': signal.isError,
+    }));
     _quiesceEngineCallbacksForTerminal();
     _ringTimeout?.cancel();
     setState(() {
@@ -542,6 +551,21 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     );
   }
 
+  void _startTeardownTimeline() {
+    _teardownElapsed ??= Stopwatch()..start();
+  }
+
+  Future<void> _diagTeardown(
+    String stage, {
+    Map<String, dynamic>? meta,
+  }) {
+    _startTeardownTimeline();
+    return _diagCall(stage, meta: <String, dynamic>{
+      'teardownElapsedMs': _teardownElapsed!.elapsedMilliseconds,
+      ...?meta,
+    });
+  }
+
   Future<void> _forceVideoAudioState(
     RtcEngine engine, {
     required String source,
@@ -576,7 +600,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
   Future<void> _cleanupCallkitUi({required String reason}) async {
     if (_testMode) {
-      await _diagCall('callkit_cleanup_start', meta: {
+      await _diagTeardown('callkit_cleanup_start', meta: {
         'reason': reason,
         'testMode': true,
       });
@@ -584,9 +608,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         'reason': reason,
         'testMode': true,
       });
+      await _diagTeardown('callkit_cleanup_complete', meta: {
+        'testMode': true,
+      });
       return;
     }
-    await _diagCall('callkit_cleanup_start', meta: {'reason': reason});
+    await _diagTeardown('callkit_cleanup_start', meta: {'reason': reason});
     try {
       final ended = await _callkitController.endOwnedCall(
         useExactNativeEnd: Platform.isIOS,
@@ -595,10 +622,17 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         'reason': reason,
         'requestAccepted': ended,
       });
+      await _diagTeardown('callkit_cleanup_complete', meta: {
+        'requestAccepted': ended,
+      });
     } catch (e) {
       await _diagCall('callkit_exact_end_error', meta: {
         'reason': reason,
         'error': '$e',
+      });
+      await _diagTeardown('callkit_cleanup_complete', meta: {
+        'requestAccepted': false,
+        'cleanupError': true,
       });
     }
   }
@@ -2644,46 +2678,124 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     return result;
   }
 
-  Future<void> _returnToAppAfterCall() async {
-    if (!mounted) return;
+  bool _ownsManagedCallRoute() {
+    final inviteId = (widget.inviteId ?? '').trim();
+    return inviteId.isNotEmpty &&
+        CallSessionManager.instance.isOwnedCallRoute(
+          inviteId: inviteId,
+          lifecycleGeneration: widget.lifecycleGeneration,
+          acceptedCallkitId: widget.acceptedCallkitId ?? '',
+        );
+  }
+
+  Future<bool> _returnToAppAfterCall({
+    bool requireManagedRouteOwnership = true,
+  }) async {
+    if (!mounted) return false;
+    if (requireManagedRouteOwnership && !_ownsManagedCallRoute()) {
+      await _diagTeardown('route_pop_stale_owner_blocked');
+      return false;
+    }
     if (!_routePopAuthorized) {
       setState(() => _routePopAuthorized = true);
+      await _diagTeardown('route_pop_authorized');
       await WidgetsBinding.instance.endOfFrame;
-      if (!mounted) return;
+      if (!mounted) return false;
+    }
+    if (requireManagedRouteOwnership && !_ownsManagedCallRoute()) {
+      await _diagTeardown('route_pop_stale_owner_blocked');
+      return false;
+    }
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) {
+      await _diagTeardown('route_pop_not_current_blocked');
+      return false;
     }
     final nav = Navigator.of(context);
+    await _diagTeardown('navigator_pop_invoked', meta: {
+      'navigatorCanPop': nav.canPop(),
+    });
     if (nav.canPop()) {
       nav.pop();
-      return;
+      return true;
     }
     nav.pushNamedAndRemoveUntil('/', (route) => false);
+    return true;
+  }
+
+  void _startBackgroundTeardown(
+    Future<void> terminalTransition, {
+    required String reason,
+  }) {
+    if (_backgroundTeardownFuture != null) return;
+    final teardown = _completeBackgroundTeardown(
+      terminalTransition,
+      reason: reason,
+    );
+    _backgroundTeardownFuture = teardown;
+    unawaited(teardown.catchError((Object _, StackTrace __) {
+      return _diagTeardown('background_teardown_error', meta: {
+        'backgroundTeardownFailed': true,
+      });
+    }));
+  }
+
+  Future<void> _completeBackgroundTeardown(
+    Future<void> terminalTransition, {
+    required String reason,
+  }) async {
+    try {
+      await terminalTransition;
+      await _diagTeardown('terminal_transition_complete');
+    } catch (_) {
+      await _diagTeardown('terminal_transition_complete', meta: {
+        'transitionFailed': true,
+      });
+    }
+
+    await _diagTeardown('engine_cleanup_start');
+    final cleanupResult = await _cleanupEngine();
+    await _diagTeardown('engine_cleanup_complete', meta: {
+      'cleanupSucceeded': cleanupResult.succeeded,
+      'cleanupErrorCode': cleanupResult.errorCode,
+    });
+    await _cleanupCallkitUi(reason: reason);
+    _updateCallV2LifecycleStatus(routeCleanupCompleted: true);
+    await _diagTeardown('hard_reset_start');
+    await CallSessionManager.instance.hardResetForNewCall(
+      reason: reason,
+      expectedInviteId: widget.inviteId,
+      expectedCallkitId: _callkitId,
+    );
+    _updateCallV2LifecycleStatus(sessionResetCompleted: true);
+    await _diagTeardown('hard_reset_complete');
+    await _diagTeardown(
+      cleanupResult.succeeded
+          ? 'cleanup_gate_released'
+          : 'cleanup_gate_blocked',
+      meta: {
+        'nextEngineAllowed': _engineCleanupGate.nextEngineAllowed,
+        'cleanupInProgress': _engineCleanupGate.cleanupInProgress,
+      },
+    );
   }
 
   Future<void> _closeScreenAfterTerminalState(String reason) async {
     if (_endingCall) return;
     _endingCall = true;
+    _startTeardownTimeline();
     _quiesceEngineCallbacksForTerminal();
     _autoCloseTimer?.cancel();
-    await _diagCall('screen_auto_close', meta: {'reason': reason});
-    try {
-      final cleanupResult = await _awaitCleanupForUi(_cleanupEngine());
-      await _cleanupCallkitUi(reason: 'screen_terminal_hard_reset');
-      _updateCallV2LifecycleStatus(routeCleanupCompleted: true);
-      await CallSessionManager.instance.hardResetForNewCall(
-        reason: 'screen_terminal_hard_reset',
-        expectedInviteId: widget.inviteId,
-        expectedCallkitId: _callkitId,
-      );
-      _updateCallV2LifecycleStatus(sessionResetCompleted: true);
-      await _returnToAppAfterCall();
-      if (cleanupResult == null) {
-        _setCallV2BlockerCode('cleanup_in_progress');
-      } else if (!cleanupResult.succeeded) {
-        _setCallV2BlockerCode('cleanup_failed');
-      }
-    } finally {
+    await _diagTeardown('screen_auto_close', meta: {'reason': reason});
+    final popped = await _returnToAppAfterCall();
+    if (!popped) {
       _endingCall = false;
+      return;
     }
+    _startBackgroundTeardown(
+      Future<void>.value(),
+      reason: 'screen_terminal_hard_reset',
+    );
   }
 
   void _scheduleAutoClose(
@@ -2711,7 +2823,12 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     attachment?.detach();
     _mediaAttachment = null;
     _mediaAttachmentListener = null;
-    if (!widget.skipRuntimeSetupForTest && widget.isVideo) {
+    if (_teardownElapsed != null) {
+      unawaited(_diagTeardown('ui_route_disposed'));
+    }
+    if (!widget.skipRuntimeSetupForTest &&
+        widget.isVideo &&
+        _backgroundTeardownFuture == null) {
       unawaited(_cleanupEngine().then<void>((_) {}, onError: (_) {}));
     }
     super.dispose();
@@ -2751,38 +2868,40 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   Future<void> _endCall({String source = 'end_button'}) async {
     if (_endingCall) return;
     _endingCall = true;
+    _startTeardownTimeline();
     _quiesceEngineCallbacksForTerminal();
-    try {
-      await _diagCall('end_pressed');
-      final id = (widget.inviteId ?? '').trim();
-      if (id.isNotEmpty) {
-        await CallSessionManager.instance.endCallFromLocalUser(
-          inviteId: id,
-          source: source,
-          lifecycleGeneration: widget.lifecycleGeneration == 0
-              ? null
-              : widget.lifecycleGeneration,
-          acceptedCallkitId: widget.acceptedCallkitId ?? '',
-        );
-      }
-      final cleanupResult = await _awaitCleanupForUi(_cleanupEngine());
-      await _cleanupCallkitUi(reason: 'manual_end_hard_reset');
-      _updateCallV2LifecycleStatus(routeCleanupCompleted: true);
-      await CallSessionManager.instance.hardResetForNewCall(
-        reason: 'manual_end_hard_reset',
-        expectedInviteId: widget.inviteId,
-        expectedCallkitId: _callkitId,
-      );
-      _updateCallV2LifecycleStatus(sessionResetCompleted: true);
-      await _returnToAppAfterCall();
-      if (cleanupResult == null) {
-        _setCallV2BlockerCode('cleanup_in_progress');
-      } else if (!cleanupResult.succeeded) {
-        _setCallV2BlockerCode('cleanup_failed');
-      }
-    } finally {
+    await _diagTeardown('hangup_initiated', meta: {'source': source});
+    await _diagCall('end_pressed');
+    final id = (widget.inviteId ?? '').trim();
+    final terminalTransition = id.isEmpty
+        ? null
+        : CallSessionManager.instance.beginEndCallFromLocalUser(
+            inviteId: id,
+            source: source,
+            lifecycleGeneration: widget.lifecycleGeneration == 0
+                ? null
+                : widget.lifecycleGeneration,
+            acceptedCallkitId: widget.acceptedCallkitId ?? '',
+          );
+    if (terminalTransition == null) {
+      await _diagTeardown('terminal_ownership_rejected');
       _endingCall = false;
+      return;
     }
+    await _diagTeardown('terminal_teardown_ownership_established');
+    final popped = await _returnToAppAfterCall();
+    if (!popped) {
+      _startBackgroundTeardown(
+        terminalTransition,
+        reason: 'manual_end_hard_reset',
+      );
+      _endingCall = false;
+      return;
+    }
+    _startBackgroundTeardown(
+      terminalTransition,
+      reason: 'manual_end_hard_reset',
+    );
   }
 
   Future<void> _requestManagedRouteExit() async {
@@ -2791,12 +2910,17 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     final testExit = widget.managedRouteExitForTest;
     if (testExit != null) {
       _endingCall = true;
-      try {
-        await testExit(terminalUi);
-        await _returnToAppAfterCall();
-      } finally {
+      _startTeardownTimeline();
+      final teardown = testExit(terminalUi);
+      final popped = await _returnToAppAfterCall(
+        requireManagedRouteOwnership: false,
+      );
+      if (!popped) {
         _endingCall = false;
+        return;
       }
+      _backgroundTeardownFuture = teardown;
+      unawaited(teardown.catchError((_) {}));
       return;
     }
     final inviteId = (widget.inviteId ?? '').trim();
@@ -3405,6 +3529,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
   Widget _hangupButton() {
     return InkResponse(
+      key: const Key('call-v2-hangup'),
       onTap: () => _endCall(),
       child: Container(
         width: 76,

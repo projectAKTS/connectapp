@@ -105,6 +105,56 @@ void main() {
     expect(find.byKey(const Key('call-v2-managed-route-exit-scope')), findsOne);
   }
 
+  Future<int> showOwnedCallScreen(
+    WidgetTester tester, {
+    required String inviteId,
+    required String acceptedCallkitId,
+    bool isVideo = false,
+  }) async {
+    final generation = await manager.debugCreateHeldCallRouteForTest(
+      inviteId: inviteId,
+      channel: 'channel_$inviteId',
+      acceptedCallkitId: acceptedCallkitId,
+      status: CallInviteStatus.connected,
+      isVideo: isVideo,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              key: const Key('open-call-screen'),
+              onPressed: () {
+                Navigator.of(context).push<void>(
+                  MaterialPageRoute<void>(
+                    fullscreenDialog: true,
+                    builder: (_) => AgoraCallScreen(
+                      channelName: 'channel_$inviteId',
+                      isVideo: isVideo,
+                      otherUserName: 'Owned Route User',
+                      inviteId: inviteId,
+                      acceptedCallkitId: acceptedCallkitId,
+                      lifecycleGeneration: generation,
+                      isCaller: true,
+                      skipRuntimeSetupForTest: true,
+                      startLoadedForTest: true,
+                    ),
+                  ),
+                );
+              },
+              child: const Text('Home'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(const Key('open-call-screen')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('call-v2-hangup')), findsOne);
+    return generation;
+  }
+
   setUp(() async {
     firestore = FakeFirebaseFirestore();
     HelperlyTestRuntime.configureForTest(
@@ -301,6 +351,151 @@ void main() {
       await tester.pumpAndSettle();
       expect(terminalFlags, <bool>[false]);
     }
+  });
+
+  testWidgets(
+      'production hangup pops before delayed authoritative transition completes',
+      (tester) async {
+    const inviteId = 'prompt_hangup_delayed_transaction';
+    const exactId = 'exact_prompt_hangup';
+    final transactionEntered = Completer<void>();
+    final releaseTransaction = Completer<void>();
+    manager.configure(beforeTerminalTransactionForTest: () async {
+      if (!transactionEntered.isCompleted) transactionEntered.complete();
+      await releaseTransaction.future;
+    });
+    await seedInvite(inviteId, status: CallInviteStatus.connected);
+    await showOwnedCallScreen(
+      tester,
+      inviteId: inviteId,
+      acceptedCallkitId: exactId,
+    );
+
+    await tester.tap(find.byKey(const Key('call-v2-hangup')));
+    await tester.pump();
+    await transactionEntered.future;
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(releaseTransaction.isCompleted, isFalse);
+    expect(find.byKey(const Key('open-call-screen')), findsOne);
+    expect(find.byKey(const Key('call-v2-hangup')), findsNothing);
+    expect(manager.debugSnapshot()['callLifecycleState'], 'ending');
+    expect(manager.debugSnapshot()['callRouteActive'], isTrue);
+
+    releaseTransaction.complete();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 700));
+  });
+
+  testWidgets('remote terminal UI pops before delayed cleanup completes',
+      (tester) async {
+    final cleanupEntered = Completer<void>();
+    final releaseCleanup = Completer<void>();
+    var cleanupCount = 0;
+    await showManagedCallScreen(
+      tester,
+      isVideo: false,
+      loaded: true,
+      terminal: true,
+      onExit: (terminal) async {
+        expect(terminal, isTrue);
+        cleanupCount += 1;
+        if (!cleanupEntered.isCompleted) cleanupEntered.complete();
+        await releaseCleanup.future;
+      },
+    );
+
+    await tester.tap(find.byKey(const Key('call-v2-route-close')));
+    await tester.pump();
+    await cleanupEntered.future;
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(releaseCleanup.isCompleted, isFalse);
+    expect(find.byKey(const Key('open-call-screen')), findsOne);
+    expect(cleanupCount, 1);
+
+    releaseCleanup.complete();
+    await tester.pump();
+  });
+
+  testWidgets('repeated exit starts one cleanup and one navigation',
+      (tester) async {
+    final releaseCleanup = Completer<void>();
+    var cleanupCount = 0;
+    await showManagedCallScreen(
+      tester,
+      isVideo: false,
+      loaded: true,
+      onExit: (_) async {
+        cleanupCount += 1;
+        await releaseCleanup.future;
+      },
+    );
+
+    await tester.tap(find.byKey(const Key('call-v2-route-close')));
+    await tester.tap(find.byKey(const Key('call-v2-route-close')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(cleanupCount, 1);
+    expect(find.byKey(const Key('open-call-screen')), findsOne);
+    releaseCleanup.complete();
+    await tester.pump();
+  });
+
+  testWidgets('stale A screen cannot pop or mutate owned Call B',
+      (tester) async {
+    final generationA = await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'owned_a',
+      channel: 'channel_owned_a',
+      acceptedCallkitId: 'exact_owned_a',
+    );
+    await manager.forceIdleForTest();
+    final generationB = await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'owned_b',
+      channel: 'channel_owned_b',
+      acceptedCallkitId: 'exact_owned_b',
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              key: const Key('open-stale-a'),
+              onPressed: () => Navigator.of(context).push<void>(
+                MaterialPageRoute<void>(
+                  builder: (_) => AgoraCallScreen(
+                    channelName: 'channel_owned_a',
+                    isVideo: false,
+                    otherUserName: 'Stale A',
+                    inviteId: 'owned_a',
+                    acceptedCallkitId: 'exact_owned_a',
+                    lifecycleGeneration: generationA,
+                    isCaller: true,
+                    skipRuntimeSetupForTest: true,
+                    startLoadedForTest: true,
+                  ),
+                ),
+              ),
+              child: const Text('Home'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(const Key('open-stale-a')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('call-v2-hangup')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.byKey(const Key('call-v2-hangup')), findsOne);
+    expect(manager.activeInviteId, 'owned_b');
+    expect(manager.debugSnapshot()['lifecycleGeneration'], generationB);
+    expect(manager.debugSnapshot()['callRouteActive'], isTrue);
+    expect(manager.debugSnapshot()['callRouteOwnerMatchesCurrent'], isTrue);
   });
 
   test('delayed Call A route completion cannot mutate current Call B',

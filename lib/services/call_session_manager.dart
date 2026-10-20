@@ -479,6 +479,7 @@ class CallSessionManager {
   Future<void> Function(int attempt)? _beforeAcceptTransactionAttemptForTest;
   Future<void> Function(int attempt)?
       _afterAcceptTransactionCallbackEnteredForTest;
+  Future<void> Function()? _beforeTerminalTransactionForTest;
   BeforeAgoraJoinProgressForTest? _beforeAgoraJoinProgressForTest;
   BeforeProductionRoutePushForTest? _beforeProductionRoutePushForTest;
   CallScreenOpenRecorderForTest? _callScreenOpenRecorderForTest;
@@ -603,6 +604,26 @@ class CallSessionManager {
           acceptedCallkitId: acceptedCallkitId,
         ) &&
         (session.isTerminal || _isTerminalStatus(session.status));
+  }
+
+  bool isOwnedCallRoute({
+    required String inviteId,
+    required int lifecycleGeneration,
+    required String acceptedCallkitId,
+  }) {
+    final session = _current;
+    final owner = _callRouteOwner;
+    return session != null &&
+        owner != null &&
+        _callRouteActive &&
+        _sessionMatchesOwnership(
+          session,
+          inviteId: inviteId,
+          lifecycleGeneration:
+              lifecycleGeneration == 0 ? null : lifecycleGeneration,
+          acceptedCallkitId: acceptedCallkitId,
+        ) &&
+        owner.ownsSession(session);
   }
 
   String get debugLastDiagStage => _lastDiagStage;
@@ -741,6 +762,7 @@ class CallSessionManager {
     _readInviteDataForTest = null;
     _beforeAcceptTransactionAttemptForTest = null;
     _afterAcceptTransactionCallbackEnteredForTest = null;
+    _beforeTerminalTransactionForTest = null;
     _beforeAgoraJoinProgressForTest = null;
     _beforeProductionRoutePushForTest = null;
     _callScreenOpenRecorderForTest = null;
@@ -902,6 +924,7 @@ class CallSessionManager {
     Future<void> Function(int attempt)? beforeAcceptTransactionAttemptForTest,
     Future<void> Function(int attempt)?
         afterAcceptTransactionCallbackEnteredForTest,
+    Future<void> Function()? beforeTerminalTransactionForTest,
     BeforeAgoraJoinProgressForTest? beforeAgoraJoinProgressForTest,
     BeforeProductionRoutePushForTest? beforeProductionRoutePushForTest,
     CallScreenOpenRecorderForTest? callScreenOpenRecorderForTest,
@@ -947,6 +970,9 @@ class CallSessionManager {
     if (afterAcceptTransactionCallbackEnteredForTest != null) {
       _afterAcceptTransactionCallbackEnteredForTest =
           afterAcceptTransactionCallbackEnteredForTest;
+    }
+    if (beforeTerminalTransactionForTest != null && _debugTestAccessEnabled) {
+      _beforeTerminalTransactionForTest = beforeTerminalTransactionForTest;
     }
     if (beforeAgoraJoinProgressForTest != null) {
       _beforeAgoraJoinProgressForTest = beforeAgoraJoinProgressForTest;
@@ -2470,6 +2496,21 @@ class CallSessionManager {
     int? lifecycleGeneration,
     String acceptedCallkitId = '',
   }) async {
+    final completion = beginEndCallFromLocalUser(
+      inviteId: inviteId,
+      source: source,
+      lifecycleGeneration: lifecycleGeneration,
+      acceptedCallkitId: acceptedCallkitId,
+    );
+    if (completion != null) await completion;
+  }
+
+  Future<void>? beginEndCallFromLocalUser({
+    required String inviteId,
+    String source = 'local_end',
+    int? lifecycleGeneration,
+    String acceptedCallkitId = '',
+  }) {
     final session = _current;
     if (session == null ||
         !_sessionMatchesOwnership(
@@ -2478,11 +2519,11 @@ class CallSessionManager {
           lifecycleGeneration: lifecycleGeneration,
           acceptedCallkitId: acceptedCallkitId,
         )) {
-      return;
+      return null;
     }
-    if (session.isTerminal) return;
+    if (session.isTerminal) return Future<void>.value();
 
-    await _markTerminal(
+    return _markTerminal(
       inviteId: inviteId,
       status: CallInviteStatus.ended,
       message: 'Call ended',
@@ -5062,6 +5103,11 @@ class CallSessionManager {
     }
 
     _callLifecycleArbiter.beginEnding(session.lifecycleGeneration);
+    unawaited(_diagManager('terminal_teardown_ownership_established', meta: {
+      'requestedStatus': status.name,
+      'authoritativeLocalExit': authoritativeLocalExit,
+      'callLifecycleState': _callLifecycleArbiter.state.name,
+    }));
     late final Future<void> transitionFuture;
     transitionFuture = _performAuthoritativeTerminalTransition(
       session: session,
@@ -5093,6 +5139,12 @@ class CallSessionManager {
     required bool authoritativeLocalExit,
     String? error,
   }) async {
+    final transitionElapsed = Stopwatch()..start();
+    await _diagManager('firestore_terminal_transition_start', meta: {
+      'requestedStatus': requestedStatus.name,
+      'authoritativeLocalExit': authoritativeLocalExit,
+      'elapsedMs': transitionElapsed.elapsedMilliseconds,
+    });
     final transition = await _resolveAuthoritativeTerminalTransition(
       session: session,
       requestedStatus: requestedStatus,
@@ -5103,6 +5155,12 @@ class CallSessionManager {
       error: error,
       authoritativeLocalExit: authoritativeLocalExit,
     );
+    await _diagManager('firestore_terminal_transition_complete', meta: {
+      'resultStatus': transition.status.name,
+      'writeApplied': transition.writeApplied,
+      'preservedExistingTerminal': transition.preservedExistingTerminal,
+      'elapsedMs': transitionElapsed.elapsedMilliseconds,
+    });
     if (!identical(_current, session) ||
         !_callLifecycleArbiter.ownsGeneration(session.lifecycleGeneration)) {
       return;
@@ -5128,6 +5186,10 @@ class CallSessionManager {
         if (error != null && error.isNotEmpty) 'error': error,
       },
     );
+    await _diagManager('terminal_native_callkit_cleanup_start', meta: {
+      'exactIdentityPresent': session.callkitId.isNotEmpty,
+      'elapsedMs': transitionElapsed.elapsedMilliseconds,
+    });
     await _markNativeInviteStateByIdsSafely(
       inviteId: session.inviteId,
       channel: session.channel,
@@ -5141,6 +5203,10 @@ class CallSessionManager {
       callkitId: session.callkitId,
       reason: transition.endReason,
     );
+    await _diagManager('terminal_native_callkit_cleanup_complete', meta: {
+      'exactIdentityPresent': session.callkitId.isNotEmpty,
+      'elapsedMs': transitionElapsed.elapsedMilliseconds,
+    });
 
     await _emitTerminalSignal(
       inviteId: session.inviteId,
@@ -5169,6 +5235,10 @@ class CallSessionManager {
       writeApplied: false,
       preservedExistingTerminal: false,
     );
+    final beforeTransaction = _beforeTerminalTransactionForTest;
+    if (beforeTransaction != null && _debugTestAccessEnabled) {
+      await beforeTransaction();
+    }
     try {
       return await _db.runTransaction<_AuthoritativeTerminalTransition>(
         (tx) async {
