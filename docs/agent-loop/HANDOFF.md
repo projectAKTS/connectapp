@@ -1,110 +1,101 @@
-# Fast Hangup UI With Owned Background Cleanup Handoff
+# Final Fast Hangup Safety Revision Handoff
 
 STATUS: `ready_for_review`
 
-STARTING_SHA: `1937701449ca5ab6d7f5fd30938b938b7183c4d8`
-AUTHORIZATION_SHA: `bd12a7c9e8d2db9944fd9980d576142e9822de82`
-IMPLEMENTATION_SHA: `f27e3ec5b91c84195ea0be8f9e84e9d7e9fa350d`
+STARTING_SHA: `15828dbc5fdd94e69d0d75d15359ecc63e930b45`
+AUTHORIZATION_SHA: `dc5b42ba8fdd742a4ff4b627286922334361b26f`
+IMPLEMENTATION_SHA: `6466cfc954e6feaa8f69af56aea62013e3ce35ae`
 ENDING_SHA: `SELF`
 
-## Physical Observation And Source Finding
+## Final Pre-Pop Guard
 
-Physical build `1.0.2 (202610170043)` showed Audio A and B connecting, while
-the caller's call route remained visible for about 10-15 seconds after hangup.
-The source-proven delay was ordering: both local hangup and remote-terminal
-paths awaited authoritative Firestore terminal work, engine cleanup, exact
-CallKit cleanup, and hard reset before invoking Navigator pop. Existing evidence
-does not isolate which awaited operation accounted for the full physical delay.
+`AgoraCallScreen._returnToAppAfterCall()` now performs one final synchronous
+validation after the last diagnostic/test asynchronous boundary and immediately
+before navigation. It verifies the exact managed session ownership (invite,
+lifecycle generation, and accepted CallKit identity), exact route owner, the
+same `ModalRoute`, the same `NavigatorState`, and that the route is still
+current. No await exists between this validation and `Navigator.pop()` (or the
+root fallback).
 
-The route now dismisses after synchronous exact-call teardown ownership is
-established. The authoritative transition and all owned cleanup continue in the
-background behind the unchanged process cleanup gate.
+The deterministic production-Navigator regression pauses Call A at this final
+boundary, transfers manager and Navigator ownership to Call B, then releases A.
+A returns stale without popping B; B remains current, route-active, and owned by
+its newer lifecycle generation.
 
-## Ownership And Cleanup
+## Prompt Owned Media Teardown
 
-- `beginEndCallFromLocalUser()` validates the exact invite, lifecycle
-  generation, and accepted CallKit identity, enters ending ownership before its
-  first asynchronous boundary, and returns the eventual terminal-transition
-  future.
-- The call screen revalidates the exact active route owner before and after its
-  frame boundary, and refuses to pop a stale or non-current route.
-- Firestore terminal transition, engine cleanup, exact native CallKit cleanup,
-  and exact-identity hard reset continue after the route is dismissed.
-- The cleanup coordinator and next-engine gate are unchanged. A later engine
-  cannot start until the prior cleanup actually completes.
-- Hard reset retains expected invite and exact CallKit identity checks, so late
-  Call A cleanup cannot reset or dismiss owned Call B.
-- Duplicate exit requests share one route dismissal and one teardown future.
+Valid local hangup still establishes authoritative ending ownership first.
+Immediately afterward it starts exact physical-media-owner termination and the
+screen engine cleanup without waiting for the Firestore terminal transaction.
+Exact CallKit UI cleanup also starts independently. The mandatory Firestore
+transition remains active and is awaited before exact hard reset.
 
-## Diagnostics
+`CallSessionManager.beginOwnedPhysicalMediaTeardown()` accepts only the exact
+current session and lifecycle generation. It snapshots the session's exact
+physical media key and caches one teardown future, making duplicate local,
+remote-terminal, screen-disposal, and late callback cleanup idempotent. A late
+Call A key cannot terminate Call B.
 
-Privacy-safe monotonic teardown checkpoints now cover hangup/remote terminal,
-teardown ownership, Firestore transition, route authorization and pop, route
-disposal, engine cleanup, exact CallKit cleanup, hard reset, and cleanup-gate
-release. Metadata is limited to elapsed counts, booleans, controlled stages,
-and safe status/error categories; it contains no raw identifiers or payloads.
+For shared route-first audio, the runtime enters the existing process cleanup
+gate as soon as exact owner termination starts. While that cleanup is held, the
+old physical owner remains present and a different call cannot claim media.
+Only completion releases that ownership. Existing cleanup-coordinator tests
+prove failed cleanup keeps the next-engine decision blocked.
 
-## Regression Proof
+## Deterministic Proof
 
-The production widget path blocks the authoritative transaction with a
-`Completer`, taps the real hangup control, and proves the call route returns to
-Home while the transaction remains blocked and lifecycle state remains
-`ending`. Additional deterministic tests prove prompt remote-terminal exit,
-duplicate-exit coalescing, and that a stale Call A screen cannot pop or mutate
-owned Call B.
-
-The focused matrix also covers background accepted audio, exact CallKit
-ownership, physical media ownership, repeated calls, rapid lifecycle changes,
-notification ownership, foreground recovery, and the existing route-first
-accepted-video path.
-
-## Video C
-
-No retained physical Video C timeline was found in the local terminal, build
-logs, or diagnostic exports. Automated accepted-video coverage passes, but the
-physical failure's first blocking stage is not available. Its root cause remains
-unproven, and no Agora, token, PushKit, Firebase, native CallKit, permission, or
-video-media code was changed.
+- The production hangup control is exercised while the authoritative terminal
+  transaction is held by a `Completer`.
+- Home becomes visible while both Firestore completion and physical-runtime
+  cleanup remain held.
+- The exact audio runtime has already made media inactive, but its owner remains
+  held, preventing replacement until cleanup completes.
+- Releasing media cleanup clears only A's exact owner while Firestore is still
+  held; releasing Firestore then completes terminal/native cleanup.
+- Exact native CallKit cleanup starts independently and the manager's terminal
+  path removes the matching native call after the authoritative transition.
+- Existing failure regressions prove cleanup failure still attempts CallKit and
+  session cleanup while retaining `cleanup_failed` next-engine blocking.
+- Existing sequential integration proves Audio A -> Audio B -> Video C retains
+  one route and one RTC owner per call after cleanup completes.
 
 ## Files Changed
 
 - `lib/screens/call/agora_call_screen.dart`
 - `lib/services/call_session_manager.dart`
+- `test/call_v2/real_flow/call_v2_background_audio_media_integration_test.dart`
+- `test/call_v2/real_flow/call_v2_physical_media_owner_test.dart`
 - `test/call_v2/real_flow/call_v2_route_ownership_terminal_transition_test.dart`
-- `docs/agent-loop/NEXT_TASK.md`
-- `docs/agent-loop/STATE.json`
 - `docs/agent-loop/HANDOFF.md`
+- `docs/agent-loop/STATE.json`
 
 The pre-existing untracked architecture document and Aider artifacts remain
 untouched.
 
 ## Validation
 
-- Focused route/cleanup/recovery/media matrix: 211 passed.
-- Route ownership and terminal transition file: 18 passed.
-- Foreground recovery: 3 passed.
-- Full Call V2 suite at exact implementation commit: 2,370 passed.
+- Core changed-file regression set: 44 passed.
+- Focused cleanup/ownership/recovery/lifecycle matrix: 223 passed.
+- Foreground recovery: passed within the focused matrix.
+- Audio A -> Audio B -> Video C: passed within the focused matrix.
+- Full Call V2 suite at exact implementation commit: 2,373 passed.
 - `flutter analyze`: passed, no issues.
 - Formatting check: passed.
 - `git diff --check`: passed.
 - Dependency diff: none.
 
-The full suite was run in a detached clean worktree at the exact implementation
-commit because four legacy source-isolation audits reject every untracked file.
-This preserved the required untracked architecture document and Aider artifacts
-in the main workspace while exercising all audits under their intended clean
-conditions.
+The full suite ran in a detached clean worktree at the exact implementation
+commit because legacy source-isolation audits reject preserved untracked files.
 
-## Safety
+## Scope And Safety
 
-No cleanup timeout, cleanup-gate policy, connection setup, RTC/token behavior,
-CallKit connected timing, PushKit/APNs, Firestore authority protocol, backend,
-dependency, or platform configuration changed. No TestFlight build, backend
-deployment, or physical call was performed.
+No Agora connection setup, tokens, backend, Firestore acceptance semantics,
+PushKit/APNs, native CallKit implementation, video/camera setup, audio join
+timing, cleanup timeout, cleanup-gate policy, dependency, or build flag changed.
+No TestFlight build, deployment, backend contact, or physical call occurred.
 
 PHYSICAL_FIX_CLAIM: `NONE`
 
 ## Next
 
-Review the fast route dismissal and exact owned background cleanup, then perform
-one controlled two-iPhone validation only after approval.
+Review this narrow safety revision before authorizing any physical validation.
