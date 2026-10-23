@@ -110,6 +110,7 @@ void main() {
     required String inviteId,
     required String acceptedCallkitId,
     bool isVideo = false,
+    bool isCaller = true,
     GlobalKey<NavigatorState>? navigatorKey,
     Future<void> Function()? beforeFinalNavigatorPop,
   }) async {
@@ -118,6 +119,7 @@ void main() {
       channel: 'channel_$inviteId',
       acceptedCallkitId: acceptedCallkitId,
       status: CallInviteStatus.connected,
+      isCaller: isCaller,
       isVideo: isVideo,
     );
     await tester.pumpWidget(
@@ -138,7 +140,7 @@ void main() {
                       inviteId: inviteId,
                       acceptedCallkitId: acceptedCallkitId,
                       lifecycleGeneration: generation,
-                      isCaller: true,
+                      isCaller: isCaller,
                       skipRuntimeSetupForTest: true,
                       startLoadedForTest: true,
                       beforeFinalNavigatorPopForTest: beforeFinalNavigatorPop,
@@ -421,6 +423,46 @@ void main() {
 
     releaseCleanup.complete();
     await tester.pump();
+  });
+
+  testWidgets(
+      'remote terminal route returns home after native stale UI reconciliation',
+      (tester) async {
+    const inviteId = 'remote_terminal_stale_native_reconciliation';
+    const exactId = 'exact_remote_terminal_stale_native';
+    await seedInvite(inviteId, status: CallInviteStatus.connected);
+    await showOwnedCallScreen(
+      tester,
+      inviteId: inviteId,
+      acceptedCallkitId: exactId,
+      isCaller: false,
+    );
+
+    await manager.reportRemoteOffline(
+      inviteId: inviteId,
+      wasConnected: true,
+      isCaller: false,
+      reason: 'remote_hangup',
+    );
+    await tester.pump();
+
+    expect(find.text('Call ended'), findsOne);
+    expect(manager.debugSnapshot()['callRouteActive'], isTrue);
+    expect(manager.debugSnapshot()['callRouteOwnerMatchesCurrent'], isTrue);
+
+    // NotificationService invokes this after the exact native CallKit call is
+    // gone. The still-mounted terminal route must retain dismissal ownership.
+    manager.clearStaleUiFlags();
+    expect(manager.debugSnapshot()['callRouteActive'], isTrue);
+    expect(manager.debugSnapshot()['callRouteOwnerMatchesCurrent'], isTrue);
+
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.text('Call ended'), findsOne);
+    await tester.pump(const Duration(seconds: 40));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('open-call-screen')), findsOne);
+    expect(find.text('Call ended'), findsNothing);
   });
 
   testWidgets('repeated exit starts one cleanup and one navigation',

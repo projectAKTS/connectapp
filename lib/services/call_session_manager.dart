@@ -1101,7 +1101,13 @@ class CallSessionManager {
   }
 
   void clearStaleUiFlags() {
-    if (hasActiveSession) return;
+    final routeOwner = _callRouteOwner;
+    final ownsMountedCallRoute = _callRouteActive &&
+        routeOwner != null &&
+        routeOwner.ownsSession(_current);
+    if (hasActiveSession || _openingCallRoute || ownsMountedCallRoute) {
+      return;
+    }
     _openingCallRoute = false;
     _openingCallRouteAttempt = null;
     _callRouteActive = false;
