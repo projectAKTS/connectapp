@@ -1,101 +1,146 @@
-# Final Fast Hangup Safety Revision Handoff
+# Critical Terminal Screen Deadlock Handoff
 
 STATUS: `ready_for_review`
 
-STARTING_SHA: `15828dbc5fdd94e69d0d75d15359ecc63e930b45`
-AUTHORIZATION_SHA: `dc5b42ba8fdd742a4ff4b627286922334361b26f`
-IMPLEMENTATION_SHA: `6466cfc954e6feaa8f69af56aea62013e3ce35ae`
+STARTING_SHA: `b8f29c2836ba9cb0c27fc5bd6b0cb9293d6d0b0b`
+AUTHORIZATION_SHA: `d8a24702bad229204a03352cab0f166cc726dd63`
+IMPLEMENTATION_SHA: `89dcbd151f9ed5636f40c1f9b3e872b2d50bc37f`
 ENDING_SHA: `SELF`
 
-## Final Pre-Pop Guard
+## Physical Evidence Recovered
 
-`AgoraCallScreen._returnToAppAfterCall()` now performs one final synchronous
-validation after the last diagnostic/test asynchronous boundary and immediately
-before navigation. It verifies the exact managed session ownership (invite,
-lifecycle generation, and accepted CallKit identity), exact route owner, the
-same `ModalRoute`, the same `NavigatorState`, and that the route is still
-current. No await exists between this validation and `Navigator.pop()` (or the
-root fallback).
+The existing Venus TestFlight artifacts were copied read-only from build
+`1.0.2 (202610211427)`. For the failed call, the native durable ledger records
+route ownership, media ownership, terminal observation, and exact native call
+end. The Flutter durable ledger records the accepted transaction, physical
+media claim, token request, Agora join callback, and media-owned ACK. These
+artifacts corroborate that media connected and the exact native call ended, but
+they do not persist the later Flutter route-pop decision.
 
-The deterministic production-Navigator regression pauses Call A at this final
-boundary, transfers manager and Navigator ownership to Call B, then releases A.
-A returns stale without popping B; B remains current, route-active, and owned by
-its newer lifecycle generation.
+No new physical call was placed. The causal route-pop proof therefore comes
+from the deterministic baseline regression below, not from an absent physical
+log event.
 
-## Prompt Owned Media Teardown
+## Baseline Red Proof
 
-Valid local hangup still establishes authoritative ending ownership first.
-Immediately afterward it starts exact physical-media-owner termination and the
-screen engine cleanup without waiting for the Firestore terminal transaction.
-Exact CallKit UI cleanup also starts independently. The mandatory Firestore
-transition remains active and is awaited before exact hard reset.
+Test:
 
-`CallSessionManager.beginOwnedPhysicalMediaTeardown()` accepts only the exact
-current session and lifecycle generation. It snapshots the session's exact
-physical media key and caches one teardown future, making duplicate local,
-remote-terminal, screen-disposal, and late callback cleanup idempotent. A late
-Call A key cannot terminate Call B.
+`remote terminal route returns home after native stale UI reconciliation`
 
-For shared route-first audio, the runtime enters the existing process cleanup
-gate as soon as exact owner termination starts. While that cleanup is held, the
-old physical owner remains present and a different call cannot claim media.
-Only completion releases that ownership. Existing cleanup-coordinator tests
-prove failed cleanup keeps the next-engine decision blocked.
+The test uses the real `MaterialApp`, `Navigator`, `PopScope`,
+`AgoraCallScreen`, and production `CallSessionManager` methods. It creates an
+exact owned callee route, drives `Call ended` through
+`reportRemoteOffline()`, then invokes `clearStaleUiFlags()`, the same public
+manager method used by `NotificationService` after native active-call
+reconciliation reports no CallKit call.
 
-## Deterministic Proof
+On the unmodified baseline:
 
-- The production hangup control is exercised while the authoritative terminal
-  transaction is held by a `Completer`.
-- Home becomes visible while both Firestore completion and physical-runtime
-  cleanup remain held.
-- The exact audio runtime has already made media inactive, but its owner remains
-  held, preventing replacement until cleanup completes.
-- Releasing media cleanup clears only A's exact owner while Firestore is still
-  held; releasing Firestore then completes terminal/native cleanup.
-- Exact native CallKit cleanup starts independently and the manager's terminal
-  path removes the matching native call after the authoritative transition.
-- Existing failure regressions prove cleanup failure still attempts CallKit and
-  session cleanup while retaining `cleanup_failed` next-engine blocking.
-- Existing sequential integration proves Audio A -> Audio B -> Video C retains
-  one route and one RTC owner per call after cleanup completes.
+- the terminal route was visible and displayed `Call ended`;
+- exact route ownership was initially active;
+- stale-native reconciliation cleared route-active and route-owner state
+  because terminal sessions are excluded from `hasActiveSession`;
+- the one-second automatic close reached `route_pop_stale_owner_blocked`;
+- Home was absent and `Call ended` remained after the test advanced beyond 40
+  seconds;
+- no later retry dismissed the route.
+
+The existing terminal widget regression missed this because it used
+`managedRouteExitForTest`, explicitly bypassing manager route ownership. Other
+tests covered terminal UI, stale cleanup, and route ownership independently,
+but never combined remote terminal state, exact real Navigator ownership, and
+native stale-UI reconciliation.
+
+## Proven Cause And Fix
+
+The reproduced ownership invalidation point is
+`CallSessionManager.clearStaleUiFlags()`, not a normal mounted-route call to
+`_detachSessionState()`. Normal terminal signal handling retains a mounted
+route, and normal hard reset defers final session cleanup until that route
+closes. The supplied `_detachSessionState()` contract was audited, but it was
+not needed to reproduce this physical-shape failure.
+
+`clearStaleUiFlags()` previously returned only for a nonterminal active
+session. Once remote terminal handling marked the exact session terminal,
+`hasActiveSession` became false even though the matching Flutter route was
+still mounted. Native CallKit ending then made stale-native reconciliation
+eligible to clear the route flags required by `_returnToAppAfterCall()`.
+
+The correction preserves flags only when:
+
+- an active nonterminal session exists;
+- a route is currently opening; or
+- the active route owner exactly owns the current session.
+
+Mismatched or orphaned UI flags remain clearable. No fallback pop, destructive
+navigation, delayed retry, session resurrection, or cleanup bypass was added.
+
+## Green And Isolation Proof
+
+The identical physical-shape regression now retains exact route ownership,
+records `route_pop_authorized`, invokes one Navigator pop, disposes the terminal
+route, and shows Home. Engine cleanup, exact physical-media teardown, and
+CallKit cleanup start independently and remain idempotent.
+
+Existing adversarial coverage remains green for:
+
+- stale Call A screens and delayed callbacks not dismissing Call B;
+- final synchronous current-route and exact-owner validation before pop;
+- repeated exit requests producing one cleanup/navigation action;
+- exact native CallKit ownership and cleanup;
+- background accepted audio and accepted recovery;
+- physical-media and process cleanup-gate ownership;
+- rapid and repeated lifecycle reuse;
+- Audio A -> Audio B -> Video C with one media owner per call.
 
 ## Files Changed
 
-- `lib/screens/call/agora_call_screen.dart`
-- `lib/services/call_session_manager.dart`
-- `test/call_v2/real_flow/call_v2_background_audio_media_integration_test.dart`
-- `test/call_v2/real_flow/call_v2_physical_media_owner_test.dart`
-- `test/call_v2/real_flow/call_v2_route_ownership_terminal_transition_test.dart`
-- `docs/agent-loop/HANDOFF.md`
-- `docs/agent-loop/STATE.json`
+Implementation commit:
 
-The pre-existing untracked architecture document and Aider artifacts remain
-untouched.
+- `lib/services/call_session_manager.dart`
+- `test/call_v2/real_flow/call_v2_route_ownership_terminal_transition_test.dart`
+
+Agent-loop metadata:
+
+- `docs/agent-loop/NEXT_TASK.md`
+- `docs/agent-loop/STATE.json`
+- `docs/agent-loop/HANDOFF.md`
+
+The pre-existing untracked architecture document and Aider artifacts were
+preserved unchanged.
 
 ## Validation
 
-- Core changed-file regression set: 44 passed.
-- Focused cleanup/ownership/recovery/lifecycle matrix: 223 passed.
-- Foreground recovery: passed within the focused matrix.
-- Audio A -> Audio B -> Video C: passed within the focused matrix.
-- Full Call V2 suite at exact implementation commit: 2,373 passed.
+- Baseline regression: failed before the fix with
+  `route_pop_stale_owner_blocked` and no Home after more than 40 seconds.
+- Identical corrected regression: passed, 1 test.
+- Route ownership file: passed, 20 tests.
+- Focused ownership/recovery/media/lifecycle matrix: passed, 215 tests.
+- Foreground recovery: passed, 3 tests.
+- Full Call V2 suite: passed, 2,374 tests.
 - `flutter analyze`: passed, no issues.
-- Formatting check: passed.
+- Format check: passed.
 - `git diff --check`: passed.
 - Dependency diff: none.
 
-The full suite ran in a detached clean worktree at the exact implementation
-commit because legacy source-isolation audits reject preserved untracked files.
+Legacy phase-isolation tests enumerate all untracked files. For the final full
+suite only, the four pre-existing untracked artifacts were moved to a temporary
+directory under an automatic restore trap, then restored. Their final paths and
+untracked status are unchanged.
 
 ## Scope And Safety
 
-No Agora connection setup, tokens, backend, Firestore acceptance semantics,
-PushKit/APNs, native CallKit implementation, video/camera setup, audio join
-timing, cleanup timeout, cleanup-gate policy, dependency, or build flag changed.
-No TestFlight build, deployment, backend contact, or physical call occurred.
+No `AgoraCallScreen` behavior, Navigator architecture, Agora setup or cleanup,
+physical-media implementation, CallKit/native code, PushKit/APNs, Firebase,
+Firestore authority, backend, timeout, dependency, build flag, or release
+configuration changed. No TestFlight build, App Store upload, deployment,
+backend contact, or physical call occurred.
+
+ROOT_CAUSE_CONFIDENCE: `SOURCE_PROVEN`
 
 PHYSICAL_FIX_CLAIM: `NONE`
 
 ## Next
 
-Review this narrow safety revision before authorizing any physical validation.
+Review the narrow terminal route-ownership correction before authorizing any
+physical validation.

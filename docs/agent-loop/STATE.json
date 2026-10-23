@@ -2,26 +2,40 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "critical_terminal_screen_deadlock",
-  "status": "revision_required",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "b8f29c2836ba9cb0c27fc5bd6b0cb9293d6d0b0b",
   "starting_sha": "b8f29c2836ba9cb0c27fc5bd6b0cb9293d6d0b0b",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
-  "ending_sha": null,
-  "changed_files": [],
-  "validation": {},
+  "code_commit_sha": "89dcbd151f9ed5636f40c1f9b3e872b2d50bc37f",
+  "ending_sha": "SELF",
+  "changed_files": [
+    "lib/services/call_session_manager.dart",
+    "test/call_v2/real_flow/call_v2_route_ownership_terminal_transition_test.dart"
+  ],
+  "validation": {
+    "baseline_red": "failed as expected: route_pop_stale_owner_blocked and terminal route remained after more than 40 seconds",
+    "identical_regression": "passed, 1 test",
+    "route_ownership": "passed, 20 tests",
+    "focused_matrix": "passed, 215 tests",
+    "foreground_recovery": "passed, 3 tests",
+    "full_call_v2": "passed, 2374 tests",
+    "flutter_analyze": "passed, no issues",
+    "format_check": "passed",
+    "git_diff_check": "passed",
+    "dependency_diff": "none"
+  },
   "safety": {
     "deployed": false,
     "testflight_built": false,
     "production_services_contacted": false,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": false,
-    "test_changes": false
+    "production_code_changes": true,
+    "test_changes": true
   },
   "review": {
-    "decision": "revision_required",
-    "notes": "Physical build 1.0.2 (202610211427) left the callee on a mounted Call ended screen for more than 40 seconds after remote hangup. First prove the supplied route-ownership invalidation hypothesis with a deterministic real-Navigator baseline-red test; only then apply the smallest exact-route terminal dismissal correction."
+    "decision": "ready_for_review",
+    "notes": "Baseline-red production-Navigator proof reproduced the permanent terminal route at clearStaleUiFlags: terminal state made hasActiveSession false, stale-native reconciliation revoked the exact mounted route owner, and auto-close returned route_pop_stale_owner_blocked with no retry. The narrow guard now preserves only an opening route or an exact owner matching the current session; 2374 Call V2 tests pass. No physical-fix claim."
   }
 }
