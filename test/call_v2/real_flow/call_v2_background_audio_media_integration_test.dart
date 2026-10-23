@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:connect_app/call_v2/real_flow/call_v2_agora_media_runtime.dart';
@@ -680,6 +681,141 @@ void main() {
     expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 0);
     expect(runtimes, hasLength(1));
     expect(runtimes.single.cleaned, isTrue);
+  });
+
+  testWidgets(
+      'production manager-owned receiver route returns Home within two seconds after stale native reconciliation',
+      (tester) async {
+    const inviteId = 'production_fast_terminal_receiver';
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(800, 1200);
+    addTearDown(tester.view.reset);
+    await manager.forceIdleForTest();
+    HelperlyTestRuntime.configureForTest(
+      firestore: firestore,
+      currentUid: calleeUid,
+      currentDisplayName: 'Background Callee',
+    );
+    configureManagerForProductionRoute(
+      beforeProductionRoutePush: () async {},
+    );
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      const MethodChannel('flutter_callkit_incoming'),
+      (_) async => null,
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('flutter_callkit_incoming'),
+        null,
+      );
+    });
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navigatorKey,
+      home: const Scaffold(body: Text('home')),
+    ));
+    await seedInvite(inviteId);
+    nativeCalls.add(const NativeCallSnapshot(
+      callkitId: exactId,
+      inviteId: inviteId,
+      channel: 'channel_production_fast_terminal_receiver',
+      accepted: true,
+    ));
+    await manager.handleCallkitAudioSessionChanged(
+      callkitId: exactId,
+      active: true,
+    );
+
+    expect(
+      await manager.handleRecoveredAcceptedInvite(
+        inviteId: inviteId,
+        channel: 'channel_$inviteId',
+        isVideo: false,
+        fromName: 'Background Caller',
+        fromUid: callerUid,
+        callkitId: exactId,
+      ),
+      AcceptedCallRecoveryResult.pendingNavigator,
+    );
+    await waitUntil(tester, () => mediaAcks.contains(exactId));
+
+    appForeground = true;
+    expect(
+      await manager.resumePendingAcceptedRouteIfReady(
+        source: 'test_fast_terminal_foreground',
+      ),
+      AcceptedCallRecoveryResult.opened,
+    );
+    await waitUntil(
+      tester,
+      () => find.byKey(const Key('call-v2-hangup')).evaluate().isNotEmpty,
+    );
+    expect(
+      find.byKey(const Key('call-v2-managed-route-exit-scope')),
+      findsOne,
+    );
+    expect(runtimes, hasLength(1));
+    expect(runtimes.single.startCount, 1);
+    expect(runtimes.single.joinCount, 1);
+
+    await manager.reportRemoteJoined(
+      inviteId: inviteId,
+      isCaller: false,
+    );
+    await manager.reportRemoteOffline(
+      inviteId: inviteId,
+      wasConnected: true,
+      isCaller: false,
+      reason: 'remote_hangup',
+    );
+    await tester.pump();
+    expect(find.text('Call ended'), findsOne);
+    expect(manager.debugSnapshot()['callRouteOwnerMatchesCurrent'], isTrue);
+
+    // This is the exact manager call made by
+    // NotificationService._resetStaleIncomingUiIfNeeded after iOS reports no
+    // active native calls. The private service entry is Platform.isIOS-gated,
+    // so the widget test verifies its production manager boundary directly.
+    manager.clearStaleUiFlags();
+    expect(manager.debugSnapshot()['callRouteOwnerMatchesCurrent'], isTrue);
+
+    var elapsedMs = 0;
+    bool routeDisposed() =>
+        find.byType(AgoraCallScreen).evaluate().isEmpty &&
+        find
+            .byKey(const Key('call-v2-managed-route-exit-scope'))
+            .evaluate()
+            .isEmpty &&
+        find.text('home').evaluate().isNotEmpty;
+    while (!routeDisposed() && elapsedMs < 2000) {
+      await tester.pump(const Duration(milliseconds: 16));
+      elapsedMs += 16;
+    }
+
+    expect(elapsedMs, lessThanOrEqualTo(2000));
+    expect(routeDisposed(), isTrue);
+    expect(find.text('Call ended'), findsNothing);
+
+    await waitUntil(
+        tester, () => manager.debugSnapshot()['sessionIdle'] == true);
+    expect(nativeCalls, isEmpty);
+    expect(mediaOwner.hasOwner, isFalse);
+    expect(runtimes.single.cleaned, isTrue);
+    expect(manager.debugSnapshot()['callRouteActive'], isFalse);
+    expect(manager.debugSnapshot()['routeOpenCount'], 1);
+    expect(manager.debugSnapshot()['rtcSetupOwnerCount'], 1);
+
+    await manager.reportRemoteOffline(
+      inviteId: inviteId,
+      wasConnected: true,
+      isCaller: false,
+      reason: 'late_remote_hangup',
+    );
+    manager.clearStaleUiFlags();
+    for (var laterMs = 0; laterMs < 2000; laterMs += 16) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(routeDisposed(), isTrue);
+    expect(find.byType(AgoraCallScreen), findsNothing);
   });
 
   testWidgets(

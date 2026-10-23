@@ -7,6 +7,7 @@ import 'package:connect_app/services/helperly_test_runtime.dart';
 import 'package:connect_app/services/notification_service.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -159,6 +160,34 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.byKey(const Key('call-v2-hangup')), findsOne);
     return generation;
+  }
+
+  bool terminalRouteIsDisposed() {
+    return find
+            .byKey(const Key('call-v2-managed-route-exit-scope'))
+            .evaluate()
+            .isEmpty &&
+        find.byKey(const Key('call-v2-hangup')).evaluate().isEmpty &&
+        find.text('Call ended').evaluate().isEmpty &&
+        find.byKey(const Key('open-call-screen')).evaluate().isNotEmpty;
+  }
+
+  Future<int> pumpFramesUntil(
+    WidgetTester tester,
+    bool Function() condition, {
+    int maximumElapsedMs = 2000,
+    int frameMs = 16,
+    String failure = 'Condition was not reached within the frame budget.',
+  }) async {
+    var elapsedMs = 0;
+    while (!condition() && elapsedMs < maximumElapsedMs) {
+      await tester.pump(Duration(milliseconds: frameMs));
+      elapsedMs += frameMs;
+    }
+    if (!condition()) {
+      fail('$failure Elapsed simulated time: ${elapsedMs}ms.');
+    }
+    return elapsedMs;
   }
 
   setUp(() async {
@@ -463,6 +492,168 @@ void main() {
 
     expect(find.byKey(const Key('open-call-screen')), findsOne);
     expect(find.text('Call ended'), findsNothing);
+  });
+
+  testWidgets(
+      'manager-owned receiver route returns Home within two seconds after immediate stale native reconciliation',
+      (tester) async {
+    const inviteId = 'fast_terminal_stale_native_reconciliation';
+    const exactId = 'exact_fast_terminal_stale_native';
+    final endedNativeCalls = <String>[];
+    final pluginEndedCalls = <String>[];
+    final nativeStates = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      const MethodChannel('flutter_callkit_incoming'),
+      (call) async {
+        if (call.method == 'endCall') {
+          final arguments = Map<String, dynamic>.from(call.arguments as Map);
+          pluginEndedCalls.add((arguments['id'] ?? '').toString());
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('flutter_callkit_incoming'),
+        null,
+      );
+    });
+    manager.configure(
+      endNativeCall: (callkitId) async => endedNativeCalls.add(callkitId),
+      markNativeInviteState: ({
+        required String inviteId,
+        required String channel,
+        required String callkitId,
+        required String state,
+      }) async {
+        nativeStates.add('$state:$callkitId');
+      },
+    );
+    await seedInvite(inviteId, status: CallInviteStatus.connected);
+    await showOwnedCallScreen(
+      tester,
+      inviteId: inviteId,
+      acceptedCallkitId: exactId,
+      isCaller: false,
+    );
+
+    await manager.reportRemoteOffline(
+      inviteId: inviteId,
+      wasConnected: true,
+      isCaller: false,
+      reason: 'remote_hangup',
+    );
+    await tester.pump();
+
+    expect(find.text('Call ended'), findsOne);
+    expect(manager.debugSnapshot()['callRouteOwnerMatchesCurrent'], isTrue);
+    expect(endedNativeCalls, <String>[exactId]);
+    expect(nativeStates, contains('terminal:$exactId'));
+
+    // NotificationService._resetStaleIncomingUiIfNeeded invokes this exact
+    // manager operation after the iOS plugin reports no active native calls.
+    manager.clearStaleUiFlags();
+    expect(manager.debugSnapshot()['callRouteOwnerMatchesCurrent'], isTrue);
+
+    final elapsedMs = await pumpFramesUntil(
+      tester,
+      terminalRouteIsDisposed,
+      failure: 'The exact terminal route did not dispose and reveal Home.',
+    );
+
+    expect(elapsedMs, lessThanOrEqualTo(2000));
+    expect(terminalRouteIsDisposed(), isTrue);
+
+    // Late terminal/reconciliation work cannot resurrect the disposed route.
+    await manager.reportRemoteOffline(
+      inviteId: inviteId,
+      wasConnected: true,
+      isCaller: false,
+      reason: 'late_remote_hangup',
+    );
+    manager.clearStaleUiFlags();
+    for (var elapsed = 0; elapsed < 2000; elapsed += 16) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(terminalRouteIsDisposed(), isTrue);
+    expect(endedNativeCalls, isNotEmpty);
+    expect(endedNativeCalls.every((id) => id == exactId), isTrue);
+    expect(pluginEndedCalls, <String>[exactId]);
+  });
+
+  testWidgets(
+      'stale native reconciliation during auto-close keeps exact owner until prompt route disposal',
+      (tester) async {
+    const inviteId = 'terminal_reconciliation_during_auto_close';
+    const exactId = 'exact_terminal_reconciliation_during_auto_close';
+    final finalPopBoundaryEntered = Completer<void>();
+    final releaseFinalPopBoundary = Completer<void>();
+    final endedNativeCalls = <String>[];
+    final pluginEndedCalls = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      const MethodChannel('flutter_callkit_incoming'),
+      (call) async {
+        if (call.method == 'endCall') {
+          final arguments = Map<String, dynamic>.from(call.arguments as Map);
+          pluginEndedCalls.add((arguments['id'] ?? '').toString());
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('flutter_callkit_incoming'),
+        null,
+      );
+    });
+    manager.configure(
+      endNativeCall: (callkitId) async => endedNativeCalls.add(callkitId),
+    );
+    await seedInvite(inviteId, status: CallInviteStatus.connected);
+    await showOwnedCallScreen(
+      tester,
+      inviteId: inviteId,
+      acceptedCallkitId: exactId,
+      isCaller: false,
+      beforeFinalNavigatorPop: () async {
+        if (!finalPopBoundaryEntered.isCompleted) {
+          finalPopBoundaryEntered.complete();
+        }
+        await releaseFinalPopBoundary.future;
+      },
+    );
+
+    await manager.reportRemoteOffline(
+      inviteId: inviteId,
+      wasConnected: true,
+      isCaller: false,
+      reason: 'remote_hangup',
+    );
+    await tester.pump();
+    expect(find.text('Call ended'), findsOne);
+
+    var elapsedMs = await pumpFramesUntil(
+      tester,
+      () => finalPopBoundaryEntered.isCompleted,
+      failure: 'The terminal route never reached the final pop boundary.',
+    );
+    expect(elapsedMs, lessThanOrEqualTo(2000));
+
+    manager.clearStaleUiFlags();
+    expect(manager.debugSnapshot()['callRouteActive'], isTrue);
+    expect(manager.debugSnapshot()['callRouteOwnerMatchesCurrent'], isTrue);
+    releaseFinalPopBoundary.complete();
+
+    elapsedMs += await pumpFramesUntil(
+      tester,
+      terminalRouteIsDisposed,
+      maximumElapsedMs: 2000 - elapsedMs,
+      failure: 'The terminal route did not finish its authorized pop.',
+    );
+    expect(elapsedMs, lessThanOrEqualTo(2000));
+    expect(endedNativeCalls, isNotEmpty);
+    expect(endedNativeCalls.every((id) => id == exactId), isTrue);
+    expect(pluginEndedCalls, <String>[exactId]);
   });
 
   testWidgets('repeated exit starts one cleanup and one navigation',
