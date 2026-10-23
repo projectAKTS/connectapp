@@ -1,97 +1,147 @@
-# Terminal Route Timing Verification Handoff
+# Complete Terminal Route Reliability Handoff
 
 STATUS: `ready_for_review`
 
-STARTING_SHA: `7ac433472600527515365f3bc179c61a2622be09`
-AUTHORIZATION_SHA: `0304ca9`
-IMPLEMENTATION_SHA: `37f8a80883ac21c7164811d3f31fb62e63249258`
+STARTING_SHA: `dd0a6db86b94ec8ce210d588bb6679aa33f22793`
+AUTHORIZATION_SHA: `c27fc45af20366baa1a37ed48167b58635f852bb`
+IMPLEMENTATION_SHA: `41586585ee0e293e5dba909a548cea74ac36a710`
 ENDING_SHA: `SELF`
 
-## Result
+## Retained Physical Evidence
 
-The existing source correction in `clearStaleUiFlags()` required no further
-production change. New widget coverage proves that an exact manager-owned
-receiving audio route reaches Home within a strict 2,000 ms simulated-time
-budget after remote terminal observation and stale-native reconciliation.
+The retained native and Flutter diagnostics from the physically stuck receiving
+call were recovered from `/private/tmp/helperly-terminal-deadlock-evidence-20261022`.
+They show a healthy native presentation/accept path, route-owned and media-owned
+ACKs, Agora join, and exact native terminal completion. The final durable Flutter
+event was lifecycle inactive; route-pop stages were not persisted by that build.
 
-The new tests pump in 16 ms frames and assert complete route disposal. They do
-not use the existing 40-second clock jump as evidence of prompt navigation.
-The production-path test also waits for the real manager-owned route future to
-complete, observes `route_pop` and `reset_session_state_done`, and verifies
-that late terminal/reconciliation callbacks cannot reopen the route.
+Relevant UTC sequence:
 
-## Baseline Evidence
+- `23:49:09.421` native CallKit presented.
+- `23:49:11.288` native Accept callback executed.
+- `23:49:11.292` native-to-Flutter Accept dispatch completed.
+- `23:49:12.855` native route-owned ACK.
+- `23:49:13.778` native media-owned ACK after Agora join.
+- `23:49:15.329` native terminal observed.
+- `23:49:15.330` exact native CallKit call ended.
 
-The original baseline-red/fixed-green regression remains unchanged:
+The physical observation was that audio stopped and `Call ended` remained visible
+for more than 40 seconds. Runtime evidence proves native/RTC terminal work but does
+not contain the missing route-pop decision. The route failure ordering is proven by
+the unchanged-baseline RED regressions below, not inferred from absent logs.
 
-`remote terminal route returns home after native stale UI reconciliation`
+## Proven Root Causes
 
-On the uncorrected baseline it reached `route_pop_stale_owner_blocked`, left
-`Call ended` visible, and failed to show Home after more than 40 simulated
-seconds. It passes with the accepted `clearStaleUiFlags()` ownership fix. The
-new timing tests provide separate prompt-navigation proof.
+The previously accepted `clearStaleUiFlags()` correction remains intact. This
+investigation found three additional permanent terminal-route paths:
 
-## Production-Path Proof
+1. If another Navigator route covered terminal Call A when its one-shot auto-close
+   fired, `_returnToAppAfterCall()` returned `route_pop_not_current_blocked`. No
+   later event retried removal after the covering route closed.
+2. If exact manager route/session ownership was detached before the terminal timer,
+   `_returnToAppAfterCall()` returned `route_pop_stale_owner_blocked`, even though
+   the mounted widget still had exact Call A route identity. No retry existed.
+3. A transient exception at the final asynchronous Navigator boundary escaped the
+   one-shot close future and permanently abandoned the terminal route.
 
-Primary test:
+These are source-level asynchronous route-liveness defects. The retained evidence
+does not prove which one occurred on the physical device.
 
-`production manager-owned receiver route returns Home within two seconds after stale native reconciliation`
+## Baseline RED And Identical GREEN
 
-This test uses:
+The following tests failed against the unchanged authorized checkpoint before the
+production correction, then passed unchanged after it:
 
-- the actual accepted CallKit recovery and authoritative transaction path;
-- the real `CallSessionManager._openCallScreen()` production
-  `Navigator.push()` path;
-- a real `MaterialApp`, Navigator, `AgoraCallScreen`, and `PopScope`;
-- one shared physical-audio media runtime and one RTC join owner;
-- remote terminal handling and the exact manager reconciliation operation;
-- exact CallKit cleanup and the real route-future completion/reset path.
+- `terminal Call A covered during auto-close removes only its exact route`
+- `detached terminal route still removes itself within two seconds`
+- `terminal route retries after one final navigation boundary exception`
 
-It proves the `AgoraCallScreen` and managed-route scope disappear, Home is
-visible, the manager returns idle, native calls are absent, physical media is
-cleaned, and the route and RTC owner counters remain exactly one.
+The first baseline emitted `route_pop_not_current_blocked`; the second emitted
+`route_pop_stale_owner_blocked`; the third surfaced the controlled final-boundary
+exception. All three left the terminal route mounted beyond the strict 2,000 ms
+simulated-time budget.
 
-Companion tests:
+## Production Correction
 
-- `manager-owned receiver route returns Home within two seconds after immediate stale native reconciliation`
-- `stale native reconciliation during auto-close keeps exact owner until prompt route disposal`
+`AgoraCallScreen` now distinguishes exact terminal-route disposal from ordinary
+nonterminal navigation:
 
-The second companion uses the existing final-pop test barrier to place
-reconciliation at the final navigation boundary. Exact ownership remains with
-the terminal route until its authorized pop completes.
+- A current, still-owned terminal route uses the existing managed `Navigator.pop`.
+- A covered or manager-detached terminal route removes only its own captured
+  `ModalRoute`; it never pops the current covering/newer route.
+- Exact route and Navigator identity are revalidated after the asynchronous final
+  boundary.
+- A bounded eight-attempt, 100 ms retry handles transient final-boundary failures.
+  The existing one-second terminal display remains, so the maximum asserted
+  terminal-to-disposal budget is 2,000 ms.
+- Firestore, Agora, CallKit, and engine teardown remain background single-flight
+  work and are not awaited before route disposal.
 
-## Notification Reconciliation Coverage
+`CallSessionManager.handleExactCallRouteRemoved()` completes manager ownership only
+when invite, lifecycle generation, and exact accepted CallKit identity still match.
+A late Call A completion is therefore a no-op when Call B owns the manager.
 
-`NotificationService._resetStaleIncomingUiIfNeeded()` is private, guarded by
-`Platform.isIOS`, and calls the static plugin API
-`FlutterCallkitIncoming.activeCalls()`. A portable host widget test cannot
-invoke that private iOS-only entry without changing production design.
+`NotificationService` gained inert test-boundary injection for iOS platform and
+`activeCalls()`. Tests now execute the actual production Dart stale-native
+reconciliation function instead of invoking only its manager call site.
 
-Source inspection confirms its reconciliation call is
-`CallSessionManager.instance.clearStaleUiFlags()`. The widget tests invoke
-that exact public manager boundary immediately before auto-close and while
-auto-close is paused at its final pop boundary. This is explicit call-site
-coverage, not a claim that the private platform entry itself ran in the host
-test.
+## Terminal Interleaving Coverage
 
-## Isolation And Cleanup Proof
+The deterministic suite covers foreground remote terminal, paused/resumed terminal,
+native-end-before-Firestore, Firestore-before-native reconciliation, reconciliation
+before and during final pop, manager owner detachment, current-session detachment,
+delayed Firestore terminal work, delayed cleanup, covered/non-current routes,
+duplicate terminal delivery, one-time Navigator failure, audio and video terminal
+routes, incoming accepted audio ownership, outgoing local hangup, rapid Call B
+during Call A teardown, and late Call A callbacks after Call B ownership.
 
-- Existing stale-A/new-B ownership tests remain green; a stale route cannot
-  clear or dismiss the newer exact route owner.
-- Reconciliation during final pop does not revoke the exact terminal owner.
-- The production-path test starts one media runtime, joins once, then confirms
-  physical-media cleanup and no remaining owner.
-- Exact CallKit cleanup removes the matching native call only.
-- Cleanup emits `cleanup_gate_released` with the next-engine gate available
-  before the session reaches reusable idle.
-- Late remote-terminal and reconciliation callbacks do not recreate the
-  disposed route or media runtime.
+Key isolation proof:
+
+- `terminal Call A exact removal cannot dismiss owned Call B` delays A at the final
+  boundary, transfers manager ownership to B, then releases A. Only A's exact route
+  is removed; B remains current and its lifecycle generation/route owner remain
+  unchanged.
+- `duplicate terminal delivery disposes the route exactly once` preserves one
+  authoritative terminal transition.
+- `stale native reconciliation during auto-close keeps exact owner until prompt
+  route disposal` executes actual NotificationService reconciliation while final
+  pop is paused.
+
+## Media And Native Cleanup
+
+No Agora, physical-media, CallKit, watchdog, Firestore authority, or cleanup-gate
+implementation changed. Background-audio, notification ownership, rapid/repeated
+lifecycle, foreground recovery, exact native CallKit ownership, and full-suite
+regressions remain green. Native RunnerTests verify exact CallKit end/watchdog and
+sequential identity behavior independently of Flutter route disposal.
+
+## Validation
+
+- Terminal route ownership file: passed, 31 tests.
+- Focused cross-area matrix: passed, 201 tests.
+- Foreground recovery: passed, 3 tests.
+- Full Call V2 suite: passed, 2,386 tests.
+- iOS RunnerTests: passed, 30 tests on iOS 26 simulator.
+- `flutter analyze`: passed, no issues.
+- Format check: passed, 4 files unchanged.
+- `git diff --check`: passed.
+- Dependency diff: none.
+
+The first two RunnerTests attempts on the iOS 18.5 simulator aborted the host app
+before XCTest connected and executed zero tests. The identical suite passed on the
+matching iOS 26 simulator with normal simulator signing. No native file changed.
+
+Legacy phase-isolation tests enumerate every untracked file. For the full suite,
+the four pre-existing untracked Aider/architecture artifacts were preserved outside
+the worktree and restored afterward. Before/after SHA-256 manifests match exactly.
 
 ## Files Changed
 
 Implementation/test commit:
 
-- `test/call_v2/real_flow/call_v2_background_audio_media_integration_test.dart`
+- `lib/screens/call/agora_call_screen.dart`
+- `lib/services/call_session_manager.dart`
+- `lib/services/notification_service.dart`
 - `test/call_v2/real_flow/call_v2_route_ownership_terminal_transition_test.dart`
 
 Agent-loop metadata:
@@ -100,39 +150,19 @@ Agent-loop metadata:
 - `docs/agent-loop/STATE.json`
 - `docs/agent-loop/HANDOFF.md`
 
-No production file or dependency file changed. The pre-existing untracked
-architecture document and Aider artifacts remain untouched.
-
-## Validation
-
-- New strict timing regressions: passed, 3 tests.
-- Maximum asserted simulated latency: 2,000 ms, pumped in 16 ms frames.
-- Focused ownership/recovery/media/lifecycle matrix: passed, 218 tests.
-- Full Call V2 suite: passed, 2,377 tests.
-- `flutter analyze`: passed, no issues.
-- Format check: passed.
-- `git diff --check`: passed.
-- Dependency diff: none.
-
-Legacy repository-isolation tests enumerate untracked files. For the full
-suite only, the four pre-existing untracked artifacts were moved outside the
-worktree and then restored byte-for-byte to their original paths. Their
-untracked status remains unchanged.
-
 ## Scope And Limitations
 
-No production code, route behavior, CallKit connected timing, cleanup policy,
-Agora/RTC implementation, Firebase/backend, Firestore protocol, PushKit/APNs,
-native code, timeout, dependency, or build configuration changed. No
-TestFlight build, deployment, backend contact, or physical call occurred.
+No backend/Firebase deployment, TestFlight build, physical call, dependency change,
+native source change, Agora/RTC behavior change, CallKit behavior change, PushKit
+change, Firestore protocol change, or timeout increase occurred.
 
-The 2,000 ms result is deterministic simulated widget time. It proves the
-source navigation path and ownership ordering under the modeled conditions;
-it does not establish measured device latency or 100% physical correctness.
+The tests prove source behavior under deterministic Flutter/iOS simulator models.
+They do not establish measured device latency or claim the historical physical
+failure is fixed.
 
 PHYSICAL_FIX_CLAIM: `NONE`
 
 ## Next
 
-Review the deterministic timing evidence before deciding whether to authorize
-another physical TestFlight validation.
+Review the complete terminal-route reliability correction and deterministic race
+matrix before authorizing any TestFlight or physical validation.
