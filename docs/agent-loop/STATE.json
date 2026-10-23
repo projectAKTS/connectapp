@@ -1,43 +1,27 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "fast_hangup_ui_safety_revision",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "15828dbc5fdd94e69d0d75d15359ecc63e930b45",
-  "starting_sha": "15828dbc5fdd94e69d0d75d15359ecc63e930b45",
+  "phase": "critical_terminal_screen_deadlock",
+  "status": "revision_required",
+  "accepted_checkpoint_sha": "b8f29c2836ba9cb0c27fc5bd6b0cb9293d6d0b0b",
+  "starting_sha": "b8f29c2836ba9cb0c27fc5bd6b0cb9293d6d0b0b",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "6466cfc954e6feaa8f69af56aea62013e3ce35ae",
-  "ending_sha": "SELF",
-  "changed_files": [
-    "lib/screens/call/agora_call_screen.dart",
-    "lib/services/call_session_manager.dart",
-    "test/call_v2/real_flow/call_v2_background_audio_media_integration_test.dart",
-    "test/call_v2/real_flow/call_v2_physical_media_owner_test.dart",
-    "test/call_v2/real_flow/call_v2_route_ownership_terminal_transition_test.dart"
-  ],
-  "validation": {
-    "core_regressions": "passed, 44 tests",
-    "focused_safety_matrix": "passed, 223 tests",
-    "full_call_v2": "passed, 2373 tests",
-    "foreground_recovery": "passed in focused safety matrix",
-    "sequential_audio_audio_video": "passed in focused safety matrix",
-    "flutter_analyze": "passed, no issues",
-    "format_check": "passed",
-    "git_diff_check": "passed",
-    "dependency_diff": "none"
-  },
+  "code_commit_sha": null,
+  "ending_sha": null,
+  "changed_files": [],
+  "validation": {},
   "safety": {
     "deployed": false,
     "testflight_built": false,
     "production_services_contacted": false,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": true,
-    "test_changes": true
+    "production_code_changes": false,
+    "test_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "Final synchronous exact-ownership/current-route validation now has no await before Navigator.pop. Exact screen and shared-audio media teardown plus exact CallKit cleanup start independently of the mandatory Firestore terminal transaction. Cleanup ownership and gate policy remain strict; 2373 Call V2 tests pass. No physical-fix claim."
+    "decision": "revision_required",
+    "notes": "Physical build 1.0.2 (202610211427) left the callee on a mounted Call ended screen for more than 40 seconds after remote hangup. First prove the supplied route-ownership invalidation hypothesis with a deterministic real-Navigator baseline-red test; only then apply the smallest exact-route terminal dismissal correction."
   }
 }

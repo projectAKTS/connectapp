@@ -1,72 +1,85 @@
-# Active Revision - Final Fast Hangup Safety
+# Active Revision - Critical Terminal Screen Deadlock
 
 Branch: `call-v2`
 
-Starting SHA: `15828dbc5fdd94e69d0d75d15359ecc63e930b45`
+Starting SHA: `b8f29c2836ba9cb0c27fc5bd6b0cb9293d6d0b0b`
 
 ## Goal
 
-Preserve prompt owned call-route dismissal while closing two source-reviewed
-safety gaps: revalidate exact route ownership at the final synchronous boundary
-before navigation, and start exact active-media teardown without waiting for the
-authoritative Firestore terminal transaction.
+Deterministically reproduce the physical callee failure where remote hangup
+shows `Call ended` but the mounted Flutter call route never returns Home, prove
+the exact ownership/lifecycle cause, and only then apply the smallest safe
+correction.
 
 ## Allowed Files
 
 - `lib/screens/call/agora_call_screen.dart`
-- `lib/services/call_session_manager.dart` only if an exact ownership API or
-  deterministic test hook is strictly required
+- `lib/services/call_session_manager.dart` only if the proven ownership
+  contract requires a narrowly scoped API or test hook
 - directly relevant tests under `test/call_v2/**`
 - `docs/agent-loop/NEXT_TASK.md`
 - `docs/agent-loop/STATE.json`
 - `docs/agent-loop/HANDOFF.md`
 
-## Required Corrections
+## Red-First Requirement
 
-1. Immediately before production `Navigator.pop`, synchronously revalidate the
-   exact active session, invite, lifecycle generation, accepted CallKit
-   identity, route owner, route attempt, and current `ModalRoute`. No await may
-   separate this final check from navigation.
-2. On valid local hangup, establish exact ending ownership and begin shutdown
-   of the matching active RTC/physical audio owner without waiting for the
-   Firestore terminal transaction.
-3. Keep the authoritative terminal transaction mandatory and independently
-   awaited by eventual cleanup.
-4. Preserve exact native CallKit cleanup, hard reset, accepted-continuation
-   cancellation, idempotence, and the existing process-wide cleanup gate.
-5. A late Call A route or cleanup continuation must never pop, terminate,
-   reset, or otherwise mutate Call B.
-6. Cleanup failure must still attempt exact native cleanup and must not
-   incorrectly release the next-engine gate.
-7. Add deterministic production-path tests using controlled asynchronous
-   barriers for the final pre-pop race, Firestore-blocked media shutdown,
-   cleanup-gate exclusion, eventual authoritative/native cleanup, duplicate
-   exits, and sequential Audio A -> Audio B -> Video C viability.
+1. Build a deterministic widget regression using the real `MaterialApp`,
+   `Navigator`, `PopScope`, `AgoraCallScreen`, and production
+   `CallSessionManager` lifecycle methods.
+2. On the unmodified baseline, prove that remote terminal handling can detach
+   manager session/route ownership before the mounted terminal screen performs
+   its automatic close.
+3. Prove the screen remains visible after `Call ended`, the close timer, and an
+   elapsed window beyond 40 seconds, with no retry.
+4. Do not change production code if this exact causal path cannot be
+   reproduced.
+
+## Authorized Correction After Red Proof
+
+Allow a genuinely terminal, still-mounted exact call route to dismiss itself
+without depending on a live session ownership record already destroyed by
+terminal cleanup. Preserve exact invite, lifecycle generation, accepted
+CallKit identity, Navigator identity, and route identity. There must be no
+await between final navigation validation and the exact route pop.
+
+The correction must preserve stale-call isolation: Call A cannot pop or mutate
+Call B, resurrect a terminal session, bypass required cleanup, create another
+RTC owner, or weaken exact CallKit, Firestore, physical-media, engine-cleanup,
+or next-engine-gate behavior.
+
+## Required Coverage
+
+- terminal signal before and after manager detachment
+- CallKit termination before the one-second auto-close
+- physical-media cleanup and Firestore terminal completion before navigation
+- foreground/background transitions while terminal
+- stale A callback after B owns a newer route
+- repeated terminal callbacks and close requests
+- current route versus an older covered route
+- sequential Audio A -> Audio B -> Video C
+- actual Home appearance, not only timer scheduling
 
 ## Strict Non-Goals
 
-Do not change connection setup, Agora tokens, backend, Firestore acceptance
-semantics, PushKit/APNs, native CallKit implementation, camera/video setup,
-audio join timing, cleanup-gate policy, watchdog timing, dependencies, build
-flags, post-terminal continuation, or Navigator push guards. Video C remains
-unproven and receives no speculative fix.
+Do not change call connection setup, Agora, tokens, Firebase/backend, Firestore
+authority/schema/rules, PushKit/APNs, native CallKit implementation, watchdogs,
+dependencies, release configuration, cleanup-gate policy, or accepted-call
+readiness. Preserve all untracked architecture and Aider files unchanged.
 
-Preserve all untracked files, including
-`docs/CALL_V2_ARCHITECTURE_DEEP_DIVE.md` and Aider artifacts, unchanged.
-
-No TestFlight build, backend deployment, physical call, or physical-fix claim is
-authorized.
+No TestFlight build, App Store Connect upload, backend deployment, physical
+call, or physical-fix claim is authorized.
 
 ## Validation
 
-Run focused final pre-pop, media-owner, cleanup-coordinator/gate, exact CallKit,
-accepted-recovery, rapid-lifecycle, repeated-call, route-ownership, background
-audio, and sequential audio/audio/video regressions. Then run the full Call V2
-suite, `flutter analyze`, formatting, dependency diff inspection, and
+Run the new red/green production-Navigator regression and relevant route
+ownership, terminal transition, fast-hangup, background-audio, exact CallKit,
+physical-media, engine-cleanup/gate, accepted-recovery, repeated-call, and
+sequential audio/audio/video tests. Then run the full Call V2 suite,
+`flutter analyze`, format checks, dependency diff inspection, and
 `git diff --check`.
 
 ## Commit And Handoff
 
-Commit implementation and tests separately from the final agent-loop handoff.
-Then replace `HANDOFF.md`, set `STATE.json` to `ready_for_review`, commit
-metadata, push `origin/call-v2`, and stop.
+Commit implementation/tests separately from the final agent-loop handoff.
+Replace `HANDOFF.md`, set `STATE.json` to `ready_for_review`, commit metadata,
+push `origin/call-v2`, and stop.
