@@ -1,27 +1,40 @@
 {
   "version": 1,
   "branch": "call-v2",
-    "phase": "terminal_route_timing_verification",
-    "status": "revision_required",
-    "accepted_checkpoint_sha": "7ac433472600527515365f3bc179c61a2622be09",
-    "starting_sha": "7ac433472600527515365f3bc179c61a2622be09",
+  "phase": "terminal_route_timing_verification",
+  "status": "ready_for_review",
+  "accepted_checkpoint_sha": "7ac433472600527515365f3bc179c61a2622be09",
+  "starting_sha": "7ac433472600527515365f3bc179c61a2622be09",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-    "code_commit_sha": "",
-    "ending_sha": "",
-    "changed_files": [],
-    "validation": {},
+  "code_commit_sha": "37f8a80883ac21c7164811d3f31fb62e63249258",
+  "ending_sha": "SELF",
+  "changed_files": [
+    "test/call_v2/real_flow/call_v2_background_audio_media_integration_test.dart",
+    "test/call_v2/real_flow/call_v2_route_ownership_terminal_transition_test.dart"
+  ],
+  "validation": {
+    "original_baseline_red_preserved": true,
+    "strict_timing_tests": "passed, 3 tests",
+    "maximum_asserted_simulated_latency_ms": 2000,
+    "focused_ownership_recovery_media_lifecycle": "passed, 218 tests",
+    "full_call_v2": "passed, 2377 tests",
+    "flutter_analyze": "passed, no issues",
+    "format_check": "passed",
+    "git_diff_check": "passed",
+    "dependency_diff": "none"
+  },
   "safety": {
     "deployed": false,
     "testflight_built": false,
     "production_services_contacted": false,
     "firebase_changes": false,
     "backend_changes": false,
-        "production_code_changes": false,
-        "test_changes": false
+    "production_code_changes": false,
+    "test_changes": true
   },
   "review": {
-        "decision": "revision_required",
-        "notes": "Independent review accepts the clearStaleUiFlags ownership correction but requires separate small-frame production-path proof that an exact manager-owned receiving route is disposed and Home is visible within two simulated seconds after terminal observation, including stale-UI reconciliation before and during auto-close."
+    "decision": "ready_for_review",
+    "notes": "Three deterministic widget regressions prove complete manager-owned terminal route disposal and Home visibility within 2000 ms of simulated time, including reconciliation before and during auto-close. The private Platform.isIOS NotificationService entry is not directly executable in the host widget test; source inspection verifies its exact clearStaleUiFlags manager call, which the tests exercise directly. This is not a claim of measured physical-device latency or complete physical correctness."
   }
 }
