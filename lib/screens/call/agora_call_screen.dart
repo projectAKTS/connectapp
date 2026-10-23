@@ -253,6 +253,8 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   static const Duration _engineInitializeTimeout = Duration(seconds: 30);
   static const Duration _joinWatchdogTimeout = Duration(seconds: 35);
   static const Duration _cleanupUiWait = Duration(seconds: 2);
+  static const Duration _terminalRouteRetryDelay = Duration(milliseconds: 100);
+  static const int _maxTerminalRouteRetryAttempts = 8;
   late final int _callSequenceNumber;
   RtcEngine? _engine;
   RtcEngineEventHandler? _eventHandler;
@@ -291,6 +293,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   Timer? _ringTimeout;
   Timer? _joinWatchdog;
   Timer? _autoCloseTimer;
+  int _terminalRouteRetryAttempts = 0;
   final Set<Timer> _generationTimers = <Timer>{};
   bool _remoteEverJoined = false;
   bool _missedLogged = false;
@@ -2694,9 +2697,14 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
   Future<bool> _returnToAppAfterCall({
     bool requireManagedRouteOwnership = true,
+    bool allowExactTerminalRouteRemoval = false,
   }) async {
     if (!mounted) return false;
-    if (requireManagedRouteOwnership && !_ownsManagedCallRoute()) {
+    final terminalRouteRemovalAllowed =
+        allowExactTerminalRouteRemoval && (_ended || _fatalError != null);
+    if (requireManagedRouteOwnership &&
+        !_ownsManagedCallRoute() &&
+        !terminalRouteRemovalAllowed) {
       await _diagTeardown('route_pop_stale_owner_blocked');
       return false;
     }
@@ -2706,19 +2714,29 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return false;
     }
-    if (requireManagedRouteOwnership && !_ownsManagedCallRoute()) {
+    if (requireManagedRouteOwnership &&
+        !_ownsManagedCallRoute() &&
+        !terminalRouteRemovalAllowed) {
       await _diagTeardown('route_pop_stale_owner_blocked');
       return false;
     }
     final route = ModalRoute.of(context);
-    if (route == null || !route.isCurrent) {
-      await _diagTeardown('route_pop_not_current_blocked');
+    if (route == null) {
+      await _diagTeardown('route_pop_route_missing');
       return false;
     }
     final nav = Navigator.of(context);
-    await _diagTeardown('navigator_pop_invoked', meta: {
-      'navigatorCanPop': nav.canPop(),
-    });
+    if (!route.isCurrent && !terminalRouteRemovalAllowed) {
+      await _diagTeardown('route_pop_not_current_blocked');
+      return false;
+    }
+    await _diagTeardown(
+      route.isCurrent ? 'navigator_pop_invoked' : 'navigator_remove_invoked',
+      meta: {
+        'navigatorCanPop': nav.canPop(),
+        'exactTerminalRouteRemoval': terminalRouteRemovalAllowed,
+      },
+    );
     final beforeFinalPop = widget.beforeFinalNavigatorPopForTest;
     if (beforeFinalPop != null) {
       await beforeFinalPop();
@@ -2731,13 +2749,23 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     final finalNavigator = Navigator.of(context);
     final finalOwnershipValid =
         !requireManagedRouteOwnership || _ownsManagedCallRoute();
-    if (!finalOwnershipValid ||
+    if ((!finalOwnershipValid && !terminalRouteRemovalAllowed) ||
         !identical(finalRoute, route) ||
         !identical(finalNavigator, nav) ||
         finalRoute == null ||
-        !finalRoute.isCurrent) {
+        finalRoute.navigator != finalNavigator) {
       unawaited(_diagTeardown('route_pop_final_owner_blocked'));
       return false;
+    }
+    if (!finalRoute.isCurrent || !finalOwnershipValid) {
+      finalNavigator.removeRoute(finalRoute);
+      await CallSessionManager.instance.handleExactCallRouteRemoved(
+        inviteId: (widget.inviteId ?? '').trim(),
+        lifecycleGeneration: widget.lifecycleGeneration,
+        acceptedCallkitId: widget.acceptedCallkitId ?? '',
+        source: 'exact_terminal_route_removed',
+      );
+      return true;
     }
     if (nav.canPop()) {
       nav.pop();
@@ -2839,31 +2867,59 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     _startTeardownTimeline();
     _quiesceEngineCallbacksForTerminal();
     _autoCloseTimer?.cancel();
-    await _diagTeardown('screen_auto_close', meta: {'reason': reason});
-    final physicalMediaTeardown =
-        CallSessionManager.instance.beginOwnedPhysicalMediaTeardown(
-      inviteId: (widget.inviteId ?? '').trim(),
-      source: 'screen_terminal_hard_reset',
-      lifecycleGeneration:
-          widget.lifecycleGeneration == 0 ? null : widget.lifecycleGeneration,
-      acceptedCallkitId: widget.acceptedCallkitId ?? '',
-    );
-    _startBackgroundTeardown(
-      Future<void>.value(),
-      reason: 'screen_terminal_hard_reset',
-      ownedPhysicalMediaTeardown: physicalMediaTeardown,
-    );
-    final popped = await _returnToAppAfterCall();
-    if (!popped) {
+    var popped = false;
+    try {
+      await _diagTeardown('screen_auto_close', meta: {'reason': reason});
+      final physicalMediaTeardown =
+          CallSessionManager.instance.beginOwnedPhysicalMediaTeardown(
+        inviteId: (widget.inviteId ?? '').trim(),
+        source: 'screen_terminal_hard_reset',
+        lifecycleGeneration:
+            widget.lifecycleGeneration == 0 ? null : widget.lifecycleGeneration,
+        acceptedCallkitId: widget.acceptedCallkitId ?? '',
+      );
+      _startBackgroundTeardown(
+        Future<void>.value(),
+        reason: 'screen_terminal_hard_reset',
+        ownedPhysicalMediaTeardown: physicalMediaTeardown,
+      );
+      popped = await _returnToAppAfterCall(
+        allowExactTerminalRouteRemoval: true,
+      );
+    } catch (error) {
+      await _diagTeardown('terminal_route_exit_error', meta: {
+        'errorCategory': error.runtimeType.toString(),
+      });
+    }
+    if (!popped && mounted) {
       _endingCall = false;
+      _scheduleTerminalRouteExitRetry(reason);
       return;
     }
+  }
+
+  void _scheduleTerminalRouteExitRetry(String reason) {
+    if (!mounted || (!_ended && _fatalError == null)) return;
+    if (_terminalRouteRetryAttempts >= _maxTerminalRouteRetryAttempts) {
+      unawaited(_diagTeardown('terminal_route_exit_retry_exhausted'));
+      return;
+    }
+    _terminalRouteRetryAttempts += 1;
+    _scheduleAutoClose(
+      '$reason:retry',
+      delay: _terminalRouteRetryDelay,
+      resetRetryAttempts: false,
+    );
   }
 
   void _scheduleAutoClose(
     String reason, {
     Duration delay = const Duration(seconds: 1),
+    bool resetRetryAttempts = true,
   }) {
+    if (resetRetryAttempts) {
+      _terminalRouteRetryAttempts = 0;
+    }
     _autoCloseTimer?.cancel();
     _autoCloseTimer = Timer(delay, () {
       unawaited(_closeScreenAfterTerminalState(reason));

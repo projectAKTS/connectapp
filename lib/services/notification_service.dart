@@ -149,7 +149,12 @@ class _RecentAcceptedCallkitCall {
 }
 
 class NotificationService with WidgetsBindingObserver {
-  NotificationService({this.navigatorKey}) {
+  NotificationService({
+    this.navigatorKey,
+    Future<dynamic> Function()? activeCallkitCallsForTest,
+    bool? iosCallkitPlatformForTest,
+  })  : _activeCallkitCallsForTest = activeCallkitCallsForTest,
+        _iosCallkitPlatformForTest = iosCallkitPlatformForTest {
     _activeInstance = this;
     CallSessionManager.instance.configure(
       navigatorKey: navigatorKey,
@@ -170,6 +175,8 @@ class NotificationService with WidgetsBindingObserver {
   }
 
   final GlobalKey<NavigatorState>? navigatorKey;
+  final Future<dynamic> Function()? _activeCallkitCallsForTest;
+  final bool? _iosCallkitPlatformForTest;
 
   static NotificationService? _activeInstance;
 
@@ -381,6 +388,14 @@ class NotificationService with WidgetsBindingObserver {
 
   bool get _hasActiveIncomingUi =>
       CallSessionManager.instance.hasActiveUiOrSession;
+
+  bool get _isIosCallkitPlatform =>
+      _iosCallkitPlatformForTest ?? Platform.isIOS;
+
+  Future<dynamic> _activeCallkitCalls() {
+    final injected = _activeCallkitCallsForTest;
+    return injected == null ? FlutterCallkitIncoming.activeCalls() : injected();
+  }
 
   void _invalidateAcceptedRecoveryCoordinator() {
     _acceptedRecoveryGeneration += 1;
@@ -594,11 +609,11 @@ class NotificationService with WidgetsBindingObserver {
   }
 
   Future<bool> _resetStaleIncomingUiIfNeeded() async {
-    if (!Platform.isIOS || !_enableIosCallKit || !_hasActiveIncomingUi) {
+    if (!_isIosCallkitPlatform || !_enableIosCallKit || !_hasActiveIncomingUi) {
       return false;
     }
     try {
-      final activeCalls = await FlutterCallkitIncoming.activeCalls();
+      final activeCalls = await _activeCallkitCalls();
       final hasActiveCalls = activeCalls is List && activeCalls.isNotEmpty;
       if (hasActiveCalls) return false;
       final staleInviteId = CallSessionManager.instance.activeInviteId ?? '';
@@ -3118,6 +3133,13 @@ class NotificationService with WidgetsBindingObserver {
         'appState': appState,
       }),
     );
+  }
+
+  Future<bool> debugResetStaleIncomingUiForTest() async {
+    if (!_debugTestAccessEnabled) {
+      throw StateError('debugResetStaleIncomingUiForTest is test-mode only');
+    }
+    return _resetStaleIncomingUiIfNeeded();
   }
 
   Future<void> debugSimulateAcceptedCallkitEventForTest({

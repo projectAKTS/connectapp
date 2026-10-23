@@ -113,6 +113,7 @@ void main() {
     bool isVideo = false,
     bool isCaller = true,
     GlobalKey<NavigatorState>? navigatorKey,
+    List<NavigatorObserver> navigatorObservers = const <NavigatorObserver>[],
     Future<void> Function()? beforeFinalNavigatorPop,
   }) async {
     final generation = await manager.debugCreateHeldCallRouteForTest(
@@ -126,6 +127,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         navigatorKey: navigatorKey,
+        navigatorObservers: navigatorObservers,
         home: Builder(
           builder: (context) => Scaffold(
             body: TextButton(
@@ -582,6 +584,95 @@ void main() {
   });
 
   testWidgets(
+      'NotificationService reconciliation preserves terminal route until prompt disposal',
+      (tester) async {
+    const inviteId = 'notification_service_terminal_reconciliation';
+    const exactId = 'exact_notification_service_terminal_reconciliation';
+    final navigatorKey = GlobalKey<NavigatorState>();
+    var activeCallsReadCount = 0;
+    final service = NotificationService(
+      navigatorKey: navigatorKey,
+      iosCallkitPlatformForTest: true,
+      activeCallkitCallsForTest: () async {
+        activeCallsReadCount += 1;
+        return const <dynamic>[];
+      },
+    );
+    addTearDown(service.dispose);
+    await seedInvite(inviteId, status: CallInviteStatus.connected);
+    await showOwnedCallScreen(
+      tester,
+      inviteId: inviteId,
+      acceptedCallkitId: exactId,
+      navigatorKey: navigatorKey,
+      isCaller: false,
+    );
+
+    await manager.reportRemoteOffline(
+      inviteId: inviteId,
+      wasConnected: true,
+      isCaller: false,
+      reason: 'remote_hangup',
+    );
+    await tester.pump();
+    expect(find.text('Call ended'), findsOne);
+
+    expect(await service.debugResetStaleIncomingUiForTest(), isTrue);
+    expect(activeCallsReadCount, 1);
+    expect(manager.debugSnapshot()['callRouteOwnerMatchesCurrent'], isTrue);
+
+    final elapsedMs = await pumpFramesUntil(
+      tester,
+      terminalRouteIsDisposed,
+      failure:
+          'NotificationService reconciliation stranded the terminal route.',
+    );
+    expect(elapsedMs, lessThanOrEqualTo(2000));
+    expect(terminalRouteIsDisposed(), isTrue);
+  });
+
+  testWidgets(
+      'native end reconciliation before Firestore terminal preserves active route ownership',
+      (tester) async {
+    const inviteId = 'native_end_before_firestore_terminal';
+    const exactId = 'exact_native_end_before_firestore_terminal';
+    final navigatorKey = GlobalKey<NavigatorState>();
+    final service = NotificationService(
+      navigatorKey: navigatorKey,
+      iosCallkitPlatformForTest: true,
+      activeCallkitCallsForTest: () async => const <dynamic>[],
+    );
+    addTearDown(service.dispose);
+    await seedInvite(inviteId, status: CallInviteStatus.connected);
+    await showOwnedCallScreen(
+      tester,
+      inviteId: inviteId,
+      acceptedCallkitId: exactId,
+      navigatorKey: navigatorKey,
+      isCaller: false,
+    );
+
+    expect(await service.debugResetStaleIncomingUiForTest(), isTrue);
+    expect(manager.activeInviteId, inviteId);
+    expect(manager.debugSnapshot()['callRouteActive'], isTrue);
+    expect(manager.debugSnapshot()['callRouteOwnerMatchesCurrent'], isTrue);
+
+    await manager.reportRemoteOffline(
+      inviteId: inviteId,
+      wasConnected: true,
+      isCaller: false,
+      reason: 'remote_hangup',
+    );
+    await tester.pump();
+    final elapsedMs = await pumpFramesUntil(
+      tester,
+      terminalRouteIsDisposed,
+      failure: 'Native-first reconciliation stranded the later terminal route.',
+    );
+    expect(elapsedMs, lessThanOrEqualTo(2000));
+  });
+
+  testWidgets(
       'stale native reconciliation during auto-close keeps exact owner until prompt route disposal',
       (tester) async {
     const inviteId = 'terminal_reconciliation_during_auto_close';
@@ -590,6 +681,15 @@ void main() {
     final releaseFinalPopBoundary = Completer<void>();
     final endedNativeCalls = <String>[];
     final pluginEndedCalls = <String>[];
+    var activeCallsReadCount = 0;
+    final service = NotificationService(
+      iosCallkitPlatformForTest: true,
+      activeCallkitCallsForTest: () async {
+        activeCallsReadCount += 1;
+        return const <dynamic>[];
+      },
+    );
+    addTearDown(service.dispose);
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
       const MethodChannel('flutter_callkit_incoming'),
       (call) async {
@@ -639,7 +739,8 @@ void main() {
     );
     expect(elapsedMs, lessThanOrEqualTo(2000));
 
-    manager.clearStaleUiFlags();
+    expect(await service.debugResetStaleIncomingUiForTest(), isTrue);
+    expect(activeCallsReadCount, 1);
     expect(manager.debugSnapshot()['callRouteActive'], isTrue);
     expect(manager.debugSnapshot()['callRouteOwnerMatchesCurrent'], isTrue);
     releaseFinalPopBoundary.complete();
@@ -654,6 +755,293 @@ void main() {
     expect(endedNativeCalls, isNotEmpty);
     expect(endedNativeCalls.every((id) => id == exactId), isTrue);
     expect(pluginEndedCalls, <String>[exactId]);
+  });
+
+  testWidgets(
+      'terminal Call A covered during auto-close removes only its exact route',
+      (tester) async {
+    const inviteId = 'terminal_route_covered_by_overlay';
+    const exactId = 'exact_terminal_route_covered_by_overlay';
+    final navigatorKey = GlobalKey<NavigatorState>();
+    await seedInvite(inviteId, status: CallInviteStatus.connected);
+    await showOwnedCallScreen(
+      tester,
+      inviteId: inviteId,
+      acceptedCallkitId: exactId,
+      navigatorKey: navigatorKey,
+      isCaller: false,
+    );
+
+    await manager.reportRemoteOffline(
+      inviteId: inviteId,
+      wasConnected: true,
+      isCaller: false,
+      reason: 'remote_hangup',
+    );
+    await tester.pump();
+    expect(find.text('Call ended'), findsOne);
+
+    unawaited(navigatorKey.currentState!.push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => const Scaffold(
+          key: Key('terminal-route-cover'),
+          body: Text('Covering route'),
+        ),
+      ),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('terminal-route-cover')), findsOne);
+
+    final elapsedMs = await pumpFramesUntil(
+      tester,
+      () =>
+          find
+              .byType(AgoraCallScreen, skipOffstage: false)
+              .evaluate()
+              .isEmpty &&
+          manager.debugSnapshot()['callRouteActive'] == false,
+      failure: 'The covered terminal Call A route was not disposed.',
+    );
+    expect(elapsedMs, lessThanOrEqualTo(2000));
+    expect(find.byKey(const Key('terminal-route-cover')), findsOne);
+
+    navigatorKey.currentState!.pop();
+    await tester.pumpAndSettle();
+    expect(terminalRouteIsDisposed(), isTrue);
+  });
+
+  testWidgets('detached terminal route still removes itself within two seconds',
+      (tester) async {
+    const inviteId = 'terminal_route_detached_before_close';
+    const exactId = 'exact_terminal_route_detached_before_close';
+    await seedInvite(inviteId, status: CallInviteStatus.connected);
+    await showOwnedCallScreen(
+      tester,
+      inviteId: inviteId,
+      acceptedCallkitId: exactId,
+      isCaller: false,
+    );
+
+    await manager.reportRemoteOffline(
+      inviteId: inviteId,
+      wasConnected: true,
+      isCaller: false,
+      reason: 'remote_hangup',
+    );
+    await tester.pump();
+    expect(find.text('Call ended'), findsOne);
+
+    await manager.forceIdleForTest();
+    expect(manager.activeInviteId, isNull);
+    final elapsedMs = await pumpFramesUntil(
+      tester,
+      terminalRouteIsDisposed,
+      failure: 'The detached terminal route remained mounted.',
+    );
+
+    expect(elapsedMs, lessThanOrEqualTo(2000));
+    expect(terminalRouteIsDisposed(), isTrue);
+  });
+
+  testWidgets(
+      'terminal route retries after one final navigation boundary exception',
+      (tester) async {
+    const inviteId = 'terminal_route_one_time_navigation_exception';
+    const exactId = 'exact_terminal_route_one_time_navigation_exception';
+    var boundaryAttempts = 0;
+    await seedInvite(inviteId, status: CallInviteStatus.connected);
+    await showOwnedCallScreen(
+      tester,
+      inviteId: inviteId,
+      acceptedCallkitId: exactId,
+      isCaller: false,
+      beforeFinalNavigatorPop: () async {
+        boundaryAttempts += 1;
+        if (boundaryAttempts == 1) {
+          throw StateError('controlled one-time navigation failure');
+        }
+      },
+    );
+
+    await manager.reportRemoteOffline(
+      inviteId: inviteId,
+      wasConnected: true,
+      isCaller: false,
+      reason: 'remote_hangup',
+    );
+    await tester.pump();
+
+    final elapsedMs = await pumpFramesUntil(
+      tester,
+      terminalRouteIsDisposed,
+      failure: 'The terminal route did not recover after a transient failure.',
+    );
+    expect(elapsedMs, lessThanOrEqualTo(2000));
+    expect(boundaryAttempts, 2);
+  });
+
+  testWidgets('paused terminal route returns Home promptly after resume',
+      (tester) async {
+    const inviteId = 'terminal_route_paused_then_resumed';
+    const exactId = 'exact_terminal_route_paused_then_resumed';
+    await seedInvite(inviteId, status: CallInviteStatus.connected);
+    await showOwnedCallScreen(
+      tester,
+      inviteId: inviteId,
+      acceptedCallkitId: exactId,
+      isCaller: false,
+    );
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+
+    await manager.reportRemoteOffline(
+      inviteId: inviteId,
+      wasConnected: true,
+      isCaller: false,
+      reason: 'remote_hangup',
+    );
+    await tester.pump();
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(find.text('Call ended'), findsOne);
+    final elapsedMs = await pumpFramesUntil(
+      tester,
+      terminalRouteIsDisposed,
+      failure: 'The resumed terminal route remained mounted.',
+    );
+    expect(elapsedMs, lessThanOrEqualTo(2000));
+  });
+
+  testWidgets('video terminal route returns Home within two seconds',
+      (tester) async {
+    const inviteId = 'video_terminal_route';
+    const exactId = 'exact_video_terminal_route';
+    await seedInvite(inviteId, status: CallInviteStatus.connected);
+    await showOwnedCallScreen(
+      tester,
+      inviteId: inviteId,
+      acceptedCallkitId: exactId,
+      isVideo: true,
+      isCaller: false,
+    );
+
+    await manager.reportRemoteOffline(
+      inviteId: inviteId,
+      wasConnected: true,
+      isCaller: false,
+      reason: 'remote_hangup',
+    );
+    await tester.pump();
+    expect(find.text('Call ended'), findsOne);
+    final elapsedMs = await pumpFramesUntil(
+      tester,
+      terminalRouteIsDisposed,
+      failure: 'The video terminal route remained mounted.',
+    );
+    expect(elapsedMs, lessThanOrEqualTo(2000));
+  });
+
+  testWidgets('duplicate terminal delivery disposes the route exactly once',
+      (tester) async {
+    const inviteId = 'duplicate_terminal_route';
+    const exactId = 'exact_duplicate_terminal_route';
+    await seedInvite(inviteId, status: CallInviteStatus.connected);
+    await showOwnedCallScreen(
+      tester,
+      inviteId: inviteId,
+      acceptedCallkitId: exactId,
+      isCaller: false,
+    );
+
+    await Future.wait<void>(<Future<void>>[
+      manager.reportRemoteOffline(
+        inviteId: inviteId,
+        wasConnected: true,
+        isCaller: false,
+        reason: 'remote_hangup',
+      ),
+      manager.reportRemoteOffline(
+        inviteId: inviteId,
+        wasConnected: true,
+        isCaller: false,
+        reason: 'duplicate_remote_hangup',
+      ),
+    ]);
+    await tester.pump();
+    final elapsedMs = await pumpFramesUntil(
+      tester,
+      terminalRouteIsDisposed,
+      failure: 'Duplicate terminal delivery stranded the route.',
+    );
+    expect(elapsedMs, lessThanOrEqualTo(2000));
+    expect(manager.debugSnapshot()['authoritativeTerminalWriteCount'], 1);
+  });
+
+  testWidgets('terminal Call A exact removal cannot dismiss owned Call B',
+      (tester) async {
+    final navigatorKey = GlobalKey<NavigatorState>();
+    final finalBoundaryEntered = Completer<void>();
+    final releaseFinalBoundary = Completer<void>();
+    await seedInvite('terminal_exact_a', status: CallInviteStatus.connected);
+    await showOwnedCallScreen(
+      tester,
+      inviteId: 'terminal_exact_a',
+      acceptedCallkitId: 'exact_terminal_a',
+      navigatorKey: navigatorKey,
+      isCaller: false,
+      beforeFinalNavigatorPop: () async {
+        if (!finalBoundaryEntered.isCompleted) {
+          finalBoundaryEntered.complete();
+        }
+        await releaseFinalBoundary.future;
+      },
+    );
+    await manager.reportRemoteOffline(
+      inviteId: 'terminal_exact_a',
+      wasConnected: true,
+      isCaller: false,
+      reason: 'remote_hangup',
+    );
+    await tester.pump();
+    await pumpFramesUntil(
+      tester,
+      () => finalBoundaryEntered.isCompleted,
+      failure: 'Terminal Call A did not reach the final route boundary.',
+    );
+
+    await manager.forceIdleForTest();
+    final generationB = await manager.debugCreateHeldCallRouteForTest(
+      inviteId: 'terminal_exact_b',
+      channel: 'channel_terminal_exact_b',
+      acceptedCallkitId: 'exact_terminal_b',
+      status: CallInviteStatus.connected,
+    );
+    unawaited(navigatorKey.currentState!.push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => const Scaffold(
+          key: Key('terminal-exact-call-b-route'),
+          body: Text('Call B'),
+        ),
+      ),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    releaseFinalBoundary.complete();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.byKey(const Key('terminal-exact-call-b-route')), findsOne);
+    expect(
+      find.byType(AgoraCallScreen, skipOffstage: false),
+      findsNothing,
+    );
+    expect(manager.activeInviteId, 'terminal_exact_b');
+    expect(manager.debugSnapshot()['lifecycleGeneration'], generationB);
+    expect(manager.debugSnapshot()['callRouteActive'], isTrue);
+    expect(manager.debugSnapshot()['callRouteOwnerMatchesCurrent'], isTrue);
   });
 
   testWidgets('repeated exit starts one cleanup and one navigation',

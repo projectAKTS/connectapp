@@ -2641,6 +2641,23 @@ class CallSessionManager {
     }
   }
 
+  Future<void> handleExactCallRouteRemoved({
+    required String inviteId,
+    required int lifecycleGeneration,
+    required String acceptedCallkitId,
+    required String source,
+  }) async {
+    final owner = _callRouteOwner;
+    if (owner == null ||
+        owner.inviteId != inviteId.trim() ||
+        owner.lifecycleGeneration != lifecycleGeneration ||
+        owner.acceptedCallkitId.trim().toLowerCase() !=
+            acceptedCallkitId.trim().toLowerCase()) {
+      return;
+    }
+    await _completeCallRoute(owner, source: source);
+  }
+
   Future<void> _handleIncomingInviteSnapshot(
     DocumentSnapshot<Map<String, dynamic>> doc, {
     required String source,
