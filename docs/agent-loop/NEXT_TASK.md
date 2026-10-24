@@ -1,68 +1,59 @@
-# Active Revision - Complete Terminal Route Reliability Investigation
+# Active Revision - Persistent Terminal Route Diagnostics
 
 Branch: `call-v2`
 
-Starting SHA: `dd0a6db86b94ec8ce210d588bb6679aa33f22793`
+Starting SHA: `30a1303da11ee249fc3303319c635286e8fe7f69`
 
 ## Goal
 
-Complete a source- and evidence-driven audit of every iOS Call V2 terminal
-route exit, reproduce every discovered permanent `Call ended` route failure on
-the unchanged checkpoint, and implement only the smallest cohesive corrections
-proven by identical red-to-green regressions.
+Extend the existing bounded, privacy-safe durable Call V2 boundary recorder so
+terminal route navigation outcomes survive process restart and distinguish normal
+pop, exact covered/detached removal, transient retry, retry exhaustion, and stale
+ownership rejection without changing terminal-route behavior.
 
 ## Allowed Files
 
+- `lib/call_v2/diagnostics/call_v2_durable_boundary_diagnostics.dart`
 - `lib/screens/call/agora_call_screen.dart`
-- `lib/services/call_session_manager.dart`
-- `lib/services/notification_service.dart`
-- directly relevant Call V2 tests under `test/call_v2/**`
-- `test/notification_foreground_recovery_test.dart`
-- directly relevant existing iOS test harness files under `ios/RunnerTests/**`
-- `ios/Runner/AppDelegate.swift` only if a native test proves a production
-  bridge defect that cannot be covered through the existing bridge
-- directly relevant existing Flutter integration-test files, if required
+- directly relevant diagnostic and terminal-route tests under `test/call_v2/**`
 - `docs/agent-loop/NEXT_TASK.md`
 - `docs/agent-loop/STATE.json`
 - `docs/agent-loop/HANDOFF.md`
 
-## Required Investigation And Proof
+## Required Implementation
 
-- Preserve and inspect retained physical/native/Flutter/Agora/Firestore
-  evidence without placing new calls or altering evidence.
-- Audit every production path that can display `Call ended`, every route-owner
-  mutation while a route is mounted, and every eventual route-removal path.
-- Exercise the actual NotificationService stale-native reconciliation logic
-  through the closest technically supported iOS/native integration boundary;
-  document simulator or PushKit limitations precisely.
-- Deterministically cover the twenty terminal interleavings in the user
-  directive with controlled barriers and real manager-owned Navigator routes.
-- For each newly discovered production defect, capture baseline-red output
-  before changing production code, then run the identical regression green.
-- Every legitimate terminal route must either dispose safely and reveal Home,
-  or yield to a newer exact route without mutating or dismissing it.
-- Normal terminal-to-Home behavior must complete within 2,000 ms of simulated
-  time and must not await slow Firestore, Agora, or CallKit cleanup.
+- Add durable terminal-route stages for exit request, safe ownership rejection,
+  covered route, Navigator pop request, exact-route removal request/completion,
+  route disposal, retry scheduling/attempt, and retry exhaustion.
+- Reuse existing hashed call/CallKit fingerprints and lifecycle generation.
+- Persist no raw identifiers, credentials, contact data, channel, UID, token, or
+  payload values.
+- Submit diagnostics without awaiting file I/O on navigation, RTC, CallKit, or
+  cleanup-critical paths. Logging failure must not affect navigation.
+- Preserve recorder retention/bounds and avoid duplicate disposal records for one
+  logical route where possible.
+- Add deterministic persisted-timeline and restart-recovery coverage for normal
+  pop, covered removal, detached ownership, transient failure/retry, retry
+  exhaustion, and stale Call A rejection after B ownership.
+- Prove instrumentation does not alter navigation ordering or the existing strict
+  2,000 ms simulated terminal-disposal budget.
 
 ## Strict Non-Goals
 
-Do not alter tokens, Agora join/media configuration, PushKit/APNs delivery,
-Firestore schema/rules or accepted-authority protocol, Firebase/backend,
-dependencies, release configuration, or watchdog timing without a separately
-reproduced and source-proven necessity. Do not build/upload TestFlight, deploy,
-place physical calls, or request another physical test.
+Do not change RTC/media setup, Firestore terminal authority, PushKit/APNs, native
+CallKit, cleanup gates, route-removal semantics, retry limits, dependencies,
+backend/Firebase, release configuration, or the accepted terminal-route correction.
+Do not build/upload TestFlight, deploy, or place physical calls.
 
 ## Validation
 
-Run all new baseline and corrected regressions, route ownership and terminal
-transition tests, background accepted audio, exact CallKit ownership,
-physical-media and cleanup-gate tests, accepted recovery, repeated/sequential
-call tests, foreground recovery, supported iOS RunnerTests/integration tests,
-the complete Call V2 suite, `flutter analyze`, formatting checks, dependency
-diff inspection, and `git diff --check`.
+Run focused durable diagnostics and exact route-ownership tests, affected recovery
+and lifecycle regressions, the complete Call V2 suite, available iOS RunnerTests,
+`flutter analyze`, formatting checks, dependency diff inspection, and
+`git diff --check`.
 
 ## Commit And Handoff
 
-Commit production/test implementation separately from the final agent-loop
-handoff. Replace `HANDOFF.md`, set `STATE.json` to `ready_for_review`, commit
-metadata, push `origin/call-v2`, and stop. Do not claim physical correctness.
+Commit implementation/tests separately from the final agent-loop handoff. Replace
+`HANDOFF.md`, set `STATE.json` to `ready_for_review`, commit metadata, push
+`origin/call-v2`, and stop. Do not claim physical verification or 100% reliability.

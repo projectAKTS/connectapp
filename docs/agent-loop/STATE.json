@@ -1,43 +1,27 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "complete_terminal_route_reliability",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "dd0a6db86b94ec8ce210d588bb6679aa33f22793",
-  "starting_sha": "dd0a6db86b94ec8ce210d588bb6679aa33f22793",
+  "phase": "persistent_terminal_route_diagnostics",
+  "status": "revision_required",
+  "accepted_checkpoint_sha": "30a1303da11ee249fc3303319c635286e8fe7f69",
+  "starting_sha": "30a1303da11ee249fc3303319c635286e8fe7f69",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "41586585ee0e293e5dba909a548cea74ac36a710",
-  "ending_sha": "SELF",
-  "changed_files": [
-    "lib/screens/call/agora_call_screen.dart",
-    "lib/services/call_session_manager.dart",
-    "lib/services/notification_service.dart",
-    "test/call_v2/real_flow/call_v2_route_ownership_terminal_transition_test.dart"
-  ],
-  "validation": {
-    "baseline_red_regressions": "passed: 3 defects reproduced before correction",
-    "terminal_route_ownership": "passed: 31 tests",
-    "focused_cross_area": "passed: 201 tests",
-    "foreground_recovery": "passed: 3 tests",
-    "call_v2_full": "passed: 2386 tests",
-    "ios_runner_tests": "passed: 30 tests on iOS 26 simulator",
-    "flutter_analyze": "passed: no issues",
-    "format_check": "passed: 4 files unchanged",
-    "git_diff_check": "passed",
-    "dependency_diff": "none"
-  },
+  "code_commit_sha": "",
+  "ending_sha": "",
+  "changed_files": [],
+  "validation": {},
   "safety": {
     "deployed": false,
     "testflight_built": false,
     "production_services_contacted": false,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": true,
-    "test_changes": true
+    "production_code_changes": false,
+    "test_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "Three additional one-shot terminal route liveness defects were reproduced red on the accepted checkpoint and pass green after exact-route removal plus bounded retry. Exact generation/CallKit ownership prevents late Call A from mutating Call B. Full Flutter and native simulator suites pass; no physical-fix claim is made."
+    "decision": "revision_required",
+    "notes": "The terminal-route reliability correction is accepted. This revision is limited to persistent, privacy-safe, nonblocking terminal navigation outcome diagnostics and deterministic restart-recovery proof."
   }
 }
