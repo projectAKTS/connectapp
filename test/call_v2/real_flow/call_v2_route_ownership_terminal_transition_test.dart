@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:connect_app/call_v2/diagnostics/call_v2_durable_boundary_diagnostics.dart';
 import 'package:connect_app/screens/call/agora_call_screen.dart';
 import 'package:connect_app/services/call_session_manager.dart';
 import 'package:connect_app/services/helperly_test_runtime.dart';
@@ -10,6 +12,34 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+class _RouteDiagnosticMemoryStore implements CallV2DurableDiagnosticStore {
+  String? encoded;
+
+  @override
+  Future<String?> read() async => encoded;
+
+  @override
+  Future<void> write(String value) async {
+    encoded = value;
+  }
+}
+
+class _RouteDiagnosticBlockingStore extends _RouteDiagnosticMemoryStore {
+  final Completer<void> writeStarted = Completer<void>();
+  final Completer<void> releaseWrite = Completer<void>();
+  bool _blocked = false;
+
+  @override
+  Future<void> write(String value) async {
+    if (!_blocked) {
+      _blocked = true;
+      writeStarted.complete();
+      await releaseWrite.future;
+    }
+    await super.write(value);
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -17,6 +47,45 @@ void main() {
   const calleeUid = 'route_owner_callee';
   late FakeFirebaseFirestore firestore;
   late CallSessionManager manager;
+  late _RouteDiagnosticMemoryStore durableStore;
+  late CallV2DurableDiagnosticRecorder durableRecorder;
+  var durableRecorderInstalled = false;
+
+  void installDurableRecorder(_RouteDiagnosticMemoryStore store) {
+    durableStore = store;
+    durableRecorder = CallV2DurableDiagnosticRecorder(
+      store: store,
+      appLifecycleState: () => 'resumed',
+    );
+    CallV2DurableDiagnosticRecorder.debugOverrideForTest(durableRecorder);
+    durableRecorderInstalled = true;
+  }
+
+  void ensureDurableRecorderInstalled() {
+    if (!durableRecorderInstalled) {
+      installDurableRecorder(_RouteDiagnosticMemoryStore());
+    }
+  }
+
+  Future<List<CallV2DurableDiagnosticEvent>> durableEvents(
+    WidgetTester tester,
+  ) async {
+    String? previousSnapshot;
+    for (var attempt = 0; attempt < 16; attempt += 1) {
+      await tester.pump();
+      final snapshot = durableStore.encoded;
+      if (snapshot != null && snapshot == previousSnapshot) {
+        final root = jsonDecode(snapshot) as Map<String, dynamic>;
+        return (root['events'] as List<dynamic>)
+            .map((raw) => CallV2DurableDiagnosticEvent.fromJson(
+                  Map<String, Object?>.from(raw as Map),
+                ))
+            .toList(growable: false);
+      }
+      previousSnapshot = snapshot;
+    }
+    fail('Durable route diagnostics did not settle within 16 test frames.');
+  }
 
   Future<void> seedInvite(
     String inviteId, {
@@ -71,6 +140,7 @@ void main() {
     bool terminal = false,
     required Future<void> Function(bool terminal) onExit,
   }) async {
+    ensureDurableRecorderInstalled();
     await tester.pumpWidget(
       MaterialApp(
         home: Builder(
@@ -116,6 +186,7 @@ void main() {
     List<NavigatorObserver> navigatorObservers = const <NavigatorObserver>[],
     Future<void> Function()? beforeFinalNavigatorPop,
   }) async {
+    ensureDurableRecorderInstalled();
     final generation = await manager.debugCreateHeldCallRouteForTest(
       inviteId: inviteId,
       channel: 'channel_$inviteId',
@@ -222,9 +293,12 @@ void main() {
       }) async {},
       appForegroundProvider: () async => true,
     );
+    durableRecorderInstalled = false;
   });
 
   tearDown(() async {
+    CallV2DurableDiagnosticRecorder.debugOverrideForTest(null);
+    durableRecorderInstalled = false;
     await manager.forceIdleForTest();
     HelperlyTestRuntime.clear();
   });
@@ -629,6 +703,25 @@ void main() {
     );
     expect(elapsedMs, lessThanOrEqualTo(2000));
     expect(terminalRouteIsDisposed(), isTrue);
+    final events = await durableEvents(tester);
+    expect(
+      events.map((event) => event.stage),
+      containsAllInOrder(<CallV2DurableDiagnosticStage>[
+        CallV2DurableDiagnosticStage.terminalRouteExitRequested,
+        CallV2DurableDiagnosticStage.terminalNavigatorPopRequested,
+        CallV2DurableDiagnosticStage.terminalRouteDisposed,
+      ]),
+    );
+    expect(
+      events,
+      isNot(contains(predicate<CallV2DurableDiagnosticEvent>(
+        (event) =>
+            event.stage ==
+            CallV2DurableDiagnosticStage.terminalExactRouteRemovalRequested,
+      ))),
+    );
+    expect(durableStore.encoded, isNot(contains(inviteId)));
+    expect(durableStore.encoded, isNot(contains(exactId)));
   });
 
   testWidgets(
@@ -805,6 +898,24 @@ void main() {
     );
     expect(elapsedMs, lessThanOrEqualTo(2000));
     expect(find.byKey(const Key('terminal-route-cover')), findsOne);
+    final events = await durableEvents(tester);
+    final stages = events.map((event) => event.stage).toList();
+    expect(
+      stages,
+      containsAll(<CallV2DurableDiagnosticStage>[
+        CallV2DurableDiagnosticStage.terminalRouteExitRequested,
+        CallV2DurableDiagnosticStage.terminalRouteCovered,
+        CallV2DurableDiagnosticStage.terminalExactRouteRemovalRequested,
+        CallV2DurableDiagnosticStage.terminalExactRouteRemovalCompleted,
+        CallV2DurableDiagnosticStage.terminalRouteDisposed,
+      ]),
+    );
+    expect(
+      events.singleWhere((event) =>
+          event.stage == CallV2DurableDiagnosticStage.terminalRouteCovered),
+      isA<CallV2DurableDiagnosticEvent>().having((event) => event.outcome,
+          'outcome', CallV2DurableDiagnosticOutcome.routeCovered),
+    );
 
     navigatorKey.currentState!.pop();
     await tester.pumpAndSettle();
@@ -842,6 +953,26 @@ void main() {
 
     expect(elapsedMs, lessThanOrEqualTo(2000));
     expect(terminalRouteIsDisposed(), isTrue);
+    final events = await durableEvents(tester);
+    expect(
+      events,
+      contains(predicate<CallV2DurableDiagnosticEvent>(
+        (event) =>
+            event.stage ==
+                CallV2DurableDiagnosticStage.terminalRouteOwnershipRejected &&
+            event.outcome ==
+                CallV2DurableDiagnosticOutcome.staleRouteOwnership &&
+            event.generationCurrent == false,
+      )),
+    );
+    expect(
+      events.map((event) => event.stage),
+      containsAll(<CallV2DurableDiagnosticStage>[
+        CallV2DurableDiagnosticStage.terminalExactRouteRemovalRequested,
+        CallV2DurableDiagnosticStage.terminalExactRouteRemovalCompleted,
+        CallV2DurableDiagnosticStage.terminalRouteDisposed,
+      ]),
+    );
   });
 
   testWidgets(
@@ -879,6 +1010,119 @@ void main() {
     );
     expect(elapsedMs, lessThanOrEqualTo(2000));
     expect(boundaryAttempts, 2);
+    final events = await durableEvents(tester);
+    final retries = events
+        .where((event) =>
+            event.stage ==
+            CallV2DurableDiagnosticStage.terminalRouteRetryScheduled)
+        .toList();
+    expect(retries, hasLength(1));
+    expect(retries.single.attempt, 1);
+    expect(retries.single.outcome,
+        CallV2DurableDiagnosticOutcome.navigationFailure);
+    expect(
+      events.map((event) => event.stage),
+      isNot(contains(
+        CallV2DurableDiagnosticStage.terminalRouteRetryExhausted,
+      )),
+    );
+    expect(
+        events.last.stage, CallV2DurableDiagnosticStage.terminalRouteDisposed);
+  });
+
+  testWidgets('persistent terminal route timeline records retry exhaustion',
+      (tester) async {
+    const inviteId = 'terminal_route_retry_exhaustion';
+    const exactId = 'exact_terminal_route_retry_exhaustion';
+    var boundaryAttempts = 0;
+    await seedInvite(inviteId, status: CallInviteStatus.connected);
+    await showOwnedCallScreen(
+      tester,
+      inviteId: inviteId,
+      acceptedCallkitId: exactId,
+      isCaller: false,
+      beforeFinalNavigatorPop: () async {
+        boundaryAttempts += 1;
+        throw StateError('controlled persistent navigation failure');
+      },
+    );
+
+    await manager.reportRemoteOffline(
+      inviteId: inviteId,
+      wasConnected: true,
+      isCaller: false,
+      reason: 'remote_hangup',
+    );
+    await tester.pump();
+    for (var elapsed = 0; elapsed < 2200; elapsed += 16) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+
+    final events = await durableEvents(tester);
+    final retries = events
+        .where((event) =>
+            event.stage ==
+            CallV2DurableDiagnosticStage.terminalRouteRetryScheduled)
+        .toList();
+    final exhausted = events.singleWhere((event) =>
+        event.stage ==
+        CallV2DurableDiagnosticStage.terminalRouteRetryExhausted);
+    expect(retries.map((event) => event.attempt),
+        orderedEquals(<int>[1, 2, 3, 4, 5, 6, 7, 8]));
+    expect(exhausted.attempt, 8);
+    expect(exhausted.outcome, CallV2DurableDiagnosticOutcome.retryExhausted);
+    expect(boundaryAttempts, 9);
+    expect(find.text('Call ended'), findsOne);
+    expect(
+      events.map((event) => event.stage),
+      isNot(contains(CallV2DurableDiagnosticStage.terminalRouteDisposed)),
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('blocked durable storage never delays terminal route disposal',
+      (tester) async {
+    const inviteId = 'terminal_route_blocked_diagnostics';
+    const exactId = 'exact_terminal_route_blocked_diagnostics';
+    final blockingStore = _RouteDiagnosticBlockingStore();
+    installDurableRecorder(blockingStore);
+    await seedInvite(inviteId, status: CallInviteStatus.connected);
+    await showOwnedCallScreen(
+      tester,
+      inviteId: inviteId,
+      acceptedCallkitId: exactId,
+      isCaller: false,
+    );
+
+    await manager.reportRemoteOffline(
+      inviteId: inviteId,
+      wasConnected: true,
+      isCaller: false,
+      reason: 'remote_hangup',
+    );
+    await tester.pump();
+    final elapsedMs = await pumpFramesUntil(
+      tester,
+      terminalRouteIsDisposed,
+      failure: 'Durable storage blocked terminal route disposal.',
+    );
+
+    expect(blockingStore.writeStarted.isCompleted, isTrue);
+    expect(elapsedMs, lessThanOrEqualTo(2000));
+    expect(terminalRouteIsDisposed(), isTrue);
+    expect(blockingStore.encoded, isNull);
+    blockingStore.releaseWrite.complete();
+    final events = await durableEvents(tester);
+    expect(
+      events.map((event) => event.stage),
+      containsAllInOrder(<CallV2DurableDiagnosticStage>[
+        CallV2DurableDiagnosticStage.terminalRouteExitRequested,
+        CallV2DurableDiagnosticStage.terminalNavigatorPopRequested,
+        CallV2DurableDiagnosticStage.terminalRouteDisposed,
+      ]),
+    );
   });
 
   testWidgets('paused terminal route returns Home promptly after resume',
@@ -1042,6 +1286,34 @@ void main() {
     expect(manager.debugSnapshot()['lifecycleGeneration'], generationB);
     expect(manager.debugSnapshot()['callRouteActive'], isTrue);
     expect(manager.debugSnapshot()['callRouteOwnerMatchesCurrent'], isTrue);
+    final events = await durableEvents(tester);
+    final rejected = events.singleWhere((event) =>
+        event.stage ==
+            CallV2DurableDiagnosticStage.terminalRouteOwnershipRejected &&
+        event.outcome == CallV2DurableDiagnosticOutcome.staleRouteOwnership);
+    expect(
+      rejected.callFingerprint,
+      CallV2DurableDiagnosticRecorder.fingerprint(
+        'terminal_exact_a',
+        namespace: 'call',
+      ),
+    );
+    expect(
+      rejected.exactCallkitFingerprint,
+      CallV2DurableDiagnosticRecorder.fingerprint(
+        'exact_terminal_a',
+        namespace: 'exact',
+      ),
+    );
+    expect(
+      events.where((event) =>
+          event.callFingerprint ==
+          CallV2DurableDiagnosticRecorder.fingerprint(
+            'terminal_exact_b',
+            namespace: 'call',
+          )),
+      isEmpty,
+    );
   });
 
   testWidgets('repeated exit starts one cleanup and one navigation',

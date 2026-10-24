@@ -10,6 +10,7 @@ import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:agora_rtc_engine/src/impl/agora_rtc_engine_impl.dart'
     as agora_internal;
 import 'package:connect_app/call_v2/call_v2_api.dart';
+import 'package:connect_app/call_v2/diagnostics/call_v2_durable_boundary_diagnostics.dart';
 import 'package:connect_app/call_v2/firebase/call_v2_token_provider.dart';
 import 'package:connect_app/call_v2/real_flow/call_v2_agora_media_runtime.dart';
 import 'package:connect_app/call_v2/real_flow/call_v2_engine_cleanup_coordinator.dart';
@@ -294,6 +295,11 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   Timer? _joinWatchdog;
   Timer? _autoCloseTimer;
   int _terminalRouteRetryAttempts = 0;
+  bool _terminalRouteExitRequestedRecorded = false;
+  bool _terminalRouteCoveredRecorded = false;
+  bool _terminalRouteDisposedRecorded = false;
+  final Set<CallV2DurableDiagnosticOutcome> _terminalRouteRejectionOutcomes =
+      <CallV2DurableDiagnosticOutcome>{};
   final Set<Timer> _generationTimers = <Timer>{};
   bool _remoteEverJoined = false;
   bool _missedLogged = false;
@@ -2695,6 +2701,43 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         );
   }
 
+  void _recordDurableTerminalRoute(
+    CallV2DurableDiagnosticStage stage, {
+    CallV2DurableDiagnosticOutcome outcome =
+        CallV2DurableDiagnosticOutcome.none,
+    int? attempt,
+    bool? generationCurrent,
+  }) {
+    if (!_ended && _fatalError == null) return;
+    final acceptedCallkitId = (widget.acceptedCallkitId ?? '').trim();
+    try {
+      CallV2DurableDiagnosticRecorder.instance.record(
+        stage,
+        inviteIdentity: (widget.inviteId ?? '').trim(),
+        exactCallkitIdentity:
+            acceptedCallkitId.isNotEmpty ? acceptedCallkitId : _callkitId,
+        outcome: outcome,
+        attempt: attempt,
+        lifecycleGeneration:
+            widget.lifecycleGeneration == 0 ? null : widget.lifecycleGeneration,
+        generationCurrent: generationCurrent,
+      );
+    } on Object {
+      // Durable diagnostics must never affect terminal navigation.
+    }
+  }
+
+  void _recordTerminalRouteOwnershipRejected(
+    CallV2DurableDiagnosticOutcome outcome,
+  ) {
+    if (!_terminalRouteRejectionOutcomes.add(outcome)) return;
+    _recordDurableTerminalRoute(
+      CallV2DurableDiagnosticStage.terminalRouteOwnershipRejected,
+      outcome: outcome,
+      generationCurrent: _ownsManagedCallRoute(),
+    );
+  }
+
   Future<bool> _returnToAppAfterCall({
     bool requireManagedRouteOwnership = true,
     bool allowExactTerminalRouteRemoval = false,
@@ -2702,9 +2745,14 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     if (!mounted) return false;
     final terminalRouteRemovalAllowed =
         allowExactTerminalRouteRemoval && (_ended || _fatalError != null);
-    if (requireManagedRouteOwnership &&
-        !_ownsManagedCallRoute() &&
-        !terminalRouteRemovalAllowed) {
+    final initialOwnershipValid =
+        !requireManagedRouteOwnership || _ownsManagedCallRoute();
+    if (!initialOwnershipValid && terminalRouteRemovalAllowed) {
+      _recordTerminalRouteOwnershipRejected(
+        CallV2DurableDiagnosticOutcome.staleRouteOwnership,
+      );
+    }
+    if (!initialOwnershipValid && !terminalRouteRemovalAllowed) {
       await _diagTeardown('route_pop_stale_owner_blocked');
       return false;
     }
@@ -2714,18 +2762,36 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return false;
     }
-    if (requireManagedRouteOwnership &&
-        !_ownsManagedCallRoute() &&
-        !terminalRouteRemovalAllowed) {
+    final ownershipAfterFrameValid =
+        !requireManagedRouteOwnership || _ownsManagedCallRoute();
+    if (!ownershipAfterFrameValid && terminalRouteRemovalAllowed) {
+      _recordTerminalRouteOwnershipRejected(
+        CallV2DurableDiagnosticOutcome.staleRouteOwnership,
+      );
+    }
+    if (!ownershipAfterFrameValid && !terminalRouteRemovalAllowed) {
       await _diagTeardown('route_pop_stale_owner_blocked');
       return false;
     }
     final route = ModalRoute.of(context);
     if (route == null) {
+      _recordTerminalRouteOwnershipRejected(
+        CallV2DurableDiagnosticOutcome.routeMissing,
+      );
       await _diagTeardown('route_pop_route_missing');
       return false;
     }
     final nav = Navigator.of(context);
+    if (!route.isCurrent && terminalRouteRemovalAllowed) {
+      if (!_terminalRouteCoveredRecorded) {
+        _terminalRouteCoveredRecorded = true;
+        _recordDurableTerminalRoute(
+          CallV2DurableDiagnosticStage.terminalRouteCovered,
+          outcome: CallV2DurableDiagnosticOutcome.routeCovered,
+          generationCurrent: ownershipAfterFrameValid,
+        );
+      }
+    }
     if (!route.isCurrent && !terminalRouteRemovalAllowed) {
       await _diagTeardown('route_pop_not_current_blocked');
       return false;
@@ -2754,11 +2820,31 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         !identical(finalNavigator, nav) ||
         finalRoute == null ||
         finalRoute.navigator != finalNavigator) {
+      _recordTerminalRouteOwnershipRejected(
+        finalRoute == null
+            ? CallV2DurableDiagnosticOutcome.routeMissing
+            : CallV2DurableDiagnosticOutcome.navigatorChanged,
+      );
       unawaited(_diagTeardown('route_pop_final_owner_blocked'));
       return false;
     }
+    if (!finalOwnershipValid) {
+      _recordTerminalRouteOwnershipRejected(
+        CallV2DurableDiagnosticOutcome.staleRouteOwnership,
+      );
+    }
     if (!finalRoute.isCurrent || !finalOwnershipValid) {
+      _recordDurableTerminalRoute(
+        CallV2DurableDiagnosticStage.terminalExactRouteRemovalRequested,
+        outcome: CallV2DurableDiagnosticOutcome.allowed,
+        generationCurrent: finalOwnershipValid,
+      );
       finalNavigator.removeRoute(finalRoute);
+      _recordDurableTerminalRoute(
+        CallV2DurableDiagnosticStage.terminalExactRouteRemovalCompleted,
+        outcome: CallV2DurableDiagnosticOutcome.completed,
+        generationCurrent: finalOwnershipValid,
+      );
       await CallSessionManager.instance.handleExactCallRouteRemoved(
         inviteId: (widget.inviteId ?? '').trim(),
         lifecycleGeneration: widget.lifecycleGeneration,
@@ -2768,6 +2854,11 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       return true;
     }
     if (nav.canPop()) {
+      _recordDurableTerminalRoute(
+        CallV2DurableDiagnosticStage.terminalNavigatorPopRequested,
+        outcome: CallV2DurableDiagnosticOutcome.allowed,
+        generationCurrent: finalOwnershipValid,
+      );
       nav.pop();
       return true;
     }
@@ -2864,6 +2955,15 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   Future<void> _closeScreenAfterTerminalState(String reason) async {
     if (_endingCall) return;
     _endingCall = true;
+    if (!_terminalRouteExitRequestedRecorded) {
+      _terminalRouteExitRequestedRecorded = true;
+      _recordDurableTerminalRoute(
+        CallV2DurableDiagnosticStage.terminalRouteExitRequested,
+        outcome: CallV2DurableDiagnosticOutcome.allowed,
+        attempt: 0,
+        generationCurrent: _ownsManagedCallRoute(),
+      );
+    }
     _startTeardownTimeline();
     _quiesceEngineCallbacksForTerminal();
     _autoCloseTimer?.cancel();
@@ -2901,10 +3001,22 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   void _scheduleTerminalRouteExitRetry(String reason) {
     if (!mounted || (!_ended && _fatalError == null)) return;
     if (_terminalRouteRetryAttempts >= _maxTerminalRouteRetryAttempts) {
+      _recordDurableTerminalRoute(
+        CallV2DurableDiagnosticStage.terminalRouteRetryExhausted,
+        outcome: CallV2DurableDiagnosticOutcome.retryExhausted,
+        attempt: _terminalRouteRetryAttempts,
+        generationCurrent: _ownsManagedCallRoute(),
+      );
       unawaited(_diagTeardown('terminal_route_exit_retry_exhausted'));
       return;
     }
     _terminalRouteRetryAttempts += 1;
+    _recordDurableTerminalRoute(
+      CallV2DurableDiagnosticStage.terminalRouteRetryScheduled,
+      outcome: CallV2DurableDiagnosticOutcome.navigationFailure,
+      attempt: _terminalRouteRetryAttempts,
+      generationCurrent: _ownsManagedCallRoute(),
+    );
     _scheduleAutoClose(
       '$reason:retry',
       delay: _terminalRouteRetryDelay,
@@ -2943,6 +3055,14 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     _mediaAttachmentListener = null;
     if (_teardownElapsed != null) {
       unawaited(_diagTeardown('ui_route_disposed'));
+    }
+    if ((_ended || _fatalError != null) && !_terminalRouteDisposedRecorded) {
+      _terminalRouteDisposedRecorded = true;
+      _recordDurableTerminalRoute(
+        CallV2DurableDiagnosticStage.terminalRouteDisposed,
+        outcome: CallV2DurableDiagnosticOutcome.completed,
+        generationCurrent: _ownsManagedCallRoute(),
+      );
     }
     if (!widget.skipRuntimeSetupForTest &&
         widget.isVideo &&

@@ -131,6 +131,94 @@ void main() {
         hasLength(2),
       );
     });
+
+    test('terminal route outcome timeline survives recorder restart', () async {
+      final store = CallV2FileDurableDiagnosticStore.debugForTest(
+        targetFile: target,
+      );
+      final recorder = CallV2DurableDiagnosticRecorder(
+        store: store,
+        appLifecycleState: () => 'resumed',
+      );
+      const inviteId = 'private-terminal-invite';
+      const exactId = 'private-terminal-callkit';
+
+      recorder.record(
+        CallV2DurableDiagnosticStage.terminalRouteExitRequested,
+        inviteIdentity: inviteId,
+        exactCallkitIdentity: exactId,
+        outcome: CallV2DurableDiagnosticOutcome.allowed,
+        attempt: 0,
+        lifecycleGeneration: 12,
+        generationCurrent: true,
+      );
+      recorder.record(
+        CallV2DurableDiagnosticStage.terminalRouteCovered,
+        inviteIdentity: inviteId,
+        exactCallkitIdentity: exactId,
+        outcome: CallV2DurableDiagnosticOutcome.routeCovered,
+        lifecycleGeneration: 12,
+        generationCurrent: true,
+      );
+      recorder.record(
+        CallV2DurableDiagnosticStage.terminalExactRouteRemovalRequested,
+        inviteIdentity: inviteId,
+        exactCallkitIdentity: exactId,
+        outcome: CallV2DurableDiagnosticOutcome.allowed,
+        lifecycleGeneration: 12,
+        generationCurrent: true,
+      );
+      recorder.record(
+        CallV2DurableDiagnosticStage.terminalExactRouteRemovalCompleted,
+        inviteIdentity: inviteId,
+        exactCallkitIdentity: exactId,
+        outcome: CallV2DurableDiagnosticOutcome.completed,
+        lifecycleGeneration: 12,
+        generationCurrent: true,
+      );
+      recorder.record(
+        CallV2DurableDiagnosticStage.terminalRouteDisposed,
+        inviteIdentity: inviteId,
+        exactCallkitIdentity: exactId,
+        outcome: CallV2DurableDiagnosticOutcome.completed,
+        lifecycleGeneration: 12,
+        generationCurrent: true,
+      );
+      await recorder.flush();
+
+      final restarted = CallV2DurableDiagnosticRecorder(
+        store: store,
+        appLifecycleState: () => 'unknown',
+      );
+      final events = await restarted.readPersisted();
+      expect(
+        events.map((event) => event.stage),
+        orderedEquals(<CallV2DurableDiagnosticStage>[
+          CallV2DurableDiagnosticStage.terminalRouteExitRequested,
+          CallV2DurableDiagnosticStage.terminalRouteCovered,
+          CallV2DurableDiagnosticStage.terminalExactRouteRemovalRequested,
+          CallV2DurableDiagnosticStage.terminalExactRouteRemovalCompleted,
+          CallV2DurableDiagnosticStage.terminalRouteDisposed,
+        ]),
+      );
+      expect(events.map((event) => event.sequence),
+          orderedEquals(<int>[1, 2, 3, 4, 5]));
+      expect(
+          events.map((event) => event.lifecycleGeneration).toSet(), <int?>{12});
+      expect(events.map((event) => event.generationCurrent).toSet(),
+          <bool?>{true});
+      expect(
+          events.map((event) => event.callFingerprint).toSet(), hasLength(1));
+      expect(events.map((event) => event.exactCallkitFingerprint).toSet(),
+          hasLength(1));
+
+      final persisted = await target.readAsString();
+      expect(persisted, isNot(contains(inviteId)));
+      expect(persisted, isNot(contains(exactId)));
+      expect(persisted, isNot(contains('token')));
+      expect(persisted, isNot(contains('channel')));
+      expect(persisted, isNot(contains('payload')));
+    });
   });
 
   test('process restart preserves ordered A B C histories independently',

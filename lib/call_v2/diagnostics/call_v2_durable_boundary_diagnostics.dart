@@ -36,6 +36,15 @@ enum CallV2DurableDiagnosticStage {
   mediaCleanupStarted,
   mediaCleanupCompleted,
   lifecycleReturnedIdle,
+  terminalRouteExitRequested,
+  terminalRouteOwnershipRejected,
+  terminalRouteCovered,
+  terminalNavigatorPopRequested,
+  terminalExactRouteRemovalRequested,
+  terminalExactRouteRemovalCompleted,
+  terminalRouteDisposed,
+  terminalRouteRetryScheduled,
+  terminalRouteRetryExhausted,
 }
 
 enum CallV2DurableDiagnosticOutcome {
@@ -67,6 +76,12 @@ enum CallV2DurableDiagnosticOutcome {
   blocked,
   waiting,
   completed,
+  staleRouteOwnership,
+  routeMissing,
+  routeCovered,
+  navigatorChanged,
+  navigationFailure,
+  retryExhausted,
 }
 
 class CallV2DurableDiagnosticEvent {
