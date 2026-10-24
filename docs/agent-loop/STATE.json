@@ -2,26 +2,41 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "persistent_terminal_route_diagnostics",
-  "status": "revision_required",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "30a1303da11ee249fc3303319c635286e8fe7f69",
   "starting_sha": "30a1303da11ee249fc3303319c635286e8fe7f69",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "",
-  "ending_sha": "",
-  "changed_files": [],
-  "validation": {},
+  "code_commit_sha": "44b95292bf888129f5401c45891f1a011254ec00",
+  "ending_sha": "SELF",
+  "changed_files": [
+    "lib/call_v2/diagnostics/call_v2_durable_boundary_diagnostics.dart",
+    "lib/screens/call/agora_call_screen.dart",
+    "test/call_v2/diagnostics/call_v2_durable_boundary_diagnostics_test.dart",
+    "test/call_v2/real_flow/call_v2_route_ownership_terminal_transition_test.dart"
+  ],
+  "validation": {
+    "durable_diagnostics": "passed, 16 tests",
+    "terminal_route_ownership": "passed, 33 tests",
+    "focused_regressions": "passed, 193 tests",
+    "full_call_v2": "passed, 2389 tests",
+    "ios_runner_tests": "passed, 30 tests",
+    "flutter_analyze": "passed, no issues",
+    "format_check": "passed, 4 files unchanged",
+    "git_diff_check": "passed",
+    "dependency_diff": "none"
+  },
   "safety": {
     "deployed": false,
     "testflight_built": false,
     "production_services_contacted": false,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": false,
-    "test_changes": false
+    "production_code_changes": true,
+    "test_changes": true
   },
   "review": {
-    "decision": "revision_required",
-    "notes": "The terminal-route reliability correction is accepted. This revision is limited to persistent, privacy-safe, nonblocking terminal navigation outcome diagnostics and deterministic restart-recovery proof."
+    "decision": "ready_for_review",
+    "notes": "Persistent, privacy-safe terminal route outcomes now survive restart. Navigation never awaits diagnostic storage; all focused, full Call V2, native, formatting, and analysis validation passed. No physical verification or 100% reliability claim is made."
   }
 }
