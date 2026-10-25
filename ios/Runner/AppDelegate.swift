@@ -718,6 +718,15 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
           return
         }
 
+        if call.method == "getCallkitPresentationState" {
+          let args = call.arguments as? [String: Any]
+          let exactCallkitId = ((args?["callkitId"] as? String) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+          result(self.exactCallkitIdentityState(callkitId: exactCallkitId))
+          return
+        }
+
         if call.method == "endExactCallkitCall" {
           guard let args = call.arguments as? [String: Any] else {
             result(false)
@@ -1255,6 +1264,24 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
     let timestamp = entry["timestamp"] as? TimeInterval ?? 0
     return timestamp > 0 &&
       Date().timeIntervalSince1970 - timestamp < callkitPresentationLeaseGraceSeconds
+  }
+
+  /// Read-only exact identity facts for one CallKit call. The plugin's events
+  /// may carry a previous call's data, so Flutter verifies them against the
+  /// presentation ledger (written synchronously in the provider callbacks) and
+  /// the system call observer (which does not expire during long calls).
+  func exactCallkitIdentityState(callkitId: String) -> [String: Any] {
+    let exactId = callkitId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !exactId.isEmpty else {
+      return ["state": "", "systemCallActive": false]
+    }
+    let systemCallActive = callV2ExactCallController.callObserver.calls.contains { call in
+      call.uuid.uuidString.lowercased() == exactId && !call.hasEnded
+    }
+    return [
+      "state": callkitPresentationState(callkitId: exactId),
+      "systemCallActive": systemCallActive,
+    ]
   }
 
   private func activeCallkitContains(callkitId: String) -> Bool {

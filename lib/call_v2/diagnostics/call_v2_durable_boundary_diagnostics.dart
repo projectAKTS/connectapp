@@ -45,6 +45,8 @@ enum CallV2DurableDiagnosticStage {
   terminalRouteDisposed,
   terminalRouteRetryScheduled,
   terminalRouteRetryExhausted,
+  pluginEventIdentityRejected,
+  pluginEventIdentityReattributed,
 }
 
 enum CallV2DurableDiagnosticOutcome {

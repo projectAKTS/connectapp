@@ -148,13 +148,49 @@ class _RecentAcceptedCallkitCall {
   }
 }
 
+/// Exact native CallKit facts for one identity: the AppDelegate presentation
+/// ledger state and whether iOS still lists the call as not ended.
+class _NativeCallkitIdentityState {
+  const _NativeCallkitIdentityState({
+    required this.state,
+    required this.systemCallActive,
+  });
+
+  final String state;
+  final bool systemCallActive;
+
+  bool get terminal => state == 'terminal';
+  bool get accepted => state == 'accepted' || state == 'active';
+  bool get live =>
+      !terminal &&
+      (systemCallActive ||
+          state == 'presenting' ||
+          state == 'presented' ||
+          accepted);
+}
+
+class _PluginEventIdentity {
+  const _PluginEventIdentity({
+    required this.inviteId,
+    required this.callkitId,
+  });
+
+  final String inviteId;
+  final String callkitId;
+}
+
 class NotificationService with WidgetsBindingObserver {
   NotificationService({
     this.navigatorKey,
     Future<dynamic> Function()? activeCallkitCallsForTest,
     bool? iosCallkitPlatformForTest,
+    Future<Map<String, dynamic>?> Function(String callkitId)?
+        nativeCallkitIdentityStateForTest,
+    Future<Map<String, dynamic>?> Function()? nativeStoredPushTokensForTest,
   })  : _activeCallkitCallsForTest = activeCallkitCallsForTest,
-        _iosCallkitPlatformForTest = iosCallkitPlatformForTest {
+        _iosCallkitPlatformForTest = iosCallkitPlatformForTest,
+        _nativeCallkitIdentityStateForTest = nativeCallkitIdentityStateForTest,
+        _nativeStoredPushTokensForTest = nativeStoredPushTokensForTest {
     _activeInstance = this;
     CallSessionManager.instance.configure(
       navigatorKey: navigatorKey,
@@ -177,6 +213,10 @@ class NotificationService with WidgetsBindingObserver {
   final GlobalKey<NavigatorState>? navigatorKey;
   final Future<dynamic> Function()? _activeCallkitCallsForTest;
   final bool? _iosCallkitPlatformForTest;
+  final Future<Map<String, dynamic>?> Function(String callkitId)?
+      _nativeCallkitIdentityStateForTest;
+  final Future<Map<String, dynamic>?> Function()?
+      _nativeStoredPushTokensForTest;
 
   static NotificationService? _activeInstance;
 
@@ -1741,120 +1781,306 @@ class NotificationService with WidgetsBindingObserver {
     await _callkitSub?.cancel();
     _callkitSub = FlutterCallkitIncoming.onEvent.listen((event) async {
       if (event == null) return;
-      final body = _eventBody(event.body);
-      final extra = _eventExtra(body);
-      final channel = _stringField(extra, body, 'channel');
-      final fromName =
-          _stringField(extra, body, 'fromName', fallback: 'Caller');
-      final isVideo = _videoField(extra, body);
-      final id = _stringField(
-        extra,
-        body,
-        'id',
-        fallback: _stringField(extra, body, 'callkitId', fallback: channel),
+      await _handleCallkitPluginEvent(event);
+    });
+  }
+
+  Future<void> _handleCallkitPluginEvent(CallEvent event) async {
+    final body = _eventBody(event.body);
+    final extra = _eventExtra(body);
+    final channel = _stringField(extra, body, 'channel');
+    final fromName = _stringField(extra, body, 'fromName', fallback: 'Caller');
+    final isVideo = _videoField(extra, body);
+    final id = _stringField(
+      extra,
+      body,
+      'id',
+      fallback: _stringField(extra, body, 'callkitId', fallback: channel),
+    );
+    final fromUid = _stringField(extra, body, 'fromUid');
+    final inviteId = _stringField(
+      extra,
+      body,
+      'inviteId',
+      fallback: _stringField(extra, body, 'callId', fallback: id),
+    );
+    await _diagPush('callkit_event_received', meta: {
+      'event': event.event.toString(),
+      'inviteId': inviteId,
+      'callkitId': id,
+      'channel': channel,
+    });
+
+    if (event.event == Event.actionDidUpdateDevicePushTokenVoip) {
+      final token = _stringField(extra, body, 'deviceToken');
+      if (token.isNotEmpty) {
+        await _registerVoipToken(token);
+      }
+    }
+
+    if (!_enableIosCallKit) return;
+
+    if (event.event == Event.actionCallAccept && channel.isNotEmpty) {
+      final native = await _nativeCallkitIdentityState(id);
+      if (native != null && !native.accepted) {
+        await _rejectPluginEventIdentity(
+          event.event,
+          inviteId: inviteId,
+          callkitId: id,
+          native: native,
+        );
+        await _reattributePluginAcceptToNative(event.event);
+        return;
+      }
+      _rememberAcceptedCallkitCall(inviteId, id);
+      await _diagPush('callkit_accept', meta: {
+        'inviteId': inviteId,
+        'callkitId': id,
+        'channel': channel,
+        'pluginAcceptEventObserved': true,
+        'acceptedRecoverySource': 'plugin',
+      });
+      await _recoverAcceptedCallkitEvent(
+        inviteId: inviteId,
+        channel: channel,
+        isVideo: isVideo,
+        fromName: fromName,
+        fromUid: fromUid,
+        callkitId: id,
+        trigger: 'callkit_accept',
       );
-      final fromUid = _stringField(extra, body, 'fromUid');
-      final inviteId = _stringField(
-        extra,
-        body,
-        'inviteId',
-        fallback: _stringField(extra, body, 'callId', fallback: id),
-      );
-      await _diagPush('callkit_event_received', meta: {
-        'event': event.event.toString(),
+      return;
+    }
+    if (event.event == Event.actionCallDecline) {
+      await _diagPush('callkit_decline', meta: {
         'inviteId': inviteId,
         'callkitId': id,
         'channel': channel,
       });
-
-      if (event.event == Event.actionDidUpdateDevicePushTokenVoip) {
-        final token = _stringField(extra, body, 'deviceToken');
-        if (token.isNotEmpty) {
-          await _registerVoipToken(token);
-        }
+      final target = await _resolvePluginTerminalIdentity(
+        event.event,
+        nativeEventKind: 'decline',
+        inviteId: inviteId,
+        callkitId: id,
+      );
+      if (target == null) return;
+      if (!_shouldProcessCallkitTerminalEvent(
+        event.event,
+        target.inviteId,
+        target.callkitId,
+      )) {
+        return;
       }
-
-      if (!_enableIosCallKit) return;
-
-      if (event.event == Event.actionCallAccept && channel.isNotEmpty) {
-        _rememberAcceptedCallkitCall(inviteId, id);
-        await _diagPush('callkit_accept', meta: {
-          'inviteId': inviteId,
-          'callkitId': id,
-          'channel': channel,
-          'pluginAcceptEventObserved': true,
-          'acceptedRecoverySource': 'plugin',
-        });
-        await _recoverAcceptedCallkitEvent(
+      if (target.inviteId.isNotEmpty) {
+        await CallSessionManager.instance.declineInvite(
+          inviteId: target.inviteId,
+          source: 'callkit_decline',
+        );
+      }
+    }
+    if (event.event == Event.actionCallEnded) {
+      await _diagPush('callkit_end', meta: {
+        'inviteId': inviteId,
+        'callkitId': id,
+        'channel': channel,
+      });
+      final native = await _nativeCallkitIdentityState(id);
+      if (native != null && native.live) {
+        await _rejectPluginEventIdentity(
+          event.event,
           inviteId: inviteId,
-          channel: channel,
-          isVideo: isVideo,
-          fromName: fromName,
-          fromUid: fromUid,
           callkitId: id,
-          trigger: 'callkit_accept',
+          native: native,
         );
         return;
       }
-      if (event.event == Event.actionCallDecline) {
-        await _diagPush('callkit_decline', meta: {
+      // A ledger-verified exact end is real, not a synthetic post-accept end.
+      final nativeVerifiedEnd = native != null && native.terminal;
+      if (!nativeVerifiedEnd &&
+          _shouldIgnoreSyntheticAcceptedCallkitEnd(inviteId, id)) {
+        await _diagPush('callkit_end_ignored_recent_accept', meta: {
           'inviteId': inviteId,
           'callkitId': id,
           'channel': channel,
+          'hasActiveManagedCall':
+              CallSessionManager.instance.hasActiveUiOrSession,
+          'recoveringAcceptedCall': _recoveringAcceptedCall,
         });
-        if (!_shouldProcessCallkitTerminalEvent(event.event, inviteId, id)) {
-          return;
-        }
-        if (inviteId.isNotEmpty) {
-          await CallSessionManager.instance.declineInvite(
-            inviteId: inviteId,
-            source: 'callkit_decline',
-          );
-        }
+        return;
       }
-      if (event.event == Event.actionCallEnded) {
-        await _diagPush('callkit_end', meta: {
-          'inviteId': inviteId,
-          'callkitId': id,
-          'channel': channel,
-        });
-        if (_shouldIgnoreSyntheticAcceptedCallkitEnd(inviteId, id)) {
-          await _diagPush('callkit_end_ignored_recent_accept', meta: {
-            'inviteId': inviteId,
-            'callkitId': id,
-            'channel': channel,
-            'hasActiveManagedCall':
-                CallSessionManager.instance.hasActiveUiOrSession,
-            'recoveringAcceptedCall': _recoveringAcceptedCall,
-          });
-          return;
-        }
-        if (!_shouldProcessCallkitTerminalEvent(event.event, inviteId, id)) {
-          return;
-        }
-        if (inviteId.isNotEmpty) {
-          await CallSessionManager.instance.handleSystemEndedInvite(
-            inviteId: inviteId,
-            source: 'callkit_end',
-          );
-        }
+      if (!_shouldProcessCallkitTerminalEvent(event.event, inviteId, id)) {
+        return;
       }
-      if (event.event == Event.actionCallTimeout && inviteId.isNotEmpty) {
-        await _diagPush('callkit_end', meta: {
-          'inviteId': inviteId,
-          'callkitId': id,
-          'channel': channel,
-          'timeout': true,
-        });
-        if (!_shouldProcessCallkitTerminalEvent(event.event, inviteId, id)) {
-          return;
-        }
-        await CallSessionManager.instance.handleSystemTimeoutInvite(
+      if (inviteId.isNotEmpty) {
+        await CallSessionManager.instance.handleSystemEndedInvite(
           inviteId: inviteId,
-          source: 'callkit_timeout',
+          source: 'callkit_end',
         );
       }
+    }
+    if (event.event == Event.actionCallTimeout && inviteId.isNotEmpty) {
+      await _diagPush('callkit_end', meta: {
+        'inviteId': inviteId,
+        'callkitId': id,
+        'channel': channel,
+        'timeout': true,
+      });
+      final target = await _resolvePluginTerminalIdentity(
+        event.event,
+        nativeEventKind: 'timeout',
+        inviteId: inviteId,
+        callkitId: id,
+      );
+      if (target == null || target.inviteId.isEmpty) return;
+      if (!_shouldProcessCallkitTerminalEvent(
+        event.event,
+        target.inviteId,
+        target.callkitId,
+      )) {
+        return;
+      }
+      await CallSessionManager.instance.handleSystemTimeoutInvite(
+        inviteId: target.inviteId,
+        source: 'callkit_timeout',
+      );
+    }
+  }
+
+  /// Exact native facts for one CallKit identity, or null when native state
+  /// is unavailable (non-iOS, or an older native build), which keeps the
+  /// existing plugin-event behavior.
+  Future<_NativeCallkitIdentityState?> _nativeCallkitIdentityState(
+    String callkitId,
+  ) async {
+    final exactId = callkitId.trim().toLowerCase();
+    if (exactId.isEmpty) return null;
+    try {
+      final injected = _nativeCallkitIdentityStateForTest;
+      final Map<String, dynamic>? raw;
+      if (injected != null) {
+        raw = await injected(exactId);
+      } else {
+        if (!_isIosCallkitPlatform) return null;
+        raw = await _pushTokenChannel.invokeMapMethod<String, dynamic>(
+          'getCallkitPresentationState',
+          <String, Object?>{'callkitId': exactId},
+        );
+      }
+      if (raw == null) return null;
+      return _NativeCallkitIdentityState(
+        state: (raw['state'] ?? '').toString().trim().toLowerCase(),
+        systemCallActive: raw['systemCallActive'] == true,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The plugin sends decline and provider-timeout events with its global
+  /// `self.data`; AppDelegate records the exact call for the same action
+  /// before Flutter can ask. Returns the identity to act on, or null when
+  /// native state contradicts the plugin and no exact identity is known.
+  Future<_PluginEventIdentity?> _resolvePluginTerminalIdentity(
+    Event event, {
+    required String nativeEventKind,
+    required String inviteId,
+    required String callkitId,
+  }) async {
+    final pluginIdentity = _PluginEventIdentity(
+      inviteId: inviteId.trim(),
+      callkitId: callkitId.trim().toLowerCase(),
+    );
+    final native = await _nativeCallkitIdentityState(callkitId);
+    if (native == null) return pluginIdentity;
+    final tokens = await _readNativePushTokens();
+    final nativeEvent = (tokens['lastCallkitEvent'] ?? '').trim().toLowerCase();
+    final nativeCallkitId =
+        (tokens['lastCallkitEventCallkitId'] ?? '').trim().toLowerCase();
+    final nativeInviteId = (tokens['lastCallkitEventInviteId'] ?? '').trim();
+    if (nativeEvent == nativeEventKind && nativeCallkitId.isNotEmpty) {
+      if (nativeCallkitId == pluginIdentity.callkitId) return pluginIdentity;
+      final exact = await _nativeCallkitIdentityState(nativeCallkitId);
+      if (exact != null && exact.terminal && nativeInviteId.isNotEmpty) {
+        await _rejectPluginEventIdentity(
+          event,
+          inviteId: inviteId,
+          callkitId: callkitId,
+          native: native,
+        );
+        CallV2DurableDiagnosticRecorder.instance.record(
+          CallV2DurableDiagnosticStage.pluginEventIdentityReattributed,
+          inviteIdentity: nativeInviteId,
+          exactCallkitIdentity: nativeCallkitId,
+          outcome: CallV2DurableDiagnosticOutcome.exactIdentityMatch,
+        );
+        return _PluginEventIdentity(
+          inviteId: nativeInviteId,
+          callkitId: nativeCallkitId,
+        );
+      }
+    }
+    if (native.live) {
+      await _rejectPluginEventIdentity(
+        event,
+        inviteId: inviteId,
+        callkitId: callkitId,
+        native: native,
+      );
+      return null;
+    }
+    return pluginIdentity;
+  }
+
+  Future<void> _rejectPluginEventIdentity(
+    Event event, {
+    required String inviteId,
+    required String callkitId,
+    required _NativeCallkitIdentityState native,
+  }) async {
+    CallV2DurableDiagnosticRecorder.instance.record(
+      CallV2DurableDiagnosticStage.pluginEventIdentityRejected,
+      inviteIdentity: inviteId,
+      exactCallkitIdentity: callkitId,
+      outcome: CallV2DurableDiagnosticOutcome.distinctIdentity,
+    );
+    await _diagPush('callkit_plugin_identity_rejected', meta: {
+      'event': event.toString(),
+      'inviteId': inviteId,
+      'callkitId': callkitId,
+      'nativeState': native.state,
+      'systemCallActive': native.systemCallActive,
     });
+  }
+
+  /// A contradicted plugin accept still signals that some call was answered;
+  /// recover the exact call AppDelegate stored for that answer, if any.
+  Future<void> _reattributePluginAcceptToNative(Event event) async {
+    final tokens = await _readNativePushTokens();
+    final callkitId =
+        (tokens['lastCallkitAcceptedCallkitId'] ?? '').trim().toLowerCase();
+    final inviteId = (tokens['lastCallkitAcceptedInviteId'] ?? '').trim();
+    final channel = (tokens['lastCallkitAcceptedChannel'] ?? '').trim();
+    if (callkitId.isEmpty || inviteId.isEmpty || channel.isEmpty) return;
+    final native = await _nativeCallkitIdentityState(callkitId);
+    if (native == null || !native.accepted) return;
+    CallV2DurableDiagnosticRecorder.instance.record(
+      CallV2DurableDiagnosticStage.pluginEventIdentityReattributed,
+      inviteIdentity: inviteId,
+      exactCallkitIdentity: callkitId,
+      outcome: CallV2DurableDiagnosticOutcome.exactIdentityMatch,
+    );
+    _rememberAcceptedCallkitCall(inviteId, callkitId);
+    final fromName = (tokens['lastCallkitAcceptedFromName'] ?? '').trim();
+    await _recoverAcceptedCallkitEvent(
+      inviteId: inviteId,
+      channel: channel,
+      isVideo: _truthyValue(tokens['lastCallkitAcceptedIsVideo'] ?? ''),
+      fromName: fromName.isEmpty ? 'Caller' : fromName,
+      fromUid: (tokens['lastCallkitAcceptedFromUid'] ?? '').trim(),
+      callkitId: callkitId,
+      trigger: 'callkit_accept_native_identity',
+      allowDistinctPreemption: false,
+    );
   }
 
   Future<void> _registerFcmToken({
@@ -1956,9 +2182,12 @@ class NotificationService with WidgetsBindingObserver {
 
   Future<Map<String, String>> _readNativePushTokens() async {
     try {
-      final raw = await _pushTokenChannel.invokeMapMethod<String, dynamic>(
-        'getStoredPushTokens',
-      );
+      final injectedTokens = _nativeStoredPushTokensForTest;
+      final raw = injectedTokens != null
+          ? await injectedTokens()
+          : await _pushTokenChannel.invokeMapMethod<String, dynamic>(
+              'getStoredPushTokens',
+            );
       if (raw == null) return const <String, String>{};
       final apns = (raw['apnsToken'] ?? '').toString().trim();
       final apnsSuffix = (raw['apnsTokenSuffix'] ?? '').toString().trim();
@@ -3168,6 +3397,16 @@ class NotificationService with WidgetsBindingObserver {
       callkitId: exactCallkitId,
       trigger: 'debug_callkit_accept',
     );
+  }
+
+  Future<void> debugSimulateCallkitPluginEventForTest(
+    Event event,
+    Map<String, dynamic> body,
+  ) async {
+    if (!_debugTestAccessEnabled) {
+      throw StateError('debugSimulateCallkitPluginEventForTest is test-only');
+    }
+    await _handleCallkitPluginEvent(CallEvent(body, event));
   }
 
   Future<void> debugSimulateNativeAcceptedCallkitBridgeForTest({

@@ -4,6 +4,22 @@ import XCTest
 @testable import Runner
 
 class RunnerTests: XCTestCase {
+  func testExactCallkitIdentityStateNeverReportsUnknownCallsAsLive() {
+    guard let delegate = UIApplication.shared.delegate as? AppDelegate else {
+      return XCTFail("Runner host AppDelegate unavailable")
+    }
+    let empty = delegate.exactCallkitIdentityState(callkitId: "  ")
+    XCTAssertEqual(empty["state"] as? String, "")
+    XCTAssertEqual(empty["systemCallActive"] as? Bool, false)
+
+    let unknown = delegate.exactCallkitIdentityState(
+      callkitId: "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC"
+    )
+    XCTAssertEqual(unknown["state"] as? String, "")
+    XCTAssertEqual(unknown["systemCallActive"] as? Bool, false)
+    XCTAssertEqual(Set(unknown.keys), ["state", "systemCallActive"])
+  }
+
   func testExactCallkitEndRetryTargetsOnlySuppliedUuidDespiteNewerGlobalState() {
     let exactA = UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!
     let exactB = UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")!

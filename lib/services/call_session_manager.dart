@@ -231,6 +231,29 @@ class _AcceptedNativeRouteWatch {
   }
 }
 
+/// Authoritative terminal state observed for one exact accepted call.
+///
+/// A terminal observation for Call A must never be read as terminal for a
+/// different accepted Call B, so it records the exact identity and, when
+/// known, the lifecycle generation that observed it.
+class _AcceptedRouteTerminalObservation {
+  const _AcceptedRouteTerminalObservation({
+    required this.payload,
+    this.lifecycleGeneration,
+  });
+
+  final CallInvitePayload payload;
+  final int? lifecycleGeneration;
+
+  bool matches(CallInvitePayload other, {int? lifecycleGeneration}) {
+    if (!payload.matchesAcceptedIdentity(other)) return false;
+    final observed = this.lifecycleGeneration;
+    return observed == null ||
+        lifecycleGeneration == null ||
+        observed == lifecycleGeneration;
+  }
+}
+
 class _PendingAcceptedInviteIntent {
   const _PendingAcceptedInviteIntent({
     required this.payload,
@@ -512,8 +535,10 @@ class CallSessionManager {
   _PendingAcceptedInviteIntent? _pendingAcceptedInviteIntent;
   _AcceptedRouteContinuation? _acceptedRouteContinuation;
   Future<AcceptedCallRecoveryResult>? _acceptedRouteContinuationFuture;
+  _AcceptedRouteContinuation? _acceptedRouteContinuationFutureOwner;
   _AcceptedNativeRouteWatch? _acceptedNativeRouteWatch;
   Future<void>? _acceptedNativeCleanupFuture;
+  _AcceptedNativeRouteWatch? _acceptedNativeCleanupOwner;
   bool _pendingAcceptedRecorded = false;
   bool _pendingAcceptedClaimed = false;
   bool _pendingAcceptedContinuationStarted = false;
@@ -529,6 +554,7 @@ class CallSessionManager {
   bool _acceptedOwnershipRecorded = false;
   bool _acceptedRouteDeadlineReached = false;
   bool _acceptedRouteTerminalObserved = false;
+  _AcceptedRouteTerminalObservation? _acceptedRouteTerminalObservation;
   String? _nativeAcceptedCallInviteId;
   bool _acceptedNativeWatchTerminalObserved = false;
   bool _acceptedNativeWatchDeadlineReached = false;
@@ -698,6 +724,7 @@ class CallSessionManager {
     await acceptedNativeWatch?.subscription?.cancel();
     _acceptedNativeRouteWatch = null;
     _acceptedNativeCleanupFuture = null;
+    _acceptedNativeCleanupOwner = null;
     await _activeInviteSub?.cancel();
     _activeInviteSub = null;
     _cancelSessionTimers();
@@ -717,6 +744,7 @@ class CallSessionManager {
     _pendingAcceptedInviteIntent = null;
     _acceptedRouteContinuation = null;
     _acceptedRouteContinuationFuture = null;
+    _acceptedRouteContinuationFutureOwner = null;
     _pendingAcceptedRecorded = false;
     _pendingAcceptedClaimed = false;
     _pendingAcceptedContinuationStarted = false;
@@ -732,6 +760,7 @@ class CallSessionManager {
     _acceptedOwnershipRecorded = false;
     _acceptedRouteDeadlineReached = false;
     _acceptedRouteTerminalObserved = false;
+    _acceptedRouteTerminalObservation = null;
     _nativeAcceptedCallInviteId = null;
     _acceptedNativeWatchTerminalObserved = false;
     _acceptedNativeWatchDeadlineReached = false;
@@ -797,10 +826,60 @@ class CallSessionManager {
     if (cleanup != null) await cleanup;
   }
 
-  Future<void> _awaitAcceptedNativeTerminalCleanup() async {
-    final cleanup = _acceptedNativeRouteWatch?.cleanupFuture ??
-        _acceptedNativeCleanupFuture;
+  /// Waits only for accepted-native cleanup that belongs to [payload]. Without
+  /// a payload the latest cleanup is awaited, preserving generic resume.
+  Future<void> _awaitAcceptedNativeTerminalCleanup([
+    CallInvitePayload? payload,
+  ]) async {
+    final watch = _acceptedNativeRouteWatch;
+    final cleanupOwner = _acceptedNativeCleanupOwner;
+    final Future<void>? cleanup;
+    if (payload == null) {
+      cleanup = watch?.cleanupFuture ?? _acceptedNativeCleanupFuture;
+    } else if (watch != null && watch.matchesIdentity(payload)) {
+      cleanup = watch.cleanupFuture ??
+          (identical(cleanupOwner, watch)
+              ? _acceptedNativeCleanupFuture
+              : null);
+    } else if (cleanupOwner != null && cleanupOwner.matchesIdentity(payload)) {
+      cleanup = _acceptedNativeCleanupFuture;
+    } else {
+      cleanup = null;
+    }
     if (cleanup != null) await cleanup;
+  }
+
+  void _recordAcceptedRouteTerminal(
+    CallInvitePayload payload, {
+    required bool terminal,
+    int? lifecycleGeneration,
+  }) {
+    if (terminal) {
+      _acceptedRouteTerminalObserved = true;
+      _acceptedRouteTerminalObservation = _AcceptedRouteTerminalObservation(
+        payload: payload,
+        lifecycleGeneration: lifecycleGeneration,
+      );
+      return;
+    }
+    final observation = _acceptedRouteTerminalObservation;
+    if (observation == null || observation.matches(payload)) {
+      _acceptedRouteTerminalObserved = false;
+      _acceptedRouteTerminalObservation = null;
+    }
+  }
+
+  /// Whether authoritative terminal state was observed for this exact call.
+  /// A null [payload] keeps the unscoped answer for generic resume callers.
+  bool _acceptedRouteTerminalObservedFor(
+    CallInvitePayload? payload, {
+    int? lifecycleGeneration,
+  }) {
+    if (!_acceptedRouteTerminalObserved) return false;
+    if (payload == null) return true;
+    final observation = _acceptedRouteTerminalObservation;
+    return observation != null &&
+        observation.matches(payload, lifecycleGeneration: lifecycleGeneration);
   }
 
   String? get activeInviteId => _current?.inviteId;
@@ -1865,8 +1944,8 @@ class CallSessionManager {
     final continuation = _acceptedRouteContinuation;
     if (continuation == null ||
         !continuation.payload.matchesAcceptedIdentity(bridgePayload)) {
-      if (_acceptedRouteTerminalObserved) {
-        await _awaitAcceptedNativeTerminalCleanup();
+      if (_acceptedRouteTerminalObservedFor(bridgePayload)) {
+        await _awaitAcceptedNativeTerminalCleanup(bridgePayload);
         return AcceptedCallRecoveryResult.terminal;
       }
       return AcceptedCallRecoveryResult.pendingTeardown;
@@ -2980,6 +3059,7 @@ class CallSessionManager {
     );
     _acceptedNativeRouteWatch = watch;
     _acceptedNativeCleanupFuture = null;
+    _acceptedNativeCleanupOwner = null;
     _acceptedNativeWatchTerminalObserved = false;
     _acceptedNativeWatchDeadlineReached = false;
     _acceptedNativeExactIdPresent = payload.acceptedCallkitId.isNotEmpty;
@@ -3029,7 +3109,11 @@ class CallSessionManager {
     final status = _parseStatus(snapshot.data()?['status']);
     if (snapshot.exists && !_isTerminalStatus(status)) return;
     _acceptedNativeWatchTerminalObserved = true;
-    _acceptedRouteTerminalObserved = true;
+    _recordAcceptedRouteTerminal(
+      watch.payload,
+      terminal: true,
+      lifecycleGeneration: watch.lifecycleGeneration,
+    );
     await _resolveAcceptedNativeRouteWatch(
       watch,
       reason: 'accepted_native_authoritative_terminal',
@@ -3060,7 +3144,11 @@ class CallSessionManager {
     final status = _parseStatus(latest?['status']);
     final terminal = latest == null || _isTerminalStatus(status);
     _acceptedNativeWatchTerminalObserved = terminal;
-    _acceptedRouteTerminalObserved = terminal;
+    _recordAcceptedRouteTerminal(
+      watch.payload,
+      terminal: terminal,
+      lifecycleGeneration: watch.lifecycleGeneration,
+    );
     await _resolveAcceptedNativeRouteWatch(
       watch,
       reason: 'accepted_native_watch_deadline',
@@ -3086,6 +3174,7 @@ class CallSessionManager {
     );
     watch.cleanupFuture = future;
     _acceptedNativeCleanupFuture = future;
+    _acceptedNativeCleanupOwner = watch;
     await future;
   }
 
@@ -3233,6 +3322,7 @@ class CallSessionManager {
       _acceptedNativeRouteWatch = null;
     }
     _acceptedNativeCleanupFuture = null;
+    _acceptedNativeCleanupOwner = null;
   }
 
   Future<void> _transferAcceptedNativeWatchToMedia(
@@ -3246,6 +3336,7 @@ class CallSessionManager {
     watch.subscription = null;
     if (subscription != null) unawaited(subscription.cancel());
     _acceptedNativeCleanupFuture = null;
+    _acceptedNativeCleanupOwner = null;
     await _diagManager('accepted_native_watch_transferred_to_media', meta: {
       'mediaOwned': true,
       'routeOwned': watch.routeOpened,
@@ -3319,8 +3410,9 @@ class CallSessionManager {
   }) async {
     final continuation = _acceptedRouteContinuation;
     if (continuation == null) {
-      if (_acceptedRouteTerminalObserved) {
-        await _awaitAcceptedNativeTerminalCleanup();
+      final pendingPayload = _pendingAcceptedInviteIntent?.payload;
+      if (_acceptedRouteTerminalObservedFor(pendingPayload)) {
+        await _awaitAcceptedNativeTerminalCleanup(pendingPayload);
         return AcceptedCallRecoveryResult.terminal;
       }
       return _pendingAcceptedInviteIntent == null
@@ -3330,8 +3422,14 @@ class CallSessionManager {
     _acceptedRouteResumeTriggered = true;
     _acceptedRouteAppResumed = await _isAppActuallyForeground();
 
+    // Single-flight is per exact continuation. A superseded continuation that
+    // is awaiting its own terminal cleanup may be the caller that resumes the
+    // next pending call, so joining its future would deadlock that call.
     final inFlight = _acceptedRouteContinuationFuture;
-    if (inFlight != null) return inFlight;
+    if (inFlight != null &&
+        identical(_acceptedRouteContinuationFutureOwner, continuation)) {
+      return inFlight;
+    }
 
     late final Future<AcceptedCallRecoveryResult> future;
     future = _resumeAcceptedRouteContinuation(
@@ -3339,12 +3437,14 @@ class CallSessionManager {
       source: source,
     );
     _acceptedRouteContinuationFuture = future;
+    _acceptedRouteContinuationFutureOwner = continuation;
     _acceptedRouteAttemptInFlight = true;
     try {
       return await future;
     } finally {
       if (identical(_acceptedRouteContinuationFuture, future)) {
         _acceptedRouteContinuationFuture = null;
+        _acceptedRouteContinuationFutureOwner = null;
         _acceptedRouteAttemptInFlight = false;
       }
     }
@@ -3376,7 +3476,12 @@ class CallSessionManager {
     final latestStatus = _parseStatus(latest?['status']);
     final authoritativeTerminal =
         latest == null || _isTerminalStatus(latestStatus);
-    _acceptedRouteTerminalObserved = authoritativeTerminal;
+    _recordAcceptedRouteTerminal(
+      payload,
+      terminal: authoritativeTerminal,
+      lifecycleGeneration:
+          continuation?.claimedGeneration ?? intent?.claimedGeneration,
+    );
 
     if (!authoritativeTerminal) {
       await _setInviteStatusIfCurrent(
@@ -3562,12 +3667,15 @@ class CallSessionManager {
       return AcceptedCallRecoveryResult.pendingNetwork;
     }
     if (result == _IncomingCandidateResult.terminal) {
-      await _awaitAcceptedNativeTerminalCleanup();
+      await _awaitAcceptedNativeTerminalCleanup(continuation.payload);
       return AcceptedCallRecoveryResult.terminal;
     }
     if (result == _IncomingCandidateResult.ignored) {
-      if (_acceptedRouteTerminalObserved) {
-        await _awaitAcceptedNativeTerminalCleanup();
+      if (_acceptedRouteTerminalObservedFor(
+        continuation.payload,
+        lifecycleGeneration: continuation.claimedGeneration,
+      )) {
+        await _awaitAcceptedNativeTerminalCleanup(continuation.payload);
         return AcceptedCallRecoveryResult.terminal;
       }
       _acceptedRouteDiscarded = true;
