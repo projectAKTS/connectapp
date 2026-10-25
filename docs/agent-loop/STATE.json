@@ -2,26 +2,43 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "stale_callkit_plugin_identity_isolation",
-  "status": "task_ready",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "3500609828afa6e28eae5896a08b0e8c0ec5c272",
   "starting_sha": "3500609828afa6e28eae5896a08b0e8c0ec5c272",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "",
-  "ending_sha": "",
-  "changed_files": [],
-  "validation": {},
+  "code_commit_sha": "624bca530e370dd345e6a13531aab5075b7a66ad",
+  "ending_sha": "SELF",
+  "changed_files": [
+    "ios/Runner/AppDelegate.swift",
+    "ios/RunnerTests/RunnerTests.swift",
+    "lib/call_v2/diagnostics/call_v2_durable_boundary_diagnostics.dart",
+    "lib/services/call_session_manager.dart",
+    "lib/services/notification_service.dart",
+    "test/call_v2/real_flow/call_v2_stale_callkit_plugin_identity_test.dart"
+  ],
+  "validation": {
+    "baseline_red": "failed as expected, 12 failed / 4 guards passed",
+    "stale_plugin_identity_regression": "passed, 16 tests",
+    "focused_real_flow_and_diagnostics": "passed, 273 tests",
+    "full_call_v2": "passed, 2405 tests",
+    "ios_runner_tests": "passed, 31 tests on iOS 26.0 simulator",
+    "flutter_analyze": "passed, no issues",
+    "format_check": "passed, 4 files unchanged",
+    "git_diff_check": "passed",
+    "dependency_diff": "none"
+  },
   "safety": {
     "deployed": false,
     "testflight_built": false,
     "production_services_contacted": false,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": false,
-    "test_changes": false
+    "production_code_changes": true,
+    "test_changes": true
   },
   "review": {
-    "decision": "task_ready",
-    "notes": "User-authorized correction for the reproduced stale CallKit plugin identity defect: a terminal observation for declined Call A suppresses accepted Call B. Scope is exact native identity validation of plugin events and identity/generation-scoped accepted-route terminal state."
+    "decision": "ready_for_review",
+    "notes": "Stale plugin identities are validated against exact native CallKit state; accepted-route terminal state, cleanup waits, and continuation single-flight are scoped to the exact call. A declined then B accepted no longer suppresses B. No physical verification or 100% reliability claim is made."
   }
 }
