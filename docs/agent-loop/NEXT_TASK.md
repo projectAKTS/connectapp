@@ -1,78 +1,80 @@
-# Active Revision - Firestore Watch-Stream Churn And Client Wedge
+# Active Task - HTTPS Call-Invite Signaling (Firestore-Independent Critical Path)
 
-Branch: `call-v2`
+Branch: `call-v2-https-signaling` (the physically verified baseline is locked
+as `stable/calls-oct-26` and tag `stable-calls-oct-26`; do not modify them)
 
-Starting SHA: `aedfe11daaa9819124e9ca8c8a108e269bc786f7`
+Starting SHA: `46a71e94aa17e26478a929ab71b786a9f83312d2`
 
-Authorized by the user on 2026-10-25 after physical TestFlight build
-`1.0.2 (202610251434)` failed on the third consecutive call.
+Authorized by the user on 2026-10-26 after TestFlight 1.0.2 (202610252344)
+passed three consecutive audio calls and two video calls.
 
-## Proven Physical Failure (callee iPhone, 2026-10-26 UTC)
+## Problem
 
-- Calls 1 and 2 connected and closed correctly.
-- Call 3: native CallKit accept at 02:14:08.164; the Flutter accept transaction
-  callback started (08.286) but `transaction.get` never returned; attempts 2
-  and 3 never entered their callback; every other Firestore read timed out.
-  The native 20 s safety watchdog ended CallKit at 02:14:28.192.
-- Call 4 (video): accepted, recorded `pending_accept_recorded` behind call 3's
-  lifecycle `teardown`, and never started; watchdog ended it at 02:15:04.525.
-- Device unified log: Firestore logged dozens of `Listen for query at chats /
-  connections failed: Missing or insufficient permissions` and `WatchStream
-  Stream error: 'Not found: Target id not found'` per 10 s, then
-  `WriteStream ... 'Unavailable: Network connectivity changed'` at
-  02:14:08.493 and nothing at all afterwards: the watch-stream close never
-  logged.
-- Firebase iOS SDK 11.10.0 source: a connectivity change runs
-  `GrpcStream::Shutdown` -> `FastFinishCompletionsBlocking` ->
-  `GrpcCompletion::WaitUntilOffQueue()` with no timeout on Firestore's single
-  serial worker queue. A watch-stream completion that never leaves the gRPC
-  queue blocks every Firestore operation for the process lifetime (same
-  signature as open upstream issue firebase/firebase-ios-sdk#12522, whose
-  reproduction stops when the churning listener is removed).
+The Firebase iOS SDK (11.10.0) can wedge its single Firestore worker queue
+in `GrpcStream::Shutdown` -> `WaitUntilOffQueue()` on a connectivity change
+(upstream firebase-ios-sdk#12522, unfixed). The proven app-side trigger was
+removed in `3db9e00`, but every call-critical state change (accept, decline,
+joining/connected stages, terminal transitions) still runs as a client
+Firestore transaction, several of them without any timeout. If the SDK
+wedges again, an accepted call cannot connect and an unfinished teardown
+blocks the next call.
 
-## Root Cause In App Code
+App Check: the app requests App Attest, but the binary has no App Attest
+entitlement and Firebase has no App Attest configuration, so every token
+exchange returns 403 (App Check is unenforced, so nothing fails today).
+DeviceCheck is fully configured.
 
-`HomeContentScreen` is kept mounted (Offstage tab, keep-alive). `_HomeTopBar`
-and `_WelcomeCard` create `users/{uid}`, `chats` (2) and `connections` (3)
-`.snapshots()` streams inside `build()` and nested builders, so every
-`users/{uid}` change tears down and re-creates up to five watch targets.
-`DiagnosticService` and `_syncNativePushDiagnostics` write `users/{uid}` on
-every call/push diagnostic event, driving that churn hardest exactly during
-call setup and teardown.
+## Goal
+
+Make call-invite state transitions independent of the Firestore client by
+routing them through one HTTPS callable on the existing `callInvites` model,
+keep the current Firestore transactions as a bounded fallback, and fix App
+Check token issuance.
 
 ## Allowed Files
 
-- `lib/screens/home/home_content_screen.dart`
-- `lib/services/diagnostic_service.dart`
-- `lib/services/notification_service.dart` (diagnostic write gating only)
-- directly relevant tests under `test/**`
-- `docs/agent-loop/NEXT_TASK.md`
-- `docs/agent-loop/STATE.json`
-- `docs/agent-loop/HANDOFF.md`
+- `lib/main.dart` (App Check provider only)
+- `lib/services/call_session_manager.dart`
+- new `lib/services/call_invite_signaling.dart`
+- `connect_functions/index.js` (one new callable export)
+- new `connect_functions/call_invites/**`
+- new/updated tests under `test/**` and `connect_functions/test/call_invites/**`
+- `docs/agent-loop/NEXT_TASK.md`, `docs/agent-loop/STATE.json`,
+  `docs/agent-loop/HANDOFF.md`
 
 ## Required Implementation
 
-- Create the Home top-bar and welcome-card Firestore streams once per user id
-  (and only re-create them when the user id changes), never inside `build()`.
-- Write remote `users/{uid}.diag` fields only when `ENABLE_RUNTIME_DIAG` is set;
-  keep local `[DIAG]` logging and the on-device durable recorder unchanged.
-- Regression coverage proving repeated `users/{uid}` updates and parent
-  rebuilds create no additional Home Firestore listeners, and that release
-  diagnostics never write the user document.
+1. App Check: activate `AppleProvider.deviceCheck` (debug provider unchanged).
+2. Server `callInviteTransition` callable (us-central1, authenticated) with
+   actions `accept`, `decline`, `terminal`, `stage`, mirroring the client
+   transactions exactly: participant/recipient checks, status preconditions,
+   allowlisted fields only, server timestamps, idempotent repeats.
+3. Client `CallInviteSignaling`: invoke the callable with a short timeout;
+   on any failure (including not-yet-deployed) fall back to the existing
+   Firestore transaction, which gains a bounded timeout. Tests default to the
+   Firestore path so existing behavior is unchanged unless a test injects a
+   signaling fake.
+4. Bound every call-state Firestore transaction that currently has no timeout.
+5. Regression tests: RED on the baseline, GREEN after; include a scenario in
+   which the Firestore transaction never completes yet accept, joining,
+   connected, and terminal transitions succeed through signaling, and the
+   next call is not blocked.
 
 ## Strict Non-Goals
 
-No Firebase SDK upgrade, no security-rule or backend change, no call-flow,
-CallKit, PushKit, Agora, or navigation change, no dependency or lockfile change.
-No TestFlight build or upload without separate approval.
+No change to the locked stable branch/tag, PushKit/CallKit native code,
+Agora/RTC setup, terminal-route navigation, Firestore security rules, or
+dependencies. No backend deployment, Firebase console change, TestFlight
+build, or upload without separate user approval.
 
 ## Validation
 
-New regression tests RED on the unchanged baseline and GREEN after the fix,
-complete Call V2 suite, affected widget tests, iOS RunnerTests, `flutter
-analyze`, formatting, dependency/lockfile diff, and `git diff --check`.
+Server unit tests (`node --test`), new Flutter regressions RED/GREEN, the
+complete Flutter `test/` folder, iOS RunnerTests, `flutter analyze`,
+formatting, dependency/lockfile diff, and `git diff --check`.
 
 ## Commit And Handoff
 
-Commit implementation/tests separately from the handoff. Replace `HANDOFF.md`,
-set `STATE.json` to `ready_for_review`, commit metadata, push `origin/call-v2`.
+Commit implementation/tests separately from the handoff on
+`call-v2-https-signaling`, set `STATE.json` to `ready_for_review`, push that
+branch only.

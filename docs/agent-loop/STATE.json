@@ -1,42 +1,27 @@
 {
   "version": 1,
-  "branch": "call-v2",
-  "phase": "firestore_watch_churn_wedge",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "aedfe11daaa9819124e9ca8c8a108e269bc786f7",
-  "starting_sha": "aedfe11daaa9819124e9ca8c8a108e269bc786f7",
+  "branch": "call-v2-https-signaling",
+  "phase": "https_call_invite_signaling",
+  "status": "task_ready",
+  "accepted_checkpoint_sha": "46a71e94aa17e26478a929ab71b786a9f83312d2",
+  "starting_sha": "46a71e94aa17e26478a929ab71b786a9f83312d2",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "3db9e00d32e9f4a31cb06377c64e1afcd6ba0ed3",
-  "ending_sha": "SELF",
-  "changed_files": [
-    "lib/screens/home/home_content_screen.dart",
-    "lib/services/diagnostic_service.dart",
-    "lib/services/notification_service.dart",
-    "test/home/home_content_listener_stability_test.dart",
-    "test/home/home_firestore_listener_stability_test.dart"
-  ],
-  "validation": {
-    "baseline_red": "failed as expected, 0/4 and 0/1",
-    "home_listener_regressions": "passed, 5 tests",
-    "entire_flutter_test_folder": "2414 passed, 2 pre-existing HELPERLY_TEST_MODE integration wrapper failures (identical on baseline)",
-    "ios_runner_tests": "passed, 31 tests on iOS 26.0 simulator",
-    "flutter_analyze": "passed, no issues",
-    "format_check": "passed",
-    "git_diff_check": "passed",
-    "dependency_diff": "none"
-  },
+  "code_commit_sha": "",
+  "ending_sha": "",
+  "changed_files": [],
+  "validation": {},
   "safety": {
     "deployed": false,
     "testflight_built": false,
-    "production_services_contacted": true,
+    "production_services_contacted": false,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": true,
-    "test_changes": true
+    "production_code_changes": false,
+    "test_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "Device logs prove the iOS Firestore client wedged (SDK WaitUntilOffQueue on connectivity change) after app-driven watch-stream churn from Home streams created in build() and per-event users/{uid} diagnostic writes. Streams are now created once per identity and remote diagnostics are off in release. Production Firestore was read only (read-only diagnostics). No physical verification claimed."
+    "decision": "task_ready",
+    "notes": "Physically verified baseline 46a71e9 is locked (stable/calls-oct-26, tag stable-calls-oct-26). This task moves call-invite transitions to an HTTPS callable with bounded Firestore fallback and fixes App Check provider selection."
   }
 }
