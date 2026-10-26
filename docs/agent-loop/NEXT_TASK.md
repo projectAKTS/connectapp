@@ -1,85 +1,78 @@
-# Active Revision - Stale CallKit Plugin Identity Isolation
+# Active Revision - Firestore Watch-Stream Churn And Client Wedge
 
 Branch: `call-v2`
 
-Starting SHA: `3500609828afa6e28eae5896a08b0e8c0ec5c272`
+Starting SHA: `aedfe11daaa9819124e9ca8c8a108e269bc786f7`
 
-Authorized by the user on 2026-10-24 after the independent takeover audit.
+Authorized by the user on 2026-10-25 after physical TestFlight build
+`1.0.2 (202610251434)` failed on the third consecutive call.
 
-## Proven Defect
+## Proven Physical Failure (callee iPhone, 2026-10-26 UTC)
 
-`flutter_callkit_incoming` 3.0.0 emits iOS accept, decline, provider-timeout,
-and unknown-call end events with its process-wide `self.data`, which is only
-replaced by `fromPushKit: true` presentations. Flutter-foreground presentation
-uses `fromPushKit: false`, so a plugin event can carry a previous call's
-identity. Recovered physical evidence from 2026-10-22 shows the plugin accept
-event for declined Call A arriving 1 ms before the exact native bridge for
-accepted Call B.
+- Calls 1 and 2 connected and closed correctly.
+- Call 3: native CallKit accept at 02:14:08.164; the Flutter accept transaction
+  callback started (08.286) but `transaction.get` never returned; attempts 2
+  and 3 never entered their callback; every other Firestore read timed out.
+  The native 20 s safety watchdog ended CallKit at 02:14:28.192.
+- Call 4 (video): accepted, recorded `pending_accept_recorded` behind call 3's
+  lifecycle `teardown`, and never started; watchdog ended it at 02:15:04.525.
+- Device unified log: Firestore logged dozens of `Listen for query at chats /
+  connections failed: Missing or insufficient permissions` and `WatchStream
+  Stream error: 'Not found: Target id not found'` per 10 s, then
+  `WriteStream ... 'Unavailable: Network connectivity changed'` at
+  02:14:08.493 and nothing at all afterwards: the watch-stream close never
+  logged.
+- Firebase iOS SDK 11.10.0 source: a connectivity change runs
+  `GrpcStream::Shutdown` -> `FastFinishCompletionsBlocking` ->
+  `GrpcCompletion::WaitUntilOffQueue()` with no timeout on Firestore's single
+  serial worker queue. A watch-stream completion that never leaves the gRPC
+  queue blocks every Firestore operation for the process lifetime (same
+  signature as open upstream issue firebase/firebase-ios-sdk#12522, whose
+  reproduction stops when the churning listener is removed).
 
-`CallSessionManager._acceptedRouteTerminalObserved` is not identity-scoped.
-A's accepted-native watch observes A's authoritative decline, then
-`handleRecoveredAcceptedInvite(B)` returns `terminal` for B. B is never opened,
-reaches the 20 second native watch deadline, is marked `failed`, and its exact
-CallKit call is ended. A deterministic production-path reproduction fails on
-the unchanged baseline.
+## Root Cause In App Code
 
-## Goal
-
-Treat exact native CallKit identity as authoritative, reject or re-attribute
-plugin events whose identity native state contradicts, and scope accepted-route
-terminal observation and cleanup waits to the exact call identity and lifecycle
-generation so a terminal observation for A can never terminate or suppress B.
+`HomeContentScreen` is kept mounted (Offstage tab, keep-alive). `_HomeTopBar`
+and `_WelcomeCard` create `users/{uid}`, `chats` (2) and `connections` (3)
+`.snapshots()` streams inside `build()` and nested builders, so every
+`users/{uid}` change tears down and re-creates up to five watch targets.
+`DiagnosticService` and `_syncNativePushDiagnostics` write `users/{uid}` on
+every call/push diagnostic event, driving that churn hardest exactly during
+call setup and teardown.
 
 ## Allowed Files
 
-- `lib/services/notification_service.dart`
-- `lib/services/call_session_manager.dart`
-- `lib/call_v2/diagnostics/call_v2_durable_boundary_diagnostics.dart`
-- `ios/Runner/AppDelegate.swift` (read-only exact presentation-state query only)
-- `ios/RunnerTests/RunnerTests.swift`
-- directly relevant tests under `test/call_v2/**`
+- `lib/screens/home/home_content_screen.dart`
+- `lib/services/diagnostic_service.dart`
+- `lib/services/notification_service.dart` (diagnostic write gating only)
+- directly relevant tests under `test/**`
 - `docs/agent-loop/NEXT_TASK.md`
 - `docs/agent-loop/STATE.json`
 - `docs/agent-loop/HANDOFF.md`
 
 ## Required Implementation
 
-- Add a read-only native query for the exact per-CallKit presentation ledger
-  state. No presentation, PushKit, audio-session, or CallKit action changes.
-- Validate iOS plugin accept, decline, ended, and timeout identities against
-  exact native state before acting. Contradicted identities are rejected with
-  privacy-safe diagnostics; accept/decline/timeout are re-attributed to the
-  exact native identity when native records one. Unavailable native state keeps
-  the existing behavior. Legitimate foreground and background acceptance,
-  same-call plugin/native duplicates, and stored accepted recovery keep working.
-- Scope accepted-route terminal observation and accepted-native cleanup waits
-  to exact invite/CallKit identity and lifecycle generation.
-- Persist the permanent RED regression for A declined then B accepted with
-  mismatched plugin and native identity, plus adversarial coverage for: plugin
-  first, native first, valid same-call duplicates, delayed A terminal after B
-  connects, B declined in foreground, B ended with stale plugin state, repeated
-  calls without leaked recovery retry timers, B staying connected without
-  premature CallKit cleanup, and Audio A -> Audio B -> Video C isolation.
+- Create the Home top-bar and welcome-card Firestore streams once per user id
+  (and only re-create them when the user id changes), never inside `build()`.
+- Write remote `users/{uid}.diag` fields only when `ENABLE_RUNTIME_DIAG` is set;
+  keep local `[DIAG]` logging and the on-device durable recorder unchanged.
+- Regression coverage proving repeated `users/{uid}` updates and parent
+  rebuilds create no additional Home Firestore listeners, and that release
+  diagnostics never write the user document.
 
 ## Strict Non-Goals
 
-Do not change RTC/media setup, Agora, token flow, Firestore authoritative
-transitions, PushKit/APNs delivery, CallKit presentation or actions, audio
-session handling, native safety watchdog behavior, cleanup gates, terminal-route
-navigation semantics, retry limits, dependencies, lockfiles, backend/Firebase, or
-release configuration. Do not build/upload TestFlight, deploy, or place
-physical calls. Do not claim this defect caused the historical Venus stuck
-"Call ended" screen without evidence.
+No Firebase SDK upgrade, no security-rule or backend change, no call-flow,
+CallKit, PushKit, Agora, or navigation change, no dependency or lockfile change.
+No TestFlight build or upload without separate approval.
 
 ## Validation
 
-Run the new regression file against the unchanged baseline (RED) and after the
-fix (GREEN), affected notification/recovery/lifecycle/route regressions, the
-complete Call V2 suite, iOS RunnerTests, `flutter analyze`, formatting checks,
-dependency/lockfile diff inspection, and `git diff --check`.
+New regression tests RED on the unchanged baseline and GREEN after the fix,
+complete Call V2 suite, affected widget tests, iOS RunnerTests, `flutter
+analyze`, formatting, dependency/lockfile diff, and `git diff --check`.
 
 ## Commit And Handoff
 
-Commit implementation/tests separately from the final agent-loop handoff. Replace
-`HANDOFF.md`, set `STATE.json` to `ready_for_review`, commit metadata, push
-`origin/call-v2`, and stop. Do not claim physical verification or 100% reliability.
+Commit implementation/tests separately from the handoff. Replace `HANDOFF.md`,
+set `STATE.json` to `ready_for_review`, commit metadata, push `origin/call-v2`.
