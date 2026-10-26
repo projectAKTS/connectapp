@@ -43,7 +43,15 @@ class DiagnosticService {
     };
   }
 
+  /// Remote diagnostics write the signed-in user's `users/{uid}` document,
+  /// which live UI listens to. Release builds must not rewrite it on every
+  /// call/push stage; local `[DIAG]` logs and the on-device durable recorder
+  /// remain the release diagnostics.
+  static const bool remoteWritesEnabled =
+      bool.fromEnvironment('ENABLE_RUNTIME_DIAG', defaultValue: false);
+
   static void _write(String? uid, Map<String, dynamic> fields) {
+    if (!remoteWritesEnabled) return;
     final resolvedUid = _resolveUid(uid);
     if (resolvedUid == null) return;
     unawaited(_writeAsync(resolvedUid, fields));

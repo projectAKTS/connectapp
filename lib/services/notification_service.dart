@@ -2272,7 +2272,7 @@ class NotificationService with WidgetsBindingObserver {
 
   Future<void> _syncNativePushDiagnostics(
       Map<String, String> nativeTokens) async {
-    if (!Platform.isIOS) return;
+    if (!Platform.isIOS || !_diagEnabled) return;
     final uid = _currentPushAuthUid;
     if (uid == null || uid.isEmpty) return;
     try {

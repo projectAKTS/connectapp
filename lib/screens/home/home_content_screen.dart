@@ -12,6 +12,7 @@ import 'package:connect_app/screens/profile/profile_screen.dart';
 import 'package:connect_app/screens/messages/messages_screen.dart';
 import 'package:connect_app/screens/search/find_helper_screen.dart';
 import 'package:connect_app/services/call_service.dart';
+import 'package:connect_app/services/helperly_test_runtime.dart';
 
 import 'package:connect_app/screens/posts/post_video_player.dart';
 import 'package:connect_app/screens/posts/post_image_viewer.dart';
@@ -63,6 +64,37 @@ class HomeContentScreenState extends State<HomeContentScreen>
   int _postsReloadTick = 0;
   int _displayPostsLimit = 30;
   int _serverPostsLimit = 120;
+
+  // Streams are cached so a rebuild (inherited data, parent updates) never
+  // re-subscribes Firestore listeners; see [_HomeTopBarState].
+  String? _welcomeUserStreamUid;
+  Stream<DocumentSnapshot>? _welcomeUserStream;
+  String? _postsStreamKey;
+  Stream<QuerySnapshot>? _postsStream;
+
+  Stream<DocumentSnapshot> _welcomeUserStreamFor(String uid) {
+    if (_welcomeUserStreamUid != uid || _welcomeUserStream == null) {
+      _welcomeUserStreamUid = uid;
+      _welcomeUserStream = HelperlyTestRuntime.firestore
+          .collection('users')
+          .doc(uid)
+          .snapshots();
+    }
+    return _welcomeUserStream!;
+  }
+
+  Stream<QuerySnapshot> _currentPostsStream() {
+    final key = '$_postsReloadTick:$_serverPostsLimit';
+    if (_postsStreamKey != key || _postsStream == null) {
+      _postsStreamKey = key;
+      _postsStream = HelperlyTestRuntime.firestore
+          .collection('posts')
+          .orderBy('timestamp', descending: true)
+          .limit(_serverPostsLimit)
+          .snapshots();
+    }
+    return _postsStream!;
+  }
 
   @override
   void initState() {
@@ -272,9 +304,8 @@ class HomeContentScreenState extends State<HomeContentScreen>
   Widget build(BuildContext context) {
     super.build(context);
 
-    final user = FirebaseAuth.instance.currentUser;
-    final currentUid = user?.uid ?? '';
-    final fallbackName = (user?.displayName ?? '').trim();
+    final currentUid = HelperlyTestRuntime.currentUid ?? '';
+    final fallbackName = (HelperlyTestRuntime.currentDisplayName ?? '').trim();
     String firstFrom(String name) {
       final n = name.trim();
       if (n.isEmpty) return 'there';
@@ -306,10 +337,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
                         ),
                       )
                     : StreamBuilder<DocumentSnapshot>(
-                        stream: FirebaseFirestore.instance
-                            .collection('users')
-                            .doc(currentUid)
-                            .snapshots(),
+                        stream: _welcomeUserStreamFor(currentUid),
                         builder: (context, snap) {
                           final data =
                               snap.data?.data() as Map<String, dynamic>? ?? {};
@@ -331,11 +359,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
               SliverToBoxAdapter(
                 child: StreamBuilder<QuerySnapshot>(
                   key: ValueKey('home_posts_$_postsReloadTick'),
-                  stream: FirebaseFirestore.instance
-                      .collection('posts')
-                      .orderBy('timestamp', descending: true)
-                      .limit(_serverPostsLimit)
-                      .snapshots(),
+                  stream: _currentPostsStream(),
                   builder: (context, snap) {
                     if (snap.connectionState == ConnectionState.waiting &&
                         !snap.hasData) {
@@ -561,13 +585,67 @@ class HomeContentScreenState extends State<HomeContentScreen>
   }
 }
 
+@visibleForTesting
+Widget homeTopBarForTest({required String currentUid}) =>
+    _HomeTopBar(currentUid: currentUid);
+
+@visibleForTesting
+Widget homeWelcomeCardForTest({required String name}) =>
+    _WelcomeCard(name: name, onFindHelper: () {});
+
 // ===== Top bar =====
-class _HomeTopBar extends StatelessWidget {
+class _HomeTopBar extends StatefulWidget {
   final String currentUid;
   const _HomeTopBar({Key? key, required this.currentUid}) : super(key: key);
 
   @override
+  State<_HomeTopBar> createState() => _HomeTopBarState();
+}
+
+/// Home stays mounted under every call route, so its Firestore streams are
+/// created once per user id. Creating `.snapshots()` inside `build()` turned
+/// every `users/{uid}` write into new watch targets, and that watch-stream
+/// churn preceded the iOS Firestore client wedging during consecutive calls.
+class _HomeTopBarState extends State<_HomeTopBar> {
+  Stream<DocumentSnapshot>? _userStream;
+  Stream<QuerySnapshot>? _chatsByParticipantsStream;
+  Stream<QuerySnapshot>? _chatsByUsersStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _bindStreams();
+  }
+
+  @override
+  void didUpdateWidget(covariant _HomeTopBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentUid != widget.currentUid) _bindStreams();
+  }
+
+  void _bindStreams() {
+    final currentUid = widget.currentUid;
+    if (currentUid.isEmpty) {
+      _userStream = null;
+      _chatsByParticipantsStream = null;
+      _chatsByUsersStream = null;
+      return;
+    }
+    final db = HelperlyTestRuntime.firestore;
+    _userStream = db.collection('users').doc(currentUid).snapshots();
+    _chatsByParticipantsStream = db
+        .collection('chats')
+        .where('participants', arrayContains: currentUid)
+        .snapshots();
+    _chatsByUsersStream = db
+        .collection('chats')
+        .where('users', arrayContains: currentUid)
+        .snapshots();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final currentUid = widget.currentUid;
     final titleStyle = Theme.of(context).textTheme.displaySmall;
 
     return Padding(
@@ -577,12 +655,7 @@ class _HomeTopBar extends StatelessWidget {
           Text('Home', style: titleStyle),
           const Spacer(),
           StreamBuilder<DocumentSnapshot>(
-            stream: currentUid.isEmpty
-                ? null
-                : FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(currentUid)
-                    .snapshots(),
+            stream: _userStream,
             builder: (context, userSnap) {
               final data = userSnap.data?.data() as Map<String, dynamic>? ??
                   const <String, dynamic>{};
@@ -592,20 +665,10 @@ class _HomeTopBar extends StatelessWidget {
                   _asUnreadCount(data['unreadMessagesCount']);
 
               return StreamBuilder<QuerySnapshot>(
-                stream: currentUid.isEmpty
-                    ? null
-                    : FirebaseFirestore.instance
-                        .collection('chats')
-                        .where('participants', arrayContains: currentUid)
-                        .snapshots(),
+                stream: _chatsByParticipantsStream,
                 builder: (context, chatSnapParticipants) {
                   return StreamBuilder<QuerySnapshot>(
-                    stream: currentUid.isEmpty
-                        ? null
-                        : FirebaseFirestore.instance
-                            .collection('chats')
-                            .where('users', arrayContains: currentUid)
-                            .snapshots(),
+                    stream: _chatsByUsersStream,
                     builder: (context, chatSnapUsers) {
                       final merged = <String, Map<String, dynamic>>{};
                       if (chatSnapParticipants.hasData) {
@@ -708,7 +771,7 @@ class _HomeTopBar extends StatelessWidget {
 }
 
 // ===== Welcome Card =====
-class _WelcomeCard extends StatelessWidget {
+class _WelcomeCard extends StatefulWidget {
   final String name;
   final VoidCallback onFindHelper;
 
@@ -718,9 +781,43 @@ class _WelcomeCard extends StatelessWidget {
   });
 
   @override
+  State<_WelcomeCard> createState() => _WelcomeCardState();
+}
+
+/// Streams are created once per signed-in user id, never in `build()`; see
+/// [_HomeTopBarState].
+class _WelcomeCardState extends State<_WelcomeCard> {
+  String? _boundUid;
+  Stream<DocumentSnapshot>? _userStream;
+  Stream<QuerySnapshot>? _connectionsByUsersStream;
+  Stream<QuerySnapshot>? _connectionsByUserIdStream;
+  Stream<QuerySnapshot>? _connectionsByConnectedUserIdStream;
+
+  void _bindStreams(String uid) {
+    if (_boundUid == uid) return;
+    _boundUid = uid;
+    final db = HelperlyTestRuntime.firestore;
+    _userStream = db.collection('users').doc(uid).snapshots();
+    _connectionsByUsersStream = db
+        .collection('connections')
+        .where('users', arrayContains: uid)
+        .snapshots();
+    _connectionsByUserIdStream = db
+        .collection('connections')
+        .where('userId', isEqualTo: uid)
+        .snapshots();
+    _connectionsByConnectedUserIdStream = db
+        .collection('connections')
+        .where('connectedUserId', isEqualTo: uid)
+        .snapshots();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-    final uid = user?.uid;
+    final name = widget.name;
+    final onFindHelper = widget.onFindHelper;
+    final uid = HelperlyTestRuntime.currentUid;
+    if (uid != null) _bindStreams(uid);
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -754,10 +851,7 @@ class _WelcomeCard extends StatelessWidget {
             const SizedBox(height: 12),
             if (uid != null)
               StreamBuilder<DocumentSnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(uid)
-                    .snapshots(),
+                stream: _userStream,
                 builder: (context, userSnap) {
                   int seenCount = 0;
                   if (userSnap.hasData) {
@@ -769,22 +863,13 @@ class _WelcomeCard extends StatelessWidget {
                   }
 
                   return StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance
-                        .collection('connections')
-                        .where('users', arrayContains: uid)
-                        .snapshots(),
+                    stream: _connectionsByUsersStream,
                     builder: (context, usersSnap) {
                       return StreamBuilder<QuerySnapshot>(
-                        stream: FirebaseFirestore.instance
-                            .collection('connections')
-                            .where('userId', isEqualTo: uid)
-                            .snapshots(),
+                        stream: _connectionsByUserIdStream,
                         builder: (context, userIdSnap) {
                           return StreamBuilder<QuerySnapshot>(
-                            stream: FirebaseFirestore.instance
-                                .collection('connections')
-                                .where('connectedUserId', isEqualTo: uid)
-                                .snapshots(),
+                            stream: _connectionsByConnectedUserIdStream,
                             builder: (context, connectedUserIdSnap) {
                               final merged = <String, Map<String, dynamic>>{};
                               if (usersSnap.hasData) {
@@ -1033,6 +1118,21 @@ class _PostCellState extends State<_PostCell> {
   static const _collapsedLines = 7;
   bool _expanded = false;
   bool _helpfulBusy = false;
+  String? _postStreamId;
+  Stream<DocumentSnapshot<Map<String, dynamic>>>? _postStream;
+
+  /// One listener per post for the cell's lifetime; the posts query emits on
+  /// every like or update, which rebuilds every visible cell.
+  Stream<DocumentSnapshot<Map<String, dynamic>>> _currentPostStream() {
+    if (_postStreamId != widget.postId || _postStream == null) {
+      _postStreamId = widget.postId;
+      _postStream = HelperlyTestRuntime.firestore
+          .collection('posts')
+          .doc(widget.postId)
+          .snapshots();
+    }
+    return _postStream!;
+  }
 
   Future<void> _confirmDelete() async {
     final ok = await showDialog<bool>(
@@ -1146,10 +1246,7 @@ class _PostCellState extends State<_PostCell> {
           if (media() != null) media()!,
           const SizedBox(height: 8),
           StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-            stream: FirebaseFirestore.instance
-                .collection('posts')
-                .doc(widget.postId)
-                .snapshots(),
+            stream: _currentPostStream(),
             builder: (context, snap) {
               final data = snap.data?.data() ?? const <String, dynamic>{};
               final likes =
@@ -1157,7 +1254,7 @@ class _PostCellState extends State<_PostCell> {
               final likedBy = ((data['likedBy'] as List?) ?? const [])
                   .map((e) => '$e')
                   .toSet();
-              final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+              final uid = HelperlyTestRuntime.currentUid ?? '';
               final isHelpful = uid.isNotEmpty && likedBy.contains(uid);
               return Row(
                 children: [
