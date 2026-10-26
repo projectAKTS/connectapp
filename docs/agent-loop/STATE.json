@@ -2,26 +2,46 @@
   "version": 1,
   "branch": "call-v2-https-signaling",
   "phase": "https_call_invite_signaling",
-  "status": "task_ready",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "46a71e94aa17e26478a929ab71b786a9f83312d2",
   "starting_sha": "46a71e94aa17e26478a929ab71b786a9f83312d2",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "",
-  "ending_sha": "",
-  "changed_files": [],
-  "validation": {},
+  "code_commit_sha": "606a7a2808bfd629c440d911eb442b4060e2c672",
+  "ending_sha": "SELF",
+  "changed_files": [
+    "connect_functions/call_invites/call_invite_transition.js",
+    "connect_functions/index.js",
+    "connect_functions/test/call_invites/call_invite_transition.test.js",
+    "lib/main.dart",
+    "lib/services/call_invite_signaling.dart",
+    "lib/services/call_session_manager.dart",
+    "test/call_v2/real_flow/call_v2_https_signaling_test.dart"
+  ],
+  "validation": {
+    "baseline_red": "failed as expected, 0/3",
+    "https_signaling_regression": "passed, 3 tests",
+    "server_unit_tests": "passed, 7 tests",
+    "existing_server_tests": "87/88 (emulator-only file not runnable: no Java)",
+    "entire_flutter_test_folder": "2417 passed, 2 pre-existing HELPERLY_TEST_MODE wrapper failures",
+    "ios_runner_tests": "passed, 31 tests on iOS 26.0 simulator",
+    "flutter_analyze": "passed, no issues",
+    "format_check": "passed",
+    "git_diff_check": "passed",
+    "dependency_diff": "none",
+    "deploy_dry_run": "passed"
+  },
   "safety": {
     "deployed": false,
     "testflight_built": false,
-    "production_services_contacted": false,
+    "production_services_contacted": true,
     "firebase_changes": false,
-    "backend_changes": false,
-    "production_code_changes": false,
-    "test_changes": false
+    "backend_changes": true,
+    "production_code_changes": true,
+    "test_changes": true
   },
   "review": {
-    "decision": "task_ready",
-    "notes": "Physically verified baseline 46a71e9 is locked (stable/calls-oct-26, tag stable-calls-oct-26). This task moves call-invite transitions to an HTTPS callable with bounded Firestore fallback and fixes App Check provider selection."
+    "decision": "ready_for_review",
+    "notes": "callInviteTransition callable plus HTTPS-first client transitions with bounded Firestore fallback; App Check uses DeviceCheck. Deploy dry run passed; the real deploy is pending the user (blocked by session permission). Read-only production checks only."
   }
 }
