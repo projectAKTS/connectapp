@@ -1688,6 +1688,41 @@ exports.recoverCallV2TaskOutbox = onSchedule(
 );
 
 /* ============================================================
+   📞 CALL INVITE TRANSITIONS (HTTPS path for call-critical state)
+   ============================================================ */
+
+const {
+  CallInviteTransitionError,
+  createCallInviteTransitionHandler,
+} = require("./call_invites/call_invite_transition");
+
+const handleCallInviteTransition = createCallInviteTransitionHandler({
+  db,
+  serverTimestamp: () => admin.firestore.FieldValue.serverTimestamp(),
+});
+
+exports.callInviteTransition = onCall(
+  { region: "us-central1", invoker: "public" },
+  async (request) => {
+    try {
+      return await handleCallInviteTransition({
+        authUid: request.auth?.uid,
+        data: request.data,
+      });
+    } catch (error) {
+      if (error instanceof CallInviteTransitionError) {
+        throw new HttpsError(error.code, error.message);
+      }
+      console.error("callInviteTransition failed", {
+        action: String(request.data?.action ?? ""),
+        message: error?.message,
+      });
+      throw new HttpsError("unavailable", "Call update failed; retry.");
+    }
+  }
+);
+
+/* ============================================================
    📞 AGORA CALL TOKEN
    ============================================================ */
 

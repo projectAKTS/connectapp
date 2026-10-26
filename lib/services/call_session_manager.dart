@@ -14,6 +14,7 @@ import '../call_v2/real_flow/call_v2_physical_media_owner.dart';
 import '../call_v2/real_flow/call_v2_real_call_flow_gate.dart';
 import '../screens/call/agora_call_screen.dart';
 import '../screens/call/incoming_call_screen.dart';
+import 'call_invite_signaling.dart';
 import 'callkit_id.dart';
 import 'diagnostic_service.dart';
 import 'firestore_read_helper.dart';
@@ -507,6 +508,19 @@ class CallSessionManager {
   BeforeAgoraJoinProgressForTest? _beforeAgoraJoinProgressForTest;
   BeforeProductionRoutePushForTest? _beforeProductionRoutePushForTest;
   CallScreenOpenRecorderForTest? _callScreenOpenRecorderForTest;
+  CallInviteSignaling? _callInviteSignalingOverride;
+  CallInviteSignaling? _productionCallInviteSignaling;
+
+  /// HTTPS transitions are the primary path in the app. Test runtimes keep the
+  /// Firestore transaction path unless a test injects a signaling fake.
+  CallInviteSignaling? get _callInviteSignaling {
+    final override = _callInviteSignalingOverride;
+    if (override != null) return override;
+    if (HelperlyTestRuntime.isEnabled) return null;
+    return _productionCallInviteSignaling ??= FirebaseCallInviteSignaling();
+  }
+
+  static const Duration _callStateTransactionTimeout = Duration(seconds: 8);
   bool _skipActiveInviteBindingForTest = false;
   bool _skipAcceptedNativeWatchBindingForTest = false;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _incomingInviteSub;
@@ -796,6 +810,7 @@ class CallSessionManager {
     _beforeAgoraJoinProgressForTest = null;
     _beforeProductionRoutePushForTest = null;
     _callScreenOpenRecorderForTest = null;
+    _callInviteSignalingOverride = null;
     _acknowledgeNativeRouteOwnership = null;
     _acknowledgeNativeMediaOwnership = null;
     _skipActiveInviteBindingForTest = false;
@@ -1015,9 +1030,13 @@ class CallSessionManager {
     NativeRouteOwnershipAcknowledger? acknowledgeNativeRouteOwnership,
     NativeMediaOwnershipAcknowledger? acknowledgeNativeMediaOwnership,
     CallV2PhysicalMediaOwner? physicalMediaOwnerForTest,
+    CallInviteSignaling? callInviteSignalingForTest,
   }) {
     if (navigatorKey != null) {
       _navigatorKey = navigatorKey;
+    }
+    if (callInviteSignalingForTest != null && _debugTestAccessEnabled) {
+      _callInviteSignalingOverride = callInviteSignalingForTest;
     }
     if (listNativeCalls != null) {
       _listNativeCalls = listNativeCalls;
@@ -4581,108 +4600,109 @@ class CallSessionManager {
           lifecycleGeneration: lifecycleGeneration,
           generationCurrent: true,
         );
-        final result = await _db
-            .runTransaction<_AcceptInviteTransactionResult>((tx) async {
-          CallV2DurableDiagnosticRecorder.instance.record(
-            CallV2DurableDiagnosticStage.transactionCallbackEntered,
-            inviteIdentity: payload.inviteId,
-            exactCallkitIdentity: payload.acceptedCallkitId,
-            attempt: attempt,
-            lifecycleGeneration: lifecycleGeneration,
-            generationCurrent: lifecycleGeneration == null ||
-                _canContinueAcceptedRouteGeneration(lifecycleGeneration),
-          );
-          final afterCallbackEntered =
-              _afterAcceptTransactionCallbackEnteredForTest;
-          if (afterCallbackEntered != null) {
-            await afterCallbackEntered(attempt);
-          }
-          final ref = _db.collection('callInvites').doc(payload.inviteId);
-          final snap = await tx.get(ref);
-          CallV2DurableDiagnosticRecorder.instance.record(
-            CallV2DurableDiagnosticStage.transactionSnapshotObtained,
-            inviteIdentity: payload.inviteId,
-            exactCallkitIdentity: payload.acceptedCallkitId,
-            outcome: snap.exists
-                ? CallV2DurableDiagnosticOutcome.allowed
-                : CallV2DurableDiagnosticOutcome.missing,
-            attempt: attempt,
-            lifecycleGeneration: lifecycleGeneration,
-            generationCurrent: lifecycleGeneration == null ||
-                _canContinueAcceptedRouteGeneration(lifecycleGeneration),
-          );
-          if (!snap.exists) {
-            return const _AcceptInviteTransactionResult(
-              decision: _AcceptInviteDecision.missing,
-            );
-          }
-          final data = snap.data() ?? const <String, dynamic>{};
-          final status = _parseStatus(data['status']);
-          CallV2DurableDiagnosticRecorder.instance.record(
-            CallV2DurableDiagnosticStage.transactionStatusClassified,
-            inviteIdentity: payload.inviteId,
-            exactCallkitIdentity: payload.acceptedCallkitId,
-            outcome: _durableOutcomeForStatus(status),
-            attempt: attempt,
-            lifecycleGeneration: lifecycleGeneration,
-            generationCurrent: lifecycleGeneration == null ||
-                _canContinueAcceptedRouteGeneration(lifecycleGeneration),
-          );
-          final toUid = (data['toUid'] ?? '').toString().trim();
-          final me = _currentUid.trim();
-          if (me.isEmpty || toUid != me) {
-            return const _AcceptInviteTransactionResult(
-              decision: _AcceptInviteDecision.wrongRecipient,
-            );
-          }
-          if (_isTerminalStatus(status)) {
-            return _AcceptInviteTransactionResult(
-              decision: _AcceptInviteDecision.terminal,
-              authoritativeStatus: status,
-            );
-          }
-          if (status != CallInviteStatus.ringing &&
-              status != CallInviteStatus.accepted &&
-              status != CallInviteStatus.joining &&
-              status != CallInviteStatus.connected) {
-            return _AcceptInviteTransactionResult(
-              decision: _AcceptInviteDecision.invalidStatus,
-              authoritativeStatus: status,
-            );
-          }
-          final authoritativePayload = _authoritativeAcceptedPayload(
-            payload,
-            data,
-          );
-          if (authoritativePayload.channel.isEmpty ||
-              authoritativePayload.fromUid.isEmpty) {
-            return _AcceptInviteTransactionResult(
-              decision: _AcceptInviteDecision.invalidPayload,
-              authoritativeStatus: status,
-            );
-          }
-          if (status == CallInviteStatus.ringing) {
-            tx.set(
-                ref,
-                {
-                  'status': CallInviteStatus.accepted.name,
-                  'acceptedAt': FieldValue.serverTimestamp(),
-                  'calleeStage': 'accepted',
-                  'calleeLastError': '',
-                },
-                SetOptions(merge: true));
-            return _AcceptInviteTransactionResult(
-              decision: _AcceptInviteDecision.accepted,
-              authoritativePayload: authoritativePayload,
-              authoritativeStatus: CallInviteStatus.accepted,
-            );
-          }
-          return _AcceptInviteTransactionResult(
-            decision: _AcceptInviteDecision.alreadyAccepted,
-            authoritativePayload: authoritativePayload,
-            authoritativeStatus: status,
-          );
-        }).timeout(const Duration(seconds: 8));
+        final result = await _acceptInviteViaSignaling(payload) ??
+            await _db
+                .runTransaction<_AcceptInviteTransactionResult>((tx) async {
+              CallV2DurableDiagnosticRecorder.instance.record(
+                CallV2DurableDiagnosticStage.transactionCallbackEntered,
+                inviteIdentity: payload.inviteId,
+                exactCallkitIdentity: payload.acceptedCallkitId,
+                attempt: attempt,
+                lifecycleGeneration: lifecycleGeneration,
+                generationCurrent: lifecycleGeneration == null ||
+                    _canContinueAcceptedRouteGeneration(lifecycleGeneration),
+              );
+              final afterCallbackEntered =
+                  _afterAcceptTransactionCallbackEnteredForTest;
+              if (afterCallbackEntered != null) {
+                await afterCallbackEntered(attempt);
+              }
+              final ref = _db.collection('callInvites').doc(payload.inviteId);
+              final snap = await tx.get(ref);
+              CallV2DurableDiagnosticRecorder.instance.record(
+                CallV2DurableDiagnosticStage.transactionSnapshotObtained,
+                inviteIdentity: payload.inviteId,
+                exactCallkitIdentity: payload.acceptedCallkitId,
+                outcome: snap.exists
+                    ? CallV2DurableDiagnosticOutcome.allowed
+                    : CallV2DurableDiagnosticOutcome.missing,
+                attempt: attempt,
+                lifecycleGeneration: lifecycleGeneration,
+                generationCurrent: lifecycleGeneration == null ||
+                    _canContinueAcceptedRouteGeneration(lifecycleGeneration),
+              );
+              if (!snap.exists) {
+                return const _AcceptInviteTransactionResult(
+                  decision: _AcceptInviteDecision.missing,
+                );
+              }
+              final data = snap.data() ?? const <String, dynamic>{};
+              final status = _parseStatus(data['status']);
+              CallV2DurableDiagnosticRecorder.instance.record(
+                CallV2DurableDiagnosticStage.transactionStatusClassified,
+                inviteIdentity: payload.inviteId,
+                exactCallkitIdentity: payload.acceptedCallkitId,
+                outcome: _durableOutcomeForStatus(status),
+                attempt: attempt,
+                lifecycleGeneration: lifecycleGeneration,
+                generationCurrent: lifecycleGeneration == null ||
+                    _canContinueAcceptedRouteGeneration(lifecycleGeneration),
+              );
+              final toUid = (data['toUid'] ?? '').toString().trim();
+              final me = _currentUid.trim();
+              if (me.isEmpty || toUid != me) {
+                return const _AcceptInviteTransactionResult(
+                  decision: _AcceptInviteDecision.wrongRecipient,
+                );
+              }
+              if (_isTerminalStatus(status)) {
+                return _AcceptInviteTransactionResult(
+                  decision: _AcceptInviteDecision.terminal,
+                  authoritativeStatus: status,
+                );
+              }
+              if (status != CallInviteStatus.ringing &&
+                  status != CallInviteStatus.accepted &&
+                  status != CallInviteStatus.joining &&
+                  status != CallInviteStatus.connected) {
+                return _AcceptInviteTransactionResult(
+                  decision: _AcceptInviteDecision.invalidStatus,
+                  authoritativeStatus: status,
+                );
+              }
+              final authoritativePayload = _authoritativeAcceptedPayload(
+                payload,
+                data,
+              );
+              if (authoritativePayload.channel.isEmpty ||
+                  authoritativePayload.fromUid.isEmpty) {
+                return _AcceptInviteTransactionResult(
+                  decision: _AcceptInviteDecision.invalidPayload,
+                  authoritativeStatus: status,
+                );
+              }
+              if (status == CallInviteStatus.ringing) {
+                tx.set(
+                    ref,
+                    {
+                      'status': CallInviteStatus.accepted.name,
+                      'acceptedAt': FieldValue.serverTimestamp(),
+                      'calleeStage': 'accepted',
+                      'calleeLastError': '',
+                    },
+                    SetOptions(merge: true));
+                return _AcceptInviteTransactionResult(
+                  decision: _AcceptInviteDecision.accepted,
+                  authoritativePayload: authoritativePayload,
+                  authoritativeStatus: CallInviteStatus.accepted,
+                );
+              }
+              return _AcceptInviteTransactionResult(
+                decision: _AcceptInviteDecision.alreadyAccepted,
+                authoritativePayload: authoritativePayload,
+                authoritativeStatus: status,
+              );
+            }).timeout(_callStateTransactionTimeout);
 
         CallV2DurableDiagnosticRecorder.instance.record(
           CallV2DurableDiagnosticStage.transactionCompleted,
@@ -5436,6 +5456,17 @@ class CallSessionManager {
     if (beforeTransaction != null && _debugTestAccessEnabled) {
       await beforeTransaction();
     }
+    final signaled = await _terminalTransitionViaSignaling(
+      session: session,
+      requestedStatus: requestedStatus,
+      requestedMessage: requestedMessage,
+      requestedIsError: requestedIsError,
+      requestedEndReason: requestedEndReason,
+      authoritativeLocalExit: authoritativeLocalExit,
+      error: error,
+      fallback: fallback,
+    );
+    if (signaled != null) return signaled;
     try {
       return await _db.runTransaction<_AuthoritativeTerminalTransition>(
         (tx) async {
@@ -5516,7 +5547,7 @@ class CallSessionManager {
             preservedExistingTerminal: false,
           );
         },
-      );
+      ).timeout(_callStateTransactionTimeout);
     } catch (error) {
       await _diagManager('terminal_transaction_error', meta: {
         'status': requestedStatus.name,
@@ -6599,6 +6630,115 @@ class CallSessionManager {
     );
   }
 
+  /// Runs [action] through [CallInviteSignaling] and returns its `applied`
+  /// flag, or null when the HTTPS path is unavailable.
+  Future<bool?> _signalBool(String action, Map<String, Object?> data) async {
+    final signaling = _callInviteSignaling;
+    if (signaling == null) return null;
+    final result = await signaling.transition(action, data);
+    final applied = result?['applied'];
+    if (applied is! bool) return null;
+    await _diagManager('call_invite_signaling_done', meta: {
+      'action': action,
+      'applied': applied,
+      'status': (result?['status'] ?? '').toString(),
+    });
+    return applied;
+  }
+
+  Future<_AcceptInviteTransactionResult?> _acceptInviteViaSignaling(
+    CallInvitePayload payload,
+  ) async {
+    final signaling = _callInviteSignaling;
+    if (signaling == null) return null;
+    final result = await signaling.transition('accept', <String, Object?>{
+      'inviteId': payload.inviteId,
+    });
+    if (result == null) return null;
+    final decision = switch ((result['decision'] ?? '').toString()) {
+      'accepted' => _AcceptInviteDecision.accepted,
+      'alreadyAccepted' => _AcceptInviteDecision.alreadyAccepted,
+      'missing' => _AcceptInviteDecision.missing,
+      'wrongRecipient' => _AcceptInviteDecision.wrongRecipient,
+      'terminal' => _AcceptInviteDecision.terminal,
+      'invalidStatus' => _AcceptInviteDecision.invalidStatus,
+      'invalidPayload' => _AcceptInviteDecision.invalidPayload,
+      _ => null,
+    };
+    if (decision == null) return null;
+    final rawInvite = result['invite'];
+    final invite = rawInvite is Map
+        ? rawInvite.map((key, value) => MapEntry(key.toString(), value))
+        : const <String, dynamic>{};
+    final accepted = decision == _AcceptInviteDecision.accepted ||
+        decision == _AcceptInviteDecision.alreadyAccepted;
+    await _diagManager('call_invite_signaling_done', meta: {
+      'action': 'accept',
+      'decision': decision.name,
+    });
+    return _AcceptInviteTransactionResult(
+      decision: decision,
+      authoritativePayload:
+          accepted ? _authoritativeAcceptedPayload(payload, invite) : null,
+      authoritativeStatus: _parseStatus(invite['status']),
+    );
+  }
+
+  Future<_AuthoritativeTerminalTransition?> _terminalTransitionViaSignaling({
+    required _CallSession session,
+    required CallInviteStatus requestedStatus,
+    required String requestedMessage,
+    required bool requestedIsError,
+    required String requestedEndReason,
+    required bool authoritativeLocalExit,
+    required String? error,
+    required _AuthoritativeTerminalTransition fallback,
+  }) async {
+    final signaling = _callInviteSignaling;
+    if (signaling == null) return null;
+    final result = await signaling.transition('terminal', <String, Object?>{
+      'inviteId': session.inviteId,
+      'requestedStatus': requestedStatus.name,
+      'endReason': requestedEndReason,
+      'authoritativeLocalExit': authoritativeLocalExit,
+      if (error != null && error.isNotEmpty) 'error': _truncate(error),
+    });
+    if (result == null || result['writeApplied'] is! bool) return null;
+    final status = _parseStatus(result['status']);
+    final endReason = (result['endReason'] ?? requestedEndReason).toString();
+    await _diagManager('call_invite_signaling_done', meta: {
+      'action': 'terminal',
+      'status': status.name,
+      'writeApplied': result['writeApplied'],
+    });
+    if (result['preservedExistingTerminal'] == true) {
+      return _AuthoritativeTerminalTransition(
+        status: status,
+        endReason: endReason,
+        message: _terminalMessageForStatus(
+          status,
+          data: <String, dynamic>{'endReason': endReason},
+        ),
+        isError: status == CallInviteStatus.failed,
+        writeApplied: false,
+        preservedExistingTerminal: true,
+      );
+    }
+    if (result['writeApplied'] != true) return fallback;
+    return _AuthoritativeTerminalTransition(
+      status: status,
+      endReason: endReason,
+      message: status == requestedStatus
+          ? requestedMessage
+          : _terminalMessageForStatus(status),
+      isError: status == requestedStatus
+          ? requestedIsError
+          : status == CallInviteStatus.failed,
+      writeApplied: true,
+      preservedExistingTerminal: false,
+    );
+  }
+
   Future<bool> _updateInviteForActor({
     required String inviteId,
     required bool isCaller,
@@ -6607,6 +6747,11 @@ class CallSessionManager {
     Map<String, dynamic>? extra,
   }) async {
     if (inviteId.trim().isEmpty) return false;
+    final signaled = await _signalBool('stage', <String, Object?>{
+      'inviteId': inviteId,
+      'stage': stage,
+    });
+    if (signaled != null) return signaled;
     final prefix = isCaller ? 'caller' : 'callee';
     final update = <String, dynamic>{
       '${prefix}Stage': stage,
@@ -6622,7 +6767,7 @@ class CallSessionManager {
         if (!expectedStatuses.contains(status)) return false;
         tx.set(ref, update, SetOptions(merge: true));
         return true;
-      });
+      }).timeout(_callStateTransactionTimeout);
     } catch (_) {
       return false;
     }
@@ -6633,6 +6778,11 @@ class CallSessionManager {
     required String source,
   }) async {
     if (inviteId.trim().isEmpty) return;
+    final signaled = await _signalBool('decline', <String, Object?>{
+      'inviteId': inviteId,
+      'endReason': source,
+    });
+    if (signaled != null) return;
     try {
       await _db.runTransaction<void>((tx) async {
         final ref = _db.collection('callInvites').doc(inviteId);
@@ -6651,7 +6801,7 @@ class CallSessionManager {
               'calleeStage': 'declined',
             },
             SetOptions(merge: true));
-      });
+      }).timeout(_callStateTransactionTimeout);
     } catch (_) {}
   }
 
@@ -6686,7 +6836,7 @@ class CallSessionManager {
         final status = _parseStatus(data['status']);
         if (!expectedStatuses.contains(status)) return;
         tx.set(ref, updates, SetOptions(merge: true));
-      });
+      }).timeout(_callStateTransactionTimeout);
     } catch (_) {}
   }
 

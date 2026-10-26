@@ -93,9 +93,11 @@ Future<void> main() async {
       bool.fromEnvironment('APP_CHECK_DEBUG', defaultValue: false);
   try {
     await FirebaseAppCheck.instance.activate(
-      appleProvider: useDebugAppCheck
-          ? AppleProvider.debug
-          : AppleProvider.appAttestWithDeviceCheckFallback,
+      // DeviceCheck is the configured Apple provider. App Attest needs the
+      // App Attest entitlement plus Firebase registration; until both exist,
+      // every App Attest token exchange is rejected (403).
+      appleProvider:
+          useDebugAppCheck ? AppleProvider.debug : AppleProvider.deviceCheck,
       androidProvider: useDebugAppCheck
           ? AndroidProvider.debug
           : AndroidProvider.playIntegrity,
