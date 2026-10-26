@@ -29,11 +29,13 @@
     "format_check": "passed",
     "git_diff_check": "passed",
     "dependency_diff": "none",
-    "deploy_dry_run": "passed"
+    "deploy_dry_run": "passed",
+    "deploy": "callInviteTransition deployed by user; unauthenticated smoke call -> 401",
+    "testflight": "1.0.2 (202610261913) uploaded from a46f187"
   },
   "safety": {
-    "deployed": false,
-    "testflight_built": false,
+    "deployed": true,
+    "testflight_built": true,
     "production_services_contacted": true,
     "firebase_changes": false,
     "backend_changes": true,

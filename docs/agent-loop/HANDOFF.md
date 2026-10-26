@@ -61,12 +61,17 @@ change: 3/3.
 
 ## Deployment
 
-`firebase deploy --only functions:callInviteTransition --dry-run` succeeded
-using a local, gitignored `connect_functions/.env.connectapp-278b4` that holds
-only non-secret params at their code defaults (Call V2 stays disabled). The
-real deploy was blocked by the session's production-deploy permission and is
-pending the user. Until it is deployed the app falls back to the existing
-Firestore transactions.
+The user deployed `callInviteTransition` (2026-10-26) with
+`firebase deploy --only functions:callInviteTransition --project
+connectapp-278b4`, using a local, gitignored `.env.connectapp-278b4` holding
+only non-secret params at their code defaults (Call V2 stays disabled).
+`functions:list` shows it in us-central1 (nodejs20) beside the unchanged
+existing functions. An unauthenticated smoke call returned HTTP 401
+`UNAUTHENTICATED` ("Sign in is required.") and wrote nothing.
+
+TestFlight 1.0.2 (202610261913), source `a46f187`, uploaded (IPA SHA-256
+`634929254609187c49881bda0121c4ab4be3bb7e745b605c56e515772acb5224`); commit
+marker verified in archive and IPA.
 
 ## Risks
 
