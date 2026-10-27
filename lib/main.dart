@@ -33,6 +33,7 @@ import 'screens/premium/premium_screen.dart';
 // Core
 import 'widgets/main_scaffold.dart';
 import 'widgets/full_screen_back_gesture.dart';
+import 'services/android_incoming_call.dart';
 import 'services/firebase_options.dart';
 import 'services/firestore_read_helper.dart';
 import 'services/notification_service.dart';
@@ -77,6 +78,20 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
   } catch (_) {}
+  // iOS presents incoming calls natively from PushKit; Android needs the
+  // full-screen call UI presented from the data-only call push.
+  if (defaultTargetPlatform == TargetPlatform.android) {
+    final decision = AndroidIncomingCall.decide(
+      message.data,
+      sentTime: message.sentTime,
+      now: DateTime.now(),
+    );
+    await AndroidIncomingCall.apply(decision);
+    // Not awaited: FlutterFire runs background messages one at a time and
+    // waits for each handler, so awaiting the ring window would hold back a
+    // call_end push for this same call.
+    unawaited(AndroidIncomingCall.relayBackgroundDecline(decision));
+  }
 }
 
 Future<void> main() async {

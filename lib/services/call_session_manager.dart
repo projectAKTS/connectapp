@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -593,6 +594,7 @@ class CallSessionManager {
   String _acceptedRecoveryRequestInviteId = '';
   String _acceptedRecoveryRequestCallkitId = '';
   bool? _iosCallkitOnlyIncomingUiForTest;
+  bool? _nativeAudioSessionGatesCalleeMediaForTest;
   AcceptedRouteReadinessCanceller? _cancelAcceptedRouteReadiness;
   NativeRouteOwnershipAcknowledger? _acknowledgeNativeRouteOwnership;
   NativeMediaOwnershipAcknowledger? _acknowledgeNativeMediaOwnership;
@@ -816,6 +818,7 @@ class CallSessionManager {
     _skipActiveInviteBindingForTest = false;
     _skipAcceptedNativeWatchBindingForTest = false;
     _iosCallkitOnlyIncomingUiForTest = null;
+    _nativeAudioSessionGatesCalleeMediaForTest = null;
     _callLifecycleArbiter.forceIdleForTest();
     final configuredMediaOwner = _physicalMediaOwner;
     await configuredMediaOwner.resetForTest();
@@ -990,6 +993,12 @@ class CallSessionManager {
     );
   }
 
+  /// iOS CallKit activates the audio session for a CallKit-accepted callee,
+  /// and media must wait for that activation. The Android plugin UI has no
+  /// such activation, so waiting would stall the join until it times out.
+  bool get _nativeAudioSessionGatesCalleeMedia =>
+      _nativeAudioSessionGatesCalleeMediaForTest ?? !Platform.isAndroid;
+
   bool get _iosCallkitOnlyIncomingUi {
     final override = _iosCallkitOnlyIncomingUiForTest;
     if (override != null) return override;
@@ -1026,6 +1035,7 @@ class CallSessionManager {
     bool? skipActiveInviteBindingForTest,
     bool? skipAcceptedNativeWatchBindingForTest,
     bool? iosCallkitOnlyIncomingUiForTest,
+    bool? nativeAudioSessionGatesCalleeMediaForTest,
     AcceptedRouteReadinessCanceller? cancelAcceptedRouteReadiness,
     NativeRouteOwnershipAcknowledger? acknowledgeNativeRouteOwnership,
     NativeMediaOwnershipAcknowledger? acknowledgeNativeMediaOwnership,
@@ -1091,6 +1101,10 @@ class CallSessionManager {
     }
     if (iosCallkitOnlyIncomingUiForTest != null) {
       _iosCallkitOnlyIncomingUiForTest = iosCallkitOnlyIncomingUiForTest;
+    }
+    if (nativeAudioSessionGatesCalleeMediaForTest != null) {
+      _nativeAudioSessionGatesCalleeMediaForTest =
+          nativeAudioSessionGatesCalleeMediaForTest;
     }
     if (cancelAcceptedRouteReadiness != null) {
       _cancelAcceptedRouteReadiness = cancelAcceptedRouteReadiness;
@@ -4386,7 +4400,7 @@ class CallSessionManager {
       try {
         await _claimPhysicalAudioMedia(
           session,
-          requireExactAudioSession: true,
+          requireExactAudioSession: _nativeAudioSessionGatesCalleeMedia,
           allowPermissionRequest: foreground,
         );
       } catch (error) {

@@ -16,6 +16,7 @@ import 'package:uuid/uuid.dart';
 import '../call_v2/diagnostics/call_v2_durable_boundary_diagnostics.dart';
 import '../call_v2/diagnostics/call_v2_physical_diagnostic_ledger.dart';
 import 'call_session_manager.dart';
+import 'android_incoming_call.dart';
 import 'callkit_id.dart';
 import 'current_chat.dart';
 import 'diagnostic_service.dart';
@@ -522,7 +523,9 @@ class NotificationService with WidgetsBindingObserver {
   }
 
   Future<List<NativeCallSnapshot>> _listActiveCallkitCalls() async {
-    if (!Platform.isIOS || !_enableIosCallKit) {
+    // Android presents the same plugin UI for calls that arrive while the
+    // app is not in the foreground, so the manager must see those calls too.
+    if (!(Platform.isIOS || Platform.isAndroid) || !_enableIosCallKit) {
       return const <NativeCallSnapshot>[];
     }
     try {
@@ -584,6 +587,14 @@ class NotificationService with WidgetsBindingObserver {
     bool aggressive = false,
     String source = 'notification_service',
   }) async {
+    if (Platform.isAndroid && _enableIosCallKit) {
+      await _endAndroidCallkitCall(
+        callkitId,
+        aggressive: aggressive,
+        source: source,
+      );
+      return;
+    }
     if (!Platform.isIOS || !_enableIosCallKit) return;
     final normalized = callkitId.trim();
     final before = await _listActiveCallkitCalls();
@@ -1154,7 +1165,10 @@ class NotificationService with WidgetsBindingObserver {
       _nativePushHandlerBound = true;
     }
 
-    if (Platform.isIOS) {
+    // Android presents the same plugin UI for calls that arrive while the
+    // app is not in the foreground; its accept/decline/timeout events must
+    // reach the call manager too.
+    if (Platform.isIOS || Platform.isAndroid) {
       await _bindCallkitEvents();
     }
     await CallSessionManager.instance.bindIncomingInviteListener();
@@ -2677,6 +2691,12 @@ class NotificationService with WidgetsBindingObserver {
             fromUid: fromUid,
             inviteId: callId,
           );
+        } else if (Platform.isAndroid && _enableIosCallKit) {
+          await AndroidIncomingCall.apply(AndroidIncomingCall.decide(
+            data,
+            sentTime: message.sentTime,
+            now: DateTime.now(),
+          ));
         } else if (_localInitialized) {
           final notifId = _notificationIdFrom('invite_fcm_$callId');
           await _local.show(
@@ -2739,6 +2759,13 @@ class NotificationService with WidgetsBindingObserver {
         'channel': channel,
         'status': status,
       });
+      if (Platform.isAndroid && _enableIosCallKit) {
+        await AndroidIncomingCall.apply(AndroidIncomingCall.decide(
+          data,
+          sentTime: message.sentTime,
+          now: DateTime.now(),
+        ));
+      }
       if (Platform.isIOS && _enableIosCallKit) {
         final callkitId = normalizeCallkitId(
           rawId: callId,
@@ -2836,7 +2863,95 @@ class NotificationService with WidgetsBindingObserver {
     return navigatorKey?.currentState;
   }
 
+  /// Android: the plugin keeps an accepted call in `activeCalls()` with
+  /// `isAccepted`, but its accept event is lost when the app was not running
+  /// (it goes to the background messaging engine). Resume that accept through
+  /// the shared recovery path.
+  Future<void> _recoverAndroidAcceptedCallkitCall({
+    required String trigger,
+  }) async {
+    if (_recoveringStoredAcceptedCall) return;
+    _recoveringStoredAcceptedCall = true;
+    try {
+      final activeCalls = await FlutterCallkitIncoming.activeCalls();
+      if (activeCalls is! List) return;
+      for (final raw in activeCalls.reversed) {
+        if (raw is! Map) continue;
+        final body = Map<String, dynamic>.from(raw);
+        final extra = _eventExtra(body);
+        final accepted = _boolField(extra, body, 'accepted') ||
+            _boolField(extra, body, 'isAccepted');
+        if (!accepted) continue;
+        final channel = _stringField(extra, body, 'channel');
+        final callkitId = _stringField(
+          body,
+          extra,
+          'id',
+          fallback: _stringField(extra, body, 'callkitId'),
+        );
+        final inviteId = _stringField(
+          extra,
+          body,
+          'inviteId',
+          fallback: _stringField(extra, body, 'callId'),
+        );
+        if (channel.isEmpty || inviteId.isEmpty) continue;
+        await _diagPush('android_accepted_call_recovery', meta: {
+          'trigger': trigger,
+          'inviteId': inviteId,
+          'callkitId': callkitId,
+        });
+        await _recoverAcceptedCallkitEvent(
+          inviteId: inviteId,
+          channel: channel,
+          isVideo: _videoField(extra, body),
+          fromName: _stringField(
+            extra,
+            body,
+            'fromName',
+            fallback:
+                _stringField(body, extra, 'nameCaller', fallback: 'Caller'),
+          ),
+          fromUid: _stringField(extra, body, 'fromUid'),
+          callkitId: callkitId,
+          trigger: 'android_active_calls:$trigger',
+          allowDistinctPreemption: false,
+        );
+        return;
+      }
+    } catch (e) {
+      await _diagPush('accepted_call_recovery_error', meta: {
+        'trigger': trigger,
+        'error': '$e',
+      });
+    } finally {
+      _recoveringStoredAcceptedCall = false;
+    }
+  }
+
+  Future<void> _endAndroidCallkitCall(
+    String callkitId, {
+    required bool aggressive,
+    required String source,
+  }) async {
+    final normalized = callkitId.trim();
+    await _diagPush('callkit_cleanup_start', meta: {
+      'callkitId': normalized,
+      'source': source,
+      'aggressive': aggressive,
+    });
+    if (aggressive) {
+      await FlutterCallkitIncoming.endAllCalls();
+    } else if (normalized.isNotEmpty) {
+      await FlutterCallkitIncoming.endCall(normalized);
+    }
+  }
+
   Future<void> _recoverAcceptedCallkitCall({String trigger = 'manual'}) async {
+    if (Platform.isAndroid && _enableIosCallKit) {
+      await _recoverAndroidAcceptedCallkitCall(trigger: trigger);
+      return;
+    }
     if (!Platform.isIOS || !_enableIosCallKit) return;
     if (_recoveringStoredAcceptedCall) return;
 

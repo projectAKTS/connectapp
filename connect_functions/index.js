@@ -1032,6 +1032,8 @@ exports.handleStripeWebhook = onRequest(
    🔔 FIRESTORE TRIGGERS
    ============================================================ */
 
+const { buildCallInviteFcmMessage } = require("./call_invites/call_invite_fcm_message");
+
 exports.onCallInviteCreated = onDocumentCreated(
   {
     document: "callInvites/{inviteId}",
@@ -1172,34 +1174,10 @@ exports.onCallInviteCreated = onDocumentCreated(
       : tokenSets.fcmAll;
     if (tokens.length) {
       try {
-        const fcmRes = await sendToTokens(tokens, {
-          notification: {
-            title: isVideo ? "Incoming Video Call" : "Incoming Audio Call",
-            body: `From ${fromName || "Someone"}`,
-          },
-          android: {
-            priority: "high",
-            notification: {
-              channelId: "high_importance_channel",
-              sound: "default",
-            },
-          },
-          apns: {
-            headers: {
-              "apns-priority": "10",
-            },
-            payload: {
-              aps: {
-                sound: "default",
-                contentAvailable: true,
-              },
-            },
-          },
-          data: {
-            type: "call_invite",
-            ...payloadData,
-          },
-        });
+        const fcmRes = await sendToTokens(
+          tokens,
+          buildCallInviteFcmMessage({ isVideo, fromName, payloadData })
+        );
         serverDiag.serverFcmSent = fcmRes?.successCount || 0;
         serverDiag.serverFcmFailed = fcmRes?.failureCount || 0;
         fcmDelivered = serverDiag.serverFcmSent > 0;
