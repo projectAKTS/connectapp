@@ -42,6 +42,14 @@ Foreground behavior (the in-app prompt) and every iOS path stay unchanged.
   - end the native UI on `call_end`
   - `_endActiveCallkitCall` on Android
   - cold-start accepted recovery from `activeCalls()`
+- `lib/services/call_session_manager.dart` — only the exact audio-session
+  gate for a CallKit-accepted callee. iOS waits for CallKit audio activation;
+  Android has none. Added 2026-10-27 after emulator evidence: the accepted
+  Android call stalled until `accepted_joining_timeout`.
+- `android/app/src/main/AndroidManifest.xml`: `MainActivity` `launchMode` only.
+  The plugin's accept intent otherwise starts a second `MainActivity`, which
+  means a second Flutter engine and a double media join. Seen on the emulator
+  as `agora_failure`.
 - `connect_functions/index.js` (`onCallInviteCreated` FCM message shape only)
 - new `connect_functions/call_invites/call_invite_fcm_message.js` and tests
 - new tests under `test/android/**`
@@ -63,10 +71,23 @@ Foreground behavior (the in-app prompt) and every iOS path stay unchanged.
 3. Foreground handler, Android, app not active: present the same CallKit UI
    instead of the local notification. `call_end` ends it.
 4. `_endActiveCallkitCall` on Android: `FlutterCallkitIncoming.endCall(id)`.
+   `_listActiveCallkitCalls` includes Android, so the manager sees the plugin
+   UI as the incoming owner.
 5. Android cold start: `activeCalls()` entries with `isAccepted` feed the
    existing `_recoverAcceptedCallkitEvent`.
 6. Unit tests for the push decision and params, and for the server message
    shape.
+7. Killed-app decline: when the app is not running, the plugin delivers the
+   Decline tap only to the background engine, where nothing listens, so the
+   caller rang until timeout (44 s on the emulator). Added 2026-10-27: the
+   background handler listens for this CallKit id's outcome during the ring
+   window and reports a decline through the existing HTTPS
+   `callInviteTransition` (`decline`, `endReason: callkit_decline`).
+   - The listener must not be awaited. FlutterFire runs background messages
+     one at a time and blocks on each handler
+     (`FlutterFirebaseMessagingBackgroundService`, `latch.await()`).
+   - Seen on the emulator: an awaited listener held back the caller's
+     `call_end` until the 45 s timeout.
 
 ## Strict Non-Goals
 
