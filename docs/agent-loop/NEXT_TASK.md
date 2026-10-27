@@ -1,80 +1,76 @@
-# Active Task - HTTPS Call-Invite Signaling (Firestore-Independent Critical Path)
+# Active Task - Cloud Functions Runtime Node.js 22
 
-Branch: `call-v2-https-signaling` (the physically verified baseline is locked
-as `stable/calls-oct-26` and tag `stable-calls-oct-26`; do not modify them)
+Branch: `call-v2` (known-good tags `stable-calls-oct-26` -> `46a71e9` and
+`stable-calls-oct-27` -> `1e2d550`; do not modify them or
+`stable/calls-oct-26`)
 
-Starting SHA: `46a71e94aa17e26478a929ab71b786a9f83312d2`
+Starting SHA: `1e2d5503a2531e09abd2bcd1b6dc215330cb6ead`
 
-Authorized by the user on 2026-10-26 after TestFlight 1.0.2 (202610252344)
-passed three consecutive audio calls and two video calls.
+Authorized by the user on 2026-10-27, after TestFlight 202610261913 passed
+on two devices (3 audio + 1 video + 1 cellular call).
 
 ## Problem
 
-The Firebase iOS SDK (11.10.0) can wedge its single Firestore worker queue
-in `GrpcStream::Shutdown` -> `WaitUntilOffQueue()` on a connectivity change
-(upstream firebase-ios-sdk#12522, unfixed). The proven app-side trigger was
-removed in `3db9e00`, but every call-critical state change (accept, decline,
-joining/connected stages, terminal transitions) still runs as a client
-Firestore transaction, several of them without any timeout. If the SDK
-wedges again, an accepted call cannot connect and an unfinished teardown
-blocks the next call.
+Google decommissions the Node.js 20 runtime for Cloud Functions on
+2026-10-30. After that date no function on `nodejs20` can be deployed or
+updated. All 18 deployed functions (17 gen2 + `onAuthUserCreated` gen1)
+run `nodejs20`, as declared in `firebase.json` and
+`connect_functions/package.json`.
 
-App Check: the app requests App Attest, but the binary has no App Attest
-entitlement and Firebase has no App Attest configuration, so every token
-exchange returns 403 (App Check is unenforced, so nothing fails today).
-DeviceCheck is fully configured.
+A runtime change takes effect only when the functions are redeployed from
+local source. Two risks follow:
+- `index.js` also exports 11 Call V2 functions that are not deployed. An
+  unscoped `firebase deploy --only functions` would create them.
+- The deployed functions come from at least six separate deploys, and
+  `connect_functions/` has changed many times since May 2026. A redeploy
+  ships the current local code of every function.
 
 ## Goal
 
-Make call-invite state transitions independent of the Firestore client by
-routing them through one HTTPS callable on the existing `callInvites` model,
-keep the current Firestore transactions as a bounded fallback, and fix App
-Check token issuance.
+Move the runtime to Node.js 22 with no behavior change, and prepare an exact,
+scoped redeploy of only the 18 currently deployed functions. Compare the
+deployed source with the local source before the user deploys.
 
 ## Allowed Files
 
-- `lib/main.dart` (App Check provider only)
-- `lib/services/call_session_manager.dart`
-- new `lib/services/call_invite_signaling.dart`
-- `connect_functions/index.js` (one new callable export)
-- new `connect_functions/call_invites/**`
-- new/updated tests under `test/**` and `connect_functions/test/call_invites/**`
+- `firebase.json` (functions `runtime` only)
+- `connect_functions/package.json` (`engines` only)
+- `connect_functions/package-lock.json` (root `engines` only)
 - `docs/agent-loop/NEXT_TASK.md`, `docs/agent-loop/STATE.json`,
   `docs/agent-loop/HANDOFF.md`
 
 ## Required Implementation
 
-1. App Check: activate `AppleProvider.deviceCheck` (debug provider unchanged).
-2. Server `callInviteTransition` callable (us-central1, authenticated) with
-   actions `accept`, `decline`, `terminal`, `stage`, mirroring the client
-   transactions exactly: participant/recipient checks, status preconditions,
-   allowlisted fields only, server timestamps, idempotent repeats.
-3. Client `CallInviteSignaling`: invoke the callable with a short timeout;
-   on any failure (including not-yet-deployed) fall back to the existing
-   Firestore transaction, which gains a bounded timeout. Tests default to the
-   Firestore path so existing behavior is unchanged unless a test injects a
-   signaling fake.
-4. Bound every call-state Firestore transaction that currently has no timeout.
-5. Regression tests: RED on the baseline, GREEN after; include a scenario in
-   which the Firestore transaction never completes yet accept, joining,
-   connected, and terminal transitions succeed through signaling, and the
-   next call is not blocked.
+1. `firebase.json`: set `runtime` to `nodejs22`.
+2. `package.json` and lockfile: set `engines.node` to `22`. Dependency
+   versions stay unchanged, including the `firebase-functions` 5.1.1 major
+   version.
+3. Under Node 22, every exported module loads and the server unit tests pass.
+4. Run a deploy dry run scoped to the 18 deployed function names.
+5. Compare deployed with local source per function: download the deployed
+   archives read-only, or get equivalent evidence. Report every behavioral
+   difference before the deploy command is handed to the user.
 
 ## Strict Non-Goals
 
-No change to the locked stable branch/tag, PushKit/CallKit native code,
-Agora/RTC setup, terminal-route navigation, Firestore security rules, or
-dependencies. No backend deployment, Firebase console change, TestFlight
-build, or upload without separate user approval.
+- No new functions, Call V2 enablement, dependency upgrades, rule changes or
+  app changes.
+- No TestFlight build.
+- Claude does not deploy. The user runs the scoped deploy command after
+  reviewing the source comparison.
 
 ## Validation
 
-Server unit tests (`node --test`), new Flutter regressions RED/GREEN, the
-complete Flutter `test/` folder, iOS RunnerTests, `flutter analyze`,
-formatting, dependency/lockfile diff, and `git diff --check`.
+- `node --test` for `test/call_invites` and `test/call_v2`, run under Node
+  22. The emulator-only file is excluded.
+- `require('./index.js')` under Node 22, with the export list checked.
+- Scoped deploy dry run.
+- Lockfile diff limited to `engines`.
+- `git diff --check`.
 
 ## Commit And Handoff
 
-Commit implementation/tests separately from the handoff on
-`call-v2-https-signaling`, set `STATE.json` to `ready_for_review`, push that
-branch only.
+- Commit the implementation as `chore(functions): move runtime to Node.js 22`.
+- Commit the handoff as
+  `chore(agent-loop): record node22 runtime review handoff`.
+- Push `call-v2` only.
