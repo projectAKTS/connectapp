@@ -31,7 +31,8 @@
     "dependency_diff": "none",
     "deploy_dry_run": "passed",
     "deploy": "callInviteTransition deployed by user; unauthenticated smoke call -> 401",
-    "testflight": "1.0.2 (202610261913) uploaded from a46f187"
+    "testflight": "1.0.2 (202610261913) uploaded from a46f187",
+    "physical": "user-reported pass on 202610261913: 3 audio + 1 video, then a call on cellular; server log shows 40 callInviteTransition requests with auth+App Check VALID, no errors"
   },
   "safety": {
     "deployed": true,
@@ -44,6 +45,6 @@
   },
   "review": {
     "decision": "ready_for_review",
-    "notes": "callInviteTransition callable plus HTTPS-first client transitions with bounded Firestore fallback; App Check uses DeviceCheck. Deploy dry run passed; the real deploy is pending the user (blocked by session permission). Read-only production checks only."
+    "notes": "callInviteTransition callable plus HTTPS-first client transitions with bounded Firestore fallback; App Check uses DeviceCheck. Deployed by the user; physically verified by the user in one session (see HANDOFF)."
   }
 }

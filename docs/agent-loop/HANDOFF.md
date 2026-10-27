@@ -73,6 +73,23 @@ TestFlight 1.0.2 (202610261913), source `a46f187`, uploaded (IPA SHA-256
 `634929254609187c49881bda0121c4ab4be3bb7e745b605c56e515772acb5224`); commit
 marker verified in archive and IPA.
 
+## Physical verification (2026-10-27)
+
+The user tested build 202610261913 on two iPhones and reported that every
+call passed: three audio calls in a row, then a video call. A further call
+with the callee on cellular instead of Wi-Fi also passed.
+
+Read-only server corroboration (`firebase functions:log --only
+callInviteTransition`):
+- 40 authenticated callable requests between 01:29:22Z and 01:30:15Z, each
+  with `auth: VALID`, `app: VALID`. The HTTPS path served real call
+  transitions, and App Check tokens from DeviceCheck now verify.
+- No warnings or errors.
+- The only other request is the earlier unauthenticated smoke call.
+
+The CLI output may be truncated, because it returned only 88 lines. Per-call
+client logs were not collected.
+
 ## Risks
 
 - Google decommissions the Node.js 20 runtime on 2026-10-30; after that no
@@ -81,6 +98,10 @@ marker verified in archive and IPA.
 - The callable is unenforced by App Check (like `getAgoraRtcToken`).
 - The underlying SDK wedge is mitigated, not fixed. Reads that depend on the
   Firestore client still degrade to their timeouts.
-- No physical verification of the HTTPS path yet.
+- Physical coverage is one session: 4 calls plus 1 call on cellular. It
+  does not prove reliability under long sessions, poor networks, or
+  background/locked-screen accept, where native `syncInviteStatus` still uses
+  a Firestore transaction.
 
-PHYSICAL_FIX_CLAIM: `NONE`
+PHYSICAL_FIX_CLAIM: `USER_VERIFIED_SESSION` (scope above; no reliability
+guarantee)
