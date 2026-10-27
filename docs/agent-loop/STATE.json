@@ -2,26 +2,40 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "android_build_repair",
-  "status": "task_ready",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "7430a15",
   "starting_sha": "7430a15",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
-  "ending_sha": null,
-  "changed_files": [],
-  "validation": {},
+  "code_commit_sha": "ad786b8",
+  "ending_sha": "SELF",
+  "changed_files": [
+    "android/app/build.gradle",
+    "android/app/src/main/kotlin/com/example/connect_app/MainActivity.kt",
+    "android/app/src/main/res/values-night/styles.xml",
+    "android/app/src/main/res/values/styles.xml",
+    "android/build.gradle",
+    "android/gradle/wrapper/gradle-wrapper.properties",
+    "android/settings.gradle"
+  ],
+  "validation": {
+    "apk_debug_build": "passed",
+    "stripe_init": "no failure on startup (2 emulators)",
+    "emulator_calls": "audio + video passed, 0 fallbacks; earlier 3 audio passed",
+    "pubspec_lock": "unchanged",
+    "git_diff_check": "passed"
+  },
   "safety": {
     "deployed": false,
     "testflight_built": false,
     "production_services_contacted": false,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": false,
+    "production_code_changes": true,
     "test_changes": false
   },
   "review": {
-    "decision": "task_ready",
-    "notes": "Android build repair (AGP/Gradle/desugaring/NDK/FlutterFragmentActivity)."
+    "decision": "ready_for_review",
+    "notes": "Android build repair; known gaps: background full-screen call UI, multi-device answered-elsewhere, package id."
   }
 }
