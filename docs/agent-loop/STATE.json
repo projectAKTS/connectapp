@@ -20,10 +20,11 @@
     "scoped_deploy_dry_run": "passed, exactly 18 deployed functions in scope",
     "deployed_source_comparison": "all 18 export bodies identical; only scheduledConsultationReminder and onChatMessageCreated pick up the pushInstallations token resolution already live for call pushes",
     "lockfile_diff": "engines only",
-    "git_diff_check": "passed"
+    "git_diff_check": "passed",
+    "deploy": "user deployed scoped 18 functions; all nodejs22 ACTIVE, no errors, IAM unchanged, smoke 401/400, scheduled run 200"
   },
   "safety": {
-    "deployed": false,
+    "deployed": true,
     "testflight_built": false,
     "production_services_contacted": true,
     "firebase_changes": false,

@@ -80,6 +80,22 @@ Comparison method:
 with exactly the names above. Never run an unscoped functions deploy, which
 would create 11 Call V2 functions.
 
+## Deployment (2026-10-27)
+
+The user ran the scoped 18-function deploy at about 04:55Z. Post-deploy
+checks:
+- `gcloud functions list`: all 18 report `nodejs22` and `ACTIVE`, including
+  gen1 `onAuthUserCreated`. No Call V2 function exists.
+- Every Cloud Run service passed its rollout startup probe.
+- No ERROR logs since the deploy, and no `SetIamPolicy` calls. Invokers are
+  unchanged: `handleStripeWebhook`, `callInviteTransition` and
+  `getAgoraRtcToken` allow `allUsers`. `healthCheck` stays private, as before.
+- Smoke checks: unauthenticated `callInviteTransition` returns 401, and an
+  unsigned Stripe webhook returns 400, which means it is reachable and rejects
+  the bad signature.
+- The first scheduled `scheduledConsultationReminder` run on Node 22
+  (04:59:04Z) returned 200 ("No consultations soon.").
+
 ## Risks
 
 - The two token-resolution changes above.
