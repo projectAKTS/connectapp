@@ -1,107 +1,91 @@
-# HTTPS Call-Invite Signaling Handoff
+# Node.js 22 Functions Runtime Handoff
 
 STATUS: `ready_for_review`
 
-BRANCH: `call-v2-https-signaling` (locked baseline: `stable/calls-oct-26`,
-tag `stable-calls-oct-26` -> `46a71e9`)
-STARTING_SHA: `46a71e94aa17e26478a929ab71b786a9f83312d2`
-AUTHORIZATION_SHA: `da33314`
-IMPLEMENTATION_SHA: `606a7a2808bfd629c440d911eb442b4060e2c672`
+BRANCH: `call-v2` (known-good tags `stable-calls-oct-26` -> `46a71e9`,
+`stable-calls-oct-27` -> `1e2d550`; untouched)
+STARTING_SHA: `1e2d5503a2531e09abd2bcd1b6dc215330cb6ead`
+AUTHORIZATION_SHA: `4bfd473`
+IMPLEMENTATION_SHA: `e8eaf3d`
 ENDING_SHA: `SELF`
 
-## Why
+## Change
 
-Firebase iOS 11.10.0 can wedge Firestore's only worker queue on a
-connectivity change (`GrpcStream::Shutdown` -> unbounded `WaitUntilOffQueue`,
-firebase-ios-sdk#12522). `3db9e00` removed the app-side trigger, but every
-call-critical state change was still a client Firestore transaction and
-several had no timeout, so a wedge made accepted calls unable to connect and
-an unfinished teardown blocked the next call (physical failure 2026-10-26).
+- `firebase.json`: `runtime` changes from `nodejs20` to `nodejs22`.
+- `connect_functions/package.json` and the root `engines` entry of
+  `package-lock.json`: `node` changes from `20` to `22`.
+- No dependency changes. `firebase-functions` stays at 5.1.1, because 6.x
+  changes the root import.
 
-## Changes
+## Deployed vs local source (read-only)
 
-- `connect_functions/call_invites/call_invite_transition.js` + export
-  `callInviteTransition` (us-central1): actions `accept`, `decline`,
-  `terminal`, `stage` mirroring the client transactions exactly; the actor
-  role comes from the authenticated uid; only allowlisted fields and server
-  timestamps are written; repeats are idempotent; invalid ids and reasons
-  are rejected.
-- `lib/services/call_invite_signaling.dart`: HTTPS client with a 6 s
-  timeout; any failure returns null.
-- `CallSessionManager`: accept, decline, media stages, and terminal
-  transitions try HTTPS first and fall back to the existing Firestore
-  transaction, now bounded to 8 s; `_setInviteStatusIfCurrent` is bounded
-  too. Test runtimes keep the Firestore path unless a fake is injected.
-- `lib/main.dart`: App Check uses `AppleProvider.deviceCheck`. Read-only
-  check: App Attest has no entitlement and no Firebase key, DeviceCheck has a
-  key, and no service enforces App Check; the device log shows an App Attest
-  assertion followed by a 403 before every call.
+The 17 gen2 archives were downloaded from
+`gcf-v2-sources-33757728932-us-central1`. The gen1 `onAuthUserCreated`
+archive came from `generateDownloadUrl`. The archives represent five distinct
+deploys:
 
-## RED / GREEN
+| Archive | Functions | Deployed | Source match |
+|---|---|---|---|
+| A | 10 Stripe callables + `handleStripeWebhook`, `healthCheck`, `scheduledConsultationReminder` | 2026-03-04 | uncommitted |
+| B | `getAgoraRtcToken` | 2026-04-19 | `2117d05` |
+| C | `onCallInviteCreated`, `onCallInviteUpdated` | 2026-08-10 | `bd960d8` |
+| D | `onChatMessageCreated` | 2026-05-17 | uncommitted |
+| E | `callInviteTransition` | 2026-10-26 | `606a7a2` (= HEAD code) |
+| F | `onAuthUserCreated` (gen1) | 2026-03-06 | uncommitted |
 
-`test/call_v2/real_flow/call_v2_https_signaling_test.dart` (identical file),
-baseline `da33314` + seams only (interface file, ignored `configure` param):
-0/3 - `Expected: ['invite_b'] Actual: []` (accept hangs on wedged
-transactions); `operation did not complete within 30s simulated time`
-(teardown awaits a wedged transaction forever); no HTTPS attempt. After the
-change: 3/3.
+Comparison method:
+- Every deployed export body was compared with local after whitespace
+  normalization; all 18 are identical.
+- Every top-level helper was compared, and each function was mapped to the
+  differing helpers it calls.
+- The only behavioral differences a redeploy ships:
+  1. `scheduledConsultationReminder`: `getUserTokens` now resolves tokens via
+     `getUserPushTokenSets`, which uses active `users/{uid}/pushInstallations`
+     plus legacy user-doc tokens, excluding inactive ones. `sendToTokens` now
+     logs FCM send failures. Both have been live for call pushes since
+     2026-08-10.
+  2. `onChatMessageCreated`: `getUserPushTokenSets` gains the same
+     `pushInstallations` merge, so chat pushes resolve devices exactly like
+     call pushes already do in production.
+- All other functions (Stripe, Agora token, call invites, auth, health,
+  `callInviteTransition`) have identical code paths.
+- Packages: deployed A/B/D lack `@google-cloud/tasks`, `google-auth-library`
+  and, for A, `agora-token`. These are used only by Call V2 or by the
+  unchanged token path. Resolved `firebase-admin`, `firebase-functions`,
+  `stripe`, `apn`, `@google-cloud/firestore` and `google-gax` are identical.
+- Params: the local gitignored `.env.connectapp-278b4` was replaced with the
+  copy deployed with C on 2026-08-10. The local copy differed only in six
+  Call V2-only keys (deliberate `disabled` placeholders). Neither the old nor
+  the new values are read by the 18 deployed functions. The previous local
+  file was backed up to the session scratchpad.
+- Gen1 F carries a legacy `.runtimeconfig.json`. No code reads
+  `functions.config()`.
 
 ## Validation
 
-- Server: `node --test test/call_invites/*.test.js` 7/7; existing
-  `test/call_v2` 87/88 (the remaining file requires the Firestore emulator;
-  Java is not installed, so emulator tests did not run).
-- Entire Flutter `test/` folder on a clean checkout of the implementation
-  SHA: 2,417 passed, 2 failed (`HELPERLY_TEST_MODE` integration wrappers,
-  identical on the baseline). A first run hit a host stall (6 load failures,
-  no assertion failures); the rerun was clean.
-- iOS RunnerTests (iOS 26.0): 31 passed.
-- `flutter analyze`: no issues. Format and `git diff --check`: clean.
-  Dependencies/lockfiles: unchanged.
+- Under Node 22.20.0, `require('./index.js')` loads all 29 exports.
+- Under Node 22.20.0, the `test/call_invites` tests pass 7/7 and the
+  `test/call_v2` tests pass 87/87. The two emulator-only files are excluded,
+  because Java is not installed; they fail identically on Node 20.19.5.
+- Node 20.19.5 control: 87/87.
+- The scoped dry run of exactly the 18 deployed names completed. Function
+  resource references in the debug log are exactly those 18, with no Call V2
+  function. The default compute service account lookup falls back to
+  `33757728932-compute@`, the account all functions already run as.
+- `git diff --check`: clean. The lockfile diff is limited to `engines`.
 
-## Deployment
+## Deploy (user runs it)
 
-The user deployed `callInviteTransition` (2026-10-26) with
-`firebase deploy --only functions:callInviteTransition --project
-connectapp-278b4`, using a local, gitignored `.env.connectapp-278b4` holding
-only non-secret params at their code defaults (Call V2 stays disabled).
-`functions:list` shows it in us-central1 (nodejs20) beside the unchanged
-existing functions. An unauthenticated smoke call returned HTTP 401
-`UNAUTHENTICATED` ("Sign in is required.") and wrote nothing.
-
-TestFlight 1.0.2 (202610261913), source `a46f187`, uploaded (IPA SHA-256
-`634929254609187c49881bda0121c4ab4be3bb7e745b605c56e515772acb5224`); commit
-marker verified in archive and IPA.
-
-## Physical verification (2026-10-27)
-
-The user tested build 202610261913 on two iPhones and reported that every
-call passed: three audio calls in a row, then a video call. A further call
-with the callee on cellular instead of Wi-Fi also passed.
-
-Read-only server corroboration (`firebase functions:log --only
-callInviteTransition`):
-- 40 authenticated callable requests between 01:29:22Z and 01:30:15Z, each
-  with `auth: VALID`, `app: VALID`. The HTTPS path served real call
-  transitions, and App Check tokens from DeviceCheck now verify.
-- No warnings or errors.
-- The only other request is the earlier unauthenticated smoke call.
-
-The CLI output may be truncated, because it returned only 88 lines. Per-call
-client logs were not collected.
+`firebase deploy --only functions:<18 names> --project connectapp-278b4`
+with exactly the names above. Never run an unscoped functions deploy, which
+would create 11 Call V2 functions.
 
 ## Risks
 
-- Google decommissions the Node.js 20 runtime on 2026-10-30; after that no
-  function can be deployed until `runtime`/`engines` move to Node 22 and are
-  verified. `firebase-functions` 5.1.1 is also flagged as outdated.
-- The callable is unenforced by App Check (like `getAgoraRtcToken`).
-- The underlying SDK wedge is mitigated, not fixed. Reads that depend on the
-  Firestore client still degrade to their timeouts.
-- Physical coverage is one session: 4 calls plus 1 call on cellular. It
-  does not prove reliability under long sessions, poor networks, or
-  background/locked-screen accept, where native `syncInviteStatus` still uses
-  a Firestore transaction.
+- The two token-resolution changes above.
+- The FCM failure log includes full tokens. This already happens for call
+  pushes; a later cleanup should log suffixes only.
+- `firebase-functions` 5.1.1 is still outdated. Upgrading to 6.x is a separate
+  task with breaking import changes.
 
-PHYSICAL_FIX_CLAIM: `USER_VERIFIED_SESSION` (scope above; no reliability
-guarantee)
+PHYSICAL_FIX_CLAIM: `NONE` (runtime only; post-deploy check pending)

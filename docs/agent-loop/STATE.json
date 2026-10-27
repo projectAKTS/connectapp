@@ -2,26 +2,37 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "functions_node22_runtime",
-  "status": "task_ready",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "1e2d5503a2531e09abd2bcd1b6dc215330cb6ead",
   "starting_sha": "1e2d5503a2531e09abd2bcd1b6dc215330cb6ead",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
-  "ending_sha": null,
-  "changed_files": [],
-  "validation": {},
+  "code_commit_sha": "e8eaf3d",
+  "ending_sha": "SELF",
+  "changed_files": [
+    "firebase.json",
+    "connect_functions/package.json",
+    "connect_functions/package-lock.json"
+  ],
+  "validation": {
+    "node22_module_load": "passed, 29 exports",
+    "server_unit_tests_node22": "call_invites 7/7, call_v2 87/87 (2 emulator-only files excluded; same on node20)",
+    "scoped_deploy_dry_run": "passed, exactly 18 deployed functions in scope",
+    "deployed_source_comparison": "all 18 export bodies identical; only scheduledConsultationReminder and onChatMessageCreated pick up the pushInstallations token resolution already live for call pushes",
+    "lockfile_diff": "engines only",
+    "git_diff_check": "passed"
+  },
   "safety": {
     "deployed": false,
     "testflight_built": false,
-    "production_services_contacted": false,
+    "production_services_contacted": true,
     "firebase_changes": false,
-    "backend_changes": false,
+    "backend_changes": true,
     "production_code_changes": false,
     "test_changes": false
   },
   "review": {
-    "decision": "task_ready",
-    "notes": "Node.js 22 runtime move with a scoped redeploy of the 18 deployed functions; user deploys."
+    "decision": "ready_for_review",
+    "notes": "Node 22 runtime; read-only deployed-source comparison done; user runs the scoped 18-function deploy."
   }
 }
