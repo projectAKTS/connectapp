@@ -227,3 +227,122 @@ test("stage updates mirror joining, joined_local, and connected semantics", asyn
   );
   assert.equal(db.writes.length, 4);
 });
+
+const PHONE = "phone_installation_1";
+const TABLET = "tablet_installation_2";
+
+test("accept records the answering installation and fences other installations", async () => {
+  const { db, handle } = setup({ inv1: invite("ringing") });
+  const first = await handle({
+    authUid: CALLEE,
+    data: { action: "accept", inviteId: "inv1", installationId: PHONE },
+  });
+  assert.equal(first.decision, "accepted");
+  assert.equal(db.writes[0][1].acceptedInstallationId, PHONE);
+
+  const same = await handle({
+    authUid: CALLEE,
+    data: { action: "accept", inviteId: "inv1", installationId: PHONE },
+  });
+  assert.equal(same.decision, "alreadyAccepted");
+
+  const other = await handle({
+    authUid: CALLEE,
+    data: { action: "accept", inviteId: "inv1", installationId: TABLET },
+  });
+  assert.equal(other.decision, "acceptedElsewhere");
+  assert.equal(other.invite.channel, "c_channel");
+  assert.equal(db.writes.length, 1, "only the first accept writes");
+});
+
+test("old clients without an installation id keep today's accept behavior", async () => {
+  const { db, handle } = setup({
+    legacy: invite("ringing"),
+    recorded: invite("accepted", { acceptedInstallationId: PHONE }),
+    unrecorded: invite("joining"),
+    bogusId: invite("ringing"),
+  });
+  await handle({ authUid: CALLEE, data: { action: "accept", inviteId: "legacy" } });
+  assert.equal("acceptedInstallationId" in db.writes[0][1], false);
+  assert.equal(
+    (await handle({ authUid: CALLEE, data: { action: "accept", inviteId: "recorded" } })).decision,
+    "alreadyAccepted",
+  );
+  assert.equal(
+    (await handle({
+      authUid: CALLEE,
+      data: { action: "accept", inviteId: "unrecorded", installationId: TABLET },
+    })).decision,
+    "alreadyAccepted",
+  );
+  await handle({
+    authUid: CALLEE,
+    data: { action: "accept", inviteId: "bogusId", installationId: "bad id!" },
+  });
+  assert.equal("acceptedInstallationId" in db.writes[1][1], false, "invalid ids are ignored");
+});
+
+test("a non-answering callee installation cannot end or stage the answered call", async () => {
+  const { db, handle } = setup({
+    inv1: invite("connected", { acceptedInstallationId: PHONE }),
+  });
+  const end = await handle({
+    authUid: CALLEE,
+    data: {
+      action: "terminal",
+      inviteId: "inv1",
+      requestedStatus: "ended",
+      authoritativeLocalExit: true,
+      installationId: TABLET,
+    },
+  });
+  assert.equal(end.writeApplied, false);
+  assert.equal(end.reason, "answered_elsewhere");
+  const stage = await handle({
+    authUid: CALLEE,
+    data: { action: "stage", inviteId: "inv1", stage: "joining", installationId: TABLET },
+  });
+  assert.equal(stage.applied, false);
+  assert.equal(stage.reason, "answered_elsewhere");
+  assert.equal(db.writes.length, 0);
+
+  const answering = await handle({
+    authUid: CALLEE,
+    data: {
+      action: "terminal",
+      inviteId: "inv1",
+      requestedStatus: "ended",
+      authoritativeLocalExit: true,
+      installationId: PHONE,
+    },
+  });
+  assert.equal(answering.writeApplied, true);
+});
+
+test("the caller and old callee clients are never fenced", async () => {
+  const { handle } = setup({
+    byCaller: invite("connected", { acceptedInstallationId: PHONE }),
+    byLegacy: invite("connected", { acceptedInstallationId: PHONE }),
+  });
+  const caller = await handle({
+    authUid: CALLER,
+    data: {
+      action: "terminal",
+      inviteId: "byCaller",
+      requestedStatus: "ended",
+      authoritativeLocalExit: true,
+      installationId: TABLET,
+    },
+  });
+  assert.equal(caller.writeApplied, true);
+  const legacy = await handle({
+    authUid: CALLEE,
+    data: {
+      action: "terminal",
+      inviteId: "byLegacy",
+      requestedStatus: "ended",
+      authoritativeLocalExit: true,
+    },
+  });
+  assert.equal(legacy.writeApplied, true);
+});

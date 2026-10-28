@@ -195,6 +195,44 @@ void main() {
     });
   });
 
+  test('answered_elsewhere ends the call UI except on the answering device',
+      () {
+    final presented = AndroidIncomingCall.decide(invite(), now: now);
+    Map<String, dynamic> elsewhere(String answering) => <String, dynamic>{
+          ...invite(type: 'call_end'),
+          'status': AndroidIncomingCall.answeredElsewhereStatus,
+          'acceptedInstallationId': answering,
+        };
+
+    final other = AndroidIncomingCall.decide(
+      elsewhere('phone_installation_1'),
+      now: now,
+      ownInstallationId: 'tablet_installation_2',
+    );
+    expect(other.kind, AndroidIncomingCallDecisionKind.end);
+    expect(other.callkitId, presented.callkitId);
+
+    final here = AndroidIncomingCall.decide(
+      elsewhere('tablet_installation_2'),
+      now: now,
+      ownInstallationId: 'tablet_installation_2',
+    );
+    expect(here.kind, AndroidIncomingCallDecisionKind.ignore);
+    expect(here.reason, 'answered_here');
+
+    final terminal = AndroidIncomingCall.decide(
+      <String, dynamic>{
+        ...invite(type: 'call_end'),
+        'status': 'ended',
+        'acceptedInstallationId': 'tablet_installation_2',
+      },
+      now: now,
+      ownInstallationId: 'tablet_installation_2',
+    );
+    expect(terminal.kind, AndroidIncomingCallDecisionKind.end,
+        reason: 'real terminal ends always end the call UI');
+  });
+
   test('a missing caller name falls back to Caller', () {
     final decision =
         AndroidIncomingCall.decide(invite(fromName: '  '), now: now);

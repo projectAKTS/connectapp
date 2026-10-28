@@ -26,10 +26,17 @@ class AndroidIncomingCall {
   /// Shortest ring worth presenting.
   static const Duration minRing = Duration(seconds: 5);
 
+  /// `call_end` status sent to a callee's other devices when one answers.
+  static const String answeredElsewhereStatus = 'answered_elsewhere';
+
+  /// [ownInstallationId] is this device's push installation id. An
+  /// `answered_elsewhere` end addressed to the answering installation is
+  /// ignored: ending the plugin call there would end the answered call.
   static AndroidIncomingCallDecision decide(
     Map<String, dynamic> data, {
     DateTime? sentTime,
     required DateTime now,
+    String ownInstallationId = '',
   }) {
     final type = '${data['type'] ?? data['action'] ?? ''}'.trim();
     final channel = '${data['channel'] ?? ''}'.trim();
@@ -40,6 +47,13 @@ class AndroidIncomingCall {
     final callkitId = normalizeCallkitId(rawId: inviteId, fallback: channel);
 
     if (type == 'call_end') {
+      final status = '${data['status'] ?? ''}'.trim();
+      final answering = '${data['acceptedInstallationId'] ?? ''}'.trim();
+      if (status == answeredElsewhereStatus &&
+          answering.isNotEmpty &&
+          answering == ownInstallationId.trim()) {
+        return const AndroidIncomingCallDecision.ignore('answered_here');
+      }
       return AndroidIncomingCallDecision.end(callkitId: callkitId);
     }
     if (type != 'call_invite' && type != 'incoming_call') {

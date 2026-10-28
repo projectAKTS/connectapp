@@ -1204,6 +1204,56 @@ exports.onCallInviteCreated = onDocumentCreated(
   }
 );
 
+const {
+  answeredElsewhereFcmMessage,
+  answeredElsewherePayload,
+  answeredElsewhereTargets,
+  isAnsweredElsewhereTransition,
+} = require("./call_invites/answered_elsewhere");
+
+/** Stops the callee's other devices ringing once one device has accepted. */
+async function sendAnsweredElsewherePush(inviteId, before, after) {
+  const toUid = `${after.toUid || before.toUid || ""}`.trim();
+  if (!toUid) return;
+  const [installationSnap, userSnap] = await Promise.all([
+    db.collection("users").doc(toUid).collection("pushInstallations").get().catch(() => null),
+    db.collection("users").doc(toUid).get().catch(() => null),
+  ]);
+  const targets = answeredElsewhereTargets({
+    installations: installationSnap
+      ? installationSnap.docs.map((doc) => ({ id: doc.id, data: doc.data() || {} }))
+      : [],
+    userData: userSnap?.exists ? userSnap.data() || {} : {},
+    acceptedInstallationId: after.acceptedInstallationId,
+    mergeTokenSets: mergeUserPushTokenSets,
+  });
+  const payloadData = answeredElsewherePayload(inviteId, before, after);
+  if (targets.voip.length) {
+    try {
+      const voipRes = await sendVoipPushToTokens(targets.voip, payloadData);
+      console.log("APNS VoIP answered-elsewhere result:", {
+        identifierPresent: Boolean(inviteId),
+        tokenCount: targets.voip.length,
+        ...voipRes,
+      });
+    } catch (e) {
+      console.error("APNS VoIP answered-elsewhere send failed:", { error: `${e}` });
+    }
+  }
+  if (targets.fcm.length) {
+    try {
+      await sendToTokens(targets.fcm, answeredElsewhereFcmMessage(payloadData));
+    } catch (e) {
+      console.error("FCM answered-elsewhere send failed:", { error: `${e}` });
+    }
+  }
+  console.log("call invite answered-elsewhere push", {
+    identifierPresent: Boolean(inviteId),
+    voipCount: targets.voip.length,
+    fcmCount: targets.fcm.length,
+  });
+}
+
 exports.onCallInviteUpdated = onDocumentUpdated(
   {
     document: "callInvites/{inviteId}",
@@ -1217,6 +1267,10 @@ exports.onCallInviteUpdated = onDocumentUpdated(
     const afterStatus = normalizeStatus(after.status);
     const inviteId = event.params.inviteId || "";
     if (!inviteId || !afterStatus || afterStatus === beforeStatus) return;
+    if (isAnsweredElsewhereTransition(before, after)) {
+      await sendAnsweredElsewherePush(inviteId, before, after);
+      return;
+    }
     if (!TERMINAL_CALL_INVITE_STATUSES.has(afterStatus)) return;
 
     const channel = `${after.channel || before.channel || ""}`.trim();

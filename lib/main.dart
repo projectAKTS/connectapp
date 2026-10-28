@@ -34,6 +34,7 @@ import 'screens/premium/premium_screen.dart';
 import 'widgets/main_scaffold.dart';
 import 'widgets/full_screen_back_gesture.dart';
 import 'services/android_incoming_call.dart';
+import 'services/push_installation_id.dart';
 import 'services/firebase_options.dart';
 import 'services/firestore_read_helper.dart';
 import 'services/notification_service.dart';
@@ -85,6 +86,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       message.data,
       sentTime: message.sentTime,
       now: DateTime.now(),
+      ownInstallationId: await PushInstallationId.read(),
     );
     await AndroidIncomingCall.apply(decision);
     // Not awaited: FlutterFire runs background messages one at a time and

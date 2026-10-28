@@ -1222,6 +1222,19 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
     return ledger[key] ?? [:]
   }
 
+  private func callkitCallAnsweredHere(callkitId: String) -> Bool {
+    let key = callkitId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !key.isEmpty else { return false }
+    let state = ((callkitPresentationEntry(callkitId: key)["state"] as? String) ?? "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    if state == "accepted" || state == "active" { return true }
+    let stored = (UserDefaults.standard.string(forKey: lastCallkitAcceptedCallkitIdStoreKey) ?? "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    return !stored.isEmpty && stored == key
+  }
+
   private func beginCallkitPresentationLease(callkitId: String) -> Bool {
     let key = callkitId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     guard !key.isEmpty else { return false }
@@ -1858,6 +1871,20 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
       payloadType,
       payloadStatus
     )
+
+    // A callee's other devices get "answered_elsewhere" when one device
+    // answers. If this device is the one that answered, ending the CallKit
+    // call here would end the answered call.
+    if terminalPayload && payloadStatus == "answered_elsewhere" &&
+      callkitCallAnsweredHere(callkitId: callkitId) {
+      storePushkitState(
+        "answered_elsewhere_ignored_answered_here",
+        payloadType: payloadType,
+        detail: "identifier_present=true"
+      )
+      finish()
+      return
+    }
 
     if terminalPayload {
       markCallkitPresentationState(callkitId: callkitId, state: "terminal")

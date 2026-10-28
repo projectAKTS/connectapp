@@ -9,15 +9,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:uuid/uuid.dart';
 
 import '../call_v2/diagnostics/call_v2_durable_boundary_diagnostics.dart';
 import '../call_v2/diagnostics/call_v2_physical_diagnostic_ledger.dart';
 import 'call_session_manager.dart';
 import 'android_incoming_call.dart';
 import 'callkit_id.dart';
+import 'push_installation_id.dart';
 import 'current_chat.dart';
 import 'diagnostic_service.dart';
 import 'firestore_read_helper.dart';
@@ -209,6 +208,9 @@ class NotificationService with WidgetsBindingObserver {
           ? null
           : CallV2PhysicalDiagnosticLedger.instance.acknowledgeMediaJoined,
     );
+    unawaited(_getPushInstallationId()
+        .then(CallSessionManager.instance.setInstallationId)
+        .catchError((Object _) {}));
   }
 
   final GlobalKey<NavigatorState>? navigatorKey;
@@ -292,7 +294,6 @@ class NotificationService with WidgetsBindingObserver {
   bool _signOutPreparationInProgress = false;
   String? _signOutPreparingUid;
   Future<void> Function()? _afterSignOutDeactivationForTest;
-  String? _pushInstallationId;
   String? _pendingChatOpenOtherUserId;
   String? _pendingChatOpenChatId;
   bool _chatNavigationInFlight = false;
@@ -2551,33 +2552,7 @@ class NotificationService with WidgetsBindingObserver {
     }
   }
 
-  Future<String> _getPushInstallationId() async {
-    final cached = _pushInstallationId?.trim();
-    if (cached != null && cached.isNotEmpty) return cached;
-    try {
-      final dir = await getApplicationSupportDirectory();
-      final file = File('${dir.path}/helperly_push_installation_id');
-      if (await file.exists()) {
-        final existing = (await file.readAsString()).trim();
-        if (_validInstallationId(existing)) {
-          _pushInstallationId = existing;
-          return existing;
-        }
-      }
-      final generated = const Uuid().v4();
-      await file.writeAsString(generated, flush: true);
-      _pushInstallationId = generated;
-      return generated;
-    } catch (_) {
-      final generated = const Uuid().v4();
-      _pushInstallationId = generated;
-      return generated;
-    }
-  }
-
-  bool _validInstallationId(String value) {
-    return RegExp(r'^[A-Za-z0-9_-]{8,80}$').hasMatch(value.trim());
-  }
+  Future<String> _getPushInstallationId() => PushInstallationId.read();
 
   Future<void> _upsertPushInstallationForUser(
     String uid, {
@@ -2759,6 +2734,22 @@ class NotificationService with WidgetsBindingObserver {
         'channel': channel,
         'status': status,
       });
+      if (status == AndroidIncomingCall.answeredElsewhereStatus) {
+        // Another device of this user answered. Never end the native call
+        // here if this device is the one that answered.
+        final answering =
+            (data['acceptedInstallationId'] ?? '').toString().trim();
+        if (answering.isNotEmpty &&
+            answering == await _getPushInstallationId()) {
+          return;
+        }
+        await CallSessionManager.instance.handleAnsweredElsewhere(
+          inviteId: callId,
+          channel: channel,
+          source: 'push_answered_elsewhere',
+        );
+        return;
+      }
       if (Platform.isAndroid && _enableIosCallKit) {
         await AndroidIncomingCall.apply(AndroidIncomingCall.decide(
           data,
@@ -3522,6 +3513,16 @@ class NotificationService with WidgetsBindingObserver {
       throw StateError('debugSimulateCallkitPluginEventForTest is test-only');
     }
     await _handleCallkitPluginEvent(CallEvent(body, event));
+  }
+
+  Future<void> debugHandleRemoteMessageForTest(
+    RemoteMessage message, {
+    bool showLocal = false,
+  }) async {
+    if (!_debugTestAccessEnabled) {
+      throw StateError('debugHandleRemoteMessageForTest is test-only');
+    }
+    await _handleMessage(message, showLocal: showLocal);
   }
 
   Future<void> debugSimulateNativeAcceptedCallkitBridgeForTest({

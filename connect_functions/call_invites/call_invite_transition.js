@@ -47,6 +47,7 @@ const TERMINAL_TIMESTAMP_FIELDS = Object.freeze({
 });
 const INVITE_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const REASON_PATTERN = /^[A-Za-z0-9_.:-]{1,120}$/;
+const INSTALLATION_ID_PATTERN = /^[A-Za-z0-9_-]{8,80}$/;
 
 class CallInviteTransitionError extends Error {
   constructor(code, message) {
@@ -98,6 +99,22 @@ function requireReason(raw, fallback) {
   return reason;
 }
 
+/** The caller device's push installation id, or "" when absent/invalid. */
+function requestInstallationId(request) {
+  const value = String(request?.installationId ?? "").trim();
+  return INSTALLATION_ID_PATTERN.test(value) ? value : "";
+}
+
+/**
+ * True when another installation of the callee already accepted. Both ids
+ * must be present: old clients send none and keep today's behavior.
+ */
+function answeredElsewhere(data, request) {
+  const accepted = String(data?.acceptedInstallationId ?? "").trim();
+  const requester = requestInstallationId(request);
+  return Boolean(accepted && requester && accepted !== requester);
+}
+
 function participantRole(data, authUid) {
   const fromUid = String(data.fromUid ?? "").trim();
   const toUid = String(data.toUid ?? "").trim();
@@ -120,7 +137,7 @@ function invitePayload(data, status) {
 }
 
 /** Mirrors `_acceptInviteTransactionWithRetry`'s transaction body. */
-function planAccept(data, authUid) {
+function planAccept(data, authUid, request) {
   if (!data) return { result: { decision: "missing" } };
   const status = parseStatus(data.status);
   const toUid = String(data.toUid ?? "").trim();
@@ -138,15 +155,20 @@ function planAccept(data, authUid) {
     return { result: { decision: "invalidPayload", invite } };
   }
   if (status === "ringing") {
+    const installationId = requestInstallationId(request);
     return {
       update: (ts) => ({
         status: "accepted",
         acceptedAt: ts,
         calleeStage: "accepted",
         calleeLastError: "",
+        ...(installationId ? { acceptedInstallationId: installationId } : {}),
       }),
       result: { decision: "accepted", invite: { ...invite, status: "accepted" } },
     };
+  }
+  if (answeredElsewhere(data, request)) {
+    return { result: { decision: "acceptedElsewhere", invite } };
   }
   return { result: { decision: "alreadyAccepted", invite } };
 }
@@ -203,6 +225,9 @@ function planTerminal(data, authUid, request) {
   }
   const role = participantRole(data, authUid);
   if (!role) return { result: { ...fallback, reason: "not_participant" } };
+  if (role === "callee" && answeredElsewhere(data, request)) {
+    return { result: { ...fallback, reason: "answered_elsewhere" } };
+  }
   const actorIsCaller = role === "caller";
 
   let effectiveStatus = requestedStatus;
@@ -253,6 +278,9 @@ function planStage(data, authUid, request) {
   const status = parseStatus(data.status);
   const role = participantRole(data, authUid);
   if (!role) return { result: { applied: false, status, reason: "not_participant" } };
+  if (role === "callee" && answeredElsewhere(data, request)) {
+    return { result: { applied: false, status, reason: "answered_elsewhere" } };
+  }
   if (!stage.expectedStatuses.includes(status)) {
     return { result: { applied: false, status } };
   }
@@ -270,7 +298,7 @@ function planStage(data, authUid, request) {
 }
 
 const PLANNERS = Object.freeze({
-  accept: (data, authUid) => planAccept(data, authUid),
+  accept: planAccept,
   decline: planDecline,
   terminal: planTerminal,
   stage: planStage,

@@ -64,6 +64,7 @@ enum _AcceptInviteDecision {
   invalidPayload,
   unavailable,
   superseded,
+  acceptedElsewhere,
 }
 
 enum IncomingUiOwner {
@@ -598,6 +599,12 @@ class CallSessionManager {
   AcceptedRouteReadinessCanceller? _cancelAcceptedRouteReadiness;
   NativeRouteOwnershipAcknowledger? _acknowledgeNativeRouteOwnership;
   NativeMediaOwnershipAcknowledger? _acknowledgeNativeMediaOwnership;
+  String _installationId = '';
+
+  /// Invites another installation of this user answered. This device must
+  /// not ring, join, or write for them.
+  final Set<String> _answeredElsewhereInviteIds = <String>{};
+  final Map<String, int> _acceptsInFlight = <String, int>{};
   CallV2PhysicalMediaOwner _physicalMediaOwner =
       CallV2PhysicalMediaOwner.instance;
   int _callkitFallbackRequestedCount = 0;
@@ -819,6 +826,9 @@ class CallSessionManager {
     _skipAcceptedNativeWatchBindingForTest = false;
     _iosCallkitOnlyIncomingUiForTest = null;
     _nativeAudioSessionGatesCalleeMediaForTest = null;
+    _installationId = '';
+    _answeredElsewhereInviteIds.clear();
+    _acceptsInFlight.clear();
     _callLifecycleArbiter.forceIdleForTest();
     final configuredMediaOwner = _physicalMediaOwner;
     await configuredMediaOwner.resetForTest();
@@ -1041,6 +1051,7 @@ class CallSessionManager {
     NativeMediaOwnershipAcknowledger? acknowledgeNativeMediaOwnership,
     CallV2PhysicalMediaOwner? physicalMediaOwnerForTest,
     CallInviteSignaling? callInviteSignalingForTest,
+    String? installationId,
   }) {
     if (navigatorKey != null) {
       _navigatorKey = navigatorKey;
@@ -1114,6 +1125,9 @@ class CallSessionManager {
     }
     if (acknowledgeNativeMediaOwnership != null) {
       _acknowledgeNativeMediaOwnership = acknowledgeNativeMediaOwnership;
+    }
+    if (installationId != null) {
+      setInstallationId(installationId);
     }
     if (physicalMediaOwnerForTest != null && _debugTestAccessEnabled) {
       _physicalMediaOwner = physicalMediaOwnerForTest;
@@ -2072,6 +2086,7 @@ class CallSessionManager {
     required String inviteId,
     String source = 'manual_decline',
   }) async {
+    if (isAnsweredElsewhere(inviteId)) return;
     await _declineInviteTransaction(inviteId, source: source);
     await _markNativeInviteStateByIdsSafely(
       inviteId: inviteId,
@@ -2097,6 +2112,13 @@ class CallSessionManager {
       await endCallFromLocalUser(inviteId: inviteId, source: source);
       return;
     }
+    if (isAnsweredElsewhere(inviteId)) {
+      await _diagManager('system_end_ignored_answered_elsewhere', meta: {
+        'inviteId': inviteId,
+        'source': source,
+      });
+      return;
+    }
     await _markNativeInviteStateByIdsSafely(
       inviteId: inviteId,
       channel: '',
@@ -2105,6 +2127,7 @@ class CallSessionManager {
     );
     await _setInviteStatusIfCurrent(
       inviteId: inviteId,
+      skipWhenAnsweredElsewhere: true,
       expectedStatuses: const <CallInviteStatus>{
         CallInviteStatus.ringing,
         CallInviteStatus.accepted,
@@ -2129,6 +2152,7 @@ class CallSessionManager {
     required String inviteId,
     String source = 'system_timeout',
   }) async {
+    if (isAnsweredElsewhere(inviteId)) return;
     await _markNativeInviteStateByIdsSafely(
       inviteId: inviteId,
       channel: '',
@@ -2788,6 +2812,10 @@ class CallSessionManager {
           source: source,
           channel: (data['channel'] ?? '').toString().trim(),
         );
+      } else if (status == CallInviteStatus.accepted ||
+          status == CallInviteStatus.joining ||
+          status == CallInviteStatus.connected) {
+        await _handleAnsweredElsewhereSnapshot(inviteId, data, source: source);
       }
       return;
     }
@@ -4243,6 +4271,32 @@ class CallSessionManager {
     int? lifecycleGeneration,
     bool preserveLifecycleOnNavigatorUnavailable = false,
   }) async {
+    final inviteId = payload.inviteId;
+    _acceptsInFlight[inviteId] = (_acceptsInFlight[inviteId] ?? 0) + 1;
+    try {
+      return await _acceptInviteAndOpenTracked(
+        payload,
+        source: source,
+        lifecycleGeneration: lifecycleGeneration,
+        preserveLifecycleOnNavigatorUnavailable:
+            preserveLifecycleOnNavigatorUnavailable,
+      );
+    } finally {
+      final remaining = (_acceptsInFlight[inviteId] ?? 1) - 1;
+      if (remaining > 0) {
+        _acceptsInFlight[inviteId] = remaining;
+      } else {
+        _acceptsInFlight.remove(inviteId);
+      }
+    }
+  }
+
+  Future<_IncomingCandidateResult> _acceptInviteAndOpenTracked(
+    CallInvitePayload payload, {
+    required String source,
+    int? lifecycleGeneration,
+    bool preserveLifecycleOnNavigatorUnavailable = false,
+  }) async {
     if (lifecycleGeneration != null &&
         !_canContinueAcceptedRouteGeneration(lifecycleGeneration)) {
       return _IncomingCandidateResult.ignored;
@@ -4299,6 +4353,13 @@ class CallSessionManager {
         );
       } else if (lifecycleGeneration != null) {
         _releaseFailedIncomingGeneration(lifecycleGeneration);
+      }
+      if (acceptResult.decision == _AcceptInviteDecision.acceptedElsewhere) {
+        await _dismissAnsweredElsewhere(
+          payload.inviteId,
+          channel: payload.channel,
+          source: 'accept:$source',
+        );
       }
       return terminal
           ? _IncomingCandidateResult.terminal
@@ -4614,6 +4675,7 @@ class CallSessionManager {
           lifecycleGeneration: lifecycleGeneration,
           generationCurrent: true,
         );
+        final ownInstallationId = _localInstallationId;
         final result = await _acceptInviteViaSignaling(payload) ??
             await _db
                 .runTransaction<_AcceptInviteTransactionResult>((tx) async {
@@ -4703,12 +4765,20 @@ class CallSessionManager {
                       'acceptedAt': FieldValue.serverTimestamp(),
                       'calleeStage': 'accepted',
                       'calleeLastError': '',
+                      if (ownInstallationId.isNotEmpty)
+                        'acceptedInstallationId': ownInstallationId,
                     },
                     SetOptions(merge: true));
                 return _AcceptInviteTransactionResult(
                   decision: _AcceptInviteDecision.accepted,
                   authoritativePayload: authoritativePayload,
                   authoritativeStatus: CallInviteStatus.accepted,
+                );
+              }
+              if (_answeredByOtherInstallation(data, ownInstallationId)) {
+                return _AcceptInviteTransactionResult(
+                  decision: _AcceptInviteDecision.acceptedElsewhere,
+                  authoritativeStatus: status,
                 );
               }
               return _AcceptInviteTransactionResult(
@@ -4873,6 +4943,8 @@ class CallSessionManager {
         CallV2DurableDiagnosticOutcome.superseded,
       _AcceptInviteDecision.unavailable =>
         CallV2DurableDiagnosticOutcome.unavailable,
+      _AcceptInviteDecision.acceptedElsewhere =>
+        CallV2DurableDiagnosticOutcome.superseded,
     };
   }
 
@@ -6644,6 +6716,104 @@ class CallSessionManager {
     );
   }
 
+  /// Records this installation's push id. NotificationService sets it once
+  /// at startup, so call paths never wait on storage. Until then accepts are
+  /// sent without an id and keep the old single-device behavior.
+  void setInstallationId(String installationId) {
+    final id = installationId.trim();
+    if (RegExp(r'^[A-Za-z0-9_-]{8,80}$').hasMatch(id)) _installationId = id;
+  }
+
+  String get _localInstallationId => _installationId;
+
+  /// True when the invite records another installation as the answering
+  /// one. Both ids must be known; otherwise behavior is unchanged.
+  static bool _answeredByOtherInstallation(
+    Map<String, dynamic> data,
+    String ownInstallationId,
+  ) {
+    final answering = (data['acceptedInstallationId'] ?? '').toString().trim();
+    return answering.isNotEmpty &&
+        ownInstallationId.isNotEmpty &&
+        answering != ownInstallationId;
+  }
+
+  bool _hasLocalAcceptFor(String inviteId) {
+    if ((_acceptsInFlight[inviteId] ?? 0) > 0) return true;
+    final session = _current;
+    if (session != null &&
+        session.inviteId == inviteId &&
+        !session.isTerminal) {
+      return true;
+    }
+    final intent = _pendingAcceptedInviteIntent;
+    return intent != null && intent.matchesInvite(inviteId);
+  }
+
+  bool isAnsweredElsewhere(String inviteId) =>
+      _answeredElsewhereInviteIds.contains(inviteId.trim());
+
+  /// Another installation of this user answered [inviteId]: stop ringing
+  /// here without any Firestore or HTTPS write. Idempotent, and a no-op
+  /// while this device is accepting or holds a live session for the invite.
+  Future<void> handleAnsweredElsewhere({
+    required String inviteId,
+    String channel = '',
+    required String source,
+  }) async {
+    final id = inviteId.trim();
+    if (id.isEmpty || _hasLocalAcceptFor(id)) return;
+    await _dismissAnsweredElsewhere(id, channel: channel, source: source);
+  }
+
+  Future<void> _dismissAnsweredElsewhere(
+    String inviteId, {
+    required String channel,
+    required String source,
+  }) async {
+    if (!_answeredElsewhereInviteIds.add(inviteId)) return;
+    if (_answeredElsewhereInviteIds.length > 64) {
+      _answeredElsewhereInviteIds.remove(_answeredElsewhereInviteIds.first);
+    }
+    _markInviteHandled(inviteId);
+    await _diagManager('incoming_answered_elsewhere', meta: {
+      'inviteId': inviteId,
+      'channel': channel,
+      'source': source,
+    });
+    // Marked first: ending the native UI below emits plugin end events, and
+    // the system end/timeout/decline paths skip marked invites.
+    await _terminalizeUnacceptedIncomingInvite(
+      inviteId: inviteId,
+      status: CallInviteStatus.accepted,
+      source: source,
+      channel: channel,
+    );
+  }
+
+  Future<void> _handleAnsweredElsewhereSnapshot(
+    String inviteId,
+    Map<String, dynamic> data, {
+    required String source,
+  }) async {
+    if (isAnsweredElsewhere(inviteId) || _hasLocalAcceptFor(inviteId)) return;
+    final toUid = (data['toUid'] ?? '').toString().trim();
+    final currentUid = _currentUid.trim();
+    if (currentUid.isEmpty || toUid != currentUid) return;
+    final created = (data['createdAt'] as Timestamp?)?.toDate();
+    if (created != null &&
+        DateTime.now().difference(created) > const Duration(minutes: 2)) {
+      return;
+    }
+    final ownInstallationId = _localInstallationId;
+    if (!_answeredByOtherInstallation(data, ownInstallationId)) return;
+    await handleAnsweredElsewhere(
+      inviteId: inviteId,
+      channel: (data['channel'] ?? '').toString().trim(),
+      source: '$source:answered_elsewhere',
+    );
+  }
+
   /// Runs [action] through [CallInviteSignaling] and returns its `applied`
   /// flag, or null when the HTTPS path is unavailable.
   Future<bool?> _signalBool(String action, Map<String, Object?> data) async {
@@ -6665,8 +6835,10 @@ class CallSessionManager {
   ) async {
     final signaling = _callInviteSignaling;
     if (signaling == null) return null;
+    final installationId = _localInstallationId;
     final result = await signaling.transition('accept', <String, Object?>{
       'inviteId': payload.inviteId,
+      if (installationId.isNotEmpty) 'installationId': installationId,
     });
     if (result == null) return null;
     final decision = switch ((result['decision'] ?? '').toString()) {
@@ -6677,6 +6849,7 @@ class CallSessionManager {
       'terminal' => _AcceptInviteDecision.terminal,
       'invalidStatus' => _AcceptInviteDecision.invalidStatus,
       'invalidPayload' => _AcceptInviteDecision.invalidPayload,
+      'acceptedElsewhere' => _AcceptInviteDecision.acceptedElsewhere,
       _ => null,
     };
     if (decision == null) return null;
@@ -6710,8 +6883,10 @@ class CallSessionManager {
   }) async {
     final signaling = _callInviteSignaling;
     if (signaling == null) return null;
+    final installationId = _localInstallationId;
     final result = await signaling.transition('terminal', <String, Object?>{
       'inviteId': session.inviteId,
+      if (installationId.isNotEmpty) 'installationId': installationId,
       'requestedStatus': requestedStatus.name,
       'endReason': requestedEndReason,
       'authoritativeLocalExit': authoritativeLocalExit,
@@ -6761,9 +6936,11 @@ class CallSessionManager {
     Map<String, dynamic>? extra,
   }) async {
     if (inviteId.trim().isEmpty) return false;
+    final installationId = _localInstallationId;
     final signaled = await _signalBool('stage', <String, Object?>{
       'inviteId': inviteId,
       'stage': stage,
+      if (installationId.isNotEmpty) 'installationId': installationId,
     });
     if (signaled != null) return signaled;
     final prefix = isCaller ? 'caller' : 'callee';
@@ -6839,8 +7016,11 @@ class CallSessionManager {
     required String inviteId,
     required Set<CallInviteStatus> expectedStatuses,
     required Map<String, dynamic> updates,
+    bool skipWhenAnsweredElsewhere = false,
   }) async {
     if (inviteId.trim().isEmpty) return;
+    final ownInstallationId =
+        skipWhenAnsweredElsewhere ? _localInstallationId : '';
     try {
       await _db.runTransaction<void>((tx) async {
         final ref = _db.collection('callInvites').doc(inviteId);
@@ -6849,6 +7029,11 @@ class CallSessionManager {
         final data = snap.data() ?? const <String, dynamic>{};
         final status = _parseStatus(data['status']);
         if (!expectedStatuses.contains(status)) return;
+        // Another installation answered: this device must not end that call.
+        if (skipWhenAnsweredElsewhere &&
+            _answeredByOtherInstallation(data, ownInstallationId)) {
+          return;
+        }
         tx.set(ref, updates, SetOptions(merge: true));
       }).timeout(_callStateTransactionTimeout);
     } catch (_) {}
