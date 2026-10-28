@@ -1013,11 +1013,11 @@ class NotificationService with WidgetsBindingObserver {
     try {
       final existingSettings = await _fcm.getNotificationSettings();
       final existingStatus = existingSettings.authorizationStatus;
-      if (existingStatus != AuthorizationStatus.notDetermined) {
-        _notificationsAllowed =
-            existingStatus == AuthorizationStatus.authorized ||
-                existingStatus == AuthorizationStatus.provisional;
-      } else if (appActuallyForeground) {
+      if (shouldRequestNotificationPermission(
+        status: existingStatus,
+        appForeground: appActuallyForeground,
+        isAndroid: Platform.isAndroid,
+      )) {
         final requested = await _fcm.requestPermission(
           alert: true,
           badge: true,
@@ -1028,7 +1028,9 @@ class NotificationService with WidgetsBindingObserver {
                 AuthorizationStatus.authorized ||
             requested.authorizationStatus == AuthorizationStatus.provisional;
       } else {
-        _notificationsAllowed = false;
+        _notificationsAllowed =
+            existingStatus == AuthorizationStatus.authorized ||
+                existingStatus == AuthorizationStatus.provisional;
       }
     } catch (e) {
       debugPrint('⚠️ requestPermission failed: $e');
@@ -1038,6 +1040,14 @@ class NotificationService with WidgetsBindingObserver {
     await _diagPush('permission_result', meta: {
       'allowed': _notificationsAllowed,
     });
+    // Without the full-screen intent (Android 14+ can deny it) an incoming
+    // call shows as a heads-up notification instead of the ringing screen.
+    if (Platform.isAndroid) {
+      await _diagPush('android_call_permissions', meta: {
+        'notificationsAllowed': _notificationsAllowed,
+        'fullScreenIntent': await _canUseFullScreenIntent(),
+      });
+    }
     if (Platform.isIOS) {
       await _refreshNativePushRegistrations();
     }
@@ -2553,6 +2563,31 @@ class NotificationService with WidgetsBindingObserver {
   }
 
   Future<String> _getPushInstallationId() => PushInstallationId.read();
+
+  /// Android reports a missing POST_NOTIFICATIONS grant as `denied`, never
+  /// `notDetermined`, so asking only on `notDetermined` never asked there and
+  /// calls could not ring from the background. Android stops showing the
+  /// prompt by itself once the user has denied it twice.
+  @visibleForTesting
+  static bool shouldRequestNotificationPermission({
+    required AuthorizationStatus status,
+    required bool appForeground,
+    required bool isAndroid,
+  }) {
+    if (!appForeground) return false;
+    if (status == AuthorizationStatus.notDetermined) return true;
+    return isAndroid && status == AuthorizationStatus.denied;
+  }
+
+  /// Null when the plugin cannot tell.
+  Future<bool?> _canUseFullScreenIntent() async {
+    try {
+      final allowed = await FlutterCallkitIncoming.canUseFullScreenIntent();
+      return allowed is bool ? allowed : null;
+    } catch (_) {
+      return null;
+    }
+  }
 
   Future<void> _upsertPushInstallationForUser(
     String uid, {
