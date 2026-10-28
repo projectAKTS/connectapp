@@ -68,6 +68,12 @@ Old app versions keep today's behavior and are never fenced.
 - tests under `test/android/**`, new `test/multi_device/**`,
   `connect_functions/test/call_invites/**`
 - `docs/agent-loop/NEXT_TASK.md`, `STATE.json`, `HANDOFF.md`
+- Amended 2026-10-28 with the user's approval: `firestore.rules`,
+  `validPushInstallationData` only, to allow the optional boolean
+  `answeredElsewhereV1`; and its test in
+  `connect_functions/test/call_v2/firestore_rules_v2.test.js`. The
+  rule's `hasOnly` key list rejected the whole installation upsert. The
+  user deploys the rules (`firebase deploy --only firestore:rules`).
 
 ## Required Implementation
 
@@ -93,6 +99,12 @@ Old app versions keep today's behavior and are never fenced.
    - Use VoIP for iOS (the existing terminal path) and FCM data for the rest.
    - Without `acceptedInstallationId`, send nothing.
    - Terminal pushes are unchanged.
+   - Amended 2026-10-28 during implementation: target only active
+     `pushInstallations` with `answeredElsewhereV1: true`, which new builds
+     write. Never use legacy user-document tokens. An old build (for
+     example the current TestFlight iPhone) would end its CallKit call
+     natively, and its old `handleSystemEndedInvite` would then write
+     `ended` and end the answered call.
 
 ### Client
 
@@ -132,7 +144,8 @@ Old app versions keep today's behavior and are never fenced.
 ## Strict Non-Goals
 
 - No change to the ringing/terminal state machine for single-device calls,
-  to rules, to dependency versions, or to the package id.
+  to rules (except the approved `answeredElsewhereV1` amendment above),
+  to dependency versions, or to the package id.
 - No deploy by Claude.
   - The user deploys `callInviteTransition` and `onCallInviteUpdated` after
     review.
