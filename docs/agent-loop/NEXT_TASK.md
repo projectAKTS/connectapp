@@ -65,6 +65,21 @@ physical phone.
   Android notification and full-screen-intent permission state. No new UI.
 - Tests under `test/android/**`.
 - `docs/agent-loop/NEXT_TASK.md`, `STATE.json`, `HANDOFF.md`.
+- Amended 2026-10-28 during implementation:
+  - **Found:** the first clean install under the new package showed
+    `POST_NOTIFICATIONS: granted=false` with no user-set flag. The app
+    never asked.
+  - **Cause:** `NotificationService.initialize` requested permission only
+    on `notDetermined`. firebase_messaging on Android reports a missing
+    grant as `denied`.
+  - **Impact:** a fresh Android install could never ring from the
+    background.
+  - **Allowed:** the request condition in `notification_service.dart`
+    (also ask on Android `denied` while in the foreground; iOS unchanged)
+    and `test/android/notification_permission_test.dart`.
+  - **App label:** the system prompt named the app `connect_app`.
+    `android:label` in the manifest becomes `Helperly`, matching the iOS
+    display name.
 
 ## Required Implementation
 
