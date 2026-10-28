@@ -1,183 +1,144 @@
-# Active Task - Answered Elsewhere (Multi-Device Callee)
+# Active Task - Android Release Readiness
 
 Branch: `call-v2` (known-good tags `stable-calls-oct-26`, `stable-calls-oct-27`;
 do not modify them or `stable/calls-oct-26`)
 
-Starting SHA: `d7f208b`
+Starting SHA: `38bbd25`
 
-Authorized by the user on 2026-10-27:
-- The sequence: build repair, Android incoming call, then this task.
-- "Şimdi başla": start before the step-2 review. The step-2 handoff
-  (`d7f208b`, `11d46e0`) is still unreviewed; review both together.
-- A third emulator is approved for E2E.
+Authorized by the user on 2026-10-28:
+- "sen bu uygulamanin engineerisin artik sen kararlari ver": Claude reviews
+  handoffs and picks the next task. No ChatGPT review round.
+- The Android package id becomes `com.yakup.helperly`, the same as the
+  iOS bundle id.
+- A physical Android phone is available for the next step (step 5).
+
+## Review Of Steps 2 And 3 (Claude, 2026-10-28)
+
+- Step 2 (`11d46e0`, handoff `d7f208b`): accepted.
+  - A Decline on a backgrounded (not killed) app can be relayed twice, by
+    the main isolate and the background isolate. This is harmless:
+    `decline` applies only to `ringing`.
+- Step 3 (`50766c4`, `8c2d0ee`, `f271b20`, handoff `38bbd25`): accepted.
+  - Extra E2E during review: B killed answers from the plugin UI while C
+    rings in the foreground.
+    - The accept carried the installation id (`accept_tap
+      identifierFieldPresent: true`).
+    - The server pushed to exactly C (`identifierPresent: true,
+      fcmCount: 1`), and C was dismissed.
+  - The cold-start gap in the step-3 handoff did not occur.
+  - Killed answer to connected took ~28 s on the debug build: activity
+    3.7 s, Dart start to accept 6.8 s, server accept 3.7 s, Agora join
+    4.3 s. Debug JIT dominates; this task measures the release build.
 
 ## Problem
 
-The same account signed in on two devices behaves badly when one device
-answers a call. Verified in source; observed with Baris's iPhone and an
-emulator.
-
-1. Accept does not record which device accepted. `planAccept` writes only
-   `status: accepted`. A second device of the same callee that taps Accept
-   gets `alreadyAccepted` and joins the same call.
-2. Nothing tells the other devices.
-   - `onCallInviteUpdated` pushes only terminal statuses.
-   - `_handleIncomingInviteSnapshot` returns without action for a non-ringing
-     status that is not terminal.
-   - So the other device keeps ringing and keeps its lifecycle reservation.
-     The next call was busy-declined (`busy_active_call`) on the iPhone.
-3. Dangerous: when the other device's native UI ends, `actionCallEnded`
-   leads to `handleSystemEndedInvite`. With no local session, that writes
-   `status: ended` for `accepted`/`joining`/`connected`, which ends the live
-   call on the answering device. The server cannot tell the callee's devices
-   apart (same uid).
+Every Android test so far used the debug APK. The release build has never
+been built or run.
+- R8 shrinking (`minifyEnabled true`) can strip classes that plugins load
+  reflectively. This breaks only release builds. Affected plugins include
+  `flutter_callkit_incoming`, Agora, FCM and Stripe.
+- The package id `com.example.connect_app` is rejected by Play. It must
+  change before real devices collect push tokens and installation ids
+  under it.
+- Android 14+ can deny the full-screen intent. The app does not know
+  whether it has it.
 
 ## Goal
 
-When one of the callee's devices answers, the callee's other devices stop
-ringing within a few seconds.
-- No write, no join, no busy state.
-- The answered call is never ended or disturbed by them.
-- The next call rings normally on every device.
-
-Old app versions keep today's behavior and are never fenced.
+A release APK under `com.yakup.helperly` installs and runs on the
+emulators. The call matrix passes on it, so step 5 can go straight to a
+physical phone.
 
 ## Allowed Files
 
-- `connect_functions/call_invites/call_invite_transition.js` and its tests
-- new `connect_functions/call_invites/answered_elsewhere.js` and tests
-- `connect_functions/index.js`:
-  - `onCallInviteUpdated`: the accepted branch only
-  - export of the token merger for the new helper
-- `lib/services/call_session_manager.dart`:
-  - send `installationId` with accept/terminal/stage
-  - `acceptedElsewhere` decision
-  - the Firestore fallback accept
-  - local answered-elsewhere dismissal
-  - guards on the system end/timeout write paths
-- `lib/services/notification_service.dart`:
-  - delegate the installation id to the new helper
-  - route `call_end` + `answered_elsewhere`
-  - give the manager the installation id
-- new `lib/services/push_installation_id.dart`, used by the background
-  isolate and NotificationService
-- `lib/services/android_incoming_call.dart` and `lib/main.dart` (background
-  handler): skip `answered_elsewhere` addressed to the answering installation
-- `ios/Runner/AppDelegate.swift`, the terminal PushKit branch only. Ignore
-  `answered_elsewhere` when this device holds the accepted CallKit call.
-- tests under `test/android/**`, new `test/multi_device/**`,
-  `connect_functions/test/call_invites/**`
-- `docs/agent-loop/NEXT_TASK.md`, `STATE.json`, `HANDOFF.md`
-- Amended 2026-10-28 with the user's approval: `firestore.rules`,
-  `validPushInstallationData` only, to allow the optional boolean
-  `answeredElsewhereV1`; and its test in
-  `connect_functions/test/call_v2/firestore_rules_v2.test.js`. The
-  rule's `hasOnly` key list rejected the whole installation upsert. The
-  user deploys the rules (`firebase deploy --only firestore:rules`).
+- `android/app/build.gradle`: `namespace` and `applicationId` only.
+- `android/app/src/main/AndroidManifest.xml`: the `package` attribute only.
+- Move `android/app/src/main/kotlin/com/example/connect_app/MainActivity.kt`
+  to `android/app/src/main/kotlin/com/yakup/helperly/MainActivity.kt` and
+  change its `package` line.
+- `android/app/google-services.json`: replace it with the user-supplied
+  file or the approved CLI output. It holds only Firebase client config.
+- `lib/services/firebase_options.dart`: the `android` options only.
+- `android/app/proguard-rules.pro`: keep rules, only for release failures
+  that were actually observed.
+- `lib/services/notification_service.dart`: a startup diagnostic for the
+  Android notification and full-screen-intent permission state. No new UI.
+- Tests under `test/android/**`.
+- `docs/agent-loop/NEXT_TASK.md`, `STATE.json`, `HANDOFF.md`.
 
 ## Required Implementation
 
-### Server
+### Part 1 - Release build on the current package
 
-1. `accept` takes an optional `installationId` (`^[A-Za-z0-9_-]{8,80}$`;
-   an invalid value is treated as absent).
-   - For `ringing`, also write `acceptedInstallationId`.
-   - For a progress status with a stored `acceptedInstallationId` that
-     differs from the request's: return the new decision
-     `acceptedElsewhere`, with no write.
-   - Absent on either side: today's behavior (`alreadyAccepted`).
-2. `terminal` and `stage` from the callee, with both ids present and
-   different: `writeApplied:false` / `applied:false`,
-   `reason: answered_elsewhere`.
-   - `decline` already applies only to `ringing`.
-3. `onCallInviteUpdated`, `ringing` -> `accepted` with
-   `acceptedInstallationId`: send `call_end`, `status: answered_elsewhere`,
-   and `acceptedInstallationId` to the callee's tokens.
-   - Remove every token value found in the answering installation's
-     document (fcm/apns/voip) from the merged sets, including legacy
-     user-doc tokens.
-   - Use VoIP for iOS (the existing terminal path) and FCM data for the rest.
-   - Without `acceptedInstallationId`, send nothing.
-   - Terminal pushes are unchanged.
-   - Amended 2026-10-28 during implementation: target only active
-     `pushInstallations` with `answeredElsewhereV1: true`, which new builds
-     write. Never use legacy user-document tokens. An old build (for
-     example the current TestFlight iPhone) would end its CallKit call
-     natively, and its old `handleSystemEndedInvite` would then write
-     `ended` and end the answered call.
+This separates shrink failures from rename failures.
 
-### Client
+1. `flutter build apk --release`, signed with the debug key for sideloading.
+   A real upload key is a separate decision before Play.
+2. Install it on A, B and C. Run the single-device matrix and the
+   multi-device scenarios.
+3. On a failure, read the release logcat for `ClassNotFoundException`,
+   `NoSuchMethod` or missing plugin classes. Add the narrowest keep rule
+   and repeat.
 
-4. One installation id helper, shared by NotificationService (unchanged
-   storage file `helperly_push_installation_id`) and the background isolate.
-   CallSessionManager receives it through its existing configure/injection
-   style.
-5. Accept, terminal and stage requests carry `installationId`.
-   - The Firestore fallback accept writes `acceptedInstallationId` on
-     `ringing` and returns `acceptedElsewhere` on a differing stored id.
-   - `acceptedElsewhere` never falls back and never joins.
-6. Local answered-elsewhere dismissal: one path, idempotent per invite.
-   - Mark the invite answered-elsewhere and handled first.
-   - Then clear the incoming prompt, release the lifecycle reservation and
-     the pending accepted intent, and end the native UI.
-   - Make no Firestore or HTTPS write.
-   - Triggers:
-     - a snapshot with status `accepted`/`joining`/`connected` and a
-       differing `acceptedInstallationId`, while this device has no local
-       accept for the invite;
-     - the push `call_end` + `answered_elsewhere` for another installation;
-     - the decision `acceptedElsewhere`.
-7. Guards: `handleSystemEndedInvite`, `handleSystemTimeoutInvite`, and
-   decline do nothing for an invite marked answered-elsewhere.
-   - The no-session `ended` write is skipped inside its transaction when
-     the stored `acceptedInstallationId` differs from this device's.
-   - A single-device CallKit end before the session exists still ends the
-     call, as today.
-8. Android background handler and `AndroidIncomingCall.decide`:
-   - `answered_elsewhere` for the own installation is ignored.
-   - Otherwise it ends that CallKit id.
-9. iOS native: in the terminal PushKit branch, `status ==
-   answered_elsewhere` for a CallKit id this device has accepted
-   (`callV2NativeAcceptedCallActive` / stored accepted call) is ignored.
-   Every other terminal push is unchanged.
+### Part 2 - Package id `com.yakup.helperly`
+
+4. Firebase needs an Android app for `com.yakup.helperly` in
+   `connectapp-278b4`, plus the debug signing key's SHA-1 and SHA-256 for
+   Google Sign-In. Either:
+   - the user adds it in the Firebase Console and supplies
+     `google-services.json`; or
+   - with the user's per-action approval, Claude runs
+     `firebase apps:create android` and `firebase apps:android:sha:create`.
+5. Leave the old `com.example.connect_app` Firebase app as is.
+6. Rename `namespace`, `applicationId`, the manifest `package`, and the
+   MainActivity package and directory. Set the `android` `appId` in
+   `firebase_options.dart` to the new app.
+7. After the rename the emulators need reinstall and re-login. The user
+   types the passwords. Update the local `test_artifacts/bin` scripts'
+   package name.
+
+### Part 3 - Permission state diagnostics
+
+8. At NotificationService startup on Android, record a push diagnostic
+   with:
+   - whether notifications are allowed;
+   - `FlutterCallkitIncoming.canUseFullScreenIntent()` (Android 14+).
+   Never throw.
+9. On the emulator, deny the full-screen intent
+   (`adb shell appops set <pkg> USE_FULL_SCREEN_INTENT deny`). Check that a
+   killed-app call still rings as a heads-up notification and can be
+   answered. Restore the permission afterwards.
 
 ## Strict Non-Goals
 
-- No change to the ringing/terminal state machine for single-device calls,
-  to rules (except the approved `answeredElsewhereV1` amendment above),
-  to dependency versions, or to the package id.
-- No deploy by Claude.
-  - The user deploys `callInviteTransition` and `onCallInviteUpdated` after
-    review.
-  - Server first: it is backward compatible.
-- No TestFlight or store upload without the user's separate approval.
+- No new permission UI, no Play upload, and no upload key.
+- No change to call logic, the server, rules, iOS, or dependency
+  versions.
+- No deploy. No TestFlight. No physical calls; those are step 5 and need
+  approval.
+- Do not delete or modify the old Firebase Android app or any production
+  data.
 
 ## Validation
 
-- Server unit tests:
-  - accept with and without ids, `acceptedElsewhere`
-  - terminal/stage fencing
-  - old-client compatibility
-  - recipient token exclusion, including legacy tokens
-- Dart unit tests:
-  - dismissal on snapshot, push and decision
-  - no write from end/timeout after an accept elsewhere
-  - the next invite is not busy
-  - the Android decide skip
-- The full Flutter `test/` folder (pre-existing failures noted).
-  `flutter analyze`. Server `node --test` on Node 22.
-- Emulator E2E (3 emulators: caller Baris, callee venus on two):
-  - accept on one -> the other stops ringing, and the call stays connected;
-  - a second call rings on both;
-  - single-device regression;
-  - background and killed variants on the other device.
-- iOS: unit/source evidence only until a TestFlight build is approved.
+- `flutter build apk --release` succeeds for both packages.
+- Release E2E on emulators under `com.yakup.helperly`:
+  - foreground audio and video;
+  - background/killed × answer/decline/cancel;
+  - multi-device killed and background in both directions, where the other
+    device must be silent within 15 s;
+  - killed answer to connected time.
+- The full-screen-intent denied fallback (item 9).
+- `flutter test test/android test/multi_device`, the full `flutter test`
+  (pre-existing failures noted), and
+  `flutter analyze lib test integration_test`.
 - `git diff --check`.
 
 ## Commit And Handoff
 
-- Implementation commit:
-  `feat(calls): answered-elsewhere handling for multi-device callees`.
+- Implementation commits:
+  - `build(android): release build and package id com.yakup.helperly`;
+  - plus `fix(android): ...` for any keep rules.
 - Handoff commit:
-  `chore(agent-loop): record answered elsewhere review handoff`.
+  `chore(agent-loop): record android release readiness review handoff`.
 - Push `call-v2`.

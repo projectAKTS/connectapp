@@ -1,72 +1,28 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "answered_elsewhere_multi_device",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "e65e3c5",
-  "starting_sha": "d7f208b",
+  "phase": "android_release_readiness",
+  "status": "task_ready",
+  "accepted_checkpoint_sha": "38bbd25",
+  "starting_sha": "38bbd25",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "f271b20",
-  "ending_sha": "SELF",
-  "changed_files": [
-    "connect_functions/call_invites/answered_elsewhere.js",
-    "connect_functions/call_invites/call_invite_transition.js",
-    "connect_functions/index.js",
-    "connect_functions/test/call_invites/answered_elsewhere.test.js",
-    "connect_functions/test/call_invites/call_invite_transition.test.js",
-    "connect_functions/test/call_v2/firestore_rules_v2.test.js",
-    "firestore.rules",
-    "ios/Runner/AppDelegate.swift",
-    "lib/main.dart",
-    "lib/services/android_incoming_call.dart",
-    "lib/services/call_session_manager.dart",
-    "lib/services/notification_service.dart",
-    "lib/services/push_installation_id.dart",
-    "test/android/android_incoming_call_test.dart",
-    "test/multi_device/answered_elsewhere_test.dart",
-    "docs/agent-loop/NEXT_TASK.md",
-    "docs/agent-loop/HANDOFF.md",
-    "docs/agent-loop/STATE.json"
-  ],
-  "validation": {
-    "server_call_invites_node22": "19/19 pass",
-    "firestore_rules_emulator": "10/10 pass (RED 9/10 before rule change)",
-    "dart_multi_device_and_android": "16/16 pass",
-    "flutter_test_full_at_8c2d0ee": "+2419 -16 (2 pre-existing call_message_stability failures, 14 working-tree guards)",
-    "dart_tests_reading_firestore_rules_at_f271b20": "+712 -14 (same working-tree guards only)",
-    "flutter_analyze_lib_test_integration_test": "no issues",
-    "ios_runner_tests_simulator_at_50766c4": "TEST SUCCEEDED",
-    "git_diff_check": "clean",
-    "emulator_multi_device_after_rules_deploy": "4/4 pass (killed C 11.1s, killed B 9.9s, background C 2.7s, background B 4.0s; server fcmCount 1)",
-    "emulator_multi_device_foreground_at_8c2d0ee": "2/2 pass (5.1s, 11.8s)",
-    "emulator_single_device_foreground_audio": "2/2 pass",
-    "emulator_single_device_matrix_at_50766c4": "6/6 pass; foreground video pass",
-    "physical_devices": "not run"
-  },
+  "code_commit_sha": null,
+  "ending_sha": null,
+  "changed_files": [],
+  "validation": {},
   "safety": {
-    "deployed": true,
-    "deployed_by": "user",
-    "deploys": [
-      "functions:callInviteTransition,onCallInviteUpdated,onCallInviteCreated at 50766c4",
-      "functions:onCallInviteUpdated at 8c2d0ee",
-      "firestore:rules at f271b20"
-    ],
-    "deployed_source_verified_identical": true,
+    "deployed": false,
     "testflight_built": false,
-    "production_services_contacted": true,
-    "firebase_changes": true,
-    "backend_changes": true,
-    "production_code_changes": true,
-    "test_changes": true
+    "production_services_contacted": false,
+    "firebase_changes": false,
+    "backend_changes": false,
+    "production_code_changes": false,
+    "test_changes": false
   },
   "review": {
-    "decision": "ready_for_review",
-    "notes": "Review together with step 2 (android_incoming_call_ui, 11d46e0/d7f208b). firestore.rules scope added with user approval (see NEXT_TASK amendment). PHYSICAL_FIX_CLAIM NONE."
-  },
-  "implementation_shas": [
-    "50766c4",
-    "8c2d0ee",
-    "f271b20"
-  ]
+    "decision": "task_ready",
+    "reviewer": "claude",
+    "notes": "Steps 2 (android_incoming_call_ui) and 3 (answered_elsewhere_multi_device) accepted by Claude's review on 2026-10-28; see NEXT_TASK.md. The user delegated engineering decisions to Claude."
+  }
 }
