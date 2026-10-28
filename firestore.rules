@@ -65,6 +65,7 @@ service cloud.firestore {
           'fcmToken',
           'apnsToken',
           'voipToken',
+          'answeredElsewhereV1',
           'lastSeenAt',
           'updatedAt'
         ]) &&
@@ -87,7 +88,11 @@ service cloud.firestore {
         ) &&
         optionalString(request.resource.data, 'fcmToken') &&
         optionalString(request.resource.data, 'apnsToken') &&
-        optionalString(request.resource.data, 'voipToken');
+        optionalString(request.resource.data, 'voipToken') &&
+        (
+          !(request.resource.data.keys().hasAny(['answeredElsewhereV1'])) ||
+          request.resource.data.answeredElsewhereV1 is bool
+        );
     }
     
     // ✅ Users Collection

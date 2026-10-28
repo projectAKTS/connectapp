@@ -161,6 +161,30 @@ test("push installation owner can create and update only expected metadata", asy
   }));
 });
 
+test("push installation accepts the answered-elsewhere capability flag", async () => {
+  const ownerInstallation = doc(
+    testEnv.authenticatedContext("caller").firestore(),
+    "users/caller/pushInstallations/install_owner_6",
+  );
+  await assertSucceeds(setDoc(ownerInstallation, {
+    installationId: "install_owner_6",
+    ownerUid: "caller",
+    active: true,
+    platform: "android",
+    answeredElsewhereV1: true,
+    fcmToken: "fcm_owner_6",
+    lastSeenAt: new Date(),
+    updatedAt: new Date(),
+  }));
+  await assertSucceeds(updateDoc(ownerInstallation, {
+    fcmToken: "fcm_owner_6b",
+    updatedAt: new Date(),
+  }));
+  await assertFails(updateDoc(ownerInstallation, {
+    answeredElsewhereV1: "yes",
+  }));
+});
+
 test("push installation rejects cross-user and malformed writes", async () => {
   const otherWrite = doc(
     testEnv.authenticatedContext("other").firestore(),
