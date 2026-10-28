@@ -2580,6 +2580,10 @@ class NotificationService with WidgetsBindingObserver {
       'ownerUid': userId,
       'platform': platform,
       'active': true,
+      // Tells the server this build handles the `answered_elsewhere` push.
+      // Older builds would end the answered call from it, so the server
+      // sends it only to installations with this flag.
+      'answeredElsewhereV1': true,
       'lastSeenAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
       if (fcmToken != null && fcmToken.isNotEmpty) 'fcmToken': fcmToken,

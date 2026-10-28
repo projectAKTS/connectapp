@@ -9,7 +9,6 @@ const {
   answeredElsewhereTargets,
   isAnsweredElsewhereTransition,
 } = require("../../call_invites/answered_elsewhere");
-const { __testOnlyMergeUserPushTokenSets: mergeTokenSets } = require("../../index");
 
 const PHONE = "phone_installation_1";
 const TABLET = "tablet_installation_2";
@@ -29,15 +28,15 @@ test("only ringing -> accepted with an answering installation qualifies", () => 
   );
 });
 
-test("the answering installation's tokens are excluded, including legacy copies", () => {
+test("only active installations that support the push are targeted", () => {
   const targets = answeredElsewhereTargets({
     installations: [
       {
         id: PHONE,
         data: {
           installationId: PHONE,
-          platform: "ios",
           active: true,
+          answeredElsewhereV1: true,
           fcmToken: "fcm_phone",
           voipToken: "voip_phone",
         },
@@ -46,29 +45,43 @@ test("the answering installation's tokens are excluded, including legacy copies"
         id: TABLET,
         data: {
           installationId: TABLET,
-          platform: "android",
           active: true,
+          answeredElsewhereV1: true,
           fcmToken: "fcm_tablet",
+          voipToken: "voip_tablet",
         },
       },
+      {
+        id: "old_iphone_build",
+        data: { active: true, fcmToken: "fcm_old", voipToken: "voip_old" },
+      },
+      {
+        id: "signed_out_device",
+        data: { active: false, answeredElsewhereV1: true, fcmToken: "fcm_off" },
+      },
     ],
-    userData: {
-      fcmTokens: ["fcm_phone", "fcm_legacy_other"],
-      voipToken: "voip_phone",
-    },
     acceptedInstallationId: PHONE,
-    mergeTokenSets,
   });
-  assert.deepEqual(targets.fcm.sort(), ["fcm_legacy_other", "fcm_tablet"]);
-  assert.deepEqual(targets.voip, []);
+  assert.deepEqual(targets, { fcm: ["fcm_tablet"], voip: ["voip_tablet"] });
+});
+
+test("a token shared with the answering installation is never targeted", () => {
+  const targets = answeredElsewhereTargets({
+    installations: [
+      { id: PHONE, data: { active: true, answeredElsewhereV1: true, fcmToken: "shared" } },
+      { id: TABLET, data: { active: true, answeredElsewhereV1: true, fcmToken: "shared" } },
+    ],
+    acceptedInstallationId: PHONE,
+  });
+  assert.deepEqual(targets, { fcm: [], voip: [] });
 });
 
 test("no answering installation means no targets", () => {
   const targets = answeredElsewhereTargets({
-    installations: [{ id: TABLET, data: { active: true, fcmToken: "fcm_tablet" } }],
-    userData: {},
+    installations: [
+      { id: TABLET, data: { active: true, answeredElsewhereV1: true, fcmToken: "fcm_tablet" } },
+    ],
     acceptedInstallationId: "",
-    mergeTokenSets,
   });
   assert.deepEqual(targets, { fcm: [], voip: [] });
 });

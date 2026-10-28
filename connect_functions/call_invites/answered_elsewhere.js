@@ -10,6 +10,8 @@
  */
 
 const ANSWERED_ELSEWHERE_STATUS = "answered_elsewhere";
+/** Set by builds that handle this push on their pushInstallations doc. */
+const ANSWERED_ELSEWHERE_CAPABILITY = "answeredElsewhereV1";
 
 function normalizeStatus(value) {
   return `${value || ""}`.trim().toLowerCase();
@@ -31,40 +33,42 @@ function installationTokens(data) {
 }
 
 /**
- * Tokens of the callee's other installations.
+ * Tokens of the callee's other installations that support this push.
  *
- * Every token value found on the answering installation is removed from the
- * merged sets, including copies in legacy user-document fields.
+ * Only active installations with `answeredElsewhereV1: true` are targeted:
+ * older builds end the answered call when they receive it. Legacy
+ * user-document tokens are never used, because their build is unknown.
+ * Every token value of the answering installation is excluded.
  *
  * @param {{
  *   installations: Array<{id: string, data: object}>,
- *   userData: object,
  *   acceptedInstallationId: string,
- *   mergeTokenSets: (input: {installationDocs: object[], userData: object}) =>
- *     {fcmAll: string[], voip: string[]},
  * }} input
  */
-function answeredElsewhereTargets({
-  installations = [],
-  userData = {},
-  acceptedInstallationId,
-  mergeTokenSets,
-}) {
+function answeredElsewhereTargets({ installations = [], acceptedInstallationId }) {
   const answering = `${acceptedInstallationId || ""}`.trim();
   if (!answering) return { fcm: [], voip: [] };
   const answeringTokens = new Set();
+  const fcm = [];
+  const voip = [];
   for (const { id, data } of installations) {
-    const installationId = `${data?.installationId || id || ""}`.trim();
-    if (installationId === answering || `${id || ""}`.trim() === answering) {
+    const docId = `${id || ""}`.trim();
+    const installationId = `${data?.installationId || docId}`.trim();
+    if (installationId === answering || docId === answering) {
       installationTokens(data).forEach((token) => answeringTokens.add(token));
+      continue;
     }
+    if (data?.active !== true || data?.[ANSWERED_ELSEWHERE_CAPABILITY] !== true) {
+      continue;
+    }
+    const fcmToken = `${data.fcmToken || ""}`.trim();
+    const voipToken = `${data.voipToken || ""}`.trim();
+    if (fcmToken) fcm.push(fcmToken);
+    if (voipToken) voip.push(voipToken);
   }
-  const merged = mergeTokenSets({
-    installationDocs: installations.map(({ data }) => data || {}),
-    userData,
-  });
-  const others = (tokens) => tokens.filter((token) => !answeringTokens.has(token));
-  return { fcm: others(merged.fcmAll), voip: others(merged.voip) };
+  const others = (tokens) =>
+    Array.from(new Set(tokens)).filter((token) => !answeringTokens.has(token));
+  return { fcm: others(fcm), voip: others(voip) };
 }
 
 /** Data payload: the existing `call_end` shape with a non-terminal status. */
@@ -98,6 +102,7 @@ function answeredElsewhereFcmMessage(payloadData) {
 }
 
 module.exports = {
+  ANSWERED_ELSEWHERE_CAPABILITY,
   ANSWERED_ELSEWHERE_STATUS,
   answeredElsewhereFcmMessage,
   answeredElsewherePayload,

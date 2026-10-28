@@ -1215,17 +1215,17 @@ const {
 async function sendAnsweredElsewherePush(inviteId, before, after) {
   const toUid = `${after.toUid || before.toUid || ""}`.trim();
   if (!toUid) return;
-  const [installationSnap, userSnap] = await Promise.all([
-    db.collection("users").doc(toUid).collection("pushInstallations").get().catch(() => null),
-    db.collection("users").doc(toUid).get().catch(() => null),
-  ]);
+  const installationSnap = await db
+    .collection("users")
+    .doc(toUid)
+    .collection("pushInstallations")
+    .get()
+    .catch(() => null);
   const targets = answeredElsewhereTargets({
     installations: installationSnap
       ? installationSnap.docs.map((doc) => ({ id: doc.id, data: doc.data() || {} }))
       : [],
-    userData: userSnap?.exists ? userSnap.data() || {} : {},
     acceptedInstallationId: after.acceptedInstallationId,
-    mergeTokenSets: mergeUserPushTokenSets,
   });
   const payloadData = answeredElsewherePayload(inviteId, before, after);
   if (targets.voip.length) {
