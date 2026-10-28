@@ -39,10 +39,54 @@
               "client_type": 3
             },
             {
-              "client_id": "33757728932-5ni99k80hej7s2i34fu56o5t5r9j6sd9.apps.googleusercontent.com",
+              "client_id": "33757728932-4tif62vov47uhc7mgjg050vpv4hou40b.apps.googleusercontent.com",
               "client_type": 2,
               "ios_info": {
-                "bundle_id": "com.example.connectApp"
+                "bundle_id": "com.yakup.helperly"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:33757728932:android:2cc74206f093c5979a1631",
+        "android_client_info": {
+          "package_name": "com.yakup.helperly"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "33757728932-dsmb73k8887po085bduksu6i87r7lmi4.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.yakup.helperly",
+            "certificate_hash": "f3b25ff6c8d915025b88d121dab51410746b409b"
+          }
+        },
+        {
+          "client_id": "33757728932-3su9le4ua20no73h8jorit2fv606d68t.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBJGwDmjDJ6FsshG8BwBjjoYatmXSdxjaI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "33757728932-3su9le4ua20no73h8jorit2fv606d68t.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "33757728932-4tif62vov47uhc7mgjg050vpv4hou40b.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.yakup.helperly"
               }
             }
           ]

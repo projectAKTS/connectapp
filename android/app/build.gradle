@@ -6,12 +6,12 @@ plugins {
 }
 
 android {
-    namespace = "com.example.connect_app"
+    namespace = "com.yakup.helperly"
     compileSdk = 35
     ndkVersion = flutter.ndkVersion
 
     defaultConfig {
-        applicationId = "com.example.connect_app"
+        applicationId = "com.yakup.helperly"
         minSdk = 24
         targetSdk = 35
         versionCode = 1

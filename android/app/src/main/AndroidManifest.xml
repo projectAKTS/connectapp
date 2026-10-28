@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    package="com.example.connect_app">
+    package="com.yakup.helperly">
 
     <!-- Required Permissions for Notifications and Media -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
@@ -10,7 +10,7 @@
 
     <application
         android:enableOnBackInvokedCallback="true"
-        android:label="connect_app"
+        android:label="Helperly"
         tools:replace="android:label"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">

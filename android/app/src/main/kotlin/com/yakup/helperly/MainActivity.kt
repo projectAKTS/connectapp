@@ -1,4 +1,4 @@
-package com.example.connect_app
+package com.yakup.helperly
 
 import io.flutter.embedding.android.FlutterFragmentActivity
 
