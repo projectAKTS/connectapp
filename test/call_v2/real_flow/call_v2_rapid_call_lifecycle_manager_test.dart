@@ -1136,6 +1136,66 @@ void main() {
     await manager.forceIdleForTest();
   });
 
+  // Physical A55, app in the background: the Firestore listener saw the
+  // invite 5 s before the FCM push showed the native call, so the invite was
+  // owned by a Flutter prompt still waiting for the app to resume. The native
+  // Accept was then suppressed as a duplicate and the call rang out.
+  testWidgets('background Firestore candidate then native accept opens once',
+      (tester) async {
+    final routes = <String>[];
+    final nativeCalls = <NativeCallSnapshot>[];
+    var appForeground = false;
+    await tester.pumpWidget(buildHarness());
+    manager.configure(
+      navigatorKey: navigatorKey,
+      appForegroundProvider: () async => appForeground,
+      listNativeCalls: () async => List<NativeCallSnapshot>.from(nativeCalls),
+      endNativeCall: (callkitId) async {
+        nativeCalls.removeWhere((call) => call.callkitId == callkitId);
+      },
+      callScreenOpenRecorderForTest: recordingRoute(routes),
+      skipActiveInviteBindingForTest: true,
+    );
+    await seedInvite('invite_b');
+
+    final candidate = manager.handleNotificationInviteTap(
+      inviteId: 'invite_b',
+      channel: 'channel_invite_b',
+      isVideo: false,
+      fromName: callerName,
+      fromUid: callerUid,
+      source: 'firestore_listener',
+    );
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(manager.debugSnapshot()['incomingUiOwner'], 'flutter');
+
+    nativeCalls.add(nativeForInvite('invite_b'));
+    appForeground = true;
+    var settled = 0;
+    unawaited(manager
+        .handleRecoveredAcceptedInvite(
+          inviteId: 'invite_b',
+          channel: 'channel_invite_b',
+          isVideo: false,
+          fromName: callerName,
+          fromUid: callerUid,
+        )
+        .whenComplete(() => settled += 1));
+    unawaited(candidate.whenComplete(() => settled += 1));
+    for (var i = 0; i < 120 && settled < 2; i += 1) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)));
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    expect(routes, ['invite_b']);
+    expect(manager.debugSnapshot()['routeOpenCount'], 1);
+    final invite =
+        await firestore.collection('callInvites').doc('invite_b').get();
+    expect(invite.data()?['status'], CallInviteStatus.accepted.name);
+    await manager.forceIdleForTest();
+  });
+
   testWidgets('pending Firestore candidate then CallKit accept opens once',
       (tester) async {
     final routes = <String>[];

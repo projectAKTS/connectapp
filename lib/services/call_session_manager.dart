@@ -546,6 +546,9 @@ class CallSessionManager {
   bool _incomingPromptActive = false;
   IncomingUiOwner _incomingUiOwner = IncomingUiOwner.none;
   String? _incomingPromptInviteId;
+  // The invite whose Flutter IncomingCallScreen is on screen. A Flutter owner
+  // without it is still waiting for the app to resume.
+  String? _incomingPromptShownInviteId;
   CallInvitePayload? _pendingIncomingPromptPayload;
   String? _pendingIncomingPromptSource;
   _PendingAcceptedInviteIntent? _pendingAcceptedInviteIntent;
@@ -3839,9 +3842,16 @@ class CallSessionManager {
         'source': source,
         'via': via,
       });
+      // A native accept wins over a Flutter prompt that is not shown yet:
+      // in the background the Firestore listener can claim the invite before
+      // the FCM push shows the native call, and the user then answers there.
+      final flutterPromptNotShown =
+          _incomingUiOwner == IncomingUiOwner.flutter &&
+              _incomingPromptShownInviteId != payload.inviteId;
       if (autoAccept &&
           _incomingPromptInviteId == payload.inviteId &&
-          _incomingUiOwner == IncomingUiOwner.callkit) {
+          (_incomingUiOwner == IncomingUiOwner.callkit ||
+              flutterPromptNotShown)) {
         _callLifecycleArbiter.incomingAccepted(
           generation: reservation.generation,
           inviteId: payload.inviteId,
@@ -4214,6 +4224,7 @@ class CallSessionManager {
         }));
       });
 
+      _incomingPromptShownInviteId = payload.inviteId;
       final accepted = await nav.push<bool>(
         MaterialPageRoute(
           fullscreenDialog: true,
@@ -4225,6 +4236,9 @@ class CallSessionManager {
         ),
       );
       routeClosed = true;
+      if (_incomingPromptShownInviteId == payload.inviteId) {
+        _incomingPromptShownInviteId = null;
+      }
 
       if (accepted == true) {
         _callLifecycleArbiter.incomingAccepted(
