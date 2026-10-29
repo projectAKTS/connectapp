@@ -1033,6 +1033,7 @@ exports.handleStripeWebhook = onRequest(
    ============================================================ */
 
 const { buildCallInviteFcmMessage } = require("./call_invites/call_invite_fcm_message");
+const { inviteFcmPlan } = require("./call_invites/invite_fcm_plan");
 
 exports.onCallInviteCreated = onDocumentCreated(
   {
@@ -1050,7 +1051,7 @@ exports.onCallInviteCreated = onDocumentCreated(
     let fcmDelivered = false;
     const serverDiag = {
       serverNotifyStage: "started",
-      serverNotifyPolicy: "voip_then_delayed_alert_fallback",
+      serverNotifyPolicy: "android_fcm_with_voip_then_delayed_alert_fallback",
       serverVoipSent: 0,
       serverVoipFailed: 0,
       serverVoipEnvironment: "",
@@ -1080,6 +1081,25 @@ exports.onCallInviteCreated = onDocumentCreated(
       serverFcmFallbackTokenCount: tokenSets.fcmForFallback.length,
       serverNotifyStartedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
+
+    const fcmPlan = inviteFcmPlan(tokenSets);
+    const fcmMessage = buildCallInviteFcmMessage({ isVideo, fromName, payloadData });
+    const sendInviteFcm = async (tokens) => {
+      try {
+        const fcmRes = await sendToTokens(tokens, fcmMessage);
+        serverDiag.serverFcmSent += fcmRes?.successCount || 0;
+        serverDiag.serverFcmFailed += fcmRes?.failureCount || 0;
+        fcmDelivered = serverDiag.serverFcmSent > 0;
+      } catch (e) {
+        serverDiag.serverNotifyLastError = `${serverDiag.serverNotifyLastError || ""} fcm:${e}`.trim();
+        console.error("FCM call invite send failed:", {
+          identifierPresent: Boolean(inviteId && toUid && channel),
+          error: `${e}`,
+        });
+      }
+    };
+    // Android rings from FCM alone: send it now, not after the APNS wait.
+    const androidFcm = fcmPlan.immediate.length ? sendInviteFcm(fcmPlan.immediate) : null;
 
     // Primary path for iOS incoming-call reliability
     try {
@@ -1168,27 +1188,11 @@ exports.onCallInviteCreated = onDocumentCreated(
       console.error("APNS alert send failed:", e);
     }
 
-    // Use FCM for Android by default, and as a full fallback when direct APNS fails.
-    const tokens = (voipDelivered || apnsAlertDelivered)
-      ? tokenSets.fcmForFallback
-      : tokenSets.fcmAll;
-    if (tokens.length) {
-      try {
-        const fcmRes = await sendToTokens(
-          tokens,
-          buildCallInviteFcmMessage({ isVideo, fromName, payloadData })
-        );
-        serverDiag.serverFcmSent = fcmRes?.successCount || 0;
-        serverDiag.serverFcmFailed = fcmRes?.failureCount || 0;
-        fcmDelivered = serverDiag.serverFcmSent > 0;
-      } catch (e) {
-        serverDiag.serverNotifyLastError = `${serverDiag.serverNotifyLastError || ""} fcm:${e}`.trim();
-        console.error("FCM call invite send failed:", {
-          identifierPresent: Boolean(inviteId && toUid && channel),
-          error: `${e}`,
-        });
-      }
-    } else {
+    if (androidFcm) await androidFcm;
+    // iOS FCM is a full fallback only when direct APNS failed.
+    const iosFallbackTokens = (voipDelivered || apnsAlertDelivered) ? [] : fcmPlan.iosFallback;
+    if (iosFallbackTokens.length) await sendInviteFcm(iosFallbackTokens);
+    if (!fcmPlan.immediate.length && !iosFallbackTokens.length) {
       console.log("FCM skipped: no tokens", {
         identifierPresent: Boolean(inviteId && toUid && channel),
       });
