@@ -1,159 +1,92 @@
-# Active Task - Android Release Readiness
+# Active Task - Physical Android Call Verification
 
 Branch: `call-v2` (known-good tags `stable-calls-oct-26`, `stable-calls-oct-27`;
 do not modify them or `stable/calls-oct-26`)
 
-Starting SHA: `38bbd25`
+Starting SHA: `341cf94`
 
-Authorized by the user on 2026-10-28:
-- "sen bu uygulamanin engineerisin artik sen kararlari ver": Claude reviews
-  handoffs and picks the next task. No ChatGPT review round.
-- The Android package id becomes `com.yakup.helperly`, the same as the
-  iOS bundle id.
-- A physical Android phone is available for the next step (step 5).
+Authorized by the user on 2026-10-29:
+- "2 tane android telefon taktim test et lutfen ... emulator de test
+  edemeyecegimiz herseyi test edebilirsin": physical calls between the two
+  connected Samsung phones and the emulators are approved for this task.
+- The phones are only available until 2026-10-30. Evidence first; fixes
+  found here become the next task unless they are small and can be
+  verified on the phones the same day.
 
-## Review Of Steps 2 And 3 (Claude, 2026-10-28)
+## Review Of Step 4 (Claude, 2026-10-29)
 
-- Step 2 (`11d46e0`, handoff `d7f208b`): accepted.
-  - A Decline on a backgrounded (not killed) app can be relayed twice, by
-    the main isolate and the background isolate. This is harmless:
-    `decline` applies only to `ringing`.
-- Step 3 (`50766c4`, `8c2d0ee`, `f271b20`, handoff `38bbd25`): accepted.
-  - Extra E2E during review: B killed answers from the plugin UI while C
-    rings in the foreground.
-    - The accept carried the installation id (`accept_tap
-      identifierFieldPresent: true`).
-    - The server pushed to exactly C (`identifierPresent: true,
-      fcmCount: 1`), and C was dismissed.
-  - The cold-start gap in the step-3 handoff did not occur.
-  - Killed answer to connected took ~28 s on the debug build: activity
-    3.7 s, Dart start to accept 6.8 s, server accept 3.7 s, Agora join
-    4.3 s. Debug JIT dominates; this task measures the release build.
+- Step 4 (`3ae2314`, `c65e9ab`, handoff `341cf94`): accepted.
+  - The notification-permission fix is a real fresh-install bug, found by
+    the clean install and covered by a RED-checked test.
+  - Killed-app answer latency (~20 s on a loaded host) stays open and is
+    measured on real hardware here.
 
 ## Problem
 
-Every Android test so far used the debug APK. The release build has never
-been built or run.
-- R8 shrinking (`minifyEnabled true`) can strip classes that plugins load
-  reflectively. This breaks only release builds. Affected plugins include
-  `flutter_callkit_incoming`, Agora, FCM and Stripe.
-- The package id `com.example.connect_app` is rejected by Play. It must
-  change before real devices collect push tokens and installation ids
-  under it.
-- Android 14+ can deny the full-screen intent. The app does not know
-  whether it has it.
+Every call so far ran on emulators. Emulators cannot show:
+- OEM (Samsung One UI) battery management: sleeping apps, app standby,
+  Doze on real hardware, swipe-from-recents behaviour.
+- Answering over a real lock screen, with the screen off.
+- Real microphone, speaker, earpiece, proximity sensor and camera.
+- Real network changes (Wi-Fi to mobile data, airplane mode) during a call.
+- Cold start, permission prompts and answer latency on real hardware.
+- Behaviour after a reboot without opening the app.
 
 ## Goal
 
-A release APK under `com.yakup.helperly` installs and runs on the
-emulators. The call matrix passes on it, so step 5 can go straight to a
-physical phone.
+A recorded verdict for each scenario below on two physical Samsung phones
+running the release APK `com.yakup.helperly` from `c65e9ab`.
+
+## Accounts And Devices
+
+- Baris is only ever the **caller**. Calls to Baris would ring Baris's
+  physical iPhone, which must not be called.
+- Venus is the callee. Venus may be logged in on both phones and on
+  emulators B/C for multi-device runs; unused venus emulators are stopped
+  so they do not ring.
+- Logins come from `test_artifacts/secrets/test_logins.txt`. Never print
+  or commit them.
+
+## Scenarios
+
+1. Fresh install: notification prompt, then first call mic/camera prompts.
+2. Single device (phone as venus, caller emulator A or the other phone):
+   foreground, background, killed (swipe from recents), screen off and
+   locked × answer / decline / caller cancel / ring timeout.
+3. Real audio and video between the two phones (the user listens), speaker
+   and earpiece, mute, camera switch.
+4. Multi-device: both phones as venus; answer on one, the other must stop
+   ringing within 15 s; decline on one.
+5. Power: `deviceidle force-idle`, app standby bucket `rare`/`restricted`,
+   long screen-off idle, battery saver.
+6. Network: Wi-Fi off/on and airplane mode during a call; call while the
+   callee is offline and comes back.
+7. Reboot without opening the app, then an incoming call.
+8. Killed-app answer latency on real hardware.
 
 ## Allowed Files
 
-- `android/app/build.gradle`: `namespace` and `applicationId` only.
-- `android/app/src/main/AndroidManifest.xml`: the `package` attribute only.
-- Move `android/app/src/main/kotlin/com/example/connect_app/MainActivity.kt`
-  to `android/app/src/main/kotlin/com/yakup/helperly/MainActivity.kt` and
-  change its `package` line.
-- `android/app/google-services.json`: replace it with the user-supplied
-  file or the approved CLI output. It holds only Firebase client config.
-- `lib/services/firebase_options.dart`: the `android` options only.
-- `android/app/proguard-rules.pro`: keep rules, only for release failures
-  that were actually observed.
-- `lib/services/notification_service.dart`: a startup diagnostic for the
-  Android notification and full-screen-intent permission state. No new UI.
-- Tests under `test/android/**`.
 - `docs/agent-loop/NEXT_TASK.md`, `STATE.json`, `HANDOFF.md`.
-- Amended 2026-10-28 during implementation:
-  - **Found:** the first clean install under the new package showed
-    `POST_NOTIFICATIONS: granted=false` with no user-set flag. The app
-    never asked.
-  - **Cause:** `NotificationService.initialize` requested permission only
-    on `notDetermined`. firebase_messaging on Android reports a missing
-    grant as `denied`.
-  - **Impact:** a fresh Android install could never ring from the
-    background.
-  - **Allowed:** the request condition in `notification_service.dart`
-    (also ask on Android `denied` while in the foreground; iOS unchanged)
-    and `test/android/notification_permission_test.dart`.
-  - **App label:** the system prompt named the app `connect_app`.
-    `android:label` in the manifest becomes `Helperly`, matching the iOS
-    display name.
-
-## Required Implementation
-
-### Part 1 - Release build on the current package
-
-This separates shrink failures from rename failures.
-
-1. `flutter build apk --release`, signed with the debug key for sideloading.
-   A real upload key is a separate decision before Play.
-2. Install it on A, B and C. Run the single-device matrix and the
-   multi-device scenarios.
-3. On a failure, read the release logcat for `ClassNotFoundException`,
-   `NoSuchMethod` or missing plugin classes. Add the narrowest keep rule
-   and repeat.
-
-### Part 2 - Package id `com.yakup.helperly`
-
-4. Firebase needs an Android app for `com.yakup.helperly` in
-   `connectapp-278b4`, plus the debug signing key's SHA-1 and SHA-256 for
-   Google Sign-In. Either:
-   - the user adds it in the Firebase Console and supplies
-     `google-services.json`; or
-   - with the user's per-action approval, Claude runs
-     `firebase apps:create android` and `firebase apps:android:sha:create`.
-5. Leave the old `com.example.connect_app` Firebase app as is.
-6. Rename `namespace`, `applicationId`, the manifest `package`, and the
-   MainActivity package and directory. Set the `android` `appId` in
-   `firebase_options.dart` to the new app.
-7. After the rename the emulators need reinstall and re-login. The user
-   types the passwords. Update the local `test_artifacts/bin` scripts'
-   package name.
-
-### Part 3 - Permission state diagnostics
-
-8. At NotificationService startup on Android, record a push diagnostic
-   with:
-   - whether notifications are allowed;
-   - `FlutterCallkitIncoming.canUseFullScreenIntent()` (Android 14+).
-   Never throw.
-9. On the emulator, deny the full-screen intent
-   (`adb shell appops set <pkg> USE_FULL_SCREEN_INTENT deny`). Check that a
-   killed-app call still rings as a heads-up notification and can be
-   answered. Restore the permission afterwards.
+- Local, git-excluded `test_artifacts/**`.
+- No product code. If a defect is found, record it with evidence; a fix
+  needs an amendment here first.
 
 ## Strict Non-Goals
 
-- No new permission UI, no Play upload, and no upload key.
-- No change to call logic, the server, rules, iOS, or dependency
-  versions.
-- No deploy. No TestFlight. No physical calls; those are step 5 and need
-  approval.
-- Do not delete or modify the old Firebase Android app or any production
-  data.
+- No deploy, no TestFlight, no Play upload, no Firebase or rules changes.
+- Do not call Baris's iPhone or any user other than venus.
+- Do not change production data beyond what normal calls write.
 
 ## Validation
 
-- `flutter build apk --release` succeeds for both packages.
-- Release E2E on emulators under `com.yakup.helperly`:
-  - foreground audio and video;
-  - background/killed × answer/decline/cancel;
-  - multi-device killed and background in both directions, where the other
-    device must be silent within 15 s;
-  - killed answer to connected time.
-- The full-screen-intent denied fallback (item 9).
-- `flutter test test/android test/multi_device`, the full `flutter test`
-  (pre-existing failures noted), and
-  `flutter analyze lib test integration_test`.
-- `git diff --check`.
+- A result table per scenario with timestamps and the relevant
+  `pushDiag` / logcat evidence.
+- `PHYSICAL_FIX_CLAIM` changes only for scenarios that actually passed on
+  the phones.
 
 ## Commit And Handoff
 
-- Implementation commits:
-  - `build(android): release build and package id com.yakup.helperly`;
-  - plus `fix(android): ...` for any keep rules.
+- No implementation commit unless amended.
 - Handoff commit:
-  `chore(agent-loop): record android release readiness review handoff`.
+  `chore(agent-loop): record physical android verification review handoff`.
 - Push `call-v2`.

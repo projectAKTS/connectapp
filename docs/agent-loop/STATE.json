@@ -1,58 +1,30 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "android_release_readiness",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "38bbd25",
-  "starting_sha": "38bbd25",
+  "phase": "physical_android_verification",
+  "status": "task_ready",
+  "accepted_checkpoint_sha": "341cf94",
+  "starting_sha": "341cf94",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "c65e9ab",
+  "code_commit_sha": null,
   "ending_sha": "SELF",
-  "changed_files": [
-    "android/app/build.gradle",
-    "android/app/google-services.json",
-    "android/app/src/main/AndroidManifest.xml",
-    "android/app/src/main/kotlin/com/yakup/helperly/MainActivity.kt (moved from com/example/connect_app)",
-    "lib/services/firebase_options.dart",
-    "lib/services/notification_service.dart",
-    "test/android/notification_permission_test.dart",
-    "docs/agent-loop/NEXT_TASK.md",
-    "docs/agent-loop/HANDOFF.md",
-    "docs/agent-loop/STATE.json"
-  ],
-  "validation": {
-    "release_build": "flutter build apk --release succeeds (old and new package)",
-    "release_e2e_single_device": "6/6 background/killed x answer/decline/cancel; foreground audio and video pass",
-    "release_e2e_multi_device": "6/6 (killed 2.5s/2.5s, background 3.9s/3.3s, foreground 4.1s/4.6s other-silent after Accept)",
-    "notification_permission_prompt": "shown on fresh install after fix; deny path re-asks next launch",
-    "full_screen_intent_denied": "call still shown as notification, answered, connected",
-    "first_call_mic_prompt": "manual: answered from background, mic prompt, connected ~10s after grant",
-    "killed_answer_latency": "~20s Accept->Agora join on loaded host (next-task candidate)",
-    "dart_android_and_multi_device": "19/19",
-    "notification_permission_test_red": "1 test fails without Android branch",
-    "flutter_test_full": "+2422 -16 (2 pre-existing, 14 working-tree guards)",
-    "flutter_analyze_lib_test_integration_test": "no issues",
-    "git_diff_check": "clean",
-    "physical_devices": "not run"
-  },
+  "changed_files": [],
+  "validation": {},
   "safety": {
     "deployed": false,
     "testflight_built": false,
-    "production_services_contacted": true,
-    "firebase_changes": true,
-    "firebase_change_detail": "new Android app com.yakup.helperly + debug SHA-1/256 via CLI, approved by the user; nothing deleted",
+    "production_services_contacted": false,
+    "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": true,
-    "test_changes": true
+    "production_code_changes": false,
+    "test_changes": false,
+    "physical_calls_approved": true
   },
   "review": {
-    "decision": "ready_for_review",
+    "decision": "accepted_step4",
     "reviewer": "claude",
-    "notes": "Claude reviews per the user's delegation. Next recommended: step 5 physical Android + controlled TestFlight (needs approval); then killed-answer latency."
+    "notes": "Step 4 accepted. Step 5: physical Android verification on two Samsung phones, approved by the user 2026-10-29."
   },
-  "implementation_shas": [
-    "3ae2314",
-    "c65e9ab"
-  ]
+  "implementation_shas": []
 }
