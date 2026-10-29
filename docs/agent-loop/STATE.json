@@ -2,30 +2,47 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "android_invite_push_f6",
-  "status": "task_ready",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "345e8c9",
   "starting_sha": "345e8c9",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
-  "ending_sha": null,
-  "changed_files": [],
-  "validation": {},
+  "code_commit_sha": "bb1b254",
+  "ending_sha": "SELF",
+  "changed_files": [
+    "connect_functions/index.js",
+    "connect_functions/call_invites/invite_fcm_plan.js",
+    "connect_functions/test/call_invites/invite_fcm_plan.test.js",
+    "docs/agent-loop/NEXT_TASK.md",
+    "docs/agent-loop/HANDOFF.md",
+    "docs/agent-loop/STATE.json"
+  ],
+  "validation": {
+    "invite_fcm_plan_test": "RED then GREEN 4/4",
+    "call_invites_tests": "26/26",
+    "functions_emulator": "256/256",
+    "rules": "10/10",
+    "node_check": "ok",
+    "baseline_ring_emulator_before_deploy": "bg 6.4/5.6s, killed 6.1/5.5s",
+    "after_deploy": "pending"
+  },
   "safety": {
     "deployed": false,
-    "deploy_pending": null,
+    "deploy_pending": "functions:onCallInviteCreated (F6), user runs",
     "testflight_built": false,
-    "production_services_contacted": false,
+    "production_services_contacted": true,
     "firebase_changes": false,
-    "backend_changes": false,
+    "backend_changes": true,
     "production_code_changes": false,
-    "test_changes": false,
+    "test_changes": true,
     "physical_calls_approved": false
   },
   "review": {
     "decision": "accepted_previous",
     "reviewer": "claude",
-    "notes": "Physical Android verification accepted; F2 deployed + emulator-verified. Next: F6."
+    "notes": "F6 ready; awaiting user deploy of onCallInviteCreated, then emulator re-measure."
   },
-  "implementation_shas": []
+  "implementation_shas": [
+    "bb1b254"
+  ]
 }
