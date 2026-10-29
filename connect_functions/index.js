@@ -1210,6 +1210,7 @@ const {
   answeredElsewhereTargets,
   isAnsweredElsewhereTransition,
 } = require("./call_invites/answered_elsewhere");
+const { declinedElsewhereFcmRecipients } = require("./call_invites/declined_elsewhere");
 
 /** Stops the callee's other devices ringing once one device has accepted. */
 async function sendAnsweredElsewherePush(inviteId, before, after) {
@@ -1300,6 +1301,23 @@ exports.onCallInviteUpdated = onDocumentUpdated(
       return;
     }
 
+    const terminalFcmMessage = {
+      android: {
+        priority: "high",
+      },
+      apns: {
+        headers: {
+          "apns-priority": "5",
+        },
+        payload: {
+          aps: {
+            contentAvailable: true,
+          },
+        },
+      },
+      data: payloadData,
+    };
+
     for (const uid of recipients) {
       const tokenSets = await getUserPushTokenSets(uid);
       try {
@@ -1329,22 +1347,7 @@ exports.onCallInviteUpdated = onDocumentUpdated(
       const fcmTokens = tokenSets.fcmAll;
       if (fcmTokens.length) {
         try {
-          await sendToTokens(fcmTokens, {
-            android: {
-              priority: "high",
-            },
-            apns: {
-              headers: {
-                "apns-priority": "5",
-              },
-              payload: {
-                aps: {
-                  contentAvailable: true,
-                },
-              },
-            },
-            data: payloadData,
-          });
+          await sendToTokens(fcmTokens, terminalFcmMessage);
         } catch (e) {
           console.error("FCM terminal send failed:", {
             identifierPresent: Boolean(inviteId && uid && channel),
@@ -1352,6 +1355,23 @@ exports.onCallInviteUpdated = onDocumentUpdated(
             error: `${e}`,
           });
         }
+      }
+    }
+
+    for (const uid of declinedElsewhereFcmRecipients(before, after, afterStatus)) {
+      const fcmTokens = (await getUserPushTokenSets(uid)).fcmAll;
+      if (!fcmTokens.length) continue;
+      try {
+        await sendToTokens(fcmTokens, terminalFcmMessage);
+        console.log("call invite declined-elsewhere push", {
+          identifierPresent: Boolean(inviteId && uid && channel),
+          fcmCount: fcmTokens.length,
+        });
+      } catch (e) {
+        console.error("FCM declined-elsewhere send failed:", {
+          identifierPresent: Boolean(inviteId && uid && channel),
+          error: `${e}`,
+        });
       }
     }
   }
