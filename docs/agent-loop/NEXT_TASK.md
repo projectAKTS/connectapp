@@ -70,6 +70,48 @@ running the release APK `com.yakup.helperly` from `c65e9ab`.
 - Local, git-excluded `test_artifacts/**`.
 - No product code. If a defect is found, record it with evidence; a fix
   needs an amendment here first.
+- Amended 2026-10-29 during verification:
+  - **Found (F1):** on the A55, with the screensaver (dream) showing while
+    charging, "Yanıtla" on the call notification accepted the call and
+    joined Agora, but the call screen never appeared.
+    - Evidence: the plugin's `TransparentActivity` started `MainActivity`
+      with `ACTION_CALL_ACCEPT`, input focus stayed on `DreamActivity`, and
+      Dart logged `accepted_route_navigator_unavailable` every 250 ms.
+  - **Allowed:** `android/app/src/main/kotlin/com/yakup/helperly/MainActivity.kt`,
+    and a new `HelperlyApplication.kt` registered as `android:name` in the
+    manifest.
+    - `setTurnScreenOn` in `MainActivity` did not work on the phone: the
+      activity behind the dream gets `onNewIntent` only after it becomes
+      visible.
+    - The plugin's accept trampoline (`TransparentActivity`) is created
+      immediately. A short `ACQUIRE_CAUSES_WAKEUP` wake lock taken there
+      ends the dream.
+    - No `showWhenLocked`: the app must not be usable over a secure lock
+      screen.
+  - **Found (F4):** A55, app in the background.
+    - The Firestore listener saw the invite 5 s before the FCM push showed
+      the native call. The invite was owned by a Flutter prompt still
+      waiting for the app to resume.
+    - The native Accept was suppressed as a duplicate, and the call rang
+      out as missed.
+  - **Allowed:** the duplicate branch of `_handleIncomingCandidate` in
+    `lib/services/call_session_manager.dart` and a regression test in
+    `test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart`.
+    - A native accept also wins when the Flutter owner's prompt is not on
+      screen yet.
+    - A shown prompt keeps its current behaviour.
+  - **Found (F2):** venus on both phones. S21 FE declined; the killed A55
+    kept ringing for 39 s, until its local ring timeout.
+    - Evidence: the A55 received only the invite FCM.
+      `terminalCallInviteRecipients` sends a `declined` `call_end` to the
+      caller only. A running app's Firestore listener hid this on the
+      emulators.
+  - **Allowed:** `connect_functions/call_invites/declined_elsewhere.js`, its
+    test, and `onCallInviteUpdated` in `connect_functions/index.js`. After
+    a decline, the callee's devices also get the `call_end` over FCM only.
+    There is no VoIP push, so iOS is unchanged.
+  - **Deploy:** the user deploys only `functions:onCallInviteUpdated`
+    (approved per action).
 
 ## Strict Non-Goals
 
