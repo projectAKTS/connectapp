@@ -52,8 +52,16 @@ ENDING_SHA: `SELF`
    - Fix (`f7d414c`): the callee also gets the `call_end`, over FCM only.
      There is no VoIP push, so iOS is unchanged.
    - Tests: functions 256/256 with the emulator, rules 10/10.
-   - **Needs deploy:** `firebase deploy --only functions:onCallInviteUpdated --project connectapp-278b4`.
-     After the deploy it must be re-verified on two phones.
+   - **Deployed** by the user (`functions:onCallInviteUpdated`,
+     2026-10-29 23:14 UTC).
+   - Verified after the deploy on emulators (A calls, B declines in the
+     foreground, C is the other venus device): C killed twice and in the
+     background once, 3/3 PASS.
+     - C went silent 7.1-9.1 s after the decline. Its ring lasted ~11 s, well
+       short of its ~39 s local timeout.
+     - The server logged `call invite declined-elsewhere push`
+       (`fcmCount: 6`), and C's `endCall` ran in the same second.
+     - Not re-run on the Samsung phones.
 3. **F3: a network gap of ~20 s ends the call; there is no reconnect grace
    period.** Not fixed (product decision).
    - P2 Wi-Fi off 5 s: Samsung needed ~17 s more to reassociate. P2's
@@ -177,12 +185,12 @@ ways (P2's real camera seen on A).
 - A PIN or secure lock screen (approved, not run). With a PIN, the accept
   trampoline's `requestDismissKeyguard` should show the bouncer.
 - Bluetooth headset, earpiece/proximity, a GSM call during an app call.
-- F2 after deploy, and F1 on the S21 FE.
+- F2 after deploy on the Samsung phones (verified on emulators), and F1 on
+  the S21 FE.
 
 ## Next-Task Candidates
 
-1. Deploy `onCallInviteUpdated` (F2), then re-check decline-elsewhere on
-   two Android devices.
+1. Done: F2 deployed and verified on emulators.
 2. F6: send the Android FCM before the 4 s APNS alert wait. Expected gain:
    ~4 s faster ring on Android.
 3. F3: a reconnect grace period and a "Reconnecting" UI.
@@ -191,4 +199,5 @@ ways (P2's real camera seen on A).
 
 PHYSICAL_FIX_CLAIM:
 - F1: verified on P1 (A55).
-- F2, F4: source and tests only.
+- F2: deployed; verified on emulators, not on the phones.
+- F4: source and tests only.
