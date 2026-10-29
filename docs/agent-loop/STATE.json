@@ -1,64 +1,31 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "physical_android_verification",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "341cf94",
-  "starting_sha": "341cf94",
+  "phase": "android_invite_push_f6",
+  "status": "task_ready",
+  "accepted_checkpoint_sha": "345e8c9",
+  "starting_sha": "345e8c9",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "8c1b6f6",
-  "ending_sha": "SELF",
-  "changed_files": [
-    "connect_functions/index.js",
-    "connect_functions/call_invites/declined_elsewhere.js",
-    "connect_functions/test/call_invites/declined_elsewhere.test.js",
-    "android/app/src/main/kotlin/com/yakup/helperly/HelperlyApplication.kt",
-    "android/app/src/main/AndroidManifest.xml",
-    "lib/services/call_session_manager.dart",
-    "test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart",
-    "docs/agent-loop/NEXT_TASK.md",
-    "docs/agent-loop/HANDOFF.md",
-    "docs/agent-loop/STATE.json"
-  ],
-  "validation": {
-    "p2_single_device_matrix": "16/16 (S21 FE, Android 16)",
-    "p1_single_device_matrix": "16/16 (A55, Android 14, battery saver)",
-    "multi_device_answer": "all pass, other silent 3.1-7s",
-    "multi_device_decline_killed_other": "FAIL on phones before F2 deploy (rang 39s); after deploy PASS 3/3 on emulators (B declines, C killed x2 / bg x1): C silent 7.1-9.1s, server log 'declined-elsewhere push'",
-    "power_doze_restricted_rare": "4/4 pass on P2",
-    "video_and_camera_switch": "pass on P2",
-    "killed_answer_latency_physical": "Agora join 4.2-6.7s after tap",
-    "f1_screensaver_answer": "fixed, verified on P1",
-    "f4_native_accept_dropped": "fixed in source, RED->GREEN test; device race not reproduced after fix",
-    "network_gap": "F3 open: ~20s gap ends call",
-    "reboot": "E1: stale GMS connection, not app",
-    "flutter_test_call_v2_multi_device_android": "+2414 -14 (working-tree guards)",
-    "flutter_analyze": "no issues",
-    "functions_emulator": "256/256, rules 10/10",
-    "not_tested": "phone-to-phone audio, outgoing from phone, PIN lock, Bluetooth"
-  },
+  "code_commit_sha": null,
+  "ending_sha": null,
+  "changed_files": [],
+  "validation": {},
   "safety": {
-    "deployed": true,
+    "deployed": false,
     "deploy_pending": null,
     "testflight_built": false,
-    "production_services_contacted": true,
+    "production_services_contacted": false,
     "firebase_changes": false,
-    "backend_changes": true,
-    "production_code_changes": true,
-    "test_changes": true,
-    "physical_calls_approved": true,
-    "deployed_functions": "onCallInviteUpdated (user, 2026-10-29T23:14Z)"
+    "backend_changes": false,
+    "production_code_changes": false,
+    "test_changes": false,
+    "physical_calls_approved": false
   },
   "review": {
-    "decision": "ready_for_review",
+    "decision": "accepted_previous",
     "reviewer": "claude",
-    "notes": "F2 deployed and verified on emulators. Next: F6 (Android FCM before APNS wait), F3 reconnect grace."
+    "notes": "Physical Android verification accepted; F2 deployed + emulator-verified. Next: F6."
   },
-  "implementation_shas": [
-    "f7d414c",
-    "bbb0a23",
-    "613c2f7",
-    "8c1b6f6"
-  ]
+  "implementation_shas": []
 }

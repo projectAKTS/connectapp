@@ -1,134 +1,60 @@
-# Active Task - Physical Android Call Verification
+# Active Task - Android Invite Push Without The APNS Wait (F6)
 
 Branch: `call-v2` (known-good tags `stable-calls-oct-26`, `stable-calls-oct-27`;
 do not modify them or `stable/calls-oct-26`)
 
-Starting SHA: `341cf94`
+Starting SHA: `345e8c9`
 
-Authorized by the user on 2026-10-29:
-- "2 tane android telefon taktim test et lutfen ... emulator de test
-  edemeyecegimiz herseyi test edebilirsin": physical calls between the two
-  connected Samsung phones and the emulators are approved for this task.
-- The phones are only available until 2026-10-30. Evidence first; fixes
-  found here become the next task unless they are small and can be
-  verified on the phones the same day.
+## Review Of Physical Android Verification (Claude, 2026-10-29)
 
-## Review Of Step 4 (Claude, 2026-10-29)
+- Accepted: F1 (`613c2f7`, verified on the A55), F4 (`8c1b6f6`, source and a
+  RED-checked test).
+- F2 (`f7d414c`): the user deployed `onCallInviteUpdated` on 2026-10-29. It
+  was then verified 3/3 on emulators (`345e8c9`).
 
-- Step 4 (`3ae2314`, `c65e9ab`, handoff `341cf94`): accepted.
-  - The notification-permission fix is a real fresh-install bug, found by
-    the clean install and covered by a RED-checked test.
-  - Killed-app answer latency (~20 s on a loaded host) stays open and is
-    measured on real hardware here.
+## Problem (F6)
 
-## Problem
-
-Every call so far ran on emulators. Emulators cannot show:
-- OEM (Samsung One UI) battery management: sleeping apps, app standby,
-  Doze on real hardware, swipe-from-recents behaviour.
-- Answering over a real lock screen, with the screen off.
-- Real microphone, speaker, earpiece, proximity sensor and camera.
-- Real network changes (Wi-Fi to mobile data, airplane mode) during a call.
-- Cold start, permission prompts and answer latency on real hardware.
-- Behaviour after a reboot without opening the app.
+`onCallInviteCreated` sends three pushes in order: the iOS VoIP push, then
+the APNS alert check, then the Android FCM.
+- When the callee also has a delivered iOS VoIP token, the APNS alert check
+  sleeps 4 s (`CALL_ALERT_FALLBACK_DELAY_MS`) before re-reading the invite.
+- Android waits behind that sleep: on the Samsung phones the call UI
+  appeared 6-7 s after the caller tapped.
 
 ## Goal
 
-A recorded verdict for each scenario below on two physical Samsung phones
-running the release APK `com.yakup.helperly` from `c65e9ab`.
-
-## Accounts And Devices
-
-- Baris is only ever the **caller**. Calls to Baris would ring Baris's
-  physical iPhone, which must not be called.
-- Venus is the callee. Venus may be logged in on both phones and on
-  emulators B/C for multi-device runs; unused venus emulators are stopped
-  so they do not ring.
-- Logins come from `test_artifacts/secrets/test_logins.txt`. Never print
-  or commit them.
-
-## Scenarios
-
-1. Fresh install: notification prompt, then first call mic/camera prompts.
-2. Single device (phone as venus, caller emulator A or the other phone):
-   foreground, background, killed (swipe from recents), screen off and
-   locked × answer / decline / caller cancel / ring timeout.
-3. Real audio and video between the two phones (the user listens), speaker
-   and earpiece, mute, camera switch.
-4. Multi-device: both phones as venus; answer on one, the other must stop
-   ringing within 15 s; decline on one.
-5. Power: `deviceidle force-idle`, app standby bucket `rare`/`restricted`,
-   long screen-off idle, battery saver.
-6. Network: Wi-Fi off/on and airplane mode during a call; call while the
-   callee is offline and comes back.
-7. Reboot without opening the app, then an incoming call.
-8. Killed-app answer latency on real hardware.
+- Android (non-iOS) FCM tokens get the invite at the start, concurrently
+  with the VoIP push.
+- iOS FCM tokens stay a last-resort fallback. They get the invite only when
+  neither VoIP nor the APNS alert was delivered.
+- iOS behaviour is unchanged: the same VoIP push and the same delayed alert
+  check.
 
 ## Allowed Files
 
+- New `connect_functions/call_invites/invite_fcm_plan.js`: which FCM tokens
+  are sent at the start, and which only as the fallback.
+- New `connect_functions/test/call_invites/invite_fcm_plan.test.js`.
+- `onCallInviteCreated` in `connect_functions/index.js`.
 - `docs/agent-loop/NEXT_TASK.md`, `STATE.json`, `HANDOFF.md`.
-- Local, git-excluded `test_artifacts/**`.
-- No product code. If a defect is found, record it with evidence; a fix
-  needs an amendment here first.
-- Amended 2026-10-29 during verification:
-  - **Found (F1):** on the A55, with the screensaver (dream) showing while
-    charging, "Yanıtla" on the call notification accepted the call and
-    joined Agora, but the call screen never appeared.
-    - Evidence: the plugin's `TransparentActivity` started `MainActivity`
-      with `ACTION_CALL_ACCEPT`, input focus stayed on `DreamActivity`, and
-      Dart logged `accepted_route_navigator_unavailable` every 250 ms.
-  - **Allowed:** `android/app/src/main/kotlin/com/yakup/helperly/MainActivity.kt`,
-    and a new `HelperlyApplication.kt` registered as `android:name` in the
-    manifest.
-    - `setTurnScreenOn` in `MainActivity` did not work on the phone: the
-      activity behind the dream gets `onNewIntent` only after it becomes
-      visible.
-    - The plugin's accept trampoline (`TransparentActivity`) is created
-      immediately. A short `ACQUIRE_CAUSES_WAKEUP` wake lock taken there
-      ends the dream.
-    - No `showWhenLocked`: the app must not be usable over a secure lock
-      screen.
-  - **Found (F4):** A55, app in the background.
-    - The Firestore listener saw the invite 5 s before the FCM push showed
-      the native call. The invite was owned by a Flutter prompt still
-      waiting for the app to resume.
-    - The native Accept was suppressed as a duplicate, and the call rang
-      out as missed.
-  - **Allowed:** the duplicate branch of `_handleIncomingCandidate` in
-    `lib/services/call_session_manager.dart` and a regression test in
-    `test/call_v2/real_flow/call_v2_rapid_call_lifecycle_manager_test.dart`.
-    - A native accept also wins when the Flutter owner's prompt is not on
-      screen yet.
-    - A shown prompt keeps its current behaviour.
-  - **Found (F2):** venus on both phones. S21 FE declined; the killed A55
-    kept ringing for 39 s, until its local ring timeout.
-    - Evidence: the A55 received only the invite FCM.
-      `terminalCallInviteRecipients` sends a `declined` `call_end` to the
-      caller only. A running app's Firestore listener hid this on the
-      emulators.
-  - **Allowed:** `connect_functions/call_invites/declined_elsewhere.js`, its
-    test, and `onCallInviteUpdated` in `connect_functions/index.js`. After
-    a decline, the callee's devices also get the `call_end` over FCM only.
-    There is no VoIP push, so iOS is unchanged.
-  - **Deploy:** the user deploys only `functions:onCallInviteUpdated`
-    (approved per action).
 
 ## Strict Non-Goals
 
-- No deploy, no TestFlight, no Play upload, no Firebase or rules changes.
-- Do not call Baris's iPhone or any user other than venus.
-- Do not change production data beyond what normal calls write.
+- No client change, no rules change, no TestFlight.
+- No deploy by Claude. The user deploys only
+  `functions:onCallInviteCreated` (approved per action).
+- Do not change `CALL_ALERT_FALLBACK_DELAY_MS` or the iOS alert policy.
 
 ## Validation
 
-- A result table per scenario with timestamps and the relevant
-  `pushDiag` / logcat evidence.
-- `PHYSICAL_FIX_CLAIM` changes only for scenarios that actually passed on
-  the phones.
+- `node --test test/call_invites/*.test.js`.
+- `npm run test:call-v2:emulator` and `npm run test:call-v2:rules`.
+- `node --check index.js`.
+- After the user's deploy: emulator calls (A to venus on B) in fg/bg/killed.
+  Record the ring time and `serverDiag` (`serverFcmSent`, policy).
 
 ## Commit And Handoff
 
-- No implementation commit unless amended.
-- Handoff commit:
-  `chore(agent-loop): record physical android verification review handoff`.
+- Implementation: `fix(functions): send the Android call invite before the APNS alert wait`.
+- Handoff: `chore(agent-loop): record android invite push review handoff`.
 - Push `call-v2`.
