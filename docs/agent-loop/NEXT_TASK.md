@@ -1,86 +1,73 @@
-# Active Task - Reconnect Grace For Connected Calls (F3)
+# Active Task - Remote Audio Stall From Audio Stats (F3b)
 
 Branch: `call-v2` (known-good tags `stable-calls-oct-26`, `stable-calls-oct-27`;
 do not modify them or `stable/calls-oct-26`)
 
-Starting SHA: `cd64273`
+Starting SHA: `f161b25`
 
-## Review Of F6 (Claude, 2026-10-29)
+## Review Of F3 (Claude, 2026-10-30)
 
-- Accepted: `bb1b254`, deployed by the user. Emulator tap-to-ring went from
-  ~5.9 s to ~1.5 s (median); the iOS path is unchanged in the logs.
-- A physical-phone measurement is still to come.
+Physical run on the user's A55 (Android 14), with emulator A as the caller:
+- 10 s Wi-Fi gap: PASS. The phone showed "Reconnecting…" and recovered
+  about 5 s after Wi-Fi came back.
+- 35 s gap: PASS. The caller showed "Reconnecting…" from the
+  `userOfflineDropped` grace, and the call continued.
+- Ring time after F6, across bg, killed and locked: 2.2-3.2 s (5.5-6.4 s
+  before).
 
-## Product Decision
+Accepted: `6ca5e19` and `e6c9b1b`.
 
-The user delegated UX design: "WhatsApp-like, stability first".
+## Problem (F3b)
 
-## Problem (F3)
-
-Seen on the S21 FE: Wi-Fi off for 5 s, and Samsung needed ~17 s more to
-reassociate.
-- Agora rejoined 23.4 s after the drop.
-- The other side had already ended the call 0.2 s earlier, on
-  `userOfflineDropped`, which Agora fires after ~20 s without packets.
-- The offline side showed "Connected" through the whole outage.
-
-Both media paths end a connected call on any `onUserOffline`:
-- audio: `CallV2AgoraMediaRuntime` → `CallSessionManager.reportRemoteOffline`;
-- video: `AgoraCallScreen.onUserOffline` plus `reportRemoteOffline`.
+While the phone was offline, the caller's screen kept showing "Connected" for
+~20 s, until `userOfflineDropped` fired. In both runs Agora reported
+`remoteAudioStateFrozen` about 1 s into the outage, then
+`remoteAudioStateDecoding` (reason `NetworkRecovery`) exactly 2.0 s later,
+while the phone was still offline. The 2 s frozen debounce therefore never
+showed anything.
 
 ## Goal
 
-WhatsApp-like behaviour:
-1. **Remote dropped** (`userOfflineDropped`) on a connected call: show
-   "Reconnecting…" and wait 25 s more for the remote to rejoin. If it
-   rejoins, the call continues. If not, end the call with
-   `endReason: remote_left:<reason>:grace_expired`.
-2. **Remote quit** (a hang-up, `userOfflineQuit`) and offline before
-   connect: unchanged, the call ends immediately.
-3. **Local connection** `connectionStateReconnecting` on a connected call:
-   show "Reconnecting…". Back to `connectionStateConnected` clears it.
-   45 s without recovery ends the call like a local hang-up (`source:
-   local_network_lost`).
-4. **Remote audio** `remoteAudioStateFrozen` for 2 s: show
-   "Reconnecting…". Decoding again clears it. This is UI only, with no
-   timeout.
+Detect a remote audio stall from `onRemoteAudioStats`, which Agora reports
+every 2 s for each remote user that is sending audio:
+- A report with `receivedBitrate > 0` means audio is flowing. It clears the
+  stall and re-arms a 3.5 s silence timer.
+- No positive report for 3.5 s shows "Reconnecting…". This is UI only.
+- A remote mute (`onUserMuteAudio` true) stops the timer and clears the
+  stall. Muting is not a network problem.
+- Nothing is armed until the first positive report.
+- The frozen remote-audio state stays logged but no longer drives the UI.
+- Both the audio runtime and the video screen handler use the new signal.
 
 ## Allowed Files
 
-- New `lib/services/call_reconnect_watch.dart` (timers and status) and its
-  test `test/call_v2/real_flow/call_reconnect_watch_test.dart`.
-- `lib/services/call_session_manager.dart`:
-  - `reportRemoteOffline` and `reportRemoteJoined`;
-  - new `reportLocalConnectionState` and `reportRemoteAudioFrozen`;
-  - reset on terminal and test idle;
-  - the audio runtime config wiring.
-- `lib/call_v2/real_flow/call_v2_agora_media_runtime.dart`: optional
-  connection-state and remote-audio-frozen callbacks.
-- `lib/screens/call/agora_call_screen.dart`: video-path event reporting,
-  no immediate end on a network drop, and the "Reconnecting…" label.
-- A new manager/screen widget test
-  `test/call_v2/real_flow/call_v2_reconnect_grace_test.dart`.
+- `lib/services/call_reconnect_watch.dart` and its test.
+- `lib/services/call_session_manager.dart`: replace
+  `reportRemoteAudioFrozen` with `reportRemoteAudioStats` /
+  `reportRemoteAudioMuted`, plus the runtime wiring.
+- `lib/call_v2/real_flow/call_v2_agora_media_runtime.dart`: the stats and
+  mute callbacks, and a diag log when the flow starts or stops.
+- `lib/screens/call/agora_call_screen.dart`: video handler reporting.
+- `test/call_v2/real_flow/call_v2_reconnect_grace_test.dart`.
 - `docs/agent-loop/NEXT_TASK.md`, `STATE.json`, `HANDOFF.md`.
 
 ## Strict Non-Goals
 
 - No server change, no deploy, no TestFlight.
-- No change to ringing, accept, decline or cancel paths.
-- Do not change the existing `remote_hangup`-style ends.
+- Leave the drop grace and the local limit (F3) as they are.
 
 ## Validation
 
-- New tests RED before the change, GREEN after.
+- Watch and widget tests updated; the stall test is RED on the old frozen
+  signal.
 - `flutter test test/call_v2 test/multi_device test/android`: no new
   failures beyond the 14 known working-tree guards.
 - `flutter analyze lib test integration_test`: clean.
-- Emulator: during a connected call, cut the callee emulator's network
-  (`svc wifi`/`svc data` or airplane mode) for ~10 s, then restore. The
-  call continues. For ~70 s, both sides end within ~50 s.
-- Physical: Wi-Fi gap on the user's phone later today.
+- Physical: a 10 s and a 35 s Wi-Fi gap on the phone. The caller shows
+  "Reconnecting…" within ~6 s. A mute does not show it.
 
 ## Commit And Handoff
 
-- Implementation: `fix(calls): keep a connected call through a short network drop`.
-- Handoff: `chore(agent-loop): record reconnect grace review handoff`.
+- Implementation: `fix(calls): show reconnecting when remote audio stops arriving`.
+- Handoff: `chore(agent-loop): record remote audio stall review handoff`.
 - Push `call-v2`.
