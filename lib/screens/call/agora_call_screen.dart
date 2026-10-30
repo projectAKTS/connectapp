@@ -19,6 +19,7 @@ import 'package:connect_app/call_v2/real_flow/call_v2_real_call_flow_gate.dart';
 import 'package:connect_app/theme/tokens.dart';
 import 'package:firebase_auth/firebase_auth.dart' hide UserInfo;
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:connect_app/services/call_audio_route.dart';
 import 'package:connect_app/services/call_reconnect_watch.dart';
 import 'package:connect_app/services/call_session_manager.dart';
 import 'package:connect_app/services/callkit_id.dart';
@@ -280,7 +281,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
   // Controls
   bool _muted = false;
-  bool _speakerOn = true;
+  late bool _speakerOn = callStartsOnSpeaker(isVideo: widget.isVideo);
   bool _speakerRouteExplicitlyChanged = false;
   bool _frontCamera = true;
   bool _localVideoReady = false;
@@ -856,7 +857,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         setupEpoch,
         CallV2ScreenSetupCancellationStage.mediaSetup,
       );
-      await engine.setDefaultAudioRouteToSpeakerphone(true);
+      await engine.setDefaultAudioRouteToSpeakerphone(
+        callStartsOnSpeaker(isVideo: widget.isVideo),
+      );
       _cancelSetupIfStale(
         setupEpoch,
         CallV2ScreenSetupCancellationStage.mediaSetup,
@@ -1705,7 +1708,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         _joined = true;
         _isLoading = false;
         _localVideoReady = widget.isVideo;
-        _speakerOn = true;
+        _speakerOn = callStartsOnSpeaker(isVideo: widget.isVideo);
         if (_callV2Selected) {
           _callV2CallableReached = true;
           _callV2TokenReady = true;
@@ -3093,6 +3096,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
   @override
   void dispose() {
+    CallProximity.instance.hold(false);
     CallSessionManager.instance.terminalSignal
         .removeListener(_handleManagerTerminalSignal);
     CallSessionManager.instance.reconnectStatus
@@ -3240,6 +3244,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Every speaker or end change rebuilds; hold() ignores repeats.
+    CallProximity.instance.hold(
+      !widget.isVideo && !_speakerOn && !_ended && !_endingCall,
+    );
     final title = widget.isVideo ? 'Video Call' : 'Audio Call';
     late final Widget content;
     if (_isLoading) {

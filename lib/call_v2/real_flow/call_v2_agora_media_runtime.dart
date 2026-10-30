@@ -17,6 +17,7 @@ import '../firebase/call_v2_dev_callable_target.dart';
 import '../firebase/call_v2_token_provider.dart';
 import '../firebase/real_call_v2_token_provider.dart';
 import '../runtime/call_v2_runtime_state.dart';
+import '../../services/call_audio_route.dart';
 import '../../services/helperly_test_runtime.dart';
 import 'call_v2_engine_cleanup_coordinator.dart';
 import 'call_v2_real_call_flow_gate.dart';
@@ -378,9 +379,13 @@ class CallV2AgoraMediaRuntime implements CallV2PhysicalMediaRuntime {
       await created.setClientRole(
         role: ClientRoleType.clientRoleBroadcaster,
       );
-      await created.setDefaultAudioRouteToSpeakerphone(true);
+      final speakerFirst = callStartsOnSpeaker(isVideo: config.isVideo);
+      await created.setDefaultAudioRouteToSpeakerphone(speakerFirst);
       _ensureCurrent(epoch);
-      _emit(_state.value.copyWith(phase: CallV2AgoraMediaPhase.engineReady));
+      _emit(_state.value.copyWith(
+        phase: CallV2AgoraMediaPhase.engineReady,
+        speakerEnabled: speakerFirst,
+      ));
 
       final generation = _engineGeneration;
       final handler = _buildHandler(created, generation);
