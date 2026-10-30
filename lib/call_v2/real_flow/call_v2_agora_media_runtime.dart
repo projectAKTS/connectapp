@@ -216,7 +216,8 @@ class CallV2AgoraMediaRuntimeConfig {
     required this.onFailure,
     required this.diagnostic,
     this.onLocalConnectionState,
-    this.onRemoteAudioFrozen,
+    this.onRemoteAudioStats,
+    this.onRemoteAudioMuted,
   });
 
   final String channel;
@@ -235,8 +236,11 @@ class CallV2AgoraMediaRuntimeConfig {
   /// `true` while Agora is reconnecting the local connection.
   final void Function(bool reconnecting)? onLocalConnectionState;
 
-  /// `true` while the remote audio is frozen (no packets arriving).
-  final void Function(bool frozen)? onRemoteAudioFrozen;
+  /// The received bitrate (Kbps) of each 2 s remote audio stats report.
+  final void Function(int receivedBitrate)? onRemoteAudioStats;
+
+  /// `true` while the remote user has muted its audio stream.
+  final void Function(bool muted)? onRemoteAudioMuted;
 }
 
 abstract interface class CallV2PhysicalMediaRuntime {
@@ -270,6 +274,7 @@ class CallV2AgoraMediaRuntime implements CallV2PhysicalMediaRuntime {
   int _epoch = 0;
   bool _acceptCallbacks = false;
   bool _remoteEverJoined = false;
+  bool _remoteAudioFlowing = false;
   bool _failureReported = false;
   Future<void>? _startFuture;
   Future<void>? _cleanupFuture;
@@ -454,9 +459,27 @@ class CallV2AgoraMediaRuntime implements CallV2PhysicalMediaRuntime {
           'state': state.toString(),
           'reason': reason.toString(),
         }));
-        config.onRemoteAudioFrozen?.call(
-          state == RemoteAudioState.remoteAudioStateFrozen,
-        );
+      },
+      onRemoteAudioStats: (connection, stats) {
+        if (!_accepts(generation)) return;
+        final bitrate = stats.receivedBitrate ?? 0;
+        final flowing = bitrate > 0;
+        if (flowing != _remoteAudioFlowing) {
+          _remoteAudioFlowing = flowing;
+          unawaited(_diag('remote_audio_flow', <String, Object?>{
+            'flowing': flowing,
+            'receivedBitrate': bitrate,
+            'audioLossRate': stats.audioLossRate ?? -1,
+          }));
+        }
+        config.onRemoteAudioStats?.call(bitrate);
+      },
+      onUserMuteAudio: (connection, remoteUid, muted) {
+        if (!_accepts(generation)) return;
+        unawaited(_diag('remote_audio_muted', <String, Object?>{
+          'muted': muted,
+        }));
+        config.onRemoteAudioMuted?.call(muted);
       },
       onJoinChannelSuccess: (connection, elapsed) {
         if (!_accepts(generation)) return;

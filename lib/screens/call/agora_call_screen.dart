@@ -1066,6 +1066,28 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
             'remoteUid': remoteUid,
             'muted': muted,
           });
+          final inviteIdForAudio = (widget.inviteId ?? '').trim();
+          if (inviteIdForAudio.isNotEmpty) {
+            CallSessionManager.instance.reportRemoteAudioMuted(
+              inviteId: inviteIdForAudio,
+              muted: muted,
+            );
+          }
+        },
+        onRemoteAudioStats: (RtcConnection connection, RemoteAudioStats stats) {
+          if (!_acceptCallbackForGeneration(
+            generation,
+            'onRemoteAudioStats',
+          )) {
+            return;
+          }
+          final inviteIdForAudio = (widget.inviteId ?? '').trim();
+          if (inviteIdForAudio.isNotEmpty) {
+            CallSessionManager.instance.reportRemoteAudioStats(
+              inviteId: inviteIdForAudio,
+              receivedBitrate: stats.receivedBitrate ?? 0,
+            );
+          }
         },
         onRemoteAudioStateChanged: (
           RtcConnection connection,
@@ -1101,13 +1123,6 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
             'reason': '$reason',
             'elapsedMs': elapsed,
           });
-          final inviteIdForAudio = (widget.inviteId ?? '').trim();
-          if (inviteIdForAudio.isNotEmpty) {
-            CallSessionManager.instance.reportRemoteAudioFrozen(
-              inviteId: inviteIdForAudio,
-              frozen: state == RemoteAudioState.remoteAudioStateFrozen,
-            );
-          }
         },
         onAudioRoutingChanged: (int routing) {
           if (!_acceptCallbackForGeneration(

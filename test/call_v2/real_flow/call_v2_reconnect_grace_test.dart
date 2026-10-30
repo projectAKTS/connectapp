@@ -234,18 +234,24 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('frozen remote audio shows reconnecting', (tester) async {
-    const inviteId = 'reconnect_frozen';
+  testWidgets('remote audio that stops arriving shows reconnecting',
+      (tester) async {
+    const inviteId = 'reconnect_audio_stall';
     await showConnectedCall(tester, inviteId);
 
-    manager.reportRemoteAudioFrozen(inviteId: inviteId, frozen: true);
-    await tester.pump(CallReconnectWatch.defaultStallDelay);
+    manager.reportRemoteAudioStats(inviteId: inviteId, receivedBitrate: 32);
+    await tester.pump(CallReconnectWatch.defaultAudioSilenceLimit);
     await tester.pump();
     expect(find.text('Reconnecting…'), findsOne);
+    expect((await invite(inviteId))['status'], CallInviteStatus.connected.name);
 
-    manager.reportRemoteAudioFrozen(inviteId: inviteId, frozen: false);
+    manager.reportRemoteAudioStats(inviteId: inviteId, receivedBitrate: 32);
     await tester.pump();
     expect(find.text('Reconnecting…'), findsNothing);
+
+    manager.reportRemoteAudioMuted(inviteId: inviteId, muted: true);
+    await tester.pump(CallReconnectWatch.defaultAudioSilenceLimit * 2);
+    expect(find.text('Reconnecting…'), findsNothing, reason: 'muted is fine');
 
     await closeCall(tester, inviteId);
   });

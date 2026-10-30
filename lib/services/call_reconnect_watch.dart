@@ -42,7 +42,9 @@ class CallReconnectStatus {
 ///
 /// - Remote dropped: wait [remoteGrace] for it to rejoin, then end.
 /// - Local connection reconnecting: end after [localLimit] without recovery.
-/// - Remote audio frozen for [stallDelay]: show "Reconnecting…" only.
+/// - Remote audio not arriving for [audioSilenceLimit]: show "Reconnecting…"
+///   only. Agora reports the received bitrate every 2 s while audio flows;
+///   its frozen/decoding state flipped back to decoding 2 s into an outage.
 ///
 /// The owner (CallSessionManager) checks that the session is still current
 /// before acting on an expiry.
@@ -50,12 +52,12 @@ class CallReconnectWatch {
   CallReconnectWatch({
     this.remoteGrace = defaultRemoteGrace,
     this.localLimit = defaultLocalLimit,
-    this.stallDelay = defaultStallDelay,
+    this.audioSilenceLimit = defaultAudioSilenceLimit,
   });
 
   static const Duration defaultRemoteGrace = Duration(seconds: 25);
   static const Duration defaultLocalLimit = Duration(seconds: 45);
-  static const Duration defaultStallDelay = Duration(seconds: 2);
+  static const Duration defaultAudioSilenceLimit = Duration(milliseconds: 3500);
 
   /// Agora's `userOfflineDropped`, as opposed to a hang-up (`userOfflineQuit`).
   static bool isNetworkDrop(String reason) =>
@@ -63,7 +65,7 @@ class CallReconnectWatch {
 
   final Duration remoteGrace;
   final Duration localLimit;
-  final Duration stallDelay;
+  final Duration audioSilenceLimit;
 
   final ValueNotifier<CallReconnectStatus?> status =
       ValueNotifier<CallReconnectStatus?>(null);
@@ -71,6 +73,7 @@ class CallReconnectWatch {
   Timer? _remoteTimer;
   Timer? _localTimer;
   Timer? _stallTimer;
+  bool _remoteMuted = false;
 
   void remoteDropped(String inviteId, {required VoidCallback onExpired}) {
     _switchTo(inviteId);
@@ -114,17 +117,30 @@ class CallReconnectWatch {
     _update(localReconnecting: true);
   }
 
-  void remoteAudioFrozen(String inviteId, bool frozen) {
-    if (!frozen) {
-      if (!_isCurrent(inviteId)) return;
-      _stallTimer?.cancel();
-      _stallTimer = null;
-      _update(remoteStalled: false);
-      return;
-    }
+  /// One `onRemoteAudioStats` report. A positive bitrate means audio is
+  /// flowing; nothing is armed until the first one.
+  void remoteAudioReport(String inviteId, int receivedBitrate) {
+    if (receivedBitrate <= 0) return;
     _switchTo(inviteId);
-    if (_stallTimer != null || (status.value?.remoteStalled ?? false)) return;
-    _stallTimer = Timer(stallDelay, () {
+    if (_remoteMuted) return;
+    _armSilence();
+    if (status.value!.remoteStalled) _update(remoteStalled: false);
+  }
+
+  /// A muted remote sends no audio, which is not a network problem. Before
+  /// any audio has flowed there is nothing to stop.
+  void remoteAudioMuted(String inviteId, bool muted) {
+    if (!_isCurrent(inviteId)) return;
+    _remoteMuted = muted;
+    if (!muted) return;
+    _stallTimer?.cancel();
+    _stallTimer = null;
+    _update(remoteStalled: false);
+  }
+
+  void _armSilence() {
+    _stallTimer?.cancel();
+    _stallTimer = Timer(audioSilenceLimit, () {
       _stallTimer = null;
       _update(remoteStalled: true);
     });
@@ -137,6 +153,7 @@ class CallReconnectWatch {
     _remoteTimer = null;
     _localTimer = null;
     _stallTimer = null;
+    _remoteMuted = false;
     status.value = null;
   }
 

@@ -66,19 +66,43 @@ void main() {
     expect(limit, 1);
   });
 
-  testWidgets('frozen remote audio shows reconnecting only after the delay',
+  testWidgets('remote audio that stops arriving shows reconnecting',
       (tester) async {
-    watch.remoteAudioFrozen('invite_a', true);
-    expect(reconnecting(), isFalse, reason: 'a short freeze does not flicker');
-    await tester.pump(const Duration(milliseconds: 500));
-    watch.remoteAudioFrozen('invite_a', false);
-    await tester.pump(CallReconnectWatch.defaultStallDelay);
+    watch.remoteAudioReport('invite_a', 0);
+    await tester.pump(const Duration(seconds: 10));
+    expect(reconnecting(), isFalse, reason: 'nothing is armed before audio');
+
+    watch.remoteAudioReport('invite_a', 32);
+    await tester.pump(CallReconnectWatch.defaultAudioSilenceLimit -
+        const Duration(milliseconds: 1));
+    expect(reconnecting(), isFalse);
+    watch.remoteAudioReport('invite_a', 0);
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(reconnecting(), isTrue, reason: 'a zero report is no audio');
+
+    watch.remoteAudioReport('invite_a', 30);
+    expect(reconnecting(), isFalse);
+    await tester.pump(const Duration(seconds: 2));
+    watch.remoteAudioReport('invite_a', 31);
+    await tester.pump(const Duration(seconds: 2));
+    expect(reconnecting(), isFalse, reason: 'steady reports keep it clear');
+    watch.reset();
+  });
+
+  testWidgets('a remote mute is not a stall', (tester) async {
+    watch.remoteAudioReport('invite_a', 32);
+    watch.remoteAudioMuted('invite_a', true);
+    await tester.pump(CallReconnectWatch.defaultAudioSilenceLimit * 3);
     expect(reconnecting(), isFalse);
 
-    watch.remoteAudioFrozen('invite_a', true);
-    await tester.pump(CallReconnectWatch.defaultStallDelay);
+    watch.remoteAudioMuted('invite_a', false);
+    watch.remoteAudioReport('invite_a', 32);
+    await tester.pump(CallReconnectWatch.defaultAudioSilenceLimit);
     expect(reconnecting(), isTrue);
-    watch.remoteAudioFrozen('invite_a', false);
+    watch.remoteAudioMuted('invite_a', true);
+    expect(reconnecting(), isFalse, reason: 'a mute clears a stall');
+    watch.remoteAudioReport('invite_a', 0);
+    await tester.pump(CallReconnectWatch.defaultAudioSilenceLimit * 2);
     expect(reconnecting(), isFalse);
   });
 
@@ -98,7 +122,7 @@ void main() {
   testWidgets('events for another invite are ignored', (tester) async {
     watch.remoteDropped('invite_a', onExpired: () {});
     watch.remoteRejoined('invite_other');
-    watch.remoteAudioFrozen('invite_other', false);
+    watch.remoteAudioMuted('invite_other', true);
     expect(watch.status.value!.remoteDropped, isTrue);
     watch.reset();
   });

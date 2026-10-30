@@ -2337,9 +2337,13 @@ class CallSessionManager {
             inviteId: session.inviteId,
             reconnecting: reconnecting,
           ),
-          onRemoteAudioFrozen: (frozen) => reportRemoteAudioFrozen(
+          onRemoteAudioStats: (receivedBitrate) => reportRemoteAudioStats(
             inviteId: session.inviteId,
-            frozen: frozen,
+            receivedBitrate: receivedBitrate,
+          ),
+          onRemoteAudioMuted: (muted) => reportRemoteAudioMuted(
+            inviteId: session.inviteId,
+            muted: muted,
           ),
           diagnostic: (stage, metadata) => _diagManager(
             'media_runtime_$stage',
@@ -2680,13 +2684,21 @@ class CallSessionManager {
     }
   }
 
-  /// Remote audio frozen (no packets) on a connected call.
-  void reportRemoteAudioFrozen({
+  /// One Agora remote audio stats report (every 2 s while audio flows).
+  void reportRemoteAudioStats({
     required String inviteId,
-    required bool frozen,
+    required int receivedBitrate,
   }) {
     if (!_canApplyMediaProgress(_current, inviteId: inviteId)) return;
-    _reconnectWatch.remoteAudioFrozen(inviteId, frozen);
+    _reconnectWatch.remoteAudioReport(inviteId, receivedBitrate);
+  }
+
+  void reportRemoteAudioMuted({
+    required String inviteId,
+    required bool muted,
+  }) {
+    if (!_canApplyMediaProgress(_current, inviteId: inviteId)) return;
+    _reconnectWatch.remoteAudioMuted(inviteId, muted);
   }
 
   Future<void> reportJoinTimeout({
