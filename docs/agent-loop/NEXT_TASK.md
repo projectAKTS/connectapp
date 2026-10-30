@@ -1,74 +1,80 @@
-# Active Task - Show An Answered Call Over The Lock Screen (F7)
+# Active Task - Earpiece First With Proximity For Android Audio Calls (F8)
 
 Branch: `call-v2` (known-good tags `stable-calls-oct-26`, `stable-calls-oct-27`;
 do not modify them or `stable/calls-oct-26`)
 
-Starting SHA: `64f0655`
+Starting SHA: `fd99084`
 
-## Review Of F3b (Claude, 2026-10-30)
+## Review Of F7 (Claude, 2026-10-30)
 
-Accepted: `4c16626`. On the A55 the caller now shows "Reconnecting…" within
-5 s of a Wi-Fi gap, and a mute does not trigger it.
+Accepted: `754980a`.
+- PIN-locked answers pass on the A55, including with the app killed. After
+  the call the keyguard is back.
+- On the S21 FE (Android 16):
+  - outgoing calls from the phone pass 4/4;
+  - two-way audio was confirmed by ear by the user (phone <-> emulator with
+    the host mic on).
 
-## Problem (F7)
+## Problem (F8)
 
-The A55 had a temporary PIN; the call was answered from the plugin's
-lock-screen call UI.
-- Audio connected.
-- `MainActivity` stayed behind the keyguard, because it has no
-  `showWhenLocked`.
-- The manager waits for `_isAppActuallyForeground`, so it logged
-  `accepted_route_navigator_unavailable` every 250 ms and never opened the
-  call screen. The user could not see or end the call without unlocking.
+Audio calls start on the loudspeaker:
+- `CallV2AgoraMediaRuntime` calls `setDefaultAudioRouteToSpeakerphone(true)`
+  with `speakerEnabled: true`;
+- the screen's engine path does the same.
 
-## Goal (WhatsApp-like)
+This was copied in 3e9628d, not chosen to work around a bug. WhatsApp starts
+audio calls on the earpiece and turns the screen off at the ear. The app has
+no proximity handling at all, so an earpiece default alone would let a cheek
+tap the hang-up or mute button.
 
-An answered call shows the call screen over the lock screen without asking
-for the PIN. The rest of the app stays behind the keyguard.
-1. Android `MainActivity` gets a `connectapp/callLockScreen` method channel
-   with `setShowOverLockScreen(bool)`. API 27+ uses
-   `setShowWhenLocked`/`setTurnScreenOn`, older versions the window flags.
-2. A new `lib/services/call_lock_screen.dart` holds the state. It is
-   Android-only, de-duplicated, fire-and-forget, and swallows errors.
-3. `CallSessionManager` turns it on at `accept_tap`. It turns it off:
-   - at the terminal-signal publish;
-   - when session state is detached;
-   - on a failed route rollback;
-   - on accepted-native-watch cleanup;
-   - on test idle;
-   - when an accept ends busy, terminal, ignored or failed with no active
-     call.
-4. iOS is unchanged (CallKit owns its lock screen).
+## Goal (Android only; iOS and video unchanged)
+
+1. A new `lib/services/call_audio_route.dart` with:
+   - `callStartsOnSpeaker(isVideo:)`: true for video, and for audio on
+     iOS; false for audio on Android. It has a test override.
+   - `CallProximity`: Android-only, de-duplicated, fire-and-forget, over the
+     `connectapp/callProximity` channel.
+2. The runtime and the screen use `callStartsOnSpeaker` for the default route
+   and the initial `speakerEnabled`/`_speakerOn`.
+3. `AgoraCallScreen` holds proximity while it is an audio call that is not
+   ended and the speaker is off. It releases on speaker on, end, and dispose.
+4. `MainActivity` holds a `PROXIMITY_SCREEN_OFF_WAKE_LOCK` (if supported)
+   and releases it with `RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY` and on destroy.
 
 ## Allowed Files
 
+- New `lib/services/call_audio_route.dart`
+- `lib/call_v2/real_flow/call_v2_agora_media_runtime.dart` (default route only)
+- `lib/screens/call/agora_call_screen.dart` (default route, proximity sync)
 - `android/app/src/main/kotlin/com/yakup/helperly/MainActivity.kt`
-- New `lib/services/call_lock_screen.dart`
-- `lib/services/call_session_manager.dart` (the calls above only)
-- `test/call_v2/real_flow/call_v2_background_audio_media_integration_test.dart`
-  (new test)
+- New `test/call_v2/real_flow/call_audio_route_test.dart`
 - `docs/agent-loop/NEXT_TASK.md`, `STATE.json`, `HANDOFF.md`
 
 ## Strict Non-Goals
 
-- No server change, no deploy, no TestFlight.
-- Ringing, decline and the plugin's lock-screen UI stay unchanged.
-- Never dismiss the keyguard (no `requestDismissKeyguard`).
+- No iOS change (it needs proximity monitoring and a TestFlight run).
+- No video change; video stays speaker-first.
+- No server change, no deploy.
 
 ## Validation
 
-- New test: a background-accepted call turns the lock-screen flag on, and
-  ending the call turns it off. RED before, GREEN after.
+- New widget test, with earpiece-first forced:
+  - the audio screen starts with the speaker off;
+  - proximity is held;
+  - tapping the speaker releases it, and tapping again re-holds it;
+  - ending the call releases it.
+  - Video holds nothing.
 - `flutter test test/call_v2 test/multi_device test/android`: no new
-  failures beyond the known working-tree guards.
-- `flutter analyze lib test integration_test`: clean.
-- Physical, on the A55 with the temporary PIN 1234:
-  - locked and locked_killed answers show the call screen and connect;
-  - after the call ends, the lock screen is back (PIN required);
-  - then remove the PIN.
+  failures beyond the known guards. `flutter analyze` clean.
+- Physical (S21 FE):
+  - an audio call routes to the earpiece (`dumpsys audio` communication
+    device);
+  - the speaker toggle moves it to the speaker and back;
+  - the proximity wake lock is held only on the earpiece;
+  - mute reaches the caller (`remote_audio_muted`).
 
 ## Commit And Handoff
 
-- Implementation: `fix(calls): show an answered call over the Android lock screen`.
-- Handoff: `chore(agent-loop): record lock screen call review handoff`.
+- Implementation: `feat(calls): start Android audio calls on the earpiece with proximity`.
+- Handoff: `chore(agent-loop): record earpiece proximity review handoff`.
 - Push `call-v2`.
