@@ -24,23 +24,24 @@
     "rules": "10/10",
     "node_check": "ok",
     "baseline_ring_emulator_before_deploy": "bg 6.4/5.6s, killed 6.1/5.5s",
-    "after_deploy": "pending"
+    "after_deploy": "emulator bg 5.0(cold)/1.2/1.5/1.2s, killed 1.4/2.4/1.9s, fg 3.3s; iOS VoIP + delayed alert check unchanged in logs"
   },
   "safety": {
-    "deployed": false,
-    "deploy_pending": "functions:onCallInviteCreated (F6), user runs",
+    "deployed": true,
+    "deploy_pending": null,
     "testflight_built": false,
     "production_services_contacted": true,
     "firebase_changes": false,
     "backend_changes": true,
     "production_code_changes": false,
     "test_changes": true,
-    "physical_calls_approved": false
+    "physical_calls_approved": false,
+    "deployed_functions": "onCallInviteCreated (user, 2026-10-29T23:41Z)"
   },
   "review": {
     "decision": "accepted_previous",
     "reviewer": "claude",
-    "notes": "F6 ready; awaiting user deploy of onCallInviteCreated, then emulator re-measure."
+    "notes": "F6 deployed; emulator ring ~5.9s -> ~1.5s median. Physical phone check pending."
   },
   "implementation_shas": [
     "bb1b254"

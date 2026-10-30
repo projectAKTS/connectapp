@@ -44,10 +44,21 @@ Now:
   | bg | 6.4 s, 5.6 s |
   | killed | 6.1 s, 5.5 s |
 
+- **Deployed** by the user (`functions:onCallInviteCreated`,
+  2026-10-29 23:41 UTC). The same emulator runs after the deploy:
+
+  | Mode | Ring |
+  |---|---|
+  | bg | 5.0 s (first call after the deploy, cold start), 1.2 s, 1.5 s, 1.2 s |
+  | killed | 1.4 s, 2.4 s, 1.9 s |
+  | fg | 3.3 s |
+
+  - Median went from ~5.9 s to ~1.5 s.
+  - The iOS path is unchanged in the function logs: `APNS VoIP result`,
+    then 4 s later `APNS alert skipped: invite already handled`.
+
 ## Pending
 
-- The user deploys only `functions:onCallInviteCreated`.
-- Then the same emulator runs are repeated; expected ~4 s faster.
 - Not verified on a physical phone yet. The user brings one Android phone
   later today.
 
