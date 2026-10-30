@@ -2,30 +2,53 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "reconnect_grace_f3",
-  "status": "task_ready",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "cd64273",
   "starting_sha": "cd64273",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
-  "ending_sha": null,
-  "changed_files": [],
-  "validation": {},
+  "code_commit_sha": "6ca5e19",
+  "ending_sha": "SELF",
+  "changed_files": [
+    "lib/services/call_reconnect_watch.dart",
+    "lib/services/call_session_manager.dart",
+    "lib/screens/call/agora_call_screen.dart",
+    "lib/call_v2/real_flow/call_v2_agora_media_runtime.dart",
+    "test/call_v2/real_flow/call_reconnect_watch_test.dart",
+    "test/call_v2/real_flow/call_v2_reconnect_grace_test.dart",
+    "docs/agent-loop/NEXT_TASK.md",
+    "docs/agent-loop/HANDOFF.md",
+    "docs/agent-loop/STATE.json"
+  ],
+  "validation": {
+    "reconnect_watch_test": "7/7",
+    "reconnect_grace_widget_test": "RED 4/5 with stubs -> GREEN 5/5",
+    "flutter_test_call_v2_multi_device_android": "+2426 -14 (known guards)",
+    "flutter_analyze": "no issues",
+    "emulator_gap_10s": "PASS recovered",
+    "emulator_gap_35s": "PASS recovered (previously ended at ~20s)",
+    "emulator_gap_75s": "PASS both ended ~47-52s",
+    "frozen_audio": "not testable on -no-audio emulators; logged for phone",
+    "physical": "pending"
+  },
   "safety": {
     "deployed": false,
     "deploy_pending": null,
     "testflight_built": false,
-    "production_services_contacted": false,
+    "production_services_contacted": true,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": false,
-    "test_changes": false,
+    "production_code_changes": true,
+    "test_changes": true,
     "physical_calls_approved": false
   },
   "review": {
     "decision": "accepted_previous",
     "reviewer": "claude",
-    "notes": "F6 accepted (deployed, emulator ~5.9s->~1.5s). Next: F3 reconnect grace, WhatsApp-like per user delegation."
+    "notes": "F3 implemented and emulator-verified; physical Wi-Fi gap pending on user's phone."
   },
-  "implementation_shas": []
+  "implementation_shas": [
+    "6ca5e19",
+    "e6c9b1b"
+  ]
 }
