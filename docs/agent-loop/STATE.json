@@ -1,49 +1,31 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "android_invite_push_f6",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "345e8c9",
-  "starting_sha": "345e8c9",
+  "phase": "reconnect_grace_f3",
+  "status": "task_ready",
+  "accepted_checkpoint_sha": "cd64273",
+  "starting_sha": "cd64273",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "bb1b254",
-  "ending_sha": "SELF",
-  "changed_files": [
-    "connect_functions/index.js",
-    "connect_functions/call_invites/invite_fcm_plan.js",
-    "connect_functions/test/call_invites/invite_fcm_plan.test.js",
-    "docs/agent-loop/NEXT_TASK.md",
-    "docs/agent-loop/HANDOFF.md",
-    "docs/agent-loop/STATE.json"
-  ],
-  "validation": {
-    "invite_fcm_plan_test": "RED then GREEN 4/4",
-    "call_invites_tests": "26/26",
-    "functions_emulator": "256/256",
-    "rules": "10/10",
-    "node_check": "ok",
-    "baseline_ring_emulator_before_deploy": "bg 6.4/5.6s, killed 6.1/5.5s",
-    "after_deploy": "emulator bg 5.0(cold)/1.2/1.5/1.2s, killed 1.4/2.4/1.9s, fg 3.3s; iOS VoIP + delayed alert check unchanged in logs"
-  },
+  "code_commit_sha": null,
+  "ending_sha": null,
+  "changed_files": [],
+  "validation": {},
   "safety": {
-    "deployed": true,
+    "deployed": false,
     "deploy_pending": null,
     "testflight_built": false,
-    "production_services_contacted": true,
+    "production_services_contacted": false,
     "firebase_changes": false,
-    "backend_changes": true,
+    "backend_changes": false,
     "production_code_changes": false,
-    "test_changes": true,
-    "physical_calls_approved": false,
-    "deployed_functions": "onCallInviteCreated (user, 2026-10-29T23:41Z)"
+    "test_changes": false,
+    "physical_calls_approved": false
   },
   "review": {
     "decision": "accepted_previous",
     "reviewer": "claude",
-    "notes": "F6 deployed; emulator ring ~5.9s -> ~1.5s median. Physical phone check pending."
+    "notes": "F6 accepted (deployed, emulator ~5.9s->~1.5s). Next: F3 reconnect grace, WhatsApp-like per user delegation."
   },
-  "implementation_shas": [
-    "bb1b254"
-  ]
+  "implementation_shas": []
 }

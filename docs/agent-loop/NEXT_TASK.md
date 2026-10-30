@@ -1,60 +1,86 @@
-# Active Task - Android Invite Push Without The APNS Wait (F6)
+# Active Task - Reconnect Grace For Connected Calls (F3)
 
 Branch: `call-v2` (known-good tags `stable-calls-oct-26`, `stable-calls-oct-27`;
 do not modify them or `stable/calls-oct-26`)
 
-Starting SHA: `345e8c9`
+Starting SHA: `cd64273`
 
-## Review Of Physical Android Verification (Claude, 2026-10-29)
+## Review Of F6 (Claude, 2026-10-29)
 
-- Accepted: F1 (`613c2f7`, verified on the A55), F4 (`8c1b6f6`, source and a
-  RED-checked test).
-- F2 (`f7d414c`): the user deployed `onCallInviteUpdated` on 2026-10-29. It
-  was then verified 3/3 on emulators (`345e8c9`).
+- Accepted: `bb1b254`, deployed by the user. Emulator tap-to-ring went from
+  ~5.9 s to ~1.5 s (median); the iOS path is unchanged in the logs.
+- A physical-phone measurement is still to come.
 
-## Problem (F6)
+## Product Decision
 
-`onCallInviteCreated` sends three pushes in order: the iOS VoIP push, then
-the APNS alert check, then the Android FCM.
-- When the callee also has a delivered iOS VoIP token, the APNS alert check
-  sleeps 4 s (`CALL_ALERT_FALLBACK_DELAY_MS`) before re-reading the invite.
-- Android waits behind that sleep: on the Samsung phones the call UI
-  appeared 6-7 s after the caller tapped.
+The user delegated UX design: "WhatsApp-like, stability first".
+
+## Problem (F3)
+
+Seen on the S21 FE: Wi-Fi off for 5 s, and Samsung needed ~17 s more to
+reassociate.
+- Agora rejoined 23.4 s after the drop.
+- The other side had already ended the call 0.2 s earlier, on
+  `userOfflineDropped`, which Agora fires after ~20 s without packets.
+- The offline side showed "Connected" through the whole outage.
+
+Both media paths end a connected call on any `onUserOffline`:
+- audio: `CallV2AgoraMediaRuntime` → `CallSessionManager.reportRemoteOffline`;
+- video: `AgoraCallScreen.onUserOffline` plus `reportRemoteOffline`.
 
 ## Goal
 
-- Android (non-iOS) FCM tokens get the invite at the start, concurrently
-  with the VoIP push.
-- iOS FCM tokens stay a last-resort fallback. They get the invite only when
-  neither VoIP nor the APNS alert was delivered.
-- iOS behaviour is unchanged: the same VoIP push and the same delayed alert
-  check.
+WhatsApp-like behaviour:
+1. **Remote dropped** (`userOfflineDropped`) on a connected call: show
+   "Reconnecting…" and wait 25 s more for the remote to rejoin. If it
+   rejoins, the call continues. If not, end the call with
+   `endReason: remote_left:<reason>:grace_expired`.
+2. **Remote quit** (a hang-up, `userOfflineQuit`) and offline before
+   connect: unchanged, the call ends immediately.
+3. **Local connection** `connectionStateReconnecting` on a connected call:
+   show "Reconnecting…". Back to `connectionStateConnected` clears it.
+   45 s without recovery ends the call like a local hang-up (`source:
+   local_network_lost`).
+4. **Remote audio** `remoteAudioStateFrozen` for 2 s: show
+   "Reconnecting…". Decoding again clears it. This is UI only, with no
+   timeout.
 
 ## Allowed Files
 
-- New `connect_functions/call_invites/invite_fcm_plan.js`: which FCM tokens
-  are sent at the start, and which only as the fallback.
-- New `connect_functions/test/call_invites/invite_fcm_plan.test.js`.
-- `onCallInviteCreated` in `connect_functions/index.js`.
+- New `lib/services/call_reconnect_watch.dart` (timers and status) and its
+  test `test/call_v2/real_flow/call_reconnect_watch_test.dart`.
+- `lib/services/call_session_manager.dart`:
+  - `reportRemoteOffline` and `reportRemoteJoined`;
+  - new `reportLocalConnectionState` and `reportRemoteAudioFrozen`;
+  - reset on terminal and test idle;
+  - the audio runtime config wiring.
+- `lib/call_v2/real_flow/call_v2_agora_media_runtime.dart`: optional
+  connection-state and remote-audio-frozen callbacks.
+- `lib/screens/call/agora_call_screen.dart`: video-path event reporting,
+  no immediate end on a network drop, and the "Reconnecting…" label.
+- A new manager/screen widget test
+  `test/call_v2/real_flow/call_v2_reconnect_grace_test.dart`.
 - `docs/agent-loop/NEXT_TASK.md`, `STATE.json`, `HANDOFF.md`.
 
 ## Strict Non-Goals
 
-- No client change, no rules change, no TestFlight.
-- No deploy by Claude. The user deploys only
-  `functions:onCallInviteCreated` (approved per action).
-- Do not change `CALL_ALERT_FALLBACK_DELAY_MS` or the iOS alert policy.
+- No server change, no deploy, no TestFlight.
+- No change to ringing, accept, decline or cancel paths.
+- Do not change the existing `remote_hangup`-style ends.
 
 ## Validation
 
-- `node --test test/call_invites/*.test.js`.
-- `npm run test:call-v2:emulator` and `npm run test:call-v2:rules`.
-- `node --check index.js`.
-- After the user's deploy: emulator calls (A to venus on B) in fg/bg/killed.
-  Record the ring time and `serverDiag` (`serverFcmSent`, policy).
+- New tests RED before the change, GREEN after.
+- `flutter test test/call_v2 test/multi_device test/android`: no new
+  failures beyond the 14 known working-tree guards.
+- `flutter analyze lib test integration_test`: clean.
+- Emulator: during a connected call, cut the callee emulator's network
+  (`svc wifi`/`svc data` or airplane mode) for ~10 s, then restore. The
+  call continues. For ~70 s, both sides end within ~50 s.
+- Physical: Wi-Fi gap on the user's phone later today.
 
 ## Commit And Handoff
 
-- Implementation: `fix(functions): send the Android call invite before the APNS alert wait`.
-- Handoff: `chore(agent-loop): record android invite push review handoff`.
+- Implementation: `fix(calls): keep a connected call through a short network drop`.
+- Handoff: `chore(agent-loop): record reconnect grace review handoff`.
 - Push `call-v2`.
