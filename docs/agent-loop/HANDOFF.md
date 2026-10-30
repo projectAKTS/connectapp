@@ -1,60 +1,71 @@
-# Lock Screen Call Handoff (F7)
+# Earpiece Proximity Handoff (F8)
 
 STATUS: `ready_for_review` (reviewer: Claude, per the user's delegation)
 
 BRANCH: `call-v2`
-STARTING_SHA: `64f0655`
-AUTHORIZATION_SHA: `34b5915`
-IMPLEMENTATION_SHA: `754980a`
+STARTING_SHA: `fd99084`
+AUTHORIZATION_SHA: `79dd002`
+IMPLEMENTATION_SHA: `a41c564`
 ENDING_SHA: `SELF`
 
 ## Change
 
-An answered call now shows its call screen over the Android lock screen,
-like WhatsApp.
-- `MainActivity` exposes `connectapp/callLockScreen` with
-  `setShowOverLockScreen(bool)`: `setShowWhenLocked` and `setTurnScreenOn` on
-  API 27+, window flags below that. The keyguard is never dismissed.
-- `lib/services/call_lock_screen.dart` is Android-only, de-duplicated,
-  fire-and-forget, and never awaited in call paths.
-- `CallSessionManager` turns it on at `accept_tap`. It turns it off:
-  - at the terminal-signal publish;
-  - on `_detachSessionState`;
-  - on `_rollbackFailedRouteSession`;
-  - on accepted-native-watch cleanup;
-  - on `forceIdleForTest`;
-  - when an accept ends busy, terminal, ignored or failed with no active
-    call.
+Android audio calls start on the earpiece and turn the screen off at the ear,
+like WhatsApp. Video calls and iOS audio stay on the speaker.
+- New `lib/services/call_audio_route.dart`:
+  - `callStartsOnSpeaker(isVideo:)`, with a test override;
+  - `CallProximity`: Android-only, de-duplicated, fire-and-forget, over
+    `connectapp/callProximity`.
+- `CallV2AgoraMediaRuntime`: the default route and the initial
+  `speakerEnabled` come from `callStartsOnSpeaker`.
+- `AgoraCallScreen`:
+  - `_speakerOn` starts from the same helper;
+  - the screen's engine path uses it for the default route;
+  - `build` holds proximity while it is an audio call that is not ended
+    and the speaker is off;
+  - `dispose` releases it.
+- `MainActivity`: `PROXIMITY_SCREEN_OFF_WAKE_LOCK`, only if supported. It is
+  released with `RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY` and in `onDestroy`.
+  `WAKE_LOCK` is already in the merged manifest.
 
-Why: with a PIN on the A55, an answer from the plugin's lock-screen UI
-connected audio, but `MainActivity` stayed stopped behind the keyguard. The
-route waited for `_isAppActuallyForeground` (log:
-`accepted_route_navigator_unavailable` every 250 ms). The user could neither
-see nor end the call.
+Why: the speaker default was copied in 3e9628d; it was not a bug workaround.
+There was no proximity handling at all, so an earpiece default on its own
+would have let a cheek tap hang-up or mute.
 
 ## Validation
 
-- New test, "an answered call shows over the lock screen until it ends (F7)":
-  RED (`shown` false after the accept), then GREEN. Its file passes 15/15.
-- `flutter test test/call_v2 test/multi_device test/android`: +2438 -4. All 4
+- New `call_audio_route_test`: 3/3. It is RED (+2 -1) with the screen change
+  reverted.
+- `flutter test test/call_v2 test/multi_device test/android`: +2441 -4. All 4
   failures are the known Phase 7BG-7BJ working-tree guards.
 - `flutter analyze lib test integration_test`: clean.
 
-Physical runs: A55 with the temporary PIN 1234, on `app-release-f7.apk`. The
-PIN was removed afterwards.
+Physical runs: S21 FE (Android 16), `app-release-f8.apk`.
 
-| Run | Before F7 | F7 |
-|---|---|---|
-| PIN, locked answer | FAIL: audio only, no call screen | PASS 2/2: call screen over the keyguard, connected, ended from the phone |
-| PIN, locked, app killed | not reachable | PASS 2/2 |
-| PIN, locked decline | PASS | PASS |
-| After the call | n/a | `isKeyguardShowing=true`, `occluded=false`, app window not visible, so the PIN is asked again |
-| Unlocked regression: fg, bg, killed, locked and locked_killed answers, bg decline | | PASS 6/6 |
+| Check | Result |
+|---|---|
+| Audio call start | `MODE_IN_COMMUNICATION`, no preferred device (earpiece), proximity lock held |
+| Speaker on | route `speaker`, lock released |
+| Speaker off | earpiece, lock held again |
+| Phone mute, then unmute | the caller logged `remote_audio_muted` true, then false |
+| After the call | lock released |
 
-## Notes
+## Same Session, Earlier Builds (S21 FE)
 
-- Foreground in-app ring latency is 1.08 s after the caller's tap
-  (Firestore 0.69 s, FCM 1.03 s). The harness's fg "ring" figure of ~6 s is
-  uiautomator overhead.
-- Harness: with a PIN, HOME does nothing under the keyguard, so
-  `locked_killed` must unlock first, then HOME, kill and lock.
+- Outgoing calls from the phone (Baris) to emulator venus: PASS 4/4, bg and
+  killed callee, ended by either side.
+  - Accept to connected: 3.1 s.
+  - The harness "connected" figure of 13-19 s is the emulator shade and
+    uiautomator time.
+- Two-way audio by ear (the user): phone to Mac and Mac to phone, with the
+  emulator host mic on (`adb emu avd hostmicon`). The echo came from the
+  two devices sitting side by side.
+- F1, answering over the screensaver (Android 16, Colors dream): PASS 2/2,
+  awake and connected about 1.5 s after the tap. Decline PASS; the phone
+  stays dreaming. The screensaver and timeout settings were restored.
+
+## Open
+
+- iOS: earpiece-first needs `proximityMonitoringEnabled` and a TestFlight
+  run.
+- Bluetooth headset: not tested.
