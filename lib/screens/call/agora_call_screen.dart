@@ -19,6 +19,7 @@ import 'package:connect_app/call_v2/real_flow/call_v2_real_call_flow_gate.dart';
 import 'package:connect_app/theme/tokens.dart';
 import 'package:firebase_auth/firebase_auth.dart' hide UserInfo;
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:connect_app/services/call_reconnect_watch.dart';
 import 'package:connect_app/services/call_session_manager.dart';
 import 'package:connect_app/services/callkit_id.dart';
 import 'package:connect_app/services/diagnostic_service.dart';
@@ -275,6 +276,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   bool _isLoading = true;
   String? _fatalError;
   String _endedMessage = 'Call ended';
+  bool _reconnecting = false;
 
   // Controls
   bool _muted = false;
@@ -424,6 +426,8 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     _callV2BlockerCode = widget.callV2BlockerCode;
     CallSessionManager.instance.terminalSignal
         .addListener(_handleManagerTerminalSignal);
+    CallSessionManager.instance.reconnectStatus
+        .addListener(_handleReconnectStatus);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _handleManagerTerminalSignal();
       if (!widget.skipRuntimeSetupForTest) {
@@ -505,6 +509,17 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     });
     if (joinedNow) unawaited(_markCallkitConnected());
   }
+
+  void _handleReconnectStatus() {
+    final status = CallSessionManager.instance.reconnectStatus.value;
+    final reconnecting = status != null &&
+        status.inviteId == (widget.inviteId ?? '').trim() &&
+        status.reconnecting;
+    if (!mounted || reconnecting == _reconnecting) return;
+    setState(() => _reconnecting = reconnecting);
+  }
+
+  bool get _showReconnecting => _reconnecting && !_ended;
 
   void _handleManagerTerminalSignal() {
     if (!mounted) return;
@@ -907,6 +922,16 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
             'state': '$state',
             'reason': '$reason',
           });
+          final inviteIdForState = (widget.inviteId ?? '').trim();
+          if (inviteIdForState.isNotEmpty &&
+              (state == ConnectionStateType.connectionStateReconnecting ||
+                  state == ConnectionStateType.connectionStateConnected)) {
+            CallSessionManager.instance.reportLocalConnectionState(
+              inviteId: inviteIdForState,
+              reconnecting:
+                  state == ConnectionStateType.connectionStateReconnecting,
+            );
+          }
           if (_callV2Selected && mounted) {
             setState(() {
               _callV2ConnectionState = _safeAgoraDiagString('$state');
@@ -1076,6 +1101,13 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
             'reason': '$reason',
             'elapsedMs': elapsed,
           });
+          final inviteIdForAudio = (widget.inviteId ?? '').trim();
+          if (inviteIdForAudio.isNotEmpty) {
+            CallSessionManager.instance.reportRemoteAudioFrozen(
+              inviteId: inviteIdForAudio,
+              frozen: state == RemoteAudioState.remoteAudioStateFrozen,
+            );
+          }
         },
         onAudioRoutingChanged: (int routing) {
           if (!_acceptCallbackForGeneration(
@@ -1434,8 +1466,15 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
             return;
           }
           _diagCall('remote_offline', meta: {'remoteUid': uid, 'reason': '$r'});
-          final remoteEndedConnectedCall = _remoteEverJoined || _joined;
-          if (!remoteEndedConnectedCall) {
+          final inviteId = (widget.inviteId ?? '').trim();
+          final wasConnected = _remoteEverJoined || _joined;
+          // The manager waits for a dropped remote to rejoin and ends the
+          // call through its terminal signal if it does not.
+          final networkDrop = wasConnected &&
+              inviteId.isNotEmpty &&
+              CallReconnectWatch.isNetworkDrop('$r');
+          final remoteEndedConnectedCall = wasConnected && !networkDrop;
+          if (!wasConnected) {
             _recordMissedCall(reason: 'declined_or_unavailable');
           }
           if (mounted) {
@@ -1447,16 +1486,15 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
                 _ended = true;
                 _fatalError = null;
                 _endedMessage = 'Call ended';
-              } else {
+              } else if (!networkDrop) {
                 _fatalError = 'User declined or unavailable';
               }
             });
           }
-          final inviteId = (widget.inviteId ?? '').trim();
           if (inviteId.isNotEmpty) {
             unawaited(CallSessionManager.instance.reportRemoteOffline(
               inviteId: inviteId,
-              wasConnected: remoteEndedConnectedCall,
+              wasConnected: wasConnected,
               isCaller: widget.isCaller,
               reason: '$r',
             ));
@@ -3042,6 +3080,8 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   void dispose() {
     CallSessionManager.instance.terminalSignal
         .removeListener(_handleManagerTerminalSignal);
+    CallSessionManager.instance.reconnectStatus
+        .removeListener(_handleReconnectStatus);
     _quiesceEngineCallbacksForTerminal();
     _ringTimeout?.cancel();
     _autoCloseTimer?.cancel();
@@ -3237,9 +3277,11 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   }
 
   Widget _audioLayout() {
-    final status = (_remoteUid != null)
-        ? 'Connected'
-        : (_joined ? 'Calling…' : 'Connecting…');
+    final status = _showReconnecting
+        ? 'Reconnecting…'
+        : (_remoteUid != null)
+            ? 'Connected'
+            : (_joined ? 'Calling…' : 'Connecting…');
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
@@ -3327,10 +3369,16 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
                         ),
                         const SizedBox(width: 8),
                         _statusPill(
-                          icon: _joined
-                              ? Icons.wifi_tethering
-                              : Icons.access_time_rounded,
-                          label: _joined ? 'Connected' : 'Calling…',
+                          icon: _showReconnecting
+                              ? Icons.wifi_off_rounded
+                              : _joined
+                                  ? Icons.wifi_tethering
+                                  : Icons.access_time_rounded,
+                          label: _showReconnecting
+                              ? 'Reconnecting…'
+                              : _joined
+                                  ? 'Connected'
+                                  : 'Calling…',
                         ),
                       ],
                     ),
@@ -3459,11 +3507,16 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
                           ),
                           const SizedBox(width: 8),
                           _statusPill(
-                            icon: _remoteUid != null
-                                ? Icons.wifi_tethering
-                                : Icons.access_time_rounded,
-                            label:
-                                _remoteUid != null ? 'Connected' : 'Calling…',
+                            icon: _showReconnecting
+                                ? Icons.wifi_off_rounded
+                                : _remoteUid != null
+                                    ? Icons.wifi_tethering
+                                    : Icons.access_time_rounded,
+                            label: _showReconnecting
+                                ? 'Reconnecting…'
+                                : _remoteUid != null
+                                    ? 'Connected'
+                                    : 'Calling…',
                           ),
                         ],
                       ),

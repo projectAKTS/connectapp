@@ -215,6 +215,8 @@ class CallV2AgoraMediaRuntimeConfig {
     required this.onJoinTimeout,
     required this.onFailure,
     required this.diagnostic,
+    this.onLocalConnectionState,
+    this.onRemoteAudioFrozen,
   });
 
   final String channel;
@@ -229,6 +231,12 @@ class CallV2AgoraMediaRuntimeConfig {
   final Future<void> Function() onJoinTimeout;
   final Future<void> Function(String code) onFailure;
   final CallV2AgoraDiagnostic diagnostic;
+
+  /// `true` while Agora is reconnecting the local connection.
+  final void Function(bool reconnecting)? onLocalConnectionState;
+
+  /// `true` while the remote audio is frozen (no packets arriving).
+  final void Function(bool frozen)? onRemoteAudioFrozen;
 }
 
 abstract interface class CallV2PhysicalMediaRuntime {
@@ -426,6 +434,12 @@ class CallV2AgoraMediaRuntime implements CallV2PhysicalMediaRuntime {
           'state': state.toString(),
           'reason': reason.toString(),
         }));
+        if (state == ConnectionStateType.connectionStateReconnecting ||
+            state == ConnectionStateType.connectionStateConnected) {
+          config.onLocalConnectionState?.call(
+            state == ConnectionStateType.connectionStateReconnecting,
+          );
+        }
       },
       onRemoteAudioStateChanged:
           (connection, remoteUid, state, reason, elapsed) {
@@ -436,6 +450,9 @@ class CallV2AgoraMediaRuntime implements CallV2PhysicalMediaRuntime {
               ? 'remote_audio_failed'
               : _state.value.failureCode,
         ));
+        config.onRemoteAudioFrozen?.call(
+          state == RemoteAudioState.remoteAudioStateFrozen,
+        );
       },
       onJoinChannelSuccess: (connection, elapsed) {
         if (!_accepts(generation)) return;

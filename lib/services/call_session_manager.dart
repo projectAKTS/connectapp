@@ -16,6 +16,7 @@ import '../call_v2/real_flow/call_v2_real_call_flow_gate.dart';
 import '../screens/call/agora_call_screen.dart';
 import '../screens/call/incoming_call_screen.dart';
 import 'call_invite_signaling.dart';
+import 'call_reconnect_watch.dart';
 import 'callkit_id.dart';
 import 'diagnostic_service.dart';
 import 'firestore_read_helper.dart';
@@ -491,6 +492,7 @@ class CallSessionManager {
 
   final ValueNotifier<CallTerminalSignal?> _terminalSignal =
       ValueNotifier<CallTerminalSignal?>(null);
+  final CallReconnectWatch _reconnectWatch = CallReconnectWatch();
   final Map<String, DateTime> _handledInviteExpiries = <String, DateTime>{};
 
   GlobalKey<NavigatorState>? _navigatorKey;
@@ -623,6 +625,10 @@ class CallSessionManager {
 
   ValueNotifier<CallTerminalSignal?> get terminalSignal => _terminalSignal;
 
+  /// What the connected call is reconnecting from; drives "Reconnecting…".
+  ValueListenable<CallReconnectStatus?> get reconnectStatus =>
+      _reconnectWatch.status;
+
   FirebaseFirestore get _db => HelperlyTestRuntime.firestore;
   String get _currentUid => HelperlyTestRuntime.currentUid ?? '';
 
@@ -754,6 +760,7 @@ class CallSessionManager {
     await _activeInviteSub?.cancel();
     _activeInviteSub = null;
     _cancelSessionTimers();
+    _reconnectWatch.reset();
     _current = null;
     _terminalSignal.value = null;
     _openingCallRoute = false;
@@ -2326,6 +2333,14 @@ class CallSessionManager {
             message: 'Call setup failed. Please try again.',
             error: code,
           ),
+          onLocalConnectionState: (reconnecting) => reportLocalConnectionState(
+            inviteId: session.inviteId,
+            reconnecting: reconnecting,
+          ),
+          onRemoteAudioFrozen: (frozen) => reportRemoteAudioFrozen(
+            inviteId: session.inviteId,
+            frozen: frozen,
+          ),
           diagnostic: (stage, metadata) => _diagManager(
             'media_runtime_$stage',
             meta: metadata,
@@ -2534,6 +2549,12 @@ class CallSessionManager {
     final session = _current;
     if (!_canApplyMediaProgress(session, inviteId: inviteId)) return;
     final generation = session!.lifecycleGeneration;
+    if (_reconnectWatch.status.value?.remoteDropped ?? false) {
+      unawaited(_diagManager('remote_reconnected', meta: {
+        'inviteId': inviteId,
+      }));
+    }
+    _reconnectWatch.remoteRejoined(inviteId);
     CallV2PhysicalDiagnosticLedger.instance.record(
       CallV2PhysicalDiagnosticStage.remoteJoined,
     );
@@ -2581,6 +2602,28 @@ class CallSessionManager {
     if (session == null || session.inviteId != inviteId) return;
     if (session.isTerminal) return;
 
+    if ((wasConnected || session.remoteJoined) &&
+        CallReconnectWatch.isNetworkDrop(reason)) {
+      // A network drop, not a hang-up: wait for the remote to rejoin.
+      _reconnectWatch.remoteDropped(inviteId, onExpired: () {
+        unawaited(_markTerminal(
+          inviteId: inviteId,
+          status: CallInviteStatus.ended,
+          message: 'Call ended',
+          isError: false,
+          actorIsCaller: isCaller,
+          endReason: 'remote_left:$reason:grace_expired',
+          expectedSession: session,
+        ));
+      });
+      await _diagManager('remote_reconnect_grace_started', meta: {
+        'inviteId': inviteId,
+        'reason': reason,
+        'graceMs': _reconnectWatch.remoteGrace.inMilliseconds,
+      });
+      return;
+    }
+
     if (wasConnected || session.remoteJoined) {
       await _markTerminal(
         inviteId: inviteId,
@@ -2602,6 +2645,48 @@ class CallSessionManager {
       endReason: 'remote_unavailable:$reason',
       error: 'Remote user went offline before the call connected.',
     );
+  }
+
+  /// Agora's local connection state for a connected call.
+  void reportLocalConnectionState({
+    required String inviteId,
+    required bool reconnecting,
+  }) {
+    final session = _current;
+    if (!_canApplyMediaProgress(session, inviteId: inviteId)) return;
+    // Before the call connects, the join watchdog owns failures.
+    if (reconnecting &&
+        !session!.remoteJoined &&
+        session.phase != CallSessionPhase.connected) {
+      return;
+    }
+    final current = _reconnectWatch.status.value;
+    final wasReconnecting =
+        current?.inviteId == inviteId && current!.localReconnecting;
+    _reconnectWatch.localReconnecting(inviteId, reconnecting, onLimit: () {
+      if (!identical(_current, session) || session!.isTerminal) return;
+      unawaited(endCallFromLocalUser(
+        inviteId: inviteId,
+        source: 'local_network_lost',
+        lifecycleGeneration: session.lifecycleGeneration,
+        acceptedCallkitId: session.acceptedCallkitId,
+      ));
+    });
+    if (wasReconnecting != reconnecting) {
+      unawaited(_diagManager('local_reconnecting', meta: {
+        'inviteId': inviteId,
+        'reconnecting': reconnecting,
+      }));
+    }
+  }
+
+  /// Remote audio frozen (no packets) on a connected call.
+  void reportRemoteAudioFrozen({
+    required String inviteId,
+    required bool frozen,
+  }) {
+    if (!_canApplyMediaProgress(_current, inviteId: inviteId)) return;
+    _reconnectWatch.remoteAudioFrozen(inviteId, frozen);
   }
 
   Future<void> reportJoinTimeout({
@@ -5678,6 +5763,7 @@ class CallSessionManager {
       session.terminalSignalSent = true;
     }
     _cancelSessionTimers();
+    _reconnectWatch.reset();
     _terminalSignal.value = CallTerminalSignal(
       inviteId: inviteId,
       status: status.name,
