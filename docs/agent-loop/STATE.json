@@ -2,15 +2,33 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "lock_screen_call_f7",
-  "status": "task_ready",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "64f0655",
   "starting_sha": "64f0655",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
+  "code_commit_sha": "754980a",
   "ending_sha": "SELF",
-  "changed_files": [],
-  "validation": {},
+  "changed_files": [
+    "android/app/src/main/kotlin/com/yakup/helperly/MainActivity.kt",
+    "lib/services/call_lock_screen.dart",
+    "lib/services/call_session_manager.dart",
+    "test/call_v2/real_flow/call_v2_background_audio_media_integration_test.dart",
+    "docs/agent-loop/NEXT_TASK.md",
+    "docs/agent-loop/HANDOFF.md",
+    "docs/agent-loop/STATE.json"
+  ],
+  "validation": {
+    "lock_screen_test": "RED -> GREEN (file 15/15)",
+    "flutter_test_call_v2_multi_device_android": "+2438 -4 (known guards)",
+    "flutter_analyze": "no issues",
+    "phone_pin_locked_answer": "PASS 2/2 (before: FAIL)",
+    "phone_pin_locked_killed_answer": "PASS 2/2",
+    "phone_pin_locked_decline": "PASS",
+    "keyguard_after_call": "showing, not occluded",
+    "phone_unlocked_regression": "PASS 6/6",
+    "temporary_pin": "removed"
+  },
   "safety": {
     "deployed": false,
     "deploy_pending": null,
@@ -18,14 +36,16 @@
     "production_services_contacted": true,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": false,
-    "test_changes": false,
+    "production_code_changes": true,
+    "test_changes": true,
     "physical_calls_approved": true
   },
   "review": {
     "decision": "accepted",
     "reviewer": "claude",
-    "notes": "F3b accepted after A55 physical runs; F7 authorized from the PIN lock-screen finding."
+    "notes": "F7 implemented and physically verified on the A55 with a temporary PIN (removed)."
   },
-  "implementation_shas": []
+  "implementation_shas": [
+    "754980a"
+  ]
 }

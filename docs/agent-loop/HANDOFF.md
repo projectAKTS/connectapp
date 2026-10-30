@@ -1,59 +1,60 @@
-# Remote Audio Stall Handoff (F3b)
+# Lock Screen Call Handoff (F7)
 
 STATUS: `ready_for_review` (reviewer: Claude, per the user's delegation)
 
 BRANCH: `call-v2`
-STARTING_SHA: `f161b25`
-AUTHORIZATION_SHA: `3e2d2ae`
-IMPLEMENTATION_SHA: `4c16626`
+STARTING_SHA: `64f0655`
+AUTHORIZATION_SHA: `34b5915`
+IMPLEMENTATION_SHA: `754980a`
 ENDING_SHA: `SELF`
 
 ## Change
 
-The "Reconnecting…" indicator for a remote audio stall now comes from
-`onRemoteAudioStats` instead of the frozen remote-audio state.
-- Each report with a positive bitrate re-arms a 3.5 s silence timer.
-- A remote mute (`onUserMuteAudio`) disarms the timer.
-- Nothing is armed until the first positive report.
-- The audio runtime and the video screen use the same signal.
-- The runtime logs `remote_audio_flow` (start and stop, with bitrate and loss)
-  and `remote_audio_muted`.
+An answered call now shows its call screen over the Android lock screen,
+like WhatsApp.
+- `MainActivity` exposes `connectapp/callLockScreen` with
+  `setShowOverLockScreen(bool)`: `setShowWhenLocked` and `setTurnScreenOn` on
+  API 27+, window flags below that. The keyguard is never dismissed.
+- `lib/services/call_lock_screen.dart` is Android-only, de-duplicated,
+  fire-and-forget, and never awaited in call paths.
+- `CallSessionManager` turns it on at `accept_tap`. It turns it off:
+  - at the terminal-signal publish;
+  - on `_detachSessionState`;
+  - on `_rollbackFailedRouteSession`;
+  - on accepted-native-watch cleanup;
+  - on `forceIdleForTest`;
+  - when an accept ends busy, terminal, ignored or failed with no active
+    call.
 
-Why: on the A55, Agora went `Frozen` ~1 s into a Wi-Fi outage and back to
-`Decoding` (`NetworkRecovery`) 2.0 s later, while the phone was still offline.
-The caller showed "Connected" for ~20 s.
+Why: with a PIN on the A55, an answer from the plugin's lock-screen UI
+connected audio, but `MainActivity` stayed stopped behind the keyguard. The
+route waited for `_isAppActuallyForeground` (log:
+`accepted_route_navigator_unavailable` every 250 ms). The user could neither
+see nor end the call.
 
 ## Validation
 
-- `call_reconnect_watch_test`: 8/8. `call_v2_reconnect_grace_test`: 5/5. The
-  new tests did not compile against the old API (RED), then passed.
-- `flutter test test/call_v2 test/multi_device test/android`: +2437 -4. All 4
+- New test, "an answered call shows over the lock screen until it ends (F7)":
+  RED (`shown` false after the accept), then GREEN. Its file passes 15/15.
+- `flutter test test/call_v2 test/multi_device test/android`: +2438 -4. All 4
   failures are the known Phase 7BG-7BJ working-tree guards.
 - `flutter analyze lib test integration_test`: clean.
 
-Physical runs: A55 (Android 14) answering, emulator A calling, both on
-`app-release-f3c.apk`.
+Physical runs: A55 with the temporary PIN 1234, on `app-release-f7.apk`. The
+PIN was removed afterwards.
 
-| Run | Result |
-|---|---|
-| 10 s Wi-Fi gap | PASS. The caller showed "Reconnecting…" within 5 s (before: "Connected"), and the call recovered. |
-| 35 s gap | PASS. Both sides showed "Reconnecting…" throughout, and the call recovered. |
-| 75 s gap | PASS. The phone ended at ~45 s (`local_network_lost`), the caller at ~50 s (grace expired). Nothing was left stale. |
-| 15 s phone mute | PASS. The caller stayed "Connected". |
+| Run | Before F7 | F7 |
+|---|---|---|
+| PIN, locked answer | FAIL: audio only, no call screen | PASS 2/2: call screen over the keyguard, connected, ended from the phone |
+| PIN, locked, app killed | not reachable | PASS 2/2 |
+| PIN, locked decline | PASS | PASS |
+| After the call | n/a | `isKeyguardShowing=true`, `occluded=false`, app window not visible, so the PIN is asked again |
+| Unlocked regression: fg, bg, killed, locked and locked_killed answers, bg decline | | PASS 6/6 |
 
-## Also Measured (F6 on hardware)
+## Notes
 
-Ring time, bg/killed/locked: 2.2-3.2 s (5.5-6.4 s before F6). The first
-call after the install was a 6.4 s cold start.
-
-Killed-app answers connected ~8 s after the tap; the cold start takes ~3 s
-before `accept_tap`.
-
-## New Finding (F7, next task)
-
-With a PIN on the phone, a call answered from the lock-screen call UI gets
-connected audio, but the call screen never appears.
-- `MainActivity` has no `showWhenLocked`, so it stays behind the keyguard.
-- `_isAppActuallyForeground` therefore stays false, and the log shows
-  `accepted_route_navigator_unavailable` every 250 ms.
-- The user cannot see or end the call without unlocking.
+- Foreground in-app ring latency is 1.08 s after the caller's tap
+  (Firestore 0.69 s, FCM 1.03 s). The harness's fg "ring" figure of ~6 s is
+  uiautomator overhead.
+- Harness: with a PIN, HOME does nothing under the keyguard, so
+  `locked_killed` must unlock first, then HOME, kill and lock.
