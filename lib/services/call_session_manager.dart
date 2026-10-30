@@ -16,6 +16,7 @@ import '../call_v2/real_flow/call_v2_real_call_flow_gate.dart';
 import '../screens/call/agora_call_screen.dart';
 import '../screens/call/incoming_call_screen.dart';
 import 'call_invite_signaling.dart';
+import 'call_lock_screen.dart';
 import 'call_reconnect_watch.dart';
 import 'callkit_id.dart';
 import 'diagnostic_service.dart';
@@ -761,6 +762,7 @@ class CallSessionManager {
     _activeInviteSub = null;
     _cancelSessionTimers();
     _reconnectWatch.reset();
+    CallLockScreen.instance.showOverLockScreen(false);
     _current = null;
     _terminalSignal.value = null;
     _openingCallRoute = false;
@@ -3434,6 +3436,7 @@ class CallSessionManager {
           }
           _cancelSessionTimers();
           _clearCallRouteOwnershipForSession(currentSession);
+          CallLockScreen.instance.showOverLockScreen(false);
           _current = null;
           _openingCallRoute = false;
           _openingCallRouteAttempt = null;
@@ -4385,13 +4388,17 @@ class CallSessionManager {
     final inviteId = payload.inviteId;
     _acceptsInFlight[inviteId] = (_acceptsInFlight[inviteId] ?? 0) + 1;
     try {
-      return await _acceptInviteAndOpenTracked(
+      final result = await _acceptInviteAndOpenTracked(
         payload,
         source: source,
         lifecycleGeneration: lifecycleGeneration,
         preserveLifecycleOnNavigatorUnavailable:
             preserveLifecycleOnNavigatorUnavailable,
       );
+      if (_acceptEndedWithoutCall(result) && !_hasTrulyActiveCall()) {
+        CallLockScreen.instance.showOverLockScreen(false);
+      }
+      return result;
     } finally {
       final remaining = (_acceptsInFlight[inviteId] ?? 1) - 1;
       if (remaining > 0) {
@@ -4417,6 +4424,8 @@ class CallSessionManager {
       'channel': payload.channel,
       'source': source,
     });
+    // Behind a PIN keyguard the call route only opens over the lock screen.
+    CallLockScreen.instance.showOverLockScreen(true);
     await _runPreflightSweepSafely(
       reason: 'accept_preflight:$source',
       inviteId: payload.inviteId,
@@ -5399,6 +5408,7 @@ class CallSessionManager {
     }
     _cancelSessionTimers();
     _terminalSignal.value = null;
+    CallLockScreen.instance.showOverLockScreen(false);
     _current = null;
     _openingCallRoute = false;
     _openingCallRouteAttempt = null;
@@ -5776,6 +5786,7 @@ class CallSessionManager {
     }
     _cancelSessionTimers();
     _reconnectWatch.reset();
+    CallLockScreen.instance.showOverLockScreen(false);
     _terminalSignal.value = CallTerminalSignal(
       inviteId: inviteId,
       status: status.name,
@@ -6181,6 +6192,7 @@ class CallSessionManager {
       _pendingIncomingPromptPayload = null;
       _pendingIncomingPromptSource = null;
     }
+    CallLockScreen.instance.showOverLockScreen(false);
     _current = null;
     _terminalSignal.value = null;
 
@@ -7235,6 +7247,12 @@ class CallSessionManager {
     return state == AppLifecycleState.resumed ||
         state == AppLifecycleState.inactive;
   }
+
+  static bool _acceptEndedWithoutCall(_IncomingCandidateResult result) =>
+      result == _IncomingCandidateResult.busy ||
+      result == _IncomingCandidateResult.terminal ||
+      result == _IncomingCandidateResult.ignored ||
+      result == _IncomingCandidateResult.failed;
 
   bool _hasTrulyActiveCall() {
     final current = _current;

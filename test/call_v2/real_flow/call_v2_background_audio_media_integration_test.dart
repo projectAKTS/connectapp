@@ -12,6 +12,7 @@ import 'package:connect_app/call_v2/real_flow/call_v2_agora_media_runtime.dart';
 import 'package:connect_app/call_v2/real_flow/call_v2_physical_media_owner.dart';
 import 'package:connect_app/call_v2/real_flow/call_v2_real_call_flow_gate.dart';
 import 'package:connect_app/screens/call/agora_call_screen.dart';
+import 'package:connect_app/services/call_lock_screen.dart';
 import 'package:connect_app/services/call_session_manager.dart';
 import 'package:connect_app/services/helperly_test_runtime.dart';
 
@@ -223,6 +224,46 @@ void main() {
     expect(mediaAcks, <String>[exactId]);
     expect(routeAcks, isEmpty);
     expect(manager.debugSnapshot()['acceptedNativeWatchActive'], isTrue);
+    await manager.forceIdleForTest();
+    await tester.pump();
+  });
+
+  testWidgets('an answered call shows over the lock screen until it ends (F7)',
+      (tester) async {
+    await seedInvite('lock_screen_audio');
+    nativeCalls.add(const NativeCallSnapshot(
+      callkitId: exactId,
+      inviteId: 'lock_screen_audio',
+      channel: 'channel_lock_screen_audio',
+      accepted: true,
+    ));
+    await manager.handleCallkitAudioSessionChanged(
+      callkitId: exactId,
+      active: true,
+    );
+    expect(CallLockScreen.instance.shown, isFalse);
+
+    final result = await manager
+        .handleRecoveredAcceptedInvite(
+          inviteId: 'lock_screen_audio',
+          channel: 'channel_lock_screen_audio',
+          isVideo: false,
+          fromName: 'Background Caller',
+          fromUid: callerUid,
+          callkitId: exactId,
+        )
+        .timeout(const Duration(seconds: 2));
+    await waitUntil(tester, () => mediaAcks.isNotEmpty);
+
+    // Behind a PIN keyguard the app is not foreground, so the route waits;
+    // showing over the lock screen is what lets it open.
+    expect(result, AcceptedCallRecoveryResult.pendingNavigator);
+    expect(CallLockScreen.instance.shown, isTrue);
+
+    await manager.endCallFromLocalUser(inviteId: 'lock_screen_audio');
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(CallLockScreen.instance.shown, isFalse,
+        reason: 'the rest of the app goes back behind the keyguard');
     await manager.forceIdleForTest();
     await tester.pump();
   });
