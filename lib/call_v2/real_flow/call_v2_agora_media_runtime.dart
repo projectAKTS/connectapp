@@ -450,6 +450,10 @@ class CallV2AgoraMediaRuntime implements CallV2PhysicalMediaRuntime {
               ? 'remote_audio_failed'
               : _state.value.failureCode,
         ));
+        unawaited(_diag('remote_audio_state', <String, Object?>{
+          'state': state.toString(),
+          'reason': reason.toString(),
+        }));
         config.onRemoteAudioFrozen?.call(
           state == RemoteAudioState.remoteAudioStateFrozen,
         );
