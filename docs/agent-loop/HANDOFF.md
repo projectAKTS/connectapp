@@ -69,3 +69,15 @@ Physical runs: S21 FE (Android 16), `app-release-f8.apk`.
 - iOS: earpiece-first needs `proximityMonitoringEnabled` and a TestFlight
   run.
 - Bluetooth headset: not tested.
+
+## Extra Physical Checks (S21 FE, after F8)
+
+- Video call with a 12 s Wi-Fi gap: both sides showed "Reconnecting…" at
+  about 4 s and recovered when Wi-Fi came back. They ended cleanly.
+  - Harness note: the video answer action is "Video", not "Yanıtla".
+  - The caller's video hang-up is at (646, 2206).
+- F2 decline-elsewhere: venus on the phone and on emulator B, both in the
+  background. Results, 3/3:
+  - phone decline: B stopped ringing 1.1 s and 0.6 s later;
+  - phone answer: B stopped ringing 0.6 s later;
+  - no stale callkit notification and no missed-call notification.

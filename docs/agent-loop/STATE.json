@@ -28,7 +28,9 @@
     "s21fe_mute_seen_by_caller": "PASS",
     "s21fe_outgoing_from_phone": "PASS 4/4",
     "s21fe_audio_by_ear": "PASS (user)",
-    "s21fe_f1_screensaver": "answer 2/2, decline 1/1"
+    "s21fe_f1_screensaver": "answer 2/2, decline 1/1",
+    "s21fe_video_wifi_gap_12s": "PASS",
+    "s21fe_f2_decline_elsewhere": "PASS 3/3 (0.6-1.1s)"
   },
   "safety": {
     "deployed": false,
