@@ -2,15 +2,35 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "remote_audio_stall_f3b",
-  "status": "task_ready",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "f161b25",
   "starting_sha": "f161b25",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
+  "code_commit_sha": "4c16626",
   "ending_sha": "SELF",
-  "changed_files": [],
-  "validation": {},
+  "changed_files": [
+    "lib/services/call_reconnect_watch.dart",
+    "lib/services/call_session_manager.dart",
+    "lib/call_v2/real_flow/call_v2_agora_media_runtime.dart",
+    "lib/screens/call/agora_call_screen.dart",
+    "test/call_v2/real_flow/call_reconnect_watch_test.dart",
+    "test/call_v2/real_flow/call_v2_reconnect_grace_test.dart",
+    "docs/agent-loop/NEXT_TASK.md",
+    "docs/agent-loop/HANDOFF.md",
+    "docs/agent-loop/STATE.json"
+  ],
+  "validation": {
+    "reconnect_watch_test": "8/8",
+    "reconnect_grace_widget_test": "5/5 (RED: compile against old API)",
+    "flutter_test_call_v2_multi_device_android": "+2437 -4 (known guards)",
+    "flutter_analyze": "no issues",
+    "phone_gap_10s": "PASS caller Reconnecting within 5s",
+    "phone_gap_35s": "PASS recovered",
+    "phone_gap_75s": "PASS phone 45s local_network_lost, caller 50s grace_expired",
+    "phone_mute_15s": "PASS no false Reconnecting",
+    "f6_ring_time_phone": "2.2-3.2s"
+  },
   "safety": {
     "deployed": false,
     "deploy_pending": null,
@@ -18,14 +38,16 @@
     "production_services_contacted": true,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": false,
-    "test_changes": false,
+    "production_code_changes": true,
+    "test_changes": true,
     "physical_calls_approved": true
   },
   "review": {
     "decision": "accepted",
     "reviewer": "claude",
-    "notes": "F3 accepted after physical 10 s / 35 s Wi-Fi gaps on the A55; caller-side stall indicator ineffective (frozen state flips back after 2 s) -> F3b."
+    "notes": "F3b implemented and physically verified on the A55; new finding F7 (PIN lock screen hides call route)."
   },
-  "implementation_shas": []
+  "implementation_shas": [
+    "4c16626"
+  ]
 }
