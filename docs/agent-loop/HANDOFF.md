@@ -91,3 +91,16 @@ and `CALL_V2_BUILD_COMMIT`.
   both a stale VoIP registration and iOS's PushKit penalty for an app that
   did not report calls (the F9 launch crashes today). The VoIP issue was not
   a server or code defect in the current build.
+
+## Final iOS Checks (TestFlight 202610310039, 01:17)
+
+The app was killed and the phone locked; the call was answered from the
+CallKit UI.
+- Audio came from the receiver (the user confirmed it).
+- Wi-Fi was off for about 15 s on the iPhone. The caller logged
+  `remote_audio_flow false` at 01:17:59, so it showed "Reconnecting…".
+  Audio returned at 01:18:19 without a drop, and the call ended cleanly at
+  01:18:25.
+
+The calling phase is closed: Android (A55, S21 FE) and iOS (iPhone 16 Pro
+Max) are physically verified for this round.
