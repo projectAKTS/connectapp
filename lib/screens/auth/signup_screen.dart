@@ -3,8 +3,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../../config/legal_texts.dart';
 import '../../services/firebase_auth_service.dart';
 import '../../theme/tokens.dart';
+import '../settings/legal_screen.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -174,6 +176,12 @@ class _SignupScreenState extends State<SignupScreen> {
     } finally {
       if (mounted) setState(() => _isSocialLoading = false);
     }
+  }
+
+  void _openLegal(String title, String markdown) {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => LegalScreen(title: title, markdown: markdown),
+    ));
   }
 
   @override
@@ -351,9 +359,25 @@ class _SignupScreenState extends State<SignupScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'By creating an account, you agree to our Terms & Privacy.',
+                'By creating an account, you agree to our',
                 style: t.textTheme.bodyMedium,
                 textAlign: TextAlign.center,
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  TextButton(
+                    onPressed: () =>
+                        _openLegal('Terms of Use', LegalTexts.terms),
+                    child: const Text('Terms of Use'),
+                  ),
+                  Text('and', style: t.textTheme.bodyMedium),
+                  TextButton(
+                    onPressed: () =>
+                        _openLegal('Privacy Policy', LegalTexts.privacy),
+                    child: const Text('Privacy Policy'),
+                  ),
+                ],
               ),
             ],
           ),

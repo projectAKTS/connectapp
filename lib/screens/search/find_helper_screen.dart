@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:connect_app/widgets/advice_notice.dart';
 import 'package:connect_app/utils/profile_text.dart';
 import 'package:connect_app/services/helperly_test_runtime.dart';
 import 'package:connect_app/services/safety_service.dart';
@@ -90,7 +91,7 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
       final me = HelperlyTestRuntime.currentUid ?? '';
       for (final d in docs) {
         final m = d.data();
-        if (d.id == me) continue;
+        if (d.id == me || m['deletionRequestedAt'] != null) continue;
         // Unfinished profiles (no name) are not listed.
         final name = [m['displayName'], m['fullName'], m['userName']]
             .map((v) => (v ?? '').toString().trim())
@@ -330,6 +331,11 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
                   setState(() {});
                 },
               ),
+            ),
+
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 10),
+              child: AdviceNotice(),
             ),
 
             // Filter rows

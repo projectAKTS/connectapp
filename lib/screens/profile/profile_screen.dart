@@ -1,5 +1,6 @@
 // lib/screens/profile/profile_screen.dart
 import 'dart:io';
+import 'package:connect_app/screens/settings/settings_screen.dart';
 import 'package:connect_app/utils/profile_text.dart';
 import 'package:connect_app/services/safety_service.dart';
 import 'package:connect_app/config/mvp_features.dart';
@@ -19,7 +20,6 @@ import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 import 'package:connect_app/screens/profile/follow_list_screen.dart';
 import 'package:connect_app/screens/messages/messages_screen.dart';
 import 'package:connect_app/services/firestore_read_helper.dart';
-import 'package:connect_app/services/notification_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String userID;
@@ -236,16 +236,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               .showSnackBar(SnackBar(content: Text('$name is unblocked.')));
         }
     }
-  }
-
-  Future<void> _signOut() async {
-    await NotificationService.prepareCurrentUserForSignOut();
-    await FirebaseAuth.instance.signOut();
-    if (!mounted) return;
-
-    // ✅ Auth flows always on ROOT navigator
-    Navigator.of(context, rootNavigator: true)
-        .pushNamedAndRemoveUntil('/login', (route) => false);
   }
 
   void _openConnectSheet() {
@@ -696,9 +686,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 },
               ),
               IconButton(
-                icon: const Icon(Icons.logout),
-                tooltip: 'Log out',
-                onPressed: _signOut,
+                icon: const Icon(Icons.settings_outlined),
+                tooltip: 'Settings',
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const SettingsScreen(),
+                  ),
+                ),
               ),
             ],
             if (!isCurrentUser)

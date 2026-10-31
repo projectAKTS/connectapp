@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:connect_app/widgets/advice_notice.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -364,6 +365,8 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    const AdviceNotice(),
+                    const SizedBox(height: 12),
                     _card(
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
