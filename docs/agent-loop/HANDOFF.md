@@ -1,42 +1,45 @@
-# MVP Server Hardening Handoff (MVP-2)
+# Crash Reporting And Analytics Handoff (MVP-3)
 
 STATUS: `ready_for_review` (reviewer: Claude, per the user's delegation)
 
 BRANCH: `call-v2`
-STARTING_SHA: `080bd1f`
-AUTHORIZATION_SHA: `cd9f8d5`
-IMPLEMENTATION_SHAS:
-- `185a201`: price consultations on the server
-- `9d48b3f`: Firestore rules (protected user fields, private reports,
-  participant-only consultations, blocked chat sends)
-- `c853dfc`: Storage rules (chat participants, per-owner post media,
-  limits) and the client upload paths
-- `99d2d80`: `deleteAccount` and `processAccountDeletionRequests`
-- `7234e31`: email out of the public user doc, plus the migration script
-- `f95cdd6`: calls from blocked people never reach the callee
-- `0fd1e49`: legal site on hosting and real Stripe return URLs
+STARTING_SHA: `06a7209`
+IMPLEMENTATION_SHA: `d25e24a`
 ENDING_SHA: `SELF`
 
-**Nothing is deployed.** The deploy batch, its order and the rollback are in
-`docs/DEPLOY_MVP.md`.
+## Change
+
+- `firebase_dynamic_links` is removed.
+- Added `firebase_crashlytics` 4.3.6 and `firebase_analytics` 11.4.6, pinned
+  to the existing FlutterFire set (`firebase_core` 3.13.1).
+  - A plain `pub add` had upgraded every Firebase package (core 3.15,
+    Firestore 5.6.12, messaging, auth). That was rejected to keep the
+    physically verified call SDKs, and the iOS F9 fix that depends on
+    FlutterFire internals, unchanged.
+- Android: Crashlytics Gradle plugin 2.9.9. Plugin 3.x requires
+  google-services 4.4.1, and the project uses 4.3.15.
+- `AppTelemetry.init()` is called right after `Firebase.initializeApp`.
+  - Crashlytics is on in release builds only, for Flutter and platform
+    errors.
+  - Analytics records screen views and sets the user id to the uid.
+  - Five events, with no personal data: `post_created`,
+    `consultation_booked`, `report_submitted`, `user_blocked`,
+    `account_deleted`.
+  - The method is named `init()` because the owner-isolation test forbids
+    `.start(` in `main.dart`.
+- The privacy text and the regenerated `privacy.html` mention crash reports
+  and analytics.
 
 ## Validation
 
-- Node tests: `call_invites` + `consultations` + `account` 37/37 (new:
-  pricing 5, deletion 4, blocked caller 2).
-- Firestore rules emulator: MVP 5/5; the Call V2 rules are unchanged at
-  10/10.
-- Storage rules emulator, with Firestore: 5/5.
-- `flutter analyze lib`: clean.
-- Full `flutter test`: +2456 -6. The 6 failures are the same known set as
-  MVP-1: 4 working-tree guards and 2 test-mode-only integration tests.
-
-## Notes
-
-- Storage rules must go out together with or after the new app build,
-  because older builds upload post media to the flat paths, which become
-  read-only.
-- Premium perks in booking stay off (`MvpFeatures.premium`) until premium
-  has a server-side entitlement.
-- Account deletion keeps payment records and messages already sent to
-  others, as the privacy text says.
+- `flutter analyze lib test`: clean.
+- Full suite: +2446 -16, all known. 14 working-tree guards fire because
+  `pubspec.lock` and `Podfile.lock` are modified locally and intentionally
+  uncommitted; the other 2 are test-mode-only integration tests.
+- Emulator A, release APK: the app launches signed in, and Crashlytics
+  19.4.2 initializes. The project setting `firebase_crashlytics_enabled` is
+  false; the user must enable it in the console (`docs/DEPLOY_MVP.md`
+  step 5).
+- The iOS release build (no codesign) compiles. The first attempt hit a
+  transient Xcode `CompileAssetCatalogVariant` error after the restart; the
+  retry passed.

@@ -75,6 +75,23 @@ GOOGLE_CLOUD_PROJECT=connectapp-278b4 node scripts/migrate_public_emails.js
 GOOGLE_CLOUD_PROJECT=connectapp-278b4 node scripts/migrate_public_emails.js --apply
 ```
 
+### 5. Crash reporting and analytics (MVP-3)
+
+- In the Firebase console, open **Crashlytics** and click **Enable
+  Crashlytics**. The SDK is in the app, but the project setting is off, so
+  no reports are collected yet.
+- Analytics needs no deploy. Events appear in **Analytics > Events** within
+  a day.
+- iOS crash symbols: for readable iOS stack traces, add the Crashlytics dSYM
+  upload run script in Xcode later (optional for launch).
+- Update the store privacy forms to declare crash data and usage data
+  (product interaction), both linked to the user id:
+  - App Store Connect "App Privacy";
+  - Play Console "Data safety".
+- Builds on this Mac use the local `pubspec.lock` / `Podfile.lock` changes,
+  which are not committed, per the repo rule. A fresh clone resolves the
+  same pinned FlutterFire versions from `pubspec.yaml`.
+
 ## Rollback
 
 - **Rules:** revert `firestore.rules` and `storage.rules` with `git revert`,

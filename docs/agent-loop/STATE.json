@@ -1,47 +1,36 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "mvp2_server_hardening",
+  "phase": "mvp3_telemetry",
   "status": "ready_for_review",
   "accepted_checkpoint_sha": "080bd1f",
-  "starting_sha": "080bd1f",
+  "starting_sha": "06a7209",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "0fd1e49",
+  "code_commit_sha": "d25e24a",
   "ending_sha": "SELF",
   "changed_files": [
-    "connect_functions/index.js",
-    "connect_functions/consultations/consultation_price.js",
-    "connect_functions/account/delete_account.js",
-    "connect_functions/call_invites/blocked_caller.js",
-    "connect_functions/scripts/migrate_public_emails.js",
-    "connect_functions/test/consultations/consultation_price.test.js",
-    "connect_functions/test/account/delete_account.test.js",
-    "connect_functions/test/call_invites/blocked_caller.test.js",
-    "connect_functions/test/mvp/firestore_rules_mvp.test.js",
-    "connect_functions/test/mvp/storage_rules_mvp.test.js",
-    "firestore.rules",
-    "storage.rules",
-    "public/",
-    "tool/build_legal_site.py",
-    "lib/services/payment_service.dart",
-    "lib/screens/consultation/consultation_booking_screen.dart",
-    "lib/screens/posts/create_post_screen.dart",
-    "lib/screens/settings/settings_screen.dart",
-    "lib/config/legal_texts.dart",
-    "lib/services/firebase_auth_service.dart",
+    "pubspec.yaml",
+    "android/settings.gradle",
+    "android/app/build.gradle",
+    "lib/services/app_telemetry.dart",
     "lib/main.dart",
+    "lib/services/safety_service.dart",
+    "lib/screens/settings/settings_screen.dart",
+    "lib/screens/posts/create_post_screen.dart",
+    "lib/screens/consultation/consultation_booking_screen.dart",
+    "lib/config/legal_texts.dart",
+    "public/privacy.html",
     "docs/DEPLOY_MVP.md",
     "docs/agent-loop/NEXT_TASK.md",
     "docs/agent-loop/HANDOFF.md",
     "docs/agent-loop/STATE.json"
   ],
   "validation": {
-    "node_tests": "37/37",
-    "firestore_rules_emulator": "MVP 5/5, Call V2 10/10",
-    "storage_rules_emulator": "5/5",
     "flutter_analyze": "no issues",
-    "flutter_test_all": "+2456 -6 (same known 6)"
+    "flutter_test_all": "+2446 -16 (14 guards from uncommitted lock files + 2 test-mode)",
+    "android_release_launch": "PASS, Crashlytics 19.4.2 init",
+    "ios_release_compile": "PASS"
   },
   "safety": {
     "deployed": false,
@@ -57,15 +46,9 @@
   "review": {
     "decision": "accepted",
     "reviewer": "claude",
-    "notes": "MVP-2 server hardening ready; deploy batch documented for the user."
+    "notes": "MVP-3 telemetry ready; Crashlytics must be enabled in the console."
   },
   "implementation_shas": [
-    "185a201",
-    "9d48b3f",
-    "c853dfc",
-    "99d2d80",
-    "7234e31",
-    "f95cdd6",
-    "0fd1e49"
+    "d25e24a"
   ]
 }
