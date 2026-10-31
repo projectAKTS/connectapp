@@ -1,26 +1,16 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "mvp4b_helper_discovery",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "080bd1f",
-  "starting_sha": "b4c19d0",
+  "phase": "mvp5_session_ratings",
+  "status": "task_ready",
+  "accepted_checkpoint_sha": "0b604be",
+  "starting_sha": "0b604be",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "4c62329",
+  "code_commit_sha": null,
   "ending_sha": "SELF",
-  "changed_files": [
-    "lib/models/help_topics.dart",
-    "lib/screens/search/find_helper_screen.dart",
-    "test/mvp/help_topics_test.dart",
-    "docs/agent-loop/HANDOFF.md",
-    "docs/agent-loop/STATE.json"
-  ],
-  "validation": {
-    "help_topics_test": "3/3",
-    "flutter_analyze": "no issues",
-    "emulator_find_helper": "helper-role users only"
-  },
+  "changed_files": [],
+  "validation": {},
   "safety": {
     "deployed": false,
     "deploy_pending": "docs/DEPLOY_MVP.md (user batch)",
@@ -33,12 +23,9 @@
     "physical_calls_approved": true
   },
   "review": {
-    "decision": "accepted",
+    "decision": "pending",
     "reviewer": "claude",
-    "notes": "MVP-4b: Find a helper lists real helpers and matches expertise."
+    "notes": "MVP-5 authorized."
   },
-  "implementation_shas": [
-    "d812cc6",
-    "4c62329"
-  ]
+  "implementation_shas": []
 }
