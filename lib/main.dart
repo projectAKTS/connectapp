@@ -8,7 +8,6 @@ import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:firebase_dynamic_links/firebase_dynamic_links.dart';
 import 'package:flutter/foundation.dart';
 
 // Payments
@@ -191,7 +190,6 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   bool _foregroundBootstrapDone = false;
   bool _foregroundBootstrapRunning = false;
-  bool _dynamicLinksInitialized = false;
 
   @override
   void initState() {
@@ -225,11 +223,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         SubscriptionService.setupListener(_handlePurchaseUpdates);
       }
 
-      if (!_dynamicLinksInitialized) {
-        _dynamicLinksInitialized = true;
-        await _initDynamicLinks();
-      }
-
       _foregroundBootstrapDone = true;
     } catch (e, st) {
       debugPrint('Foreground bootstrap failed: $e\n$st');
@@ -257,41 +250,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       FirestoreReadHelper.ensureNetworkEnabled(reason: 'app_resumed'),
     );
     unawaited(_ensureForegroundBootstrap());
-  }
-
-  Future<void> _initDynamicLinks() async {
-    FirebaseDynamicLinks.instance.onLink.listen((data) {
-      final uri = data.link;
-      final ctx = navigatorKey.currentContext;
-      if (ctx == null) return;
-
-      if (uri.path == '/success') {
-        ScaffoldMessenger.of(ctx).showSnackBar(
-          const SnackBar(content: Text('✅ Payment successful')),
-        );
-      } else if (uri.path == '/cancel') {
-        ScaffoldMessenger.of(ctx).showSnackBar(
-          const SnackBar(content: Text('❌ Payment cancelled')),
-        );
-      }
-    }).onError((e) {
-      debugPrint('Dynamic link error: $e');
-    });
-
-    final initialLink = await FirebaseDynamicLinks.instance.getInitialLink();
-    if (initialLink != null) {
-      final uri = initialLink.link;
-      if (uri.path == '/success') {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          final ctx = navigatorKey.currentContext;
-          if (ctx != null) {
-            ScaffoldMessenger.of(ctx).showSnackBar(
-              const SnackBar(content: Text('✅ Payment successful')),
-            );
-          }
-        });
-      }
-    }
   }
 
   @override
