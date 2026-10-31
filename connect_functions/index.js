@@ -930,6 +930,47 @@ exports.chargeStoredPaymentMethod = onCall(
   }
 );
 
+// Account deletion (App Store / Play requirement). The callable deletes at
+// once; the daily job handles requests recorded by builds before it.
+exports.deleteAccount = onCall(
+  { region: "us-central1", invoker: "public" },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated");
+    const summary = await deleteUserData({
+      db,
+      bucket: admin.storage().bucket(),
+      auth: admin.auth(),
+      uid: request.auth.uid,
+      log: (stage, meta) => console.log(stage, meta),
+    });
+    return { success: true, posts: summary.posts };
+  }
+);
+
+exports.processAccountDeletionRequests = onSchedule(
+  { schedule: "every 24 hours", region: "us-central1" },
+  async () => {
+    const requests = await db
+      .collection("users")
+      .where("deletionRequestedAt", "!=", null)
+      .limit(100)
+      .get();
+    for (const doc of requests.docs) {
+      try {
+        await deleteUserData({
+          db,
+          bucket: admin.storage().bucket(),
+          auth: admin.auth(),
+          uid: doc.id,
+          log: (stage, meta) => console.log(stage, meta),
+        });
+      } catch (error) {
+        console.error("account_deletion_failed", { uid: doc.id, error: `${error}` });
+      }
+    }
+  }
+);
+
 // 4️⃣ Create Express Account for Helpers
 exports.createExpressAccountLink = onCall(
   { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
@@ -1051,6 +1092,7 @@ const {
   PRICING_VERSION,
   resolveChargeAmount,
 } = require("./consultations/consultation_price");
+const { deleteUserData } = require("./account/delete_account");
 
 exports.onCallInviteCreated = onDocumentCreated(
   {

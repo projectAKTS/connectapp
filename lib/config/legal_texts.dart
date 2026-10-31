@@ -137,8 +137,9 @@ States.
 
 ### How long we keep it
 While your account is active. When you delete your account, we delete your
-profile and personal data within 30 days, except records we must keep by
-law (for example, payment records).
+profile, posts, photos and personal data, at once or at most within 30
+days, except records we must keep by law (for example, payment records).
+Messages you already sent stay in the other person's conversation.
 
 ### Your choices and rights
 You can view and edit your profile, change notification settings, and

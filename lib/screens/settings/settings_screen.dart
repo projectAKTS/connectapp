@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connect_app/config/legal_texts.dart';
 import 'package:connect_app/screens/settings/legal_screen.dart';
 import 'package:connect_app/services/helperly_test_runtime.dart';
@@ -12,8 +13,11 @@ import 'package:flutter/material.dart';
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
-  static Future<void> signOut(BuildContext context) async {
-    await NotificationService.prepareCurrentUserForSignOut();
+  static Future<void> signOut(BuildContext context,
+      {bool pushAlreadyReleased = false}) async {
+    if (!pushAlreadyReleased) {
+      await NotificationService.prepareCurrentUserForSignOut();
+    }
     SafetyService.instance.stop();
     await FirebaseAuth.instance.signOut();
     if (!context.mounted) return;
@@ -52,29 +56,43 @@ class SettingsScreen extends StatelessWidget {
     if (ok != true || !context.mounted) return;
     final uid = HelperlyTestRuntime.currentUid ?? '';
     if (uid.isEmpty) return;
+    // Release push bindings first: afterwards they would write a push
+    // installation back under the deleted account.
+    await NotificationService.prepareCurrentUserForSignOut();
+    var deletedNow = false;
     try {
-      // Processed server-side; the profile disappears from lists now.
-      await HelperlyTestRuntime.firestore.collection('users').doc(uid).set({
-        'deletionRequestedAt': FieldValue.serverTimestamp(),
-        'isHelper': false,
-      }, SetOptions(merge: true));
+      await FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('deleteAccount',
+              options:
+                  HttpsCallableOptions(timeout: const Duration(seconds: 60)))
+          .call<void>();
+      deletedNow = true;
     } catch (_) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Could not delete your account. Please try again.'),
-        ));
+      // Server deletion unavailable: record the request, processed daily.
+      try {
+        await HelperlyTestRuntime.firestore.collection('users').doc(uid).set({
+          'deletionRequestedAt': FieldValue.serverTimestamp(),
+          'isHelper': false,
+        }, SetOptions(merge: true));
+      } catch (_) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Could not delete your account. Please try again.'),
+          ));
+        }
+        return;
       }
-      return;
     }
     if (!context.mounted) return;
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Account deletion requested'),
-        content: const Text(
-          'Your account and personal data will be deleted within 30 days. '
-          'You will now be signed out.',
-        ),
+        title:
+            Text(deletedNow ? 'Account deleted' : 'Account deletion requested'),
+        content: Text(deletedNow
+            ? 'Your account and personal data have been deleted.'
+            : 'Your account and personal data will be deleted within 30 '
+                'days. You will now be signed out.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -83,7 +101,7 @@ class SettingsScreen extends StatelessWidget {
         ],
       ),
     );
-    if (context.mounted) await signOut(context);
+    if (context.mounted) await signOut(context, pushAlreadyReleased: true);
   }
 
   @override
