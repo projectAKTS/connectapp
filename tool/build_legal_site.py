@@ -89,6 +89,7 @@ PAGE = """<!doctype html>
 {body}
 <footer>
   <a href="/privacy.html">Privacy</a><a href="/terms.html">Terms</a><a href="/safety.html">Safety</a>
+  <a href="/delete-account.html">Delete account</a>
   <a href="mailto:{email}">Contact</a>
 </footer>
 </main>
@@ -114,6 +115,27 @@ Ask the community, message helpers, or book a short call.</p>
 <p>Helpers share personal experience. Helperly is not legal, immigration or
 medical advice.</p>
 </div>""")
+write("delete-account.html", "Delete your account", f"""
+<h1>Delete your Helperly account</h1>
+<div class="card">
+<h2>In the app</h2>
+<p>Open <strong>Profile</strong>, tap the <strong>settings</strong> icon, then
+<strong>Delete account</strong>. Your account is deleted right away.</p>
+<h2>Without the app</h2>
+<p>Email <a href="mailto:{VARS["supportEmail"]}?subject=Delete%20my%20Helperly%20account">{html.escape(VARS["supportEmail"])}</a>
+from the address you signed up with and ask us to delete your account. We
+confirm and delete it within 30 days.</p>
+</div>
+<h2>What is deleted</h2>
+<ul>
+<li>Your profile, photos, posts and comments</li>
+<li>Your sign-in account and notification settings</li>
+</ul>
+<h2>What we keep</h2>
+<ul>
+<li>Payment records we must keep by law</li>
+<li>Messages you already sent, which stay in the other person's conversation</li>
+</ul>""")
 write("stripe/return.html", "Payout setup", """
 <h1>You're all set</h1>
 <p>Your payout details were sent to Stripe. You can return to the Helperly app.</p>""")

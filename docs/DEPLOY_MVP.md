@@ -63,6 +63,9 @@ firebase deploy --project connectapp-278b4 --only firestore:rules,storage,hostin
   Stripe return pages at `https://connectapp-278b4.web.app/`.
 - Put `https://connectapp-278b4.web.app/privacy.html` in App Store Connect
   and the Play Console as the privacy policy URL.
+- In the Play Console Data safety form, give
+  `https://connectapp-278b4.web.app/delete-account.html` as the account
+  deletion link (Play requires a web path besides in-app deletion).
 
 ### 4. Move existing emails out of public profiles
 
