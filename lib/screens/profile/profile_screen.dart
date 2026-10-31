@@ -1,5 +1,6 @@
 // lib/screens/profile/profile_screen.dart
 import 'dart:io';
+import 'package:connect_app/config/mvp_features.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
@@ -1021,16 +1022,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   .pushNamed('/paymentSetup');
                             },
                           ),
-                          const Divider(height: 1, color: AppColors.border),
-                          _accountRow(
-                            icon: Icons.workspace_premium_outlined,
-                            title: 'Premium',
-                            subtitle: premiumSubtitle(),
-                            onTap: () {
-                              Navigator.of(context, rootNavigator: true)
-                                  .pushNamed('/premium');
-                            },
-                          ),
+                          if (MvpFeatures.premium) ...[
+                            const Divider(height: 1, color: AppColors.border),
+                            _accountRow(
+                              icon: Icons.workspace_premium_outlined,
+                              title: 'Premium',
+                              subtitle: premiumSubtitle(),
+                              onTap: () {
+                                Navigator.of(context, rootNavigator: true)
+                                    .pushNamed('/premium');
+                              },
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -1357,6 +1360,11 @@ class _StatsStrip extends StatelessWidget {
           color: AppColors.border,
         );
 
+    if (!MvpFeatures.gamificationStats) {
+      return Center(
+        child: cell(Icons.thumb_up_alt_outlined, 'Helpful', helpfulText),
+      );
+    }
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [

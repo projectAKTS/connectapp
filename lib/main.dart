@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:connect_app/config/mvp_features.dart';
 import 'package:flutter/material.dart';
 
 // Firebase
@@ -333,7 +334,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         '/my_consultations': (_) =>
             const FullScreenBackGesture(child: MyConsultationsScreen()),
 
-        '/premium': (_) => FullScreenBackGesture(child: PremiumScreen()),
+        if (MvpFeatures.premium)
+          '/premium': (_) => FullScreenBackGesture(child: PremiumScreen()),
 
         '/onboarding': (_) =>
             const FullScreenBackGesture(child: OnboardingScreen()),
