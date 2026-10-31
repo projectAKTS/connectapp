@@ -1,37 +1,31 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "mvp4_store_compliance",
+  "phase": "mvp4b_helper_discovery",
   "status": "ready_for_review",
   "accepted_checkpoint_sha": "080bd1f",
-  "starting_sha": "2e3e424",
+  "starting_sha": "b4c19d0",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "bb5174a",
+  "code_commit_sha": "4c62329",
   "ending_sha": "SELF",
   "changed_files": [
-    "lib/services/content_filter.dart",
-    "test/mvp/content_filter_test.dart",
-    "lib/screens/posts/create_post_screen.dart",
-    "lib/screens/posts/comment_bottom_sheet.dart",
-    "lib/screens/posts/post_screen.dart",
-    "lib/screens/chat/chat_screen.dart",
-    "tool/build_legal_site.py",
-    "public/",
-    "docs/DEPLOY_MVP.md",
-    "docs/research/MVP_LANSMAN_ARASTIRMA.md",
+    "lib/models/help_topics.dart",
+    "lib/screens/search/find_helper_screen.dart",
+    "test/mvp/help_topics_test.dart",
     "docs/agent-loop/HANDOFF.md",
     "docs/agent-loop/STATE.json"
   ],
   "validation": {
-    "content_filter_test": "4/4",
-    "flutter_analyze": "no issues"
+    "help_topics_test": "3/3",
+    "flutter_analyze": "no issues",
+    "emulator_find_helper": "helper-role users only"
   },
   "safety": {
     "deployed": false,
     "deploy_pending": "docs/DEPLOY_MVP.md (user batch)",
     "testflight_built": false,
-    "production_services_contacted": true,
+    "production_services_contacted": false,
     "firebase_changes": false,
     "backend_changes": false,
     "production_code_changes": true,
@@ -41,11 +35,10 @@
   "review": {
     "decision": "accepted",
     "reviewer": "claude",
-    "notes": "MVP-4 store compliance (filter, web deletion page) + research doc."
+    "notes": "MVP-4b: Find a helper lists real helpers and matches expertise."
   },
   "implementation_shas": [
-    "d763923",
-    "bb5174a",
-    "c555209"
+    "d812cc6",
+    "4c62329"
   ]
 }
