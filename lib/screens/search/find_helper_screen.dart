@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'package:connect_app/utils/profile_text.dart';
+import 'package:connect_app/services/helperly_test_runtime.dart';
+import 'package:connect_app/services/safety_service.dart';
 import 'package:connect_app/models/help_topics.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -84,8 +87,15 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
       }
 
       final list = <_Helper>[];
+      final me = HelperlyTestRuntime.currentUid ?? '';
       for (final d in docs) {
         final m = d.data();
+        if (d.id == me) continue;
+        // Unfinished profiles (no name) are not listed.
+        final name = [m['displayName'], m['fullName'], m['userName']]
+            .map((v) => (v ?? '').toString().trim())
+            .firstWhere((v) => v.isNotEmpty, orElse: () => '');
+        if (name.isEmpty) continue;
 
         // Derive fields from onboarding-style keys when missing
         final List<String> categoriesRaw = (m['categories'] is List)
@@ -122,10 +132,9 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
 
         list.add(_Helper(
           id: d.id,
-          name: (m['displayName'] ?? m['fullName'] ?? m['userName'] ?? 'User')
-              .toString(),
+          name: name,
           handle: (m['userName'] ?? '').toString(),
-          bio: (m['bio'] ?? '').toString(),
+          bio: placeholderBioToEmpty((m['bio'] ?? '').toString()),
           avatar: photo,
           categories: categories.map((e) => e.toString()).toList(),
           languages: languages.map((e) => e.toString()).toList(),
@@ -175,7 +184,8 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
   // —— Filtering + sorting
   void _applyFilters() {
     final query = _norm(_q.text.trim());
-    List<_Helper> list = List.of(_all);
+    List<_Helper> list =
+        _all.where((h) => !SafetyService.instance.isBlocked(h.id)).toList();
 
     // Text query (name/handle/bio)
     if (query.isNotEmpty) {

@@ -415,7 +415,7 @@ class _AuthGateState extends State<AuthGate> {
 
       if (!snap.exists) {
         patch.addAll({
-          'bio': 'No bio available yet.',
+          'bio': '',
           'followers': [],
           'following': [],
           'postsCount': 0,

@@ -40,7 +40,7 @@ class FirebaseAuthService {
           'displayName': displayName,
           'displayName_lc': displayNameLc,
           'email': email,
-          'bio': 'No bio available yet.',
+          'bio': '',
           'followers': [],
           'following': [],
           'postsCount': 0,
