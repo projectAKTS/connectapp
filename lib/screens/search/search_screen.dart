@@ -1,6 +1,7 @@
 // lib/screens/search/search_screen.dart
 import 'dart:async';
 
+import 'package:connect_app/models/help_topics.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
@@ -399,14 +400,7 @@ class _SuggestedCategoriesState extends State<SuggestedCategories> {
     }
 
     if (picked.isEmpty) {
-      picked.addAll([
-        'Study Permit',
-        'Housing',
-        'Talk to a Refugee',
-        'Jobs',
-        'Healthcare',
-        'Documents'
-      ]);
+      picked.addAll(HelpTopics.topics.take(6));
     }
 
     if (!mounted) return;

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:connect_app/models/help_topics.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
@@ -583,18 +584,7 @@ class _FilterRow extends StatelessWidget {
               final result = await _pickListSheet(
                 context,
                 title: 'Select categories',
-                // Use onboarding categories
-                options: const [
-                  'Immigration',
-                  'Moving to Canada',
-                  'PR Pathways',
-                  'Quebec-specific help',
-                  'Job hunting',
-                  'Refugee claim process',
-                  'Student life',
-                  'Parenting support',
-                  'Language learning',
-                ],
+                options: HelpTopics.topics,
                 initial: selectedCategories,
               );
               if (result != null) {

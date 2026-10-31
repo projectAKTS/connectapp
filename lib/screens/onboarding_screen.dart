@@ -1,4 +1,5 @@
 // lib/screens/onboarding_screen.dart
+import 'package:connect_app/models/help_topics.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -38,28 +39,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   String _role = 'seeker'; // seeker | helper | both
 
-  final List<String> _allTopics = const [
-    'Immigration',
-    'Moving to Canada',
-    'PR Pathways',
-    'Quebec-specific help',
-    'Job hunting',
-    'Refugee claim process',
-    'Student life',
-    'Parenting support',
-    'Language learning',
-  ];
+  final List<String> _allTopics = HelpTopics.topics;
   final Set<String> _selectedTopics = {};
-  final List<String> _allExpertise = const [
-    'Resume review',
-    'Interview prep',
-    'PR guidance',
-    'School applications',
-    'Language practice',
-    'Settlement tips',
-    'Mental health support',
-    'Career transitions',
-  ];
+  final List<String> _allExpertise = HelpTopics.expertise;
   final Set<String> _selectedExpertise = {};
 
   TimeOfDay? _startTime;

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:connect_app/models/help_topics.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -29,16 +30,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late final TextEditingController _skillsCtrl;
   late final TextEditingController _experienceCtrl;
 
-  final List<String> _allExpertise = const [
-    'Resume review',
-    'Interview prep',
-    'PR guidance',
-    'School applications',
-    'Language practice',
-    'Settlement tips',
-    'Mental health support',
-    'Career transitions',
-  ];
+  final List<String> _allExpertise = HelpTopics.expertise;
 
   bool _saving = false;
   File? _imageFile;
