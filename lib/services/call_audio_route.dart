@@ -10,12 +10,13 @@ bool? _debugEarpieceFirst;
 @visibleForTesting
 set debugCallEarpieceFirst(bool? value) => _debugEarpieceFirst = value;
 
+bool get _mobile => Platform.isAndroid || Platform.isIOS;
+
 /// WhatsApp-like routing: video calls start on the speaker, audio calls on
-/// the earpiece. Only Android audio is earpiece-first for now: iOS needs its
-/// own proximity monitoring and a device run before it changes.
+/// the earpiece, with [CallProximity] blanking the screen at the ear.
 bool callStartsOnSpeaker({required bool isVideo}) {
   if (isVideo) return true;
-  return !(_debugEarpieceFirst ?? Platform.isAndroid);
+  return !(_debugEarpieceFirst ?? _mobile);
 }
 
 /// Turns the screen off at the ear while an audio call is on the earpiece,
@@ -36,7 +37,7 @@ class CallProximity {
   void hold(bool held) {
     if (_held == held) return;
     _held = held;
-    if (!Platform.isAndroid) return;
+    if (!_mobile) return;
     unawaited(_channel
         .invokeMethod<void>('setProximityScreenOff', held)
         .then<void>((_) {}, onError: (Object _) {}));

@@ -7,8 +7,8 @@ import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-// F8: Android audio calls start on the earpiece with the screen off at the
-// ear, like WhatsApp; video stays on the speaker.
+// F8: audio calls start on the earpiece with the screen off at the ear, like
+// WhatsApp; video stays on the speaker.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -130,7 +130,7 @@ void main() {
     debugCallEarpieceFirst = null;
   });
 
-  test('audio is earpiece-first only where proximity is handled', () {
+  test('audio is earpiece-first and video speaker-first', () {
     expect(callStartsOnSpeaker(isVideo: false), isFalse);
     expect(callStartsOnSpeaker(isVideo: true), isTrue);
     debugCallEarpieceFirst = false;

@@ -572,6 +572,7 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
   private let callkitPresentationMaxAttempts = 2
   private var voipRegistry: PKPushRegistry?
   private var pushTokenChannel: FlutterMethodChannel?
+  private var callProximityChannel: FlutterMethodChannel?
   private var callV2NativeAcceptedCallActive = false
   private let callV2ExactCallController = CXCallController()
   private let callV2SafeDiagnosticLedger = CallV2SafeNativeDiagnosticLedger()
@@ -625,6 +626,20 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
         binaryMessenger: controller.binaryMessenger
       )
       pushTokenChannel = channel
+      // Screen off at the ear while an audio call is on the receiver.
+      let proximityChannel = FlutterMethodChannel(
+        name: "connectapp/callProximity",
+        binaryMessenger: controller.binaryMessenger
+      )
+      callProximityChannel = proximityChannel
+      proximityChannel.setMethodCallHandler { call, result in
+        guard call.method == "setProximityScreenOff" else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        UIDevice.current.isProximityMonitoringEnabled = (call.arguments as? Bool) == true
+        result(nil)
+      }
       channel.setMethodCallHandler { [weak self] call, result in
         guard let self else {
           result(FlutterError(code: "UNAVAILABLE", message: "AppDelegate unavailable", details: nil))
