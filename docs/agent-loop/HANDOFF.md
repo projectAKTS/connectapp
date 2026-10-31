@@ -1,83 +1,75 @@
-# Earpiece Proximity Handoff (F8)
+# iOS Native Firestore Crash Handoff (F9, With F8b And F9b)
 
 STATUS: `ready_for_review` (reviewer: Claude, per the user's delegation)
 
 BRANCH: `call-v2`
-STARTING_SHA: `fd99084`
-AUTHORIZATION_SHA: `79dd002`
-IMPLEMENTATION_SHA: `a41c564`
+STARTING_SHA: `ec46d49`
+IMPLEMENTATION_SHAS:
+- `1f66093`: F8b, iOS receiver-first with proximity
+- `bdeea79`: F9, native Firestore through FlutterFire's cache
+- `82f7d24`: F9b, callee media without a CallKit call
 ENDING_SHA: `SELF`
 
-## Change
+## Findings On The User's iPhone 16 Pro Max (iOS 26.6.2, Cable Dev Build)
 
-Android audio calls start on the earpiece and turn the screen off at the ear,
-like WhatsApp. Video calls and iOS audio stay on the speaker.
-- New `lib/services/call_audio_route.dart`:
-  - `callStartsOnSpeaker(isVideo:)`, with a test override;
-  - `CallProximity`: Android-only, de-duplicated, fire-and-forget, over
-    `connectapp/callProximity`.
-- `CallV2AgoraMediaRuntime`: the default route and the initial
-  `speakerEnabled` come from `callStartsOnSpeaker`.
-- `AgoraCallScreen`:
-  - `_speakerOn` starts from the same helper;
-  - the screen's engine path uses it for the default route;
-  - `build` holds proximity while it is an audio call that is not ended
-    and the speaker is off;
-  - `dispose` releases it.
-- `MainActivity`: `PROXIMITY_SCREEN_OFF_WAKE_LOCK`, only if supported. It is
-  released with `RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY` and in `onDestroy`.
-  `WAKE_LOCK` is already in the merged manifest.
+1. **Crash (F9).** Killed app, locked phone, the user tapped the incoming-call
+   notification. The app crashed about 1 s after launch (SIGABRT, two
+   identical reports). Dart's first `enableNetwork` reached
+   `getFIRFirestoreFromAppNameFromPigeon`, then `-[FIRFirestore
+   setSettings:]` on an already started instance.
+   - Cause: the notification response handler's native `syncInviteStatus`
+     started Firestore via `Firestore.firestore()` before Dart.
+   - This has been in place since 255269c (2026-08-05).
+2. **Silent accepted call (F9b).** After F9 the app opened and accepted, then
+   waited forever on `audioSessionReadinessWaiting`. There was no CallKit call,
+   so no CallKit audio session ever activated.
+3. **No VoIP/CallKit for a killed app (open).** PushKit last arrived at
+   23:57:48, with the app in the foreground. Calls at 23:59, 00:09, 00:18
+   (after a reboot) and 00:37 came only as the APNs alert fallback, so there
+   was no accept/decline call UI.
+   - Likely cause: a test-environment artifact. The cable build has a sandbox
+     VoIP token, and the server tries production first. A stale TestFlight
+     production VoIP token is accepted but never delivered, so there is no
+     `BadDeviceToken` retry in sandbox.
+   - Not verified: function logs are not readable from this CLI (active
+     project `helperly-call-v2-dev`), and a syslog tool install was denied.
+   - Next step: a TestFlight build, which uses the production environment.
 
-Why: the speaker default was copied in 3e9628d; it was not a bug workaround.
-There was no proximity handling at all, so an earpiece default on its own
-would have let a cheek tap hang-up or mute.
+## Fixes
+
+- **F9:** `flutterFireFirestore()` reuses FlutterFire's cached instance, or
+  creates it as FlutterFire would and registers it. The registration uses the
+  default settings and FlutterFire's dispatch queue, via
+  `FLTFirebaseFirestoreUtils` and `FLTFirebaseFirestoreReader` at runtime. If
+  the cache cannot be reached, it skips the native write; Dart's recovery
+  owns it.
+- **F9b:** `_calleeMediaNeedsNativeAudioSession` keeps the iOS audio-session
+  gate only when the native CallKit list has the accepted call. If the list
+  fails, the gate stays.
+- **F8b:** iOS audio is receiver-first, with
+  `UIDevice.isProximityMonitoringEnabled` over `connectapp/callProximity`.
 
 ## Validation
 
-- New `call_audio_route_test`: 3/3. It is RED (+2 -1) with the screen change
-  reverted.
-- `flutter test test/call_v2 test/multi_device test/android`: +2441 -4. All 4
-  failures are the known Phase 7BG-7BJ working-tree guards.
-- `flutter analyze lib test integration_test`: clean.
+- F9b tests: a notification answer starts media (RED -1 before, GREEN
+  after); a CallKit answer still waits for the CallKit audio session. The
+  background audio file passes 17/17.
+- Suite: +2433 -14. All failures are the known Phase 7AW-7BJ working-tree
+  guards (more of them fired while `call_session_manager.dart` was
+  uncommitted).
+- `flutter analyze` is clean, and the iOS release build passes.
+- iPhone:
+  - F8b: the user confirmed the receiver/speaker toggle, and the screen
+    blanks at the ear.
+  - F9: no crash on the notification answer, and the native accept synced
+    (`invite_status_synced`).
+  - F9b: killed and locked, a notification answer connected at 00:37:27 with
+    audio from the iPhone (18 kbps). No crash reports since the fix.
 
-Physical runs: S21 FE (Android 16), `app-release-f8.apk`.
+## Note
 
-| Check | Result |
-|---|---|
-| Audio call start | `MODE_IN_COMMUNICATION`, no preferred device (earpiece), proximity lock held |
-| Speaker on | route `speaker`, lock released |
-| Speaker off | earpiece, lock held again |
-| Phone mute, then unmute | the caller logged `remote_audio_muted` true, then false |
-| After the call | lock released |
-
-## Same Session, Earlier Builds (S21 FE)
-
-- Outgoing calls from the phone (Baris) to emulator venus: PASS 4/4, bg and
-  killed callee, ended by either side.
-  - Accept to connected: 3.1 s.
-  - The harness "connected" figure of 13-19 s is the emulator shade and
-    uiautomator time.
-- Two-way audio by ear (the user): phone to Mac and Mac to phone, with the
-  emulator host mic on (`adb emu avd hostmicon`). The echo came from the
-  two devices sitting side by side.
-- F1, answering over the screensaver (Android 16, Colors dream): PASS 2/2,
-  awake and connected about 1.5 s after the tap. Decline PASS; the phone
-  stays dreaming. The screensaver and timeout settings were restored.
-
-## Open
-
-- iOS: earpiece-first needs `proximityMonitoringEnabled` and a TestFlight
-  run.
-- Bluetooth headset: not tested.
-
-## Extra Physical Checks (S21 FE, after F8)
-
-- Video call with a 12 s Wi-Fi gap: both sides showed "Reconnecting…" at
-  about 4 s and recovered when Wi-Fi came back. They ended cleanly.
-  - Harness note: the video answer action is "Video", not "Yanıtla".
-  - The caller's video hang-up is at (646, 2206).
-- F2 decline-elsewhere: venus on the phone and on emulator B, both in the
-  background. Results, 3/3:
-  - phone decline: B stopped ringing 1.1 s and 0.6 s later;
-  - phone answer: B stopped ringing 0.6 s later;
-  - no stale callkit notification and no missed-call notification.
+All phone builds today, the Android APKs and the iOS cable builds, were built
+without `CALL_V2_REAL_FLOW_ENABLED`, so they used the legacyV1 connection
+system, the same as yesterday's APKs. TestFlight builds pass
+`CALL_V2_REAL_FLOW_ENABLED=true`, `CALL_V2_REAL_FLOW_DEV_CALLABLE=true`
+and `CALL_V2_BUILD_COMMIT`.

@@ -2,15 +2,33 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "ios_native_firestore_f9",
-  "status": "task_ready",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "3f9561d",
   "starting_sha": "ec46d49",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
+  "code_commit_sha": "82f7d24",
   "ending_sha": "SELF",
-  "changed_files": [],
-  "validation": {},
+  "changed_files": [
+    "ios/Runner/AppDelegate.swift",
+    "lib/services/call_audio_route.dart",
+    "lib/services/call_session_manager.dart",
+    "test/call_v2/real_flow/call_audio_route_test.dart",
+    "test/call_v2/real_flow/call_v2_background_audio_media_integration_test.dart",
+    "docs/agent-loop/NEXT_TASK.md",
+    "docs/agent-loop/HANDOFF.md",
+    "docs/agent-loop/STATE.json"
+  ],
+  "validation": {
+    "background_audio_test": "17/17 (F9b RED -1 before)",
+    "suite": "+2433 -14 (known guards)",
+    "flutter_analyze": "no issues",
+    "ios_release_build": "ok",
+    "iphone_f8b_receiver_proximity": "user-verified",
+    "iphone_f9_no_crash": "PASS",
+    "iphone_f9b_notification_answer_connects": "PASS (00:37:27, audio flowing)",
+    "iphone_voip_callkit_killed": "OPEN (dev build sandbox token suspected)"
+  },
   "safety": {
     "deployed": false,
     "deploy_pending": null,
@@ -18,14 +36,18 @@
     "production_services_contacted": true,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": false,
-    "test_changes": false,
+    "production_code_changes": true,
+    "test_changes": true,
     "physical_calls_approved": true
   },
   "review": {
     "decision": "accepted",
     "reviewer": "claude",
-    "notes": "F8b committed (iOS proximity + receiver verified by user). F9 authorized: iOS crash when native Firestore starts before FlutterFire."
+    "notes": "F9/F9b fixed and verified on iPhone; VoIP for killed app pending a TestFlight build (user-approved)."
   },
-  "implementation_shas": []
+  "implementation_shas": [
+    "1f66093",
+    "bdeea79",
+    "82f7d24"
+  ]
 }
