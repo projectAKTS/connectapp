@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:connect_app/screens/settings/settings_screen.dart';
 import 'package:connect_app/utils/profile_text.dart';
 import 'package:connect_app/services/safety_service.dart';
+import 'package:connect_app/services/review_service.dart';
 import 'package:connect_app/config/mvp_features.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
@@ -651,6 +652,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final streakDays = _i(userData!['streakDays']);
     final xpPoints = _i(userData!['xpPoints']);
     final helpfulMarks = _i(userData!['helpfulMarks']);
+    final ratingCount = _i(userData!['ratingCount']);
+    final rating = (userData!['rating'] is num)
+        ? (userData!['rating'] as num).toDouble()
+        : 0.0;
 
     // For Account section status (safe defaults)
     final premiumStatus = _s(userData!['premiumStatus']);
@@ -831,8 +836,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       streakText: '$streakDays days',
                       xpText: '$xpPoints',
                       helpfulText: '$helpfulMarks',
+                      ratingText: ratingCount > 0
+                          ? '${rating.toStringAsFixed(1)} ($ratingCount)'
+                          : null,
                     ),
                   ),
+
+                  if (ratingCount > 0) ...[
+                    const SizedBox(height: 16),
+                    _sectionTitle('Reviews'),
+                    _ReviewsList(helperUid: widget.userID),
+                  ],
 
                   // ✅ Account hub (ONLY for current user)
                   if (isCurrentUser) ...[
@@ -1372,10 +1386,14 @@ class _StatsStrip extends StatelessWidget {
   final String streakText;
   final String xpText;
   final String helpfulText;
+
+  /// Average stars and count, e.g. "4.8 (12)"; null before any rating.
+  final String? ratingText;
   const _StatsStrip({
     required this.streakText,
     required this.xpText,
     required this.helpfulText,
+    this.ratingText,
   });
 
   @override
@@ -1403,8 +1421,17 @@ class _StatsStrip extends StatelessWidget {
         );
 
     if (!MvpFeatures.gamificationStats) {
-      return Center(
-        child: cell(Icons.thumb_up_alt_outlined, 'Helpful', helpfulText),
+      final helpful = cell(Icons.thumb_up_alt_outlined, 'Helpful', helpfulText);
+      if (ratingText == null) return Center(child: helpful);
+      return Row(
+        children: [
+          Expanded(child: Center(child: helpful)),
+          divider(),
+          Expanded(
+            child:
+                Center(child: cell(Icons.star_rounded, 'Rating', ratingText!)),
+          ),
+        ],
       );
     }
     return Row(
@@ -1424,6 +1451,89 @@ class _StatsStrip extends StatelessWidget {
                 child:
                     cell(Icons.thumb_up_alt_outlined, 'Helpful', helpfulText))),
       ],
+    );
+  }
+}
+
+// ---------- Reviews ----------
+/// Written reviews from booked sessions, newest first. Reviewers stay
+/// anonymous; stars-only reviews count in the average but are not listed.
+class _ReviewsList extends StatelessWidget {
+  final String helperUid;
+  const _ReviewsList({required this.helperUid});
+
+  static const int _shown = 5;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: ReviewService.instance.reviewsOf(helperUid),
+      builder: (context, snap) {
+        final written = (snap.data ?? const [])
+            .where((r) => '${r['text'] ?? ''}'.trim().isNotEmpty)
+            .take(_shown)
+            .toList();
+        if (written.isEmpty) {
+          return const Text(
+            'No written reviews yet.',
+            style: TextStyle(color: AppColors.muted),
+          );
+        }
+        return Column(
+          children: [
+            for (final r in written) ...[
+              _ReviewTile(review: r),
+              const SizedBox(height: 10),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _ReviewTile extends StatelessWidget {
+  final Map<String, dynamic> review;
+  const _ReviewTile({required this.review});
+
+  @override
+  Widget build(BuildContext context) {
+    final stars =
+        (review['stars'] is num) ? (review['stars'] as num).toInt() : 0;
+    final createdAt = parseFirestoreTimestamp(review['createdAt']);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(14),
+        border:
+            const Border.fromBorderSide(BorderSide(color: AppColors.border)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              for (var i = 1; i <= 5; i++)
+                Icon(
+                  i <= stars ? Icons.star_rounded : Icons.star_outline_rounded,
+                  size: 16,
+                  color: i <= stars ? AppColors.primary : AppColors.muted,
+                ),
+              const Spacer(),
+              Text(
+                createdAt == null
+                    ? 'Booked session'
+                    : 'Booked session · ${DateFormat.yMMMd().format(createdAt)}',
+                style: const TextStyle(color: AppColors.muted, fontSize: 12.5),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text('${review['text']}'.trim()),
+        ],
+      ),
     );
   }
 }

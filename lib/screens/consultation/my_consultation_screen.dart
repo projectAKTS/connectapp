@@ -13,6 +13,7 @@ import 'package:connect_app/screens/consultation/consultation_call_screen.dart';
 import 'package:connect_app/screens/chat/chat_screen.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
 import 'package:connect_app/services/payment_service.dart';
+import 'package:connect_app/services/review_service.dart';
 import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 
 class MyConsultationsScreen extends StatefulWidget {
@@ -40,6 +41,10 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
   final Map<String, Map<String, dynamic>> _userCache = {};
   final Set<String> _userLoading = {};
 
+  // Past consultations this user already rated.
+  StreamSubscription<Set<String>>? _reviewedSub;
+  Set<String> _reviewed = const {};
+
   @override
   void initState() {
     super.initState();
@@ -52,11 +57,16 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
     _ticker = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) setState(() {});
     });
+    _reviewedSub =
+        ReviewService.instance.reviewedConsultationIds().listen((ids) {
+      if (mounted) setState(() => _reviewed = ids);
+    }, onError: (_) {});
   }
 
   @override
   void dispose() {
     _ticker?.cancel();
+    _reviewedSub?.cancel();
     super.dispose();
   }
 
@@ -536,8 +546,28 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                                       final avatarUrl =
                                           _resolveAvatar(userData);
 
+                                      final isCancelled =
+                                          (data['status'] ?? '') == 'cancelled';
+                                      final canRate = !isCancelled &&
+                                          data['userId'] == myUid &&
+                                          otherUserId.isNotEmpty &&
+                                          scheduledAt != null &&
+                                          scheduledAt.isBefore(DateTime.now());
+
                                       return _ConsultationCard(
                                         isPast: true,
+                                        rateState: !canRate
+                                            ? _RateState.none
+                                            : _reviewed.contains(consultationId)
+                                                ? _RateState.rated
+                                                : _RateState.open,
+                                        onRate: () => ReviewService.instance
+                                            .rateWithSheet(
+                                          context,
+                                          consultationId: consultationId,
+                                          helperUid: otherUserId,
+                                          helperName: resolvedName,
+                                        ),
                                         consultationId: consultationId,
                                         scheduledAt: scheduledAt,
                                         minutes: minutes,
@@ -547,8 +577,7 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                                         displayName: resolvedName,
                                         avatarUrl: avatarUrl,
                                         joinEnabled: false,
-                                        joinHint: (data['status'] ?? '') ==
-                                                'cancelled'
+                                        joinHint: isCancelled
                                             ? 'Canceled'
                                             : 'Completed',
                                         fmtWhen: _fmtWhen,
@@ -624,8 +653,12 @@ class _CountPill extends StatelessWidget {
   }
 }
 
+enum _RateState { none, open, rated }
+
 class _ConsultationCard extends StatelessWidget {
   final bool isPast;
+  final _RateState rateState;
+  final VoidCallback? onRate;
 
   final String consultationId;
   final DateTime? scheduledAt;
@@ -652,6 +685,8 @@ class _ConsultationCard extends StatelessWidget {
 
   const _ConsultationCard({
     required this.isPast,
+    this.rateState = _RateState.none,
+    this.onRate,
     required this.consultationId,
     required this.scheduledAt,
     required this.minutes,
@@ -685,40 +720,85 @@ class _ConsultationCard extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _UserPreview(
-              uid: otherUserId,
-              avatarUrl: avatarUrl,
-              onOpenProfile: onOpenProfile,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _ConsultationMeta(
-                uid: otherUserId,
-                displayName: displayName,
-                whenText: whenText,
-                minutes: minutes,
-                costText: fmtMoney(cost),
-                hint: joinHint,
-                onOpenProfile: onOpenProfile,
-              ),
-            ),
-            const SizedBox(width: 10),
-            _ActionsColumn(
-              isPast: isPast,
-              joinEnabled: joinEnabled,
-              uid: otherUserId,
-              displayName: displayName,
-              avatarUrl: avatarUrl,
-              canCancel: canCancel,
-              onMessage: onMessage,
-              onJoin: onJoin,
-              onCancel: onCancel,
-            ),
+            _cardRow(whenText),
+            if (rateState != _RateState.none) ...[
+              const SizedBox(height: 10),
+              _RateFooter(rated: rateState == _RateState.rated, onRate: onRate),
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _cardRow(String whenText) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _UserPreview(
+          uid: otherUserId,
+          avatarUrl: avatarUrl,
+          onOpenProfile: onOpenProfile,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _ConsultationMeta(
+            uid: otherUserId,
+            displayName: displayName,
+            whenText: whenText,
+            minutes: minutes,
+            costText: fmtMoney(cost),
+            hint: joinHint,
+            onOpenProfile: onOpenProfile,
+          ),
+        ),
+        const SizedBox(width: 10),
+        _ActionsColumn(
+          isPast: isPast,
+          joinEnabled: joinEnabled,
+          uid: otherUserId,
+          displayName: displayName,
+          avatarUrl: avatarUrl,
+          canCancel: canCancel,
+          onMessage: onMessage,
+          onJoin: onJoin,
+          onCancel: onCancel,
+        ),
+      ],
+    );
+  }
+}
+
+class _RateFooter extends StatelessWidget {
+  final bool rated;
+  final VoidCallback? onRate;
+  const _RateFooter({required this.rated, required this.onRate});
+
+  @override
+  Widget build(BuildContext context) {
+    if (rated) {
+      return const Row(
+        children: [
+          Icon(Icons.check_circle_outline, size: 18, color: AppColors.muted),
+          SizedBox(width: 6),
+          Text('You rated this session',
+              style: TextStyle(color: AppColors.muted)),
+        ],
+      );
+    }
+    return OutlinedButton.icon(
+      key: const Key('consultation_rate_button'),
+      onPressed: onRate,
+      icon: const Icon(Icons.star_outline_rounded, size: 20),
+      label: const Text('Rate this session'),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppColors.text,
+        backgroundColor: AppColors.button,
+        side: const BorderSide(color: AppColors.border),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }

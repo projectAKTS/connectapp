@@ -26,6 +26,7 @@ functions:processAccountDeletionRequests,\
 functions:onAuthUserCreated,\
 functions:createExpressAccountLink,\
 functions:onCallInviteCreated,\
+functions:onReviewCreated,\
 functions:createStripeCustomer,\
 functions:createSetupIntent,\
 functions:createStripeCheckoutSession,\
@@ -39,11 +40,12 @@ What each change does:
 | Function | Change |
 |---|---|
 | `chargeStoredPaymentMethod` | The server prices the session. A client amount is accepted only if it is an offered price, and the charge records metadata. |
-| `deleteAccount` (new) | Deletes the account and personal data at once. |
+| `deleteAccount` (new) | Deletes the account and personal data at once; clears the text of reviews the user wrote. |
 | `processAccountDeletionRequests` (new, daily) | Handles deletion requests made from MVP-1 builds. |
 | `onAuthUserCreated` | Puts the email in the private `users/{uid}/private/account` doc; empty bio. |
 | `createExpressAccountLink` | Real Stripe return URLs (hosting pages); email from Auth. |
 | `onCallInviteCreated` | Calls from someone the callee blocked are never delivered. |
+| `onReviewCreated` (new) | A session review updates the helper's `rating` / `ratingCount`. |
 | The six Stripe customer functions | The Stripe customer email comes from Auth instead of the public doc. |
 
 ### 2. Release the new app build
@@ -57,6 +59,10 @@ and uses the new deletion and payment calls.
 firebase deploy --project connectapp-278b4 --only firestore:rules,storage,hosting
 ```
 
+- Firestore rules add `reviews/{consultationId}`: only the person who
+  booked a session can rate it, once, after its start time and unless it was
+  cancelled. `ratingSum` joins the fields users cannot write on their own
+  doc. No new index is needed.
 - Storage rules now read Firestore (to check chat participants). The CLI
   may ask to grant Storage access to Firestore; answer **yes**.
 - Hosting publishes `index`, `privacy`, `terms` and `safety` pages and the

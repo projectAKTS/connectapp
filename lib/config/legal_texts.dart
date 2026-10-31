@@ -113,6 +113,8 @@ use it, in line with Canada's PIPEDA.
 - **Account:** name, email, sign-in provider.
 - **Profile:** photo, bio, country, languages, topics and expertise you add.
 - **Content:** posts, comments, messages and attachments you share.
+- **Reviews:** stars and comments you give after a booked session. They
+  appear on the helper's profile without your name.
 - **Calls:** who called whom, when, and for how long. We don't record the
   audio or video of calls.
 - **Payments:** handled by Stripe. We store a payment reference, never your
@@ -141,7 +143,9 @@ States.
 While your account is active. When you delete your account, we delete your
 profile, posts, photos and personal data, at once or at most within 30
 days, except records we must keep by law (for example, payment records).
-Messages you already sent stay in the other person's conversation.
+Messages you already sent stay in the other person's conversation. Review
+comments you wrote are removed; their stars stay in the helper's average
+without your name.
 
 ### Your choices and rights
 You can view and edit your profile, change notification settings, and
