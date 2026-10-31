@@ -408,10 +408,6 @@ class _AuthGateState extends State<AuthGate> {
         'fullNameLower': resolvedName.toLowerCase(),
       };
 
-      final email = (user.email ?? '').trim();
-      if (email.isNotEmpty && (data['email'] ?? '').toString().trim().isEmpty) {
-        patch['email'] = email;
-      }
 
       if (!snap.exists) {
         patch.addAll({

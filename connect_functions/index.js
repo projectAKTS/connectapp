@@ -615,6 +615,17 @@ async function sendApnsAlertToTokens(tokens, { title, body, data }) {
   };
 }
 
+// Email lives in Auth and in the server-only users/{uid}/private/account doc,
+// never in the world-readable user doc.
+async function accountEmail(uid) {
+  try {
+    const user = await admin.auth().getUser(uid);
+    return `${user.email || ""}`.trim();
+  } catch (_) {
+    return "";
+  }
+}
+
 // --- Ensure Stripe Customer ---
 async function getOrCreateCustomer(uid) {
   const ref = db.collection("users").doc(uid);
@@ -637,7 +648,7 @@ async function getOrCreateCustomer(uid) {
   }
 
   const customer = await stripe.customers.create({
-    email: data.email || undefined,
+    email: (await accountEmail(uid)) || data.email || undefined,
     name: data.fullName || data.name || undefined,
     metadata: { firebaseUID: uid },
   });
@@ -986,7 +997,7 @@ exports.createExpressAccountLink = onCall(
       const acct = await stripe.accounts.create({
         type: "express",
         country: "CA",
-        email: data.email,
+        email: (await accountEmail(uid)) || data.email || undefined,
         capabilities: { transfers: { requested: true } },
       });
       accountId = acct.id;
@@ -1674,8 +1685,7 @@ exports.onAuthUserCreated = functionsV1.auth.user().onCreate(async (user) => {
       fullNameLower: resolvedName.toLowerCase(),
       displayName: resolvedName,
       displayName_lc: resolvedName.toLowerCase(),
-      email,
-      bio: "No bio available yet.",
+      bio: "",
       followers: [],
       following: [],
       postsCount: 0,
@@ -1708,6 +1718,14 @@ exports.onAuthUserCreated = functionsV1.auth.user().onCreate(async (user) => {
     },
     { merge: true }
   );
+  if (email) {
+    await db
+      .collection("users")
+      .doc(uid)
+      .collection("private")
+      .doc("account")
+      .set({ email }, { merge: true });
+  }
 });
 
 exports.healthCheck = onRequest(

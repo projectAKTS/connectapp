@@ -39,7 +39,6 @@ class FirebaseAuthService {
           'fullNameLower': fullName.toLowerCase(),
           'displayName': displayName,
           'displayName_lc': displayNameLc,
-          'email': email,
           'bio': '',
           'followers': [],
           'following': [],
