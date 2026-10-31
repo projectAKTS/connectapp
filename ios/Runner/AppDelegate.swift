@@ -1334,6 +1334,46 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
     }
   }
 
+  /// The Firestore instance FlutterFire uses, created the way FlutterFire
+  /// would create it and registered in its cache.
+  ///
+  /// FlutterFire calls setSettings the first time Dart touches Firestore
+  /// unless the instance is already cached, and setSettings on a started
+  /// instance throws and aborts the app. Answering a call notification on a
+  /// killed app wrote the invite status through Firestore.firestore() before
+  /// Dart ran, and the app crashed on Dart's first enableNetwork. Native
+  /// code must never start Firestore outside FlutterFire's cache, so this
+  /// returns nil when the cache cannot be reached.
+  private func flutterFireFirestore() -> Firestore? {
+    ensureFirebaseConfigured()
+    let database = "(default)"
+    guard let app = FirebaseApp.app(),
+          let utils = NSClassFromString("FLTFirebaseFirestoreUtils") as? NSObject.Type,
+          let reader = NSClassFromString("FLTFirebaseFirestoreReader") as? NSObject.Type
+    else { return nil }
+    let getSelector = NSSelectorFromString("getFirestoreInstanceByName:databaseURL:")
+    let setSelector = NSSelectorFromString("setCachedFIRFirestoreInstance:forAppName:databaseURL:")
+    let queueSelector = NSSelectorFromString("getFirestoreQueue")
+    guard utils.responds(to: getSelector),
+          utils.responds(to: setSelector),
+          reader.responds(to: queueSelector)
+    else { return nil }
+    if let cached = utils.perform(getSelector, with: app.name, with: database)?
+      .takeUnretainedValue() as? Firestore {
+      return cached
+    }
+    guard let queue = reader.perform(queueSelector)?.takeUnretainedValue() as? DispatchQueue
+    else { return nil }
+    let firestore = Firestore.firestore(app: app, database: database)
+    let settings = FirestoreSettings()
+    settings.dispatchQueue = queue
+    firestore.settings = settings
+    typealias SetCached = @convention(c) (AnyObject, Selector, Firestore, NSString, NSString) -> Void
+    let setCached = unsafeBitCast(utils.method(for: setSelector), to: SetCached.self)
+    setCached(utils, setSelector, firestore, app.name as NSString, database as NSString)
+    return firestore
+  }
+
   private func inviteIdFromCall(_ call: Call?) -> String {
     let extra = call?.data.extra as? [String: Any]
     let inviteId = (extra?["inviteId"] as? String) ?? ""
@@ -1366,8 +1406,17 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
       payload[key] = value
     }
 
-    Firestore.firestore().runTransaction({ transaction, errorPointer -> Any? in
-      let ref = Firestore.firestore().collection("callInvites").document(trimmedInviteId)
+    guard let firestore = flutterFireFirestore() else {
+      // Dart's accept/decline recovery writes the status instead.
+      storePushkitState(
+        "invite_status_sync_skipped",
+        payloadType: trimmedStatus,
+        detail: "identifier_present=true firestore_cache=unavailable"
+      )
+      return
+    }
+    firestore.runTransaction({ transaction, errorPointer -> Any? in
+      let ref = firestore.collection("callInvites").document(trimmedInviteId)
       let snapshot: DocumentSnapshot
       do {
         snapshot = try transaction.getDocument(ref)
