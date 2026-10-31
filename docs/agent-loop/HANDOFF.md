@@ -73,3 +73,21 @@ without `CALL_V2_REAL_FLOW_ENABLED`, so they used the legacyV1 connection
 system, the same as yesterday's APKs. TestFlight builds pass
 `CALL_V2_REAL_FLOW_ENABLED=true`, `CALL_V2_REAL_FLOW_DEV_CALLABLE=true`
 and `CALL_V2_BUILD_COMMIT`.
+
+## TestFlight Result (Build 202610310039, Commit d673113)
+
+- Upload: the first try failed with "PLA Update available" and no "iOS
+  Distribution" certificate. The user accepted the new Apple Developer
+  agreement, and the same archive then uploaded.
+- First call, TestFlight build installed as an update: still the APNs
+  fallback notification. Production function logs (read-only): VoIP went to
+  the one token with `sent: 1`, `failed: 0`, `environment: production`.
+  Apple accepted it, but the device showed no CallKit UI.
+- After the user deleted the app and reinstalled the same TestFlight build:
+  - the native CallKit full-screen UI appeared on the lock screen;
+  - the answer connected at 01:12:31 with audio flowing;
+  - the call ended cleanly.
+- Conclusion: the VoIP-to-CallKit path works. A delete and reinstall resets
+  both a stale VoIP registration and iOS's PushKit penalty for an app that
+  did not report calls (the F9 launch crashes today). The VoIP issue was not
+  a server or code defect in the current build.

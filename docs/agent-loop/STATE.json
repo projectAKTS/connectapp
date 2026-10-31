@@ -27,12 +27,12 @@
     "iphone_f8b_receiver_proximity": "user-verified",
     "iphone_f9_no_crash": "PASS",
     "iphone_f9b_notification_answer_connects": "PASS (00:37:27, audio flowing)",
-    "iphone_voip_callkit_killed": "OPEN (dev build sandbox token suspected)"
+    "iphone_voip_callkit_killed": "PASS on TestFlight 202610310039 after app delete+reinstall (CallKit UI, connected 01:12:31)"
   },
   "safety": {
     "deployed": false,
     "deploy_pending": null,
-    "testflight_built": false,
+    "testflight_built": true,
     "production_services_contacted": true,
     "firebase_changes": false,
     "backend_changes": false,
@@ -43,7 +43,7 @@
   "review": {
     "decision": "accepted",
     "reviewer": "claude",
-    "notes": "F9/F9b fixed and verified on iPhone; VoIP for killed app pending a TestFlight build (user-approved)."
+    "notes": "F9/F9b verified; TestFlight 202610310039 uploaded with user approval; killed+locked CallKit answer connects after reinstall."
   },
   "implementation_shas": [
     "1f66093",
