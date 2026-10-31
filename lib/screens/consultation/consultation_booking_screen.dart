@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:connect_app/config/mvp_features.dart';
 import 'package:connect_app/widgets/advice_notice.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -119,7 +120,10 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
   }
 
   bool get _isSeeker => _userRole != 'helper';
-  bool get _isSeekerPremium => _premiumActive && _isSeeker;
+  // Premium perks are client-decided and premiumStatus is user-writable, so
+  // they stay off until premium has a server-side entitlement.
+  bool get _isSeekerPremium =>
+      MvpFeatures.premium && _premiumActive && _isSeeker;
 
   bool get _freeAudioUsedThisMonth {
     final used = _freeAudioUsedAt;
@@ -236,7 +240,12 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
       if (_finalPrice > 0) {
         debugPrint(
             '🧾 [Booking] Starting payment flow. Amount: $_finalPrice CAD');
-        var charge = await _paymentService.processPayment(amount: _finalPrice);
+        var charge = await _paymentService.processPayment(
+          amount: _finalPrice,
+          durationMinutes: _selectedDuration,
+          callType: _callType,
+          helperId: widget.targetUserId,
+        );
         debugPrint('📤 [Booking] processPayment() returned: ${charge.result}');
 
         if (charge.result == PaymentResult.unauthenticated) {
@@ -244,7 +253,12 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
               '🔁 [Booking] Retrying payment after refreshing tokens...');
           await user.getIdToken(true);
           await FirebaseAppCheck.instance.getToken(true);
-          charge = await _paymentService.processPayment(amount: _finalPrice);
+          charge = await _paymentService.processPayment(
+            amount: _finalPrice,
+            durationMinutes: _selectedDuration,
+            callType: _callType,
+            helperId: widget.targetUserId,
+          );
           debugPrint('📤 [Booking] Retry result: ${charge.result}');
         }
 
@@ -311,7 +325,8 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
         widget.targetUserId,
         _selectedDuration,
         scheduledAt: _scheduledAt!,
-        costOverride: _finalPrice,
+        costOverride:
+            _finalPrice > 0 ? (charge.chargedAmount ?? _finalPrice) : 0,
         paymentIntentId: _finalPrice > 0 ? charge.paymentIntentId : null,
         currency: 'cad',
       );

@@ -890,10 +890,14 @@ exports.chargeStoredPaymentMethod = onCall(
     if (!request.auth) throw new HttpsError("unauthenticated");
     const stripe = getStripeClient();
     const uid = request.auth.uid;
-    const { amount, currency = "cad" } = request.data || {};
-
-    if (!amount || amount <= 0)
-      throw new HttpsError("invalid-argument", "Invalid amount");
+    const data = request.data || {};
+    // The server prices the session; a client-sent amount is never trusted.
+    const priced = resolveChargeAmount(data);
+    if (priced.error) throw new HttpsError("invalid-argument", priced.error);
+    const helperId = `${data.helperId || ""}`.trim();
+    if (helperId && helperId === uid) {
+      throw new HttpsError("invalid-argument", "You cannot book yourself");
+    }
 
     const doc = await db.collection("users").doc(uid).get();
     const u = doc.data() || {};
@@ -902,14 +906,23 @@ exports.chargeStoredPaymentMethod = onCall(
 
     try {
       const pi = await stripe.paymentIntents.create({
-        amount: Math.round(amount * 100),
-        currency,
+        amount: Math.round(priced.amount * 100),
+        currency: "cad",
         customer: u.stripeCustomerId,
         payment_method: u.defaultPaymentMethodId,
         off_session: true,
         confirm: true,
+        metadata: {
+          kind: "consultation",
+          seekerUid: uid,
+          helperUid: helperId,
+          durationMinutes: `${priced.durationMinutes ?? ""}`,
+          callType: priced.callType || "",
+          pricingVersion: PRICING_VERSION,
+          legacyAmount: priced.legacy ? "true" : "false",
+        },
       });
-      return { success: true, id: pi.id };
+      return { success: true, id: pi.id, amount: priced.amount };
     } catch (e) {
       console.error("Charge error:", e);
       throw new HttpsError("internal", e.message);
@@ -1034,6 +1047,10 @@ exports.handleStripeWebhook = onRequest(
 
 const { buildCallInviteFcmMessage } = require("./call_invites/call_invite_fcm_message");
 const { inviteFcmPlan } = require("./call_invites/invite_fcm_plan");
+const {
+  PRICING_VERSION,
+  resolveChargeAmount,
+} = require("./consultations/consultation_price");
 
 exports.onCallInviteCreated = onDocumentCreated(
   {

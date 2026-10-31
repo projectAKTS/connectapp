@@ -18,9 +18,13 @@ class PaymentChargeResult {
   final PaymentResult result;
   final String? paymentIntentId;
 
+  /// What the server actually charged (CAD), when it reports it.
+  final double? chargedAmount;
+
   const PaymentChargeResult({
     required this.result,
     this.paymentIntentId,
+    this.chargedAmount,
   });
 }
 
@@ -327,7 +331,14 @@ class PaymentService {
   }
 
   /// Charges the user’s stored default payment method.
-  Future<PaymentChargeResult> processPayment({required double amount}) async {
+  /// Charges a consultation. The server prices it from [durationMinutes] and
+  /// [callType]; [amount] is only read by servers older than that change.
+  Future<PaymentChargeResult> processPayment({
+    required double amount,
+    int? durationMinutes,
+    String? callType,
+    String? helperId,
+  }) async {
     debugPrint('💳 [PaymentService] processPayment() started. Amount: $amount');
     try {
       final functions = await _getAuthedFunctions();
@@ -340,6 +351,9 @@ class PaymentService {
       final response = await callable.call({
         'amount': amount,
         'currency': 'cad',
+        if (durationMinutes != null) 'durationMinutes': durationMinutes,
+        if (callType != null) 'callType': callType,
+        if (helperId != null) 'helperId': helperId,
       });
 
       final data = Map<String, dynamic>.from(response.data);
@@ -351,6 +365,7 @@ class PaymentService {
         return PaymentChargeResult(
           result: PaymentResult.success,
           paymentIntentId: data['id'] as String?,
+          chargedAmount: (data['amount'] as num?)?.toDouble(),
         );
       }
 
