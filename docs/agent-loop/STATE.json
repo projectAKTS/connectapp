@@ -1,47 +1,16 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "mvp1_client_blockers",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "fd7ad91",
-  "starting_sha": "fd7ad91",
+  "phase": "mvp2_server_hardening",
+  "status": "task_ready",
+  "accepted_checkpoint_sha": "080bd1f",
+  "starting_sha": "080bd1f",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "ba7dc8c",
+  "code_commit_sha": null,
   "ending_sha": "SELF",
-  "changed_files": [
-    "lib/models/help_topics.dart",
-    "lib/config/mvp_features.dart",
-    "lib/config/legal_texts.dart",
-    "lib/services/safety_service.dart",
-    "lib/utils/profile_text.dart",
-    "lib/widgets/advice_notice.dart",
-    "lib/screens/settings/settings_screen.dart",
-    "lib/screens/settings/legal_screen.dart",
-    "lib/main.dart",
-    "lib/theme/tokens.dart",
-    "lib/services/firebase_auth_service.dart",
-    "lib/screens/onboarding_screen.dart",
-    "lib/screens/profile/edit_profile_screen.dart",
-    "lib/screens/profile/profile_screen.dart",
-    "lib/screens/search/find_helper_screen.dart",
-    "lib/screens/search/search_screen.dart",
-    "lib/screens/home/home_content_screen.dart",
-    "lib/screens/messages/messages_screen.dart",
-    "lib/screens/chat/chat_screen.dart",
-    "lib/screens/auth/signup_screen.dart",
-    "lib/screens/consultation/consultation_booking_screen.dart",
-    "test/mvp/safety_service_test.dart",
-    "docs/agent-loop/NEXT_TASK.md",
-    "docs/agent-loop/HANDOFF.md",
-    "docs/agent-loop/STATE.json"
-  ],
-  "validation": {
-    "safety_service_test": "4/4",
-    "flutter_test_all": "+2456 -6 (4 known guards + 2 test-mode-only integration)",
-    "flutter_analyze": "no issues",
-    "emulator_visual": "Find a helper, Profile, Settings checked"
-  },
+  "changed_files": [],
+  "validation": {},
   "safety": {
     "deployed": false,
     "deploy_pending": null,
@@ -49,22 +18,14 @@
     "production_services_contacted": true,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": true,
-    "test_changes": true,
+    "production_code_changes": false,
+    "test_changes": false,
     "physical_calls_approved": true
   },
   "review": {
     "decision": "accepted",
     "reviewer": "claude",
-    "notes": "MVP-1 client blockers done; MVP-2 (rules/functions, user deploy) next."
+    "notes": "MVP-1 accepted; MVP-2 server hardening authorized (user asleep, deploys batched by user)."
   },
-  "implementation_shas": [
-    "f10f71d",
-    "c2a1c2e",
-    "f5dbfe8",
-    "331dfa9",
-    "061ff48",
-    "71aa58b",
-    "ba7dc8c"
-  ]
+  "implementation_shas": []
 }
