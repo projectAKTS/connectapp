@@ -5,10 +5,11 @@
  * Play account deletion, PIPEDA).
  *
  * Deleted: the user doc and all its subcollections, their posts (with
- * comments), their follower lists, their profile photos and post media, and
- * the Auth user. Kept: consultations and Stripe records (payment records the
- * law requires), and messages already sent to other people, which stay in
- * those people's chats.
+ * comments), their follower lists, their profile photos and post media, the
+ * text of reviews they wrote, and the Auth user. Kept: consultations and
+ * Stripe records (payment records the law requires), review stars (they are
+ * part of the helper's average), and messages already sent to other people,
+ * which stay in those people's chats.
  *
  * Dependencies are injected so the plan can be tested without Firebase.
  */
@@ -18,7 +19,13 @@ const STORAGE_PREFIXES = ["users", "post_images", "post_videos", "post_video_thu
 async function deleteUserData({ db, bucket, auth, uid, log = () => {} }) {
   const userId = `${uid || ""}`.trim();
   if (!userId) throw new Error("uid required");
-  const summary = { uid: userId, posts: 0, storagePrefixes: 0, authDeleted: false };
+  const summary = {
+    uid: userId,
+    posts: 0,
+    reviews: 0,
+    storagePrefixes: 0,
+    authDeleted: false,
+  };
 
   // Posts store the author as userID; older ones used userId.
   const seen = new Set();
@@ -30,6 +37,12 @@ async function deleteUserData({ db, bucket, auth, uid, log = () => {} }) {
       await db.recursiveDelete(post.ref);
       summary.posts += 1;
     }
+  }
+
+  const reviews = await db.collection("reviews").where("reviewerUid", "==", userId).get();
+  for (const review of reviews.docs) {
+    await review.ref.update({ text: "", reviewerDeleted: true });
+    summary.reviews += 1;
   }
 
   await db.recursiveDelete(db.collection("followers").doc(userId));

@@ -64,6 +64,7 @@ service cloud.firestore {
         'stripeAccountId',
         'rating',
         'ratingCount',
+        'ratingSum',
         'reviewCount'
       ];
     }
@@ -374,6 +375,38 @@ service cloud.firestore {
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.participants is list
         && request.resource.data.participants.hasAny([request.auth.uid]);
+    }
+
+    // Reviews: the payer rates a consultation once, after its start time and
+    // unless it was cancelled. The doc id is the consultation id, so a second
+    // review is an update, which is denied. The server adds `countedAt` when
+    // it updates the helper's average.
+    match /reviews/{consultationId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(
+          ['consultationId', 'reviewerUid', 'helperUid', 'stars', 'text', 'createdAt'])
+        && request.resource.data.consultationId == consultationId
+        && request.resource.data.reviewerUid == request.auth.uid
+        && request.resource.data.helperUid is string
+        && request.resource.data.helperUid != request.auth.uid
+        && request.resource.data.stars is int
+        && request.resource.data.stars >= 1
+        && request.resource.data.stars <= 5
+        && request.resource.data.get('text', '') is string
+        && request.resource.data.get('text', '').size() <= 500
+        && request.resource.data.createdAt == request.time
+        && reviewableConsultation(consultationId, request.resource.data.helperUid);
+      allow update, delete: if false;
+    }
+
+    function reviewableConsultation(consultationId, helperUid) {
+      let c = get(/databases/$(database)/documents/consultations/$(consultationId)).data;
+      return c.userId == request.auth.uid
+        && c.targetUserId == helperUid
+        && c.get('status', 'scheduled') != 'cancelled'
+        && c.scheduledAt is timestamp
+        && c.scheduledAt < request.time;
     }
   }
 }

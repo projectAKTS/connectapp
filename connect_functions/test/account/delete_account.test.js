@@ -5,18 +5,22 @@ const { test } = require("node:test");
 
 const { deleteUserData } = require("../../account/delete_account");
 
-function fakes({ posts = [], authError = null } = {}) {
-  const calls = { recursive: [], prefixes: [], authDeleted: [] };
-  const ref = (p) => ({ path: p });
+function fakes({ posts = [], reviews = [], authError = null } = {}) {
+  const calls = { recursive: [], prefixes: [], authDeleted: [], updated: [] };
+  const ref = (p) => ({
+    path: p,
+    update: async (data) => calls.updated.push({ path: p, data }),
+  });
+  const rows = { posts, reviews };
   const db = {
     collection(name) {
       return {
         doc: (id) => ref(`${name}/${id}`),
         where: (field, op, value) => ({
           get: async () => ({
-            docs: posts
+            docs: (rows[name] || [])
               .filter((p) => op === "==" && p[field] === value)
-              .map((p) => ({ ref: ref(`posts/${p.id}`) })),
+              .map((p) => ({ ref: ref(`${name}/${p.id}`) })),
           }),
         }),
       };
@@ -51,6 +55,20 @@ test("deletes the user's doc, posts, followers, media and auth user", async () =
   ]);
   assert.deepEqual(f.calls.authDeleted, ["u1"]);
   assert.equal(summary.posts, 2);
+});
+
+test("reviews the user wrote lose their text but keep their stars", async () => {
+  const f = fakes({
+    reviews: [
+      { id: "c1", reviewerUid: "u1" },
+      { id: "c2", reviewerUid: "other" },
+    ],
+  });
+  const summary = await deleteUserData({ ...f, uid: "u1" });
+  assert.deepEqual(f.calls.updated, [
+    { path: "reviews/c1", data: { text: "", reviewerDeleted: true } },
+  ]);
+  assert.equal(summary.reviews, 1);
 });
 
 test("an already deleted auth user is fine", async () => {

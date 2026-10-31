@@ -1112,6 +1112,33 @@ const {
   resolveChargeAmount,
 } = require("./consultations/consultation_price");
 const { deleteUserData } = require("./account/delete_account");
+const { addReviewToRating, validStars } = require("./reviews/review_aggregate");
+
+// A seeker's review of a finished consultation updates the helper's average
+// rating. Rules let only the payer create it, once, after the session time.
+// `countedAt` makes retried events count the review once.
+exports.onReviewCreated = onDocumentCreated(
+  { document: "reviews/{consultationId}", region: "us-central1" },
+  async (event) => {
+    const review = event.data?.data() || {};
+    const stars = validStars(review.stars);
+    const helperUid = `${review.helperUid || ""}`.trim();
+    if (!stars || !helperUid) return;
+    const helperRef = db.collection("users").doc(helperUid);
+    await db.runTransaction(async (tx) => {
+      const [reviewSnap, helperSnap] = await Promise.all([
+        tx.get(event.data.ref),
+        tx.get(helperRef),
+      ]);
+      if (!reviewSnap.exists || reviewSnap.get("countedAt")) return;
+      if (!helperSnap.exists) return;
+      tx.update(helperRef, addReviewToRating(helperSnap.data(), stars));
+      tx.update(event.data.ref, {
+        countedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+  },
+);
 
 exports.onCallInviteCreated = onDocumentCreated(
   {
