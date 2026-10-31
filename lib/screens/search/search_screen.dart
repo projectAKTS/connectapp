@@ -10,7 +10,10 @@ import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
 import 'package:connect_app/screens/posts/post_detail_screen.dart';
 import 'package:connect_app/services/firestore_read_helper.dart';
+import 'package:connect_app/services/helperly_test_runtime.dart';
+import 'package:connect_app/services/safety_service.dart';
 import 'package:connect_app/widgets/full_screen_back_gesture.dart';
+import 'package:connect_app/widgets/initials_avatar.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({Key? key}) : super(key: key);
@@ -27,6 +30,9 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Timer? _debounce;
   bool _loading = false;
+
+  // Only the newest search may write results; older ones finish late.
+  int _searchSeq = 0;
   _Tab _tab = _Tab.all;
 
   // Results
@@ -61,6 +67,7 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _runSearch(String raw) async {
+    final seq = ++_searchSeq;
     final query = _norm(raw);
     if (query.isEmpty) {
       setState(() {
@@ -89,7 +96,8 @@ class _SearchScreenState extends State<SearchScreen> {
           timeout: const Duration(seconds: 5),
         );
         for (final d in qs.docs) {
-          people.add(_userFromDoc(d.id, d.data()));
+          final hit = _userFromDoc(d.id, d.data());
+          if (hit != null) people.add(hit);
         }
         anyIndexedHit = people.isNotEmpty;
       } catch (_) {}
@@ -105,7 +113,9 @@ class _SearchScreenState extends State<SearchScreen> {
         );
         for (final d in qs.docs) {
           final hit = _userFromDoc(d.id, d.data());
-          if (!people.any((p) => p.userId == hit.userId)) people.add(hit);
+          if (hit != null && !people.any((p) => p.userId == hit.userId)) {
+            people.add(hit);
+          }
         }
         anyIndexedHit = anyIndexedHit || people.isNotEmpty;
       } catch (_) {}
@@ -118,12 +128,15 @@ class _SearchScreenState extends State<SearchScreen> {
         );
         for (final d in usersSnap.docs) {
           final m = d.data();
-          final name = (m['displayName'] ?? m['userName'] ?? '').toString();
+          final name =
+              (m['displayName'] ?? m['fullName'] ?? m['userName'] ?? '')
+                  .toString();
           final handle = (m['userName'] ?? '').toString();
           final bio = (m['bio'] ?? '').toString();
           final hay = '${_norm(name)} ${_norm(handle)} ${_norm(bio)}';
           if (hay.contains(query)) {
-            people.add(_userFromDoc(d.id, m));
+            final hit = _userFromDoc(d.id, m);
+            if (hit != null) people.add(hit);
           }
         }
       }
@@ -144,6 +157,7 @@ class _SearchScreenState extends State<SearchScreen> {
         final userName = (m['userName'] ?? 'User').toString();
         final userAvatar = (m['userAvatar'] ?? '').toString();
         final userId = _extractPostUserId(m);
+        if (SafetyService.instance.isBlocked(userId)) continue;
         final tags = (m['tags'] is List)
             ? (m['tags'] as List).map((e) => e.toString()).toList()
             : <String>[];
@@ -163,33 +177,46 @@ class _SearchScreenState extends State<SearchScreen> {
         }
       }
 
-      if (!mounted) return;
+      if (!mounted || seq != _searchSeq) return;
       setState(() {
         _userHits = people;
         _postHits = posts;
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || seq != _searchSeq) return;
       setState(() {
         _userHits = [];
         _postHits = [];
       });
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && seq == _searchSeq) setState(() => _loading = false);
     }
   }
 
-  _UserHit _userFromDoc(String id, Map<String, dynamic> m) {
-    final name = (m['displayName'] ?? m['userName'] ?? 'User').toString();
-    final handle = (m['userName'] ?? '').toString();
-    final bio = (m['bio'] ?? '').toString();
-    final avatar = (m['photoURL'] ?? m['avatar'] ?? '').toString();
+  /// A person result, or null for yourself, blocked people and accounts
+  /// being deleted.
+  _UserHit? _userFromDoc(String id, Map<String, dynamic> m) {
+    if (id == (HelperlyTestRuntime.currentUid ?? '')) return null;
+    if (m['deletionRequestedAt'] != null) return null;
+    if (SafetyService.instance.isBlocked(id)) return null;
+    String first(List<String> keys) {
+      for (final k in keys) {
+        final v = m[k];
+        if (v is String && v.trim().isNotEmpty) return v.trim();
+      }
+      return '';
+    }
+
+    final name = first(['displayName', 'fullName', 'userName']);
+    final role = '${m['role'] ?? ''}';
     return _UserHit(
       userId: id,
       name: name.isEmpty ? 'User' : name,
-      handle: handle,
-      bio: bio,
-      avatarUrl: avatar,
+      handle: first(['userName']),
+      bio: first(['bio']),
+      // The app stores the photo as profilePicture; the others are older.
+      avatarUrl: first(['profilePicture', 'photoURL', 'avatar']),
+      isHelper: role == 'helper' || role == 'both' || m['isHelper'] == true,
     );
   }
 
@@ -551,6 +578,16 @@ class _UserTile extends StatelessWidget {
   final _UserHit hit;
   const _UserTile({required this.hit});
 
+  static Widget? _subtitle(_UserHit hit) {
+    final parts = [
+      if (hit.isHelper) 'Helper',
+      if (hit.handle.isNotEmpty) '@${hit.handle}',
+    ];
+    if (parts.isEmpty) return null;
+    return Text(parts.join(' · '),
+        style: const TextStyle(color: AppColors.muted));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -560,14 +597,11 @@ class _UserTile extends StatelessWidget {
         side: const BorderSide(color: AppColors.border),
       ),
       child: ListTile(
-        leading: _Avatar(url: hit.avatarUrl, radius: 22),
+        leading: InitialsAvatar(url: hit.avatarUrl, name: hit.name, radius: 22),
         title: Text(hit.name,
             style: const TextStyle(
                 fontWeight: FontWeight.w700, color: AppColors.text)),
-        subtitle: hit.handle.isEmpty
-            ? null
-            : Text('@${hit.handle}',
-                style: const TextStyle(color: AppColors.muted)),
+        subtitle: _subtitle(hit),
         onTap: () {
           Navigator.of(context, rootNavigator: true).push(
             MaterialPageRoute(
@@ -726,7 +760,10 @@ class _PostTile extends StatelessWidget {
                   InkWell(
                     borderRadius: BorderRadius.circular(18),
                     onTap: openProfile,
-                    child: _Avatar(url: hit.authorAvatar, radius: 18),
+                    child: InitialsAvatar(
+                        url: hit.authorAvatar,
+                        name: hit.authorName,
+                        radius: 18),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -919,12 +956,14 @@ class _UserHit {
   final String handle;
   final String bio;
   final String avatarUrl;
+  final bool isHelper;
   _UserHit({
     required this.userId,
     required this.name,
     required this.handle,
     required this.bio,
     required this.avatarUrl,
+    this.isHelper = false,
   });
 }
 
@@ -948,19 +987,6 @@ class _PostHit {
 }
 
 // ——— Small avatar ————————————————————————————————————————————————
-class _Avatar extends StatelessWidget {
-  final String url;
-  final double radius;
-  const _Avatar({required this.url, this.radius = 20});
-  @override
-  Widget build(BuildContext context) => url.isEmpty
-      ? CircleAvatar(
-          radius: radius,
-          backgroundColor: AppColors.avatarBg,
-          child: const Icon(Icons.person_outline, color: AppColors.avatarFg))
-      : CircleAvatar(radius: radius, backgroundImage: NetworkImage(url));
-}
-
 // ——— Normalization helper ————————————————————————————————————————————
 String _norm(String s) {
   final lower = s.toLowerCase();

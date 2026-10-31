@@ -9,6 +9,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import 'package:connect_app/theme/tokens.dart';
+import 'package:connect_app/widgets/initials_avatar.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
 import 'package:connect_app/services/firestore_read_helper.dart';
 import 'package:connect_app/widgets/full_screen_back_gesture.dart';
@@ -473,7 +474,7 @@ class _HelperTile extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Avatar(url: helper.avatar, name: helper.name, radius: 24),
+              InitialsAvatar(url: helper.avatar, name: helper.name, radius: 24),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -1157,45 +1158,6 @@ class _SearchPill extends StatelessWidget {
           const SizedBox(width: 8),
         ],
       ),
-    );
-  }
-}
-
-class _Avatar extends StatelessWidget {
-  final String url;
-  final String name;
-  final double radius;
-  const _Avatar({required this.url, this.name = '', this.radius = 20});
-
-  /// Up to two initials; people recognise names faster than a generic icon.
-  String get _initials {
-    final parts =
-        name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
-    if (parts.isEmpty) return '';
-    final first = parts.first.characters.first;
-    final last = parts.length > 1 ? parts.last.characters.first : '';
-    return (first + last).toUpperCase();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (url.isNotEmpty) {
-      return CircleAvatar(radius: radius, backgroundImage: NetworkImage(url));
-    }
-    final initials = _initials;
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: AppColors.avatarBg,
-      child: initials.isEmpty
-          ? const Icon(Icons.person_outline, color: AppColors.avatarFg)
-          : Text(
-              initials,
-              style: TextStyle(
-                color: AppColors.primary,
-                fontWeight: FontWeight.w700,
-                fontSize: radius * 0.7,
-              ),
-            ),
     );
   }
 }
