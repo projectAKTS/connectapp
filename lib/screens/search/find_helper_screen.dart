@@ -473,7 +473,7 @@ class _HelperTile extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Avatar(url: helper.avatar, radius: 24),
+              _Avatar(url: helper.avatar, name: helper.name, radius: 24),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -521,7 +521,9 @@ class _HelperTile extends StatelessWidget {
                       children: [
                         if (helper.hourlyRate != null)
                           _Tag('\$${helper.hourlyRate!.toStringAsFixed(0)}/hr'),
-                        if (helper.isAvailable) const _Tag('Available now'),
+                        // Derived from a stated time window, not live
+                        // presence, so it must not claim "now".
+                        if (helper.isAvailable) const _Tag('Available'),
                         ...(helper.expertise.isNotEmpty
                                 ? helper.expertise
                                 : helper.categories)
@@ -1161,16 +1163,41 @@ class _SearchPill extends StatelessWidget {
 
 class _Avatar extends StatelessWidget {
   final String url;
+  final String name;
   final double radius;
-  const _Avatar({required this.url, this.radius = 20});
+  const _Avatar({required this.url, this.name = '', this.radius = 20});
+
+  /// Up to two initials; people recognise names faster than a generic icon.
+  String get _initials {
+    final parts =
+        name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return '';
+    final first = parts.first.characters.first;
+    final last = parts.length > 1 ? parts.last.characters.first : '';
+    return (first + last).toUpperCase();
+  }
+
   @override
-  Widget build(BuildContext context) => url.isEmpty
-      ? CircleAvatar(
-          radius: radius,
-          backgroundColor: AppColors.avatarBg,
-          child: const Icon(Icons.person_outline, color: AppColors.avatarFg),
-        )
-      : CircleAvatar(radius: radius, backgroundImage: NetworkImage(url));
+  Widget build(BuildContext context) {
+    if (url.isNotEmpty) {
+      return CircleAvatar(radius: radius, backgroundImage: NetworkImage(url));
+    }
+    final initials = _initials;
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: AppColors.avatarBg,
+      child: initials.isEmpty
+          ? const Icon(Icons.person_outline, color: AppColors.avatarFg)
+          : Text(
+              initials,
+              style: TextStyle(
+                color: AppColors.primary,
+                fontWeight: FontWeight.w700,
+                fontSize: radius * 0.7,
+              ),
+            ),
+    );
+  }
 }
 
 // —— Helpers ————————————————————————————————————————————————————————————
