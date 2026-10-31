@@ -1099,6 +1099,7 @@ exports.handleStripeWebhook = onRequest(
 
 const { buildCallInviteFcmMessage } = require("./call_invites/call_invite_fcm_message");
 const { inviteFcmPlan } = require("./call_invites/invite_fcm_plan");
+const { calleeBlockedCaller } = require("./call_invites/blocked_caller");
 const {
   PRICING_VERSION,
   resolveChargeAmount,
@@ -1116,6 +1117,24 @@ exports.onCallInviteCreated = onDocumentCreated(
     const { fromName, toUid, channel, isVideo } = d;
     const inviteId = event.params.inviteId || "";
     if (!toUid || !channel) return;
+    const calleeDoc = await db.collection("users").doc(`${toUid}`).get();
+    if (calleeBlockedCaller(calleeDoc.data(), d.fromUid)) {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(event.data.ref);
+        if ((snap.get("status") || "") !== "ringing") return;
+        tx.set(
+          event.data.ref,
+          {
+            status: "missed",
+            endReason: "callee_unavailable",
+            endedAt: admin.firestore.FieldValue.serverTimestamp(),
+            serverNotifyStage: "skipped_blocked",
+          },
+          { merge: true }
+        );
+      });
+      return;
+    }
     let voipDelivered = false;
     let apnsAlertDelivered = false;
     let fcmDelivered = false;
