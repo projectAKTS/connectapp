@@ -854,6 +854,8 @@ class _SearchPill extends StatelessWidget {
               focusNode: focusNode,
               decoration: InputDecoration(
                 hintText: hint,
+                // The pill draws the background; a themed fill clipped it.
+                filled: false,
                 border: InputBorder.none,
                 isDense: true,
                 contentPadding:

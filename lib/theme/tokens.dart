@@ -6,7 +6,7 @@ class AppColors {
 
   // Core surfaces
   static const canvas = Color(0xFFFFFFFF); // Pure white background
-  static const card   = Color(0xFFFFFFFF); // Pure white cards
+  static const card   = Color(0xFFFBFAF8); // Ultra-white cards
   static const postCard = card;            // Home posts also pure white
   static const button = Color(0xFFF7F5F2); // Soft beige for pills/buttons
   static const surface = canvas;

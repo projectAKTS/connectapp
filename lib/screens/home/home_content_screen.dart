@@ -527,7 +527,8 @@ class HomeContentScreenState extends State<HomeContentScreen>
                               authorName: authorName,
                               authorAvatarUrl: avatar,
                               subtitle: subtitle,
-                              rightTime: right,
+                              // The subtitle already says "<time> ago".
+                              rightTime: '',
                               body: body,
                               imageUrls: imageUrls,
                               videoUrl: videoUrl,
@@ -1413,14 +1414,16 @@ class _PostHeader extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(width: 8),
-        Text(
-          rightTime,
-          style: const TextStyle(
-            fontSize: 12.5,
-            color: AppColors.muted,
+        if (rightTime.isNotEmpty) ...[
+          const SizedBox(width: 8),
+          Text(
+            rightTime,
+            style: const TextStyle(
+              fontSize: 12.5,
+              color: AppColors.muted,
+            ),
           ),
-        ),
+        ],
         if (trailing != null) ...[
           const SizedBox(width: 4),
           trailing!,
