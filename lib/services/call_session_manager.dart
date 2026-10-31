@@ -1021,6 +1021,37 @@ class CallSessionManager {
   bool get _nativeAudioSessionGatesCalleeMedia =>
       _nativeAudioSessionGatesCalleeMediaForTest ?? !Platform.isAndroid;
 
+  /// iOS gates callee media on CallKit's audio session. An answer from the
+  /// incoming-call notification fallback (no VoIP push arrived) has no
+  /// CallKit call, so that session never activates and the call never
+  /// connected; the app is foreground then and Agora owns the session. Any
+  /// doubt (the native list fails) keeps the gate.
+  Future<bool> _calleeMediaNeedsNativeAudioSession(
+    _CallSession session,
+  ) async {
+    if (!_nativeAudioSessionGatesCalleeMedia) return false;
+    final provider = _listNativeCalls;
+    if (provider == null) return true;
+    final List<NativeCallSnapshot> nativeCalls;
+    try {
+      nativeCalls = await provider();
+    } catch (_) {
+      return true;
+    }
+    final exactId = session.acceptedCallkitId.trim().toLowerCase();
+    final hasNativeCall = nativeCalls.any((call) =>
+        (exactId.isNotEmpty &&
+            call.callkitId.trim().toLowerCase() == exactId) ||
+        call.inviteId == session.inviteId);
+    if (!hasNativeCall) {
+      await _diagManager('callee_media_without_native_call', meta: {
+        'inviteId': session.inviteId,
+        'nativeCallCount': nativeCalls.length,
+      });
+    }
+    return hasNativeCall;
+  }
+
   bool get _iosCallkitOnlyIncomingUi {
     final override = _iosCallkitOnlyIncomingUiForTest;
     if (override != null) return override;
@@ -4578,10 +4609,12 @@ class CallSessionManager {
         return _IncomingCandidateResult.ignored;
       }
       final foreground = await _isAppActuallyForeground();
+      final needsNativeAudioSession =
+          await _calleeMediaNeedsNativeAudioSession(session);
       try {
         await _claimPhysicalAudioMedia(
           session,
-          requireExactAudioSession: _nativeAudioSessionGatesCalleeMedia,
+          requireExactAudioSession: needsNativeAudioSession,
           allowPermissionRequest: foreground,
         );
       } catch (error) {

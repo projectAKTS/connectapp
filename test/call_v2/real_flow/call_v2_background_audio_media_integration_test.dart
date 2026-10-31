@@ -268,6 +268,63 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('a notification answer without a CallKit call starts media (F9)',
+      (tester) async {
+    // iOS fallback: no VoIP push, so no CallKit call and no CallKit audio
+    // session; waiting for one left the call silent until it ended.
+    await seedInvite('notification_answer');
+    expect(nativeCalls, isEmpty);
+
+    await manager
+        .handleRecoveredAcceptedInvite(
+          inviteId: 'notification_answer',
+          channel: 'channel_notification_answer',
+          isVideo: false,
+          fromName: 'Background Caller',
+          fromUid: callerUid,
+          callkitId: exactId,
+        )
+        .timeout(const Duration(seconds: 2));
+    await waitUntil(tester, () => runtimes.isNotEmpty);
+    await waitUntil(tester, () => runtimes.single.joinCount == 1);
+
+    expect(runtimes.single.startCount, 1);
+    await manager.forceIdleForTest();
+    await tester.pump();
+  });
+
+  testWidgets('a CallKit answer still waits for the CallKit audio session',
+      (tester) async {
+    await seedInvite('callkit_answer');
+    nativeCalls.add(const NativeCallSnapshot(
+      callkitId: exactId,
+      inviteId: 'callkit_answer',
+      channel: 'channel_callkit_answer',
+      accepted: true,
+    ));
+
+    await manager
+        .handleRecoveredAcceptedInvite(
+          inviteId: 'callkit_answer',
+          channel: 'channel_callkit_answer',
+          isVideo: false,
+          fromName: 'Background Caller',
+          fromUid: callerUid,
+          callkitId: exactId,
+        )
+        .timeout(const Duration(seconds: 2));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(runtimes.where((r) => r.joinCount > 0), isEmpty);
+
+    await manager.handleCallkitAudioSessionChanged(
+      callkitId: exactId,
+      active: true,
+    );
+    await waitUntil(tester, () => runtimes.any((r) => r.joinCount == 1));
+    await manager.forceIdleForTest();
+    await tester.pump();
+  });
+
   testWidgets(
       'media ACK and watch transfer precede blocked Firestore join progress',
       (tester) async {
