@@ -626,6 +626,11 @@ async function accountEmail(uid) {
   }
 }
 
+function hostingOrigin() {
+  const project = process.env.GCLOUD_PROJECT || "connectapp-278b4";
+  return `https://${project}.web.app`;
+}
+
 // --- Ensure Stripe Customer ---
 async function getOrCreateCustomer(uid) {
   const ref = db.collection("users").doc(uid);
@@ -1006,8 +1011,10 @@ exports.createExpressAccountLink = onCall(
 
     const link = await stripe.accountLinks.create({
       account: accountId,
-      refresh_url: "https://yourapp.page.link/onboarding_refresh",
-      return_url: "https://yourapp.page.link/onboarding_success",
+      // Pages on this project's Firebase Hosting (public/stripe/); the old
+      // page.link URLs were placeholders on the shut-down Dynamic Links.
+      refresh_url: `${hostingOrigin()}/stripe/refresh.html`,
+      return_url: `${hostingOrigin()}/stripe/return.html`,
       type: "account_onboarding",
     });
     return { url: link.url, stripeAccountId: accountId };
