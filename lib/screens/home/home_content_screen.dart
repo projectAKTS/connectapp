@@ -1,4 +1,5 @@
 // lib/screens/home/home_content_screen.dart
+import 'package:connect_app/services/safety_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
@@ -100,13 +101,20 @@ class HomeContentScreenState extends State<HomeContentScreen>
   void initState() {
     super.initState();
     widget.controller.attach(this);
+    SafetyService.instance.watch();
+    SafetyService.instance.blocked.addListener(_onBlockedChanged);
   }
 
   @override
   void dispose() {
+    SafetyService.instance.blocked.removeListener(_onBlockedChanged);
     widget.controller.detach(this);
     _scroll.dispose();
     super.dispose();
+  }
+
+  void _onBlockedChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -442,7 +450,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
                           hasMedia) {
                         return false;
                       }
-                      return true;
+                      return !SafetyService.instance.isBlocked(authorId);
                     }).toList();
 
                     final shownPosts = visiblePosts
@@ -514,6 +522,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
 
                             return _PostCell(
                               postId: shownPosts[i].id,
+                              authorId: authorId,
                               postType: type,
                               authorName: authorName,
                               authorAvatarUrl: avatar,
@@ -1067,6 +1076,7 @@ class _UploadBanner extends StatelessWidget {
 
 class _PostCell extends StatefulWidget {
   final String postId;
+  final String authorId;
   final String postType;
   final String authorName;
   final String authorAvatarUrl;
@@ -1090,6 +1100,7 @@ class _PostCell extends StatefulWidget {
 
   const _PostCell({
     required this.postId,
+    required this.authorId,
     required this.postType,
     required this.authorName,
     required this.authorAvatarUrl,
@@ -1155,6 +1166,23 @@ class _PostCellState extends State<_PostCell> {
         .collection('posts')
         .doc(widget.postId)
         .delete();
+  }
+
+  Future<void> _onOtherPostAction(String action) async {
+    if (action == 'report') {
+      await SafetyService.instance.reportWithSheet(
+        context,
+        type: 'post',
+        targetId: widget.postId,
+        targetUid: widget.authorId,
+      );
+    } else if (action == 'block') {
+      await SafetyService.instance.blockWithConfirm(
+        context,
+        targetUid: widget.authorId,
+        name: widget.authorName,
+      );
+    }
   }
 
   Future<void> _toggleHelpful(bool isHelpful) async {
@@ -1230,7 +1258,22 @@ class _PostCellState extends State<_PostCell> {
                     icon: const Icon(Icons.more_horiz, color: AppColors.muted),
                     tooltip: 'Post options',
                   )
-                : null,
+                : PopupMenuButton<String>(
+                    tooltip: 'Post options',
+                    icon: const Icon(Icons.more_horiz, color: AppColors.muted),
+                    onSelected: _onOtherPostAction,
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(
+                        value: 'report',
+                        child: Text('Report post'),
+                      ),
+                      if (widget.authorId.isNotEmpty)
+                        PopupMenuItem(
+                          value: 'block',
+                          child: Text('Block ${widget.authorName}'),
+                        ),
+                    ],
+                  ),
           ),
           const SizedBox(height: 8),
           _PostTypeBadge(label: _typeToBadge(widget.postType)),

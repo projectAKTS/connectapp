@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:connect_app/services/safety_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -296,9 +297,41 @@ class _ChatScreenState extends State<ChatScreen> {
     }).toList();
   }
 
+  /// Blocking stops sending; the person stays reachable after unblocking.
+  bool _blockedGuard() {
+    if (!SafetyService.instance.isBlocked(widget.otherUserId)) return false;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('You blocked this person. Unblock them to send messages.'),
+    ));
+    return true;
+  }
+
+  Future<void> _onSafetyAction(String action) async {
+    final name = _titleName?.isNotEmpty == true ? _titleName! : 'this person';
+    final safety = SafetyService.instance;
+    switch (action) {
+      case 'report':
+        await safety.reportWithSheet(
+          context,
+          type: 'chat',
+          targetId: _chatId,
+          targetUid: widget.otherUserId,
+        );
+      case 'block':
+        await safety.blockWithConfirm(
+          context,
+          targetUid: widget.otherUserId,
+          name: name,
+        );
+      case 'unblock':
+        await safety.setBlocked(widget.otherUserId, false);
+    }
+  }
+
   Future<void> _sendText(String text) async {
     final t = text.trim();
     if (t.isEmpty) return;
+    if (_blockedGuard()) return;
     _inputCtrl.clear();
     DiagnosticService.logChat('message_send_start', uid: _me, meta: {
       'chatId': _chatId,
@@ -420,6 +453,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _sendPendingAttachment() async {
     final x = _pendingAttachment;
     if (x == null) return;
+    if (_blockedGuard()) return;
     try {
       await _uploadAndSend(x, isImage: _pendingIsImage);
       if (!mounted) return;
@@ -574,6 +608,28 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ],
           ),
+          actions: [
+            ValueListenableBuilder<Set<String>>(
+              valueListenable: SafetyService.instance.blocked,
+              builder: (context, blocked, _) {
+                final isBlocked = blocked.contains(widget.otherUserId);
+                return PopupMenuButton<String>(
+                  tooltip: 'More',
+                  onSelected: _onSafetyAction,
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
+                      value: 'report',
+                      child: Text('Report'),
+                    ),
+                    PopupMenuItem(
+                      value: isBlocked ? 'unblock' : 'block',
+                      child: Text(isBlocked ? 'Unblock' : 'Block'),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ],
         ),
         body: FutureBuilder<void>(
           future: _ready,

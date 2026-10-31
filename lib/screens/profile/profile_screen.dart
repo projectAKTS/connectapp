@@ -1,5 +1,7 @@
 // lib/screens/profile/profile_screen.dart
 import 'dart:io';
+import 'package:connect_app/utils/profile_text.dart';
+import 'package:connect_app/services/safety_service.dart';
 import 'package:connect_app/config/mvp_features.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
@@ -209,6 +211,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
       toName: otherName,
       isVideo: isVideo,
     );
+  }
+
+  Future<void> _onSafetyAction(String action, String name) async {
+    final safety = SafetyService.instance;
+    switch (action) {
+      case 'report':
+        await safety.reportWithSheet(
+          context,
+          type: 'user',
+          targetId: widget.userID,
+          targetUid: widget.userID,
+        );
+      case 'block':
+        await safety.blockWithConfirm(
+          context,
+          targetUid: widget.userID,
+          name: name,
+        );
+      case 'unblock':
+        await safety.setBlocked(widget.userID, false);
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text('$name is unblocked.')));
+        }
+    }
   }
 
   Future<void> _signOut() async {
@@ -629,7 +656,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         boostedUntil != null && boostedUntil.isAfter(DateTime.now());
 
     final fullName = _s(userData!['fullName'], 'Unknown User');
-    final bio = _s(userData!['bio']);
+    final bio = placeholderBioToEmpty(_s(userData!['bio']));
     final badges = _stringList(userData!['badges']);
     final streakDays = _i(userData!['streakDays']);
     final xpPoints = _i(userData!['xpPoints']);
@@ -674,6 +701,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 onPressed: _signOut,
               ),
             ],
+            if (!isCurrentUser)
+              ValueListenableBuilder<Set<String>>(
+                valueListenable: SafetyService.instance.blocked,
+                builder: (context, blocked, _) {
+                  final isBlocked = blocked.contains(widget.userID);
+                  return PopupMenuButton<String>(
+                    tooltip: 'More',
+                    onSelected: (action) => _onSafetyAction(action, fullName),
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(
+                        value: 'report',
+                        child: Text('Report user'),
+                      ),
+                      PopupMenuItem(
+                        value: isBlocked ? 'unblock' : 'block',
+                        child: Text(isBlocked ? 'Unblock' : 'Block'),
+                      ),
+                    ],
+                  );
+                },
+              ),
           ],
         ),
         body: GestureDetector(

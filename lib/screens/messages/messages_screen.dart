@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:connect_app/services/safety_service.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -262,6 +263,8 @@ class _MessagesScreenState extends State<MessagesScreen> {
   @override
   void initState() {
     super.initState();
+    SafetyService.instance.watch();
+    SafetyService.instance.blocked.addListener(_onBlockedChanged);
     _waitingGuard = Timer(const Duration(seconds: 10), () {
       if (!mounted) return;
       setState(() => _allowWaitingFallback = true);
@@ -285,8 +288,13 @@ class _MessagesScreenState extends State<MessagesScreen> {
 
   @override
   void dispose() {
+    SafetyService.instance.blocked.removeListener(_onBlockedChanged);
     _waitingGuard?.cancel();
     super.dispose();
+  }
+
+  void _onBlockedChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _markAllChatsRead(String uid) async {
@@ -424,6 +432,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
                     otherId = _otherIdFromChatId(chatId, currentUid);
                   }
                   if (otherId.isEmpty || otherId == currentUid) continue;
+                  if (SafetyService.instance.isBlocked(otherId)) continue;
 
                   rowsByChatId[chatId] = {
                     'otherId': otherId,
