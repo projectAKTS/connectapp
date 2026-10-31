@@ -131,7 +131,125 @@ Kaynak: [Firebase Dynamic Links FAQ](https://firebase.google.com/support/dynamic
   **önce ücretsiz** yapıp ücretli görüşmeyi ikinci aşamada açmak. Ben bunu
   öneriyorum: önce topluluk ve güven, sonra para.
 
-## 7. Senden karar bekleyenler (özet)
+## 7. Québec'te yaşamak neyi değiştiriyor (31 Ekim 2026 ek araştırma)
+
+### Fransızca: lansman şehrinden bağımsız
+- **Kural:** Fransız Dili Şartı'na göre Québec'te kurulu ve Québec pazarına
+  hitap eden işletmelerde:
+  - web sitesindeki ticari içerik **Fransızca** olmalı;
+  - herkese aynı sunulan sözleşmeler (kullanım koşulları gibi) önce
+    **Fransızca** verilmeli (madde 55);
+  - yazılımın Fransızca sürümü varsa diğer dillerden kötü olmayan
+    koşullarla sunulmalı (madde 52.1). Yazılım kuralının tüketici
+    uygulamalarına nasıl uygulandığı net değil; avukata sorulmalı.
+- **Ceza:** şahıslar için 700–7.000 $, şirketler için 3.000–30.000 $;
+  tekrarda iki katı. Uygulama çoğunlukla **şikâyet üzerine** işliyor.
+  2023'te Fransızca olmayan siteler için verilen cezalar 1.500–3.000 $
+  civarındaydı.
+- **Helperly için anlamı:** Sen Québec'te yaşadığın için işletme de
+  Québec'te sayılır. Lansmanı Toronto'da yapsan bile uygulama Québec'ten
+  indirilebilir; Fransızca yükümlülüğü yine büyük ölçüde geçerli. İngilizce
+  şehir seçmek riski azaltır, ortadan kaldırmaz.
+- **Uygulamanın durumu:** dil altyapısı yok, ekranlarda en az ~240 sabit
+  İngilizce metin var. Fransızca eklemek yapılabilir bir iş; hukuki
+  metinlerin Fransızcası bir insan tarafından kontrol edilmeli.
+
+Kaynaklar:
+[Miller Thomson – Québec'te iş yapmak](https://www.millerthomson.com/en/insights/publications/special-considerations-doing-business-in-quebec-civil-law-language-compliance/),
+[BCF – Haziran 2025 yükümlülükleri](https://www.bcf.ca/en/thought-leadership/2025/the-charter-of-the-french-language-new-obligations-as-of-june-2025),
+[Smart & Biggar – ihlal maliyeti](https://www.smartbiggar.ca/insights/publication/french-language-requirements-in-qu%C3%A9bec-part-8---the-cost-of-violating-the-french-language-requirements-in-the-province-of-qu%C3%A9bec),
+[Montréal International](https://www.montrealinternational.com/en/?p=40110),
+[CFIB – Law 14](https://cfib-fcei.ca/en/site/qc-law-14-bill-96).
+
+### Gizlilik: Québec Law 25
+- **Kapsam:** Küçük işletme veya şahıs istisnası yok.
+- **Gizlilik sorumlusu:** Varsayılan olarak işletme sahibi (sen). Unvanı ve
+  iletişim bilgisi sitede yayınlanmalı.
+- **Etki değerlendirmesi:** Kişisel veri işleyen bir uygulama geliştirmeden
+  önce ve veriyi **Québec dışına** aktarmadan önce yazılı bir gizlilik etki
+  değerlendirmesi (PIA) gerekiyor. Firebase, Agora ve Stripe sunucuları ABD'de
+  olduğu için bu aktarım sayılıyor.
+- **Varsayılan gizlilik:** Kişiyi tanımlayan veya profilleyen izleme
+  teknolojisi varsayılan olarak kapalı olmalı ve kullanıcı bilgilendirilmeli.
+  Firebase Analytics için en güvenli yol, kullanıcı izin verene kadar kapalı
+  tutmak.
+- **Olay kaydı:** Veri sızıntısı olursa kayıt tutulmalı; ciddi durumlarda
+  CAI'ye ve kullanıcılara bildirilmeli.
+
+Kaynaklar:
+[CFIB – Law 25](https://www.cfib-fcei.ca/en/site/qc-law-25),
+[BCLP – Law 25](https://www.bclplaw.com/en-US/events-insights-news/quebec-law-no-25-a-little-known-privacy-law-with-a-big-reach.html),
+[TrustArc – Law 25](https://trustarc.com/regulations/quebec-law-25/).
+
+### Göç konusu: Québec ikinci bir kural ekliyor
+Québec'in kendi seçim programları (CSQ vb.) için danışmanlık yapacak kişinin
+**MIFI tarafından tanınmış** olması gerekiyor. Bu, federal RCIC kuralına
+eklenir. "Immigration experience" konusu yalnızca ücretsiz deneyim paylaşımı
+olarak kalmalı.
+
+Kaynaklar:
+[Québec – göç danışmanı olma koşulları](https://www.quebec.ca/immigration/consultants-immigration/obtenir-titre-consultant-immigration/conditions),
+[Québec göç danışmanları kaydı](https://open.canada.ca/data/en/dataset/23f8d075-4574-4238-a3d1-f3ba5674fce0).
+
+### İşletme kaydı
+Şahıs olarak kendi adın dışında bir adla ("Helperly") iş yapacaksan
+Registraire des entreprises'e kayıt zorunlu. Ücret yaklaşık 40 $; yıllık
+beyan da var. Kayıttan sonra bir NEQ numarası alırsın. Ad kuralları
+(Fransızca jenerik terim) avukata sorulmalı.
+
+Kaynak: [Québec.ca – kayıt](https://www.quebec.ca/en/businesses-and-self-employed-workers/start-entreprise/register-constitute-enterprise/learn-about-registration/about-registration).
+
+### Pazar
+- 2024'te yeni daimi oturum sayısı: Montréal bölgesi ~38.700, Toronto
+  ~124.660 (IRCC verisini aktaran ikincil kaynak).
+- Québec'te Ocak 2025'te ~617.000 geçici göçmen vardı. Bunlar uygulamanın en
+  doğal kullanıcıları: öğrenciler ve çalışma izinliler.
+- MIFI, 2024–25'te 91.165 kişiye Fransızca eğitimi verdi (%25 artış).
+  Fransızca pratiği ve Québec bürokrasisi Montréal'e özgü güçlü bir ihtiyaç.
+
+Kaynaklar:
+[CBC – Québec göç 2024](https://amp.cbc.ca/news/canada/montreal/quebec-immigration-fertility-1.7529965),
+[MIFI 2024-25 raporu (Immigrant Québec)](https://immigrantquebec.com/fr/actualites/bilan-en-immigration-le-rapport-annuel-de-gestion-2024-2025-du-mifi-depose/),
+[StatCan Q4 2025](https://www150.statcan.gc.ca/n1/daily-quotidien/260318/dq260318b-fra.htm).
+
+### Ücretsiz veya düşük ücretli hukuki yardım (Montréal)
+- Compass Startup Legal Clinic: girişimcilere ücretsiz hukuki bilgi
+  ([McGill Engine](https://www.mcgill.ca/engine/resources/mcgill-engine-centre-support/partners)).
+- YES Montréal: haftalık ücretsiz hukuki bilgi kliniği
+  ([YES](https://yesmontreal.ca/events/2024-01-08/)).
+- Barreau du Québec erişim kaynakları
+  ([Barreau](https://www.barreau.qc.ca/en/general-public/access-justice/access-justice-resources/)).
+
+## 8. Önerilen karar (Claude)
+
+1. **Şehir:** Montréal, iki dilli (FR + EN). Fransızca zaten gerekecek.
+   Yardımcı bulmak marketplace'in en zor kısmı ve bunu en iyi yaşadığın
+   yerde, yüz yüze yaparsın.
+   - Fransızca bitene kadar arkadaş ve topluluk çevresinde **kapalı beta**
+     (TestFlight ve Play internal testing) İngilizce yapılabilir.
+   - Herkese açık lansman Fransızca ile.
+2. **Önce ücretsiz.** Ücretli görüşme yardımcıya ödeme aktarımı bağlanınca
+   ve düzenli kullanım oluşunca açılır.
+3. **Fiyat (ücretli aşamada):** 10 dk = 4,99 $, platform payı ilk aşamada
+   %15 (yardımcıyı çekmek için). Ücretsiz 1 dakika kaldırılmalı; ücretsiz
+   aşama zaten tanışmayı karşılıyor.
+4. **Destek e-postası:** Bir alan adı al, support@ ve privacy@ adreslerini
+   ücretsiz yönlendirme ile (Cloudflare Email Routing gibi) Gmail'e bağla.
+   privacy@ Law 25 için gizlilik sorumlusu iletişimi olur.
+5. **Law 25:**
+   - gizlilik sorumlusu sen; adın ve iletişim bilgin gizlilik metnine
+     eklenir;
+   - Analytics izin verilene kadar kapalı (Crashlytics açık kalır);
+   - PIA taslağı hazırlanır.
+6. **İşletme kaydı:** "Helperly" adıyla Registraire des entreprises.
+7. **Avukata (Compass / YES) sorulacaklar:**
+   - Fransızca kapsamı;
+   - koşullar ve gizlilik metni;
+   - Law 25 PIA;
+   - işletme adı;
+   - ücretli aşamada vergi (GST/QST) ve tüketici koruma.
+
+## 9. Senden karar bekleyenler (özet)
 
 1. Gerçek destek e-postası.
 2. Lansman şehri: Ontario/BC mi, Québec mi (Fransızca)?
