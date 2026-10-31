@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:connect_app/services/app_telemetry.dart';
 import 'package:connect_app/config/mvp_features.dart';
 import 'package:connect_app/widgets/advice_notice.dart';
 import 'package:flutter/material.dart';
@@ -340,6 +341,10 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
 
       await InteractionService.recordInteraction(widget.targetUserId);
       if (!mounted) return;
+      AppTelemetry.event('consultation_booked', {
+        'call_type': _callType,
+        'minutes': _selectedDuration,
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Consultation booked successfully.')),
       );

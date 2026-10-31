@@ -1,3 +1,4 @@
+import 'package:connect_app/services/app_telemetry.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connect_app/config/legal_texts.dart';
@@ -67,6 +68,7 @@ class SettingsScreen extends StatelessWidget {
                   HttpsCallableOptions(timeout: const Duration(seconds: 60)))
           .call<void>();
       deletedNow = true;
+      AppTelemetry.event('account_deleted');
     } catch (_) {
       // Server deletion unavailable: record the request, processed daily.
       try {

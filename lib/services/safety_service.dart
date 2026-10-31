@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:connect_app/services/app_telemetry.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connect_app/services/helperly_test_runtime.dart';
 import 'package:connect_app/theme/tokens.dart';
@@ -149,6 +150,7 @@ class SafetyService {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Thanks. We received your report.'),
       ));
+      AppTelemetry.event('report_submitted', {'type': type});
     }
     return true;
   }
@@ -182,6 +184,7 @@ class SafetyService {
     );
     if (ok != true) return false;
     await setBlocked(targetUid, true);
+    AppTelemetry.event('user_blocked');
     if (context.mounted) {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('$name is blocked.')));

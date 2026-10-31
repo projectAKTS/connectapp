@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:connect_app/services/app_telemetry.dart';
 import 'package:connect_app/config/mvp_features.dart';
 import 'package:flutter/material.dart';
 
@@ -102,6 +103,7 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  await AppTelemetry.init();
   unawaited(
     FirestoreReadHelper.ensureNetworkEnabled(reason: 'app_start'),
   );
@@ -256,7 +258,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: navigatorKey,
-      navigatorObservers: [_RouteLogger()],
+      navigatorObservers: [_RouteLogger(), AppTelemetry.observer],
       title: 'Connect App',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
@@ -407,7 +409,6 @@ class _AuthGateState extends State<AuthGate> {
         'fullName': resolvedName,
         'fullNameLower': resolvedName.toLowerCase(),
       };
-
 
       if (!snap.exists) {
         patch.addAll({

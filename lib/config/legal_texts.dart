@@ -117,8 +117,10 @@ use it, in line with Canada's PIPEDA.
   audio or video of calls.
 - **Payments:** handled by Stripe. We store a payment reference, never your
   full card number.
-- **Device:** push notification tokens, app version, and diagnostic data
-  that helps us fix problems.
+- **Device and usage:** push notification tokens, app version, crash
+  reports (Firebase Crashlytics) and app usage events such as screens viewed
+  (Firebase Analytics), which help us fix problems and improve the app. They
+  don't include your messages or posts.
 
 ### How we use it
 To run the service (profiles, matching, messages, calls, payments), to keep
@@ -127,8 +129,8 @@ you've enabled, and to fix bugs and improve the app.
 
 ### Who we share it with
 Service providers who run parts of Helperly for us: Google Firebase
-(hosting, database, sign-in, notifications), Agora (calls) and Stripe
-(payments). Other users see your public profile and the content you post.
+(hosting, database, sign-in, notifications, crash reports, analytics),
+Agora (calls) and Stripe (payments). Other users see your public profile and the content you post.
 We don't sell personal information.
 
 ### Where it is stored

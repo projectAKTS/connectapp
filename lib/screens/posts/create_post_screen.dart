@@ -1,6 +1,7 @@
 // lib/screens/posts/create_post_screen.dart
 import 'dart:io';
 
+import 'package:connect_app/services/app_telemetry.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -624,6 +625,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Posted ✅')),
       );
+      AppTelemetry.event('post_created');
 
       Future.delayed(const Duration(milliseconds: 250), () {
         if (mounted) Navigator.of(context).maybePop('posted');
