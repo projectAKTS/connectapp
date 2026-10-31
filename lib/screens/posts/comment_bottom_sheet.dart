@@ -1,3 +1,4 @@
+import 'package:connect_app/services/content_filter.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -30,6 +31,12 @@ class _CommentBottomSheetState extends State<CommentBottomSheet> {
 
   Future<void> _postComment() async {
     if (_commentController.text.trim().isEmpty || _isPosting) return;
+    if (!ContentFilter.isAllowed(_commentController.text)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(ContentFilter.rejectionMessage)),
+      );
+      return;
+    }
 
     setState(() {
       _isPosting = true;
@@ -43,11 +50,14 @@ class _CommentBottomSheetState extends State<CommentBottomSheet> {
           .doc(userId)
           .get();
 
-      String userName = userDoc.exists
-          ? (userDoc['fullName'] ?? 'Anonymous')
-          : 'Anonymous';
+      String userName =
+          userDoc.exists ? (userDoc['fullName'] ?? 'Anonymous') : 'Anonymous';
 
-      await _firestore.collection('posts').doc(widget.postId).collection('comments').add({
+      await _firestore
+          .collection('posts')
+          .doc(widget.postId)
+          .collection('comments')
+          .add({
         'text': _commentController.text.trim(),
         'userId': userId,
         'userName': userName,
@@ -67,7 +77,6 @@ class _CommentBottomSheetState extends State<CommentBottomSheet> {
           );
         }
       });
-
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error posting comment: $e')),
@@ -136,13 +145,15 @@ class _CommentBottomSheetState extends State<CommentBottomSheet> {
                   controller: _scrollController,
                   itemCount: comments.length,
                   itemBuilder: (context, index) {
-                    var commentData = comments[index].data() as Map<String, dynamic>;
+                    var commentData =
+                        comments[index].data() as Map<String, dynamic>;
 
                     String commentText = commentData['text'] ?? 'No content';
                     String userName = commentData['userName'] ?? 'Anonymous';
 
                     // ⭐ Robust Timestamp Fix
-                    final dt = parseFirestoreTimestamp(commentData['timestamp']);
+                    final dt =
+                        parseFirestoreTimestamp(commentData['timestamp']);
                     String formattedTime = dt != null
                         ? DateFormat('MMM d, yyyy - hh:mm a').format(dt)
                         : 'Just now';

@@ -1,3 +1,4 @@
+import 'package:connect_app/services/content_filter.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -27,7 +28,9 @@ class _PostScreenState extends State<PostScreen> {
   }
 
   Future<void> _toggleLike() async {
-    final postRef = FirebaseFirestore.instance.collection('posts').doc(widget.postData['id']);
+    final postRef = FirebaseFirestore.instance
+        .collection('posts')
+        .doc(widget.postData['id']);
     final userId = currentUser?.uid;
 
     if (userId == null) return;
@@ -47,11 +50,20 @@ class _PostScreenState extends State<PostScreen> {
 
   Future<void> _addComment() async {
     if (_commentController.text.trim().isEmpty) return;
+    if (!ContentFilter.isAllowed(_commentController.text)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(ContentFilter.rejectionMessage)),
+      );
+      return;
+    }
 
-    final postRef = FirebaseFirestore.instance.collection('posts').doc(widget.postData['id']);
+    final postRef = FirebaseFirestore.instance
+        .collection('posts')
+        .doc(widget.postData['id']);
     await postRef.collection('comments').add({
       'content': _commentController.text.trim(),
-      'userName': currentUser?.email ?? 'Anonymous',
+      // Never the email: comments are public.
+      'userName': currentUser?.displayName ?? 'Member',
       'timestamp': FieldValue.serverTimestamp(),
     });
 
@@ -91,7 +103,8 @@ class _PostScreenState extends State<PostScreen> {
                   color: Colors.orange.shade100,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Text('💡 Pro Tip', style: TextStyle(color: Colors.orange)),
+                child: const Text('💡 Pro Tip',
+                    style: TextStyle(color: Colors.orange)),
               ),
             const SizedBox(height: 8),
 
@@ -101,8 +114,7 @@ class _PostScreenState extends State<PostScreen> {
             ),
             const SizedBox(height: 16),
 
-            if (imageUrls.isNotEmpty)
-              _PostMediaCarousel(urls: imageUrls),
+            if (imageUrls.isNotEmpty) _PostMediaCarousel(urls: imageUrls),
 
             if (tags.isNotEmpty) ...[
               const SizedBox(height: 16),
@@ -122,7 +134,8 @@ class _PostScreenState extends State<PostScreen> {
             Row(
               children: [
                 IconButton(
-                  icon: Icon(Icons.favorite, color: isLiked ? Colors.red : Colors.grey),
+                  icon: Icon(Icons.favorite,
+                      color: isLiked ? Colors.red : Colors.grey),
                   onPressed: _toggleLike,
                 ),
                 Text('$likesCount likes', style: const TextStyle(fontSize: 16)),
@@ -141,17 +154,20 @@ class _PostScreenState extends State<PostScreen> {
                     .orderBy('timestamp', descending: true)
                     .snapshots(),
                 builder: (context, snapshot) {
-                  if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                  if (!snapshot.hasData)
+                    return const Center(child: CircularProgressIndicator());
 
                   final comments = snapshot.data!.docs;
 
                   return ListView.builder(
                     itemCount: comments.length,
                     itemBuilder: (context, index) {
-                      final commentData = comments[index].data() as Map<String, dynamic>;
+                      final commentData =
+                          comments[index].data() as Map<String, dynamic>;
 
                       // Robust timestamp parsing
-                      final dt = parseFirestoreTimestamp(commentData['timestamp']);
+                      final dt =
+                          parseFirestoreTimestamp(commentData['timestamp']);
                       final formatted = dt != null
                           ? DateFormat('MMM d, yyyy – hh:mm a').format(dt)
                           : '';
@@ -166,7 +182,8 @@ class _PostScreenState extends State<PostScreen> {
                             if (formatted.isNotEmpty)
                               Text(
                                 formatted,
-                                style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                style: const TextStyle(
+                                    fontSize: 12, color: Colors.grey),
                               ),
                           ],
                         ),
@@ -184,7 +201,8 @@ class _PostScreenState extends State<PostScreen> {
                 Expanded(
                   child: TextField(
                     controller: _commentController,
-                    decoration: const InputDecoration(hintText: 'Add a comment...'),
+                    decoration:
+                        const InputDecoration(hintText: 'Add a comment...'),
                   ),
                 ),
                 IconButton(

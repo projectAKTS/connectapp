@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:connect_app/services/content_filter.dart';
 import 'package:connect_app/services/safety_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -332,6 +333,12 @@ class _ChatScreenState extends State<ChatScreen> {
     final t = text.trim();
     if (t.isEmpty) return;
     if (_blockedGuard()) return;
+    if (!ContentFilter.isAllowed(t)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(ContentFilter.rejectionMessage)),
+      );
+      return;
+    }
     _inputCtrl.clear();
     DiagnosticService.logChat('message_send_start', uid: _me, meta: {
       'chatId': _chatId,
