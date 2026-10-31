@@ -5,26 +5,65 @@ service firebase.storage {
       return request.auth != null;
     }
 
-    // Chat attachments
-    match /chats/{chatId}/{allPaths=**} {
-      allow read, write: if isSignedIn();
+    function isImageUnder(mb) {
+      return request.resource.contentType.matches('image/.*') &&
+        request.resource.size < mb * 1024 * 1024;
     }
 
-    // Post media
-    match /post_images/{allPaths=**} {
-      allow read, write: if isSignedIn();
+    function isVideoUnder(mb) {
+      return request.resource.contentType.matches('video/.*') &&
+        request.resource.size < mb * 1024 * 1024;
     }
-    match /post_videos/{allPaths=**} {
-      allow read, write: if isSignedIn();
+
+    function isChatParticipant(chatId) {
+      let chat = firestore.get(/databases/(default)/documents/chats/$(chatId)).data;
+      return (chat.keys().hasAny(['participants']) &&
+          chat.participants.hasAny([request.auth.uid])) ||
+        (chat.keys().hasAny(['users']) &&
+          chat.users.hasAny([request.auth.uid]));
     }
-    match /post_video_thumbs/{allPaths=**} {
-      allow read, write: if isSignedIn();
+
+    // Chat attachments: only the chat's participants. Files are immutable.
+    match /chats/{chatId}/{allPaths=**} {
+      allow read: if isSignedIn() && isChatParticipant(chatId);
+      allow create: if isSignedIn() && isChatParticipant(chatId) &&
+        (isImageUnder(15) || isVideoUnder(200));
+    }
+
+    // Post media, one folder per owner: everyone signed in reads, only the
+    // owner writes or deletes.
+    match /post_images/{uid}/{file} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == uid && isImageUnder(15);
+      allow delete: if isSignedIn() && request.auth.uid == uid;
+    }
+    match /post_videos/{uid}/{file} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == uid && isVideoUnder(300);
+      allow delete: if isSignedIn() && request.auth.uid == uid;
+    }
+    match /post_video_thumbs/{uid}/{file} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == uid && isImageUnder(5);
+      allow delete: if isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Post media uploaded before per-owner folders: read-only.
+    match /post_images/{file} {
+      allow read: if isSignedIn();
+    }
+    match /post_videos/{file} {
+      allow read: if isSignedIn();
+    }
+    match /post_video_thumbs/{file} {
+      allow read: if isSignedIn();
     }
 
     // Profile photos
     match /users/{uid}/{allPaths=**} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && request.auth.uid == uid;
+      allow write: if isSignedIn() && request.auth.uid == uid &&
+        (request.resource == null || isImageUnder(10));
     }
 
     // Deny everything else by default

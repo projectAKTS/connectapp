@@ -96,8 +96,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       return _quickController.text.trim().isNotEmpty || _hasMedia;
     }
 
-    final hasAnyAnswer =
-        _a1.text.trim().isNotEmpty || _a2.text.trim().isNotEmpty || _a3.text.trim().isNotEmpty;
+    final hasAnyAnswer = _a1.text.trim().isNotEmpty ||
+        _a2.text.trim().isNotEmpty ||
+        _a3.text.trim().isNotEmpty;
 
     return hasAnyAnswer || _hasMedia;
   }
@@ -573,8 +574,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         final videoFile = _videoFile;
         final videoThumbPath = _videoThumbPath;
         final mediaAspect = _mediaAspect;
-        final mediaCount =
-            imageFiles.length + (videoFile != null ? 1 : 0);
+        final mediaCount = imageFiles.length + (videoFile != null ? 1 : 0);
 
         final postId = await _postService.createPostShell(
           content,
@@ -649,6 +649,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final List<String> imageUrls = [];
     String? videoUrl;
     String? videoThumbUrl;
+    // Storage rules let only the owner write under post_*/{uid}/.
+    final ownerUid = FirebaseAuth.instance.currentUser?.uid ?? '';
 
     try {
       if (imageFiles.isNotEmpty) {
@@ -657,8 +659,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           final ref = FirebaseStorage.instance
               .ref()
               .child('post_images')
+              .child(ownerUid)
               .child('${DateTime.now().millisecondsSinceEpoch}_$i.jpg');
-          await ref.putFile(file).timeout(const Duration(minutes: 3));
+          await ref
+              .putFile(file, SettableMetadata(contentType: 'image/jpeg'))
+              .timeout(const Duration(minutes: 3));
           imageUrls.add(await ref.getDownloadURL());
         }
         if (imageUrls.isNotEmpty) imageUrl = imageUrls.first;
@@ -668,25 +673,28 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         final vRef = FirebaseStorage.instance
             .ref()
             .child('post_videos')
+            .child(ownerUid)
             .child('${DateTime.now().millisecondsSinceEpoch}.mp4');
-        await vRef.putFile(videoFile).timeout(const Duration(minutes: 5));
+        await vRef
+            .putFile(videoFile, SettableMetadata(contentType: 'video/mp4'))
+            .timeout(const Duration(minutes: 5));
         videoUrl = await vRef.getDownloadURL();
 
         if (videoThumbPath != null) {
           final tRef = FirebaseStorage.instance
               .ref()
               .child('post_video_thumbs')
+              .child(ownerUid)
               .child('${DateTime.now().millisecondsSinceEpoch}.jpg');
-          await tRef.putFile(File(videoThumbPath))
+          await tRef
+              .putFile(File(videoThumbPath),
+                  SettableMetadata(contentType: 'image/jpeg'))
               .timeout(const Duration(minutes: 2));
           videoThumbUrl = await tRef.getDownloadURL();
         }
       }
 
-      await FirebaseFirestore.instance
-          .collection('posts')
-          .doc(postId)
-          .update({
+      await FirebaseFirestore.instance.collection('posts').doc(postId).update({
         if (imageUrl != null && imageUrl.isNotEmpty) 'imageUrl': imageUrl,
         if (imageUrls.isNotEmpty) 'imageUrls': imageUrls,
         if (videoUrl != null && videoUrl.isNotEmpty) 'videoUrl': videoUrl,
@@ -698,10 +706,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         'mediaUploadUpdatedAt': FieldValue.serverTimestamp(),
       });
     } catch (_) {
-      await FirebaseFirestore.instance
-          .collection('posts')
-          .doc(postId)
-          .update({
+      await FirebaseFirestore.instance.collection('posts').doc(postId).update({
         'mediaUploadStatus': 'failed',
         'mediaUploadUpdatedAt': FieldValue.serverTimestamp(),
       });
@@ -763,20 +768,24 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 child: TextButton(
                   onPressed: _canPost ? _savePost : null,
                   style: TextButton.styleFrom(
-                    backgroundColor: _canPost ? AppColors.primary : AppColors.button,
+                    backgroundColor:
+                        _canPost ? AppColors.primary : AppColors.button,
                     foregroundColor: _canPost ? Colors.white : AppColors.muted,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
                     ),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 10),
                   ),
                   child: _isPosting
                       ? const SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
                         )
-                      : const Text('Post', style: TextStyle(fontWeight: FontWeight.w700)),
+                      : const Text('Post',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
                 ),
               ),
             ],
@@ -810,24 +819,24 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     Expanded(
                       child: SingleChildScrollView(
                         padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-                      child: _selectedTemplate == null
-                          ? _QuickEditor(
-                              controller: _quickController,
-                              focusNode: _quickFocus,
-                              onChanged: () => setState(() {}),
-                              readOnly: _isPosting,
-                            )
-                          : _TemplateEditor(
-                              template: templates[_selectedTemplate]!,
-                              a1: _a1,
-                              a2: _a2,
-                              a3: _a3,
-                              a1Focus: _a1Focus,
-                              a2Focus: _a2Focus,
-                              a3Focus: _a3Focus,
-                              onChanged: () => setState(() {}),
-                              readOnly: _isPosting,
-                            ),
+                        child: _selectedTemplate == null
+                            ? _QuickEditor(
+                                controller: _quickController,
+                                focusNode: _quickFocus,
+                                onChanged: () => setState(() {}),
+                                readOnly: _isPosting,
+                              )
+                            : _TemplateEditor(
+                                template: templates[_selectedTemplate]!,
+                                a1: _a1,
+                                a2: _a2,
+                                a3: _a3,
+                                a1Focus: _a1Focus,
+                                a2Focus: _a2Focus,
+                                a3Focus: _a3Focus,
+                                onChanged: () => setState(() {}),
+                                readOnly: _isPosting,
+                              ),
                       ),
                     ),
 
@@ -837,14 +846,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       child: Container(
                         decoration: const BoxDecoration(
                           color: Colors.white,
-                          border: Border(top: BorderSide(color: AppColors.border)),
+                          border:
+                              Border(top: BorderSide(color: AppColors.border)),
                         ),
                         padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
                         child: Row(
                           children: [
                             Expanded(
                               child: _PillButton(
-                                label: (_imageFiles.isNotEmpty || _videoFile != null)
+                                label: (_imageFiles.isNotEmpty ||
+                                        _videoFile != null)
                                     ? 'Media (${_imageFiles.length + (_videoFile != null ? 1 : 0)})'
                                     : 'Media',
                                 icon: Icons.photo_library_outlined,
@@ -855,7 +866,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                             const SizedBox(width: 10),
                             Expanded(
                               child: _PillButton(
-                                label: selectedTags.isNotEmpty ? 'Tags (${selectedTags.length})' : 'Tags',
+                                label: selectedTags.isNotEmpty
+                                    ? 'Tags (${selectedTags.length})'
+                                    : 'Tags',
                                 icon: Icons.tag_outlined,
                                 onTap: _openTagsSheet,
                                 selected: selectedTags.isNotEmpty,
@@ -981,7 +994,6 @@ class _MediaPanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-
           Row(
             children: [
               Expanded(
@@ -1011,16 +1023,13 @@ class _MediaPanel extends StatelessWidget {
               ),
             ],
           ),
-
           const SizedBox(height: 12),
-
           if (hasPhotos)
             _PhotosRow(
               imageFiles: imageFiles,
               onRemoveAt: onRemovePhotoAt,
               onAdd: onAddMorePhotos,
             ),
-
           if (hasVideo) ...[
             if (hasPhotos) const SizedBox(height: 12),
             _BigVideoPreview(
@@ -1029,13 +1038,13 @@ class _MediaPanel extends StatelessWidget {
               onRemove: onRemoveVideo,
             ),
           ],
-
           if (!hasPhotos && !hasVideo)
             const Padding(
               padding: EdgeInsets.only(top: 6),
               child: Text(
                 'No media added yet.',
-                style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                    color: AppColors.muted, fontWeight: FontWeight.w600),
               ),
             ),
         ],
@@ -1163,7 +1172,8 @@ class _PhotosRow extends StatelessWidget {
                 border: Border.all(color: AppColors.border),
               ),
               child: const Center(
-                child: Icon(Icons.add_rounded, size: 28, color: AppColors.muted),
+                child:
+                    Icon(Icons.add_rounded, size: 28, color: AppColors.muted),
               ),
             ),
           ),
@@ -1261,7 +1271,8 @@ class _BigVideoPreview extends StatelessWidget {
                   : Container(
                       color: AppColors.button,
                       alignment: Alignment.center,
-                      child: const Icon(Icons.videocam_rounded, color: AppColors.muted, size: 34),
+                      child: const Icon(Icons.videocam_rounded,
+                          color: AppColors.muted, size: 34),
                     ),
             ),
           ),
@@ -1274,7 +1285,8 @@ class _BigVideoPreview extends StatelessWidget {
                   color: Colors.black.withOpacity(0.45),
                   borderRadius: BorderRadius.circular(999),
                 ),
-                child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 34),
+                child: const Icon(Icons.play_arrow_rounded,
+                    color: Colors.white, size: 34),
               ),
             ),
           ),
@@ -1393,10 +1405,12 @@ class _InlineTagsComposer extends StatelessWidget {
                 ),
                 decoration: InputDecoration(
                   hintText: 'Add a tag (e.g. career)',
-                  hintStyle: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600),
+                  hintStyle: const TextStyle(
+                      color: AppColors.muted, fontWeight: FontWeight.w600),
                   filled: true,
                   fillColor: Colors.white,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
                     borderSide: const BorderSide(color: AppColors.border),
@@ -1407,7 +1421,8 @@ class _InlineTagsComposer extends StatelessWidget {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(color: AppColors.primary, width: 1.4),
+                    borderSide:
+                        const BorderSide(color: AppColors.primary, width: 1.4),
                   ),
                 ),
                 // ✅ onSubmitted triggers instantly (sheet refresh handled by onAdd)
@@ -1424,11 +1439,13 @@ class _InlineTagsComposer extends StatelessWidget {
                   foregroundColor: AppColors.primary,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
-                    side: BorderSide(color: AppColors.primary.withOpacity(0.25)),
+                    side:
+                        BorderSide(color: AppColors.primary.withOpacity(0.25)),
                   ),
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                 ),
-                child: const Text('Add', style: TextStyle(fontWeight: FontWeight.w900)),
+                child: const Text('Add',
+                    style: TextStyle(fontWeight: FontWeight.w900)),
               ),
             ),
           ],
@@ -1451,8 +1468,10 @@ class _InlineTagsComposer extends StatelessWidget {
                           ),
                         ),
                         backgroundColor: Colors.white,
-                        shape: const StadiumBorder(side: BorderSide(color: AppColors.border)),
-                        deleteIcon: const Icon(Icons.close, size: 18, color: AppColors.muted),
+                        shape: const StadiumBorder(
+                            side: BorderSide(color: AppColors.border)),
+                        deleteIcon: const Icon(Icons.close,
+                            size: 18, color: AppColors.muted),
                         onDeleted: () => onRemove(t),
                       ),
                     ),
@@ -1604,7 +1623,8 @@ class _ModeChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = selected ? AppColors.primary.withOpacity(0.10) : AppColors.button;
+    final bg =
+        selected ? AppColors.primary.withOpacity(0.10) : AppColors.button;
     final fg = selected ? AppColors.primary : AppColors.text;
 
     return Material(
@@ -1618,7 +1638,9 @@ class _ModeChip extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
-              color: selected ? AppColors.primary.withOpacity(0.25) : AppColors.border,
+              color: selected
+                  ? AppColors.primary.withOpacity(0.25)
+                  : AppColors.border,
             ),
           ),
           child: Text(
@@ -1652,7 +1674,8 @@ class _TemplateRowPro extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final leadingBg = selected ? AppColors.primary.withOpacity(0.10) : AppColors.button;
+    final leadingBg =
+        selected ? AppColors.primary.withOpacity(0.10) : AppColors.button;
     final leadingFg = selected ? AppColors.primary : AppColors.muted;
 
     return Material(
@@ -1672,7 +1695,8 @@ class _TemplateRowPro extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(color: AppColors.border),
                 ),
-                child: Icon(selected ? Icons.check_rounded : icon, color: leadingFg),
+                child: Icon(selected ? Icons.check_rounded : icon,
+                    color: leadingFg),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1702,7 +1726,9 @@ class _TemplateRowPro extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Icon(
-                selected ? Icons.check_circle_rounded : Icons.chevron_right_rounded,
+                selected
+                    ? Icons.check_circle_rounded
+                    : Icons.chevron_right_rounded,
                 color: selected ? AppColors.primary : AppColors.border,
               ),
             ],
@@ -1729,7 +1755,8 @@ class _PillButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bg = selected ? AppColors.primary.withOpacity(0.10) : Colors.white;
-    final border = selected ? AppColors.primary.withOpacity(0.25) : AppColors.border;
+    final border =
+        selected ? AppColors.primary.withOpacity(0.25) : AppColors.border;
     final iconColor = selected ? AppColors.primary : AppColors.muted;
 
     return Material(
