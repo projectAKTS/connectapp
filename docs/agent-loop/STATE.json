@@ -1,36 +1,31 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "mvp3_telemetry",
+  "phase": "mvp4_store_compliance",
   "status": "ready_for_review",
   "accepted_checkpoint_sha": "080bd1f",
-  "starting_sha": "06a7209",
+  "starting_sha": "2e3e424",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "d25e24a",
+  "code_commit_sha": "bb5174a",
   "ending_sha": "SELF",
   "changed_files": [
-    "pubspec.yaml",
-    "android/settings.gradle",
-    "android/app/build.gradle",
-    "lib/services/app_telemetry.dart",
-    "lib/main.dart",
-    "lib/services/safety_service.dart",
-    "lib/screens/settings/settings_screen.dart",
+    "lib/services/content_filter.dart",
+    "test/mvp/content_filter_test.dart",
     "lib/screens/posts/create_post_screen.dart",
-    "lib/screens/consultation/consultation_booking_screen.dart",
-    "lib/config/legal_texts.dart",
-    "public/privacy.html",
+    "lib/screens/posts/comment_bottom_sheet.dart",
+    "lib/screens/posts/post_screen.dart",
+    "lib/screens/chat/chat_screen.dart",
+    "tool/build_legal_site.py",
+    "public/",
     "docs/DEPLOY_MVP.md",
-    "docs/agent-loop/NEXT_TASK.md",
+    "docs/research/MVP_LANSMAN_ARASTIRMA.md",
     "docs/agent-loop/HANDOFF.md",
     "docs/agent-loop/STATE.json"
   ],
   "validation": {
-    "flutter_analyze": "no issues",
-    "flutter_test_all": "+2446 -16 (14 guards from uncommitted lock files + 2 test-mode)",
-    "android_release_launch": "PASS, Crashlytics 19.4.2 init",
-    "ios_release_compile": "PASS"
+    "content_filter_test": "4/4",
+    "flutter_analyze": "no issues"
   },
   "safety": {
     "deployed": false,
@@ -46,9 +41,11 @@
   "review": {
     "decision": "accepted",
     "reviewer": "claude",
-    "notes": "MVP-3 telemetry ready; Crashlytics must be enabled in the console."
+    "notes": "MVP-4 store compliance (filter, web deletion page) + research doc."
   },
   "implementation_shas": [
-    "d25e24a"
+    "d763923",
+    "bb5174a",
+    "c555209"
   ]
 }

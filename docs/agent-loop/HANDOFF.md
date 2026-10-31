@@ -1,45 +1,35 @@
-# Crash Reporting And Analytics Handoff (MVP-3)
+# Store Compliance And Research Handoff (MVP-4)
 
 STATUS: `ready_for_review` (reviewer: Claude, per the user's delegation)
 
 BRANCH: `call-v2`
-STARTING_SHA: `06a7209`
-IMPLEMENTATION_SHA: `d25e24a`
+STARTING_SHA: `2e3e424`
+IMPLEMENTATION_SHAS:
+- `d763923`: objectionable-word filter for posts, comments and chat
+  (App Store 1.2); the old comment flow no longer stores the email as the
+  public name
+- `bb5174a`: `delete-account.html` web page for Google Play's Data safety
+  deletion link
+- `c555209`: `docs/research/MVP_LANSMAN_ARASTIRMA.md`, the launch rules
+  and risks with sources (Turkish)
 ENDING_SHA: `SELF`
 
-## Change
+## Why
 
-- `firebase_dynamic_links` is removed.
-- Added `firebase_crashlytics` 4.3.6 and `firebase_analytics` 11.4.6, pinned
-  to the existing FlutterFire set (`firebase_core` 3.13.1).
-  - A plain `pub add` had upgraded every Firebase package (core 3.15,
-    Firestore 5.6.12, messaging, auth). That was rejected to keep the
-    physically verified call SDKs, and the iOS F9 fix that depends on
-    FlutterFire internals, unchanged.
-- Android: Crashlytics Gradle plugin 2.9.9. Plugin 3.x requires
-  google-services 4.4.1, and the project uses 4.3.15.
-- `AppTelemetry.init()` is called right after `Firebase.initializeApp`.
-  - Crashlytics is on in release builds only, for Flutter and platform
-    errors.
-  - Analytics records screen views and sets the user id to the uid.
-  - Five events, with no personal data: `post_created`,
-    `consultation_booked`, `report_submitted`, `user_blocked`,
-    `account_deleted`.
-  - The method is named `init()` because the owner-isolation test forbids
-    `.start(` in `main.dart`.
-- The privacy text and the regenerated `privacy.html` mention crash reports
-  and analytics.
+Checking the official App Store guideline text showed that 1.2 also
+requires a filtering method, besides report and block (done in MVP-1).
+Google Play requires a web path for account deletion.
 
 ## Validation
 
-- `flutter analyze lib test`: clean.
-- Full suite: +2446 -16, all known. 14 working-tree guards fire because
-  `pubspec.lock` and `Podfile.lock` are modified locally and intentionally
-  uncommitted; the other 2 are test-mode-only integration tests.
-- Emulator A, release APK: the app launches signed in, and Crashlytics
-  19.4.2 initializes. The project setting `firebase_crashlytics_enabled` is
-  false; the user must enable it in the console (`docs/DEPLOY_MVP.md`
-  step 5).
-- The iOS release build (no codesign) compiles. The first attempt hit a
-  transient Xcode `CompileAssetCatalogVariant` error after the restart; the
-  retry passed.
+- `content_filter_test`: 4/4, including innocent words: French "en
+  retard", the names Amina and Dick, "assistant", Scunthorpe.
+- `flutter analyze lib`: clean.
+- The site builder regenerates all pages, including `delete-account.html`.
+
+## Decisions Waiting For The User
+
+These are listed in the research doc: support email, launch city (French),
+paid sessions at launch versus free first (helper payouts are not wired in
+the booking charge), pricing differences across the docs and the free
+1-minute call, test-data cleanup, and the lawyer review.
