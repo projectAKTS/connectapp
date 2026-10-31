@@ -1,31 +1,50 @@
-# Helper Discovery Handoff (MVP-4b)
+# Session Ratings Handoff (MVP-5)
 
 STATUS: `ready_for_review` (reviewer: Claude, per the user's delegation)
 
 BRANCH: `call-v2`
-STARTING_SHA: `b4c19d0`
+STARTING_SHA: `0b604be`
 IMPLEMENTATION_SHAS:
-- `d812cc6`: Find a helper lists real helpers (`role` helper/both, plus
-  legacy `isHelper`) with no unfiltered fallback; cards show expertise;
-  topics match the expertise that answers them (`HelpTopics.helperFitsTopic`)
-- `4c62329`: initials avatars for helpers without a photo; the tag says
-  "Available" instead of "Available now" (it reflects a stated window, not
-  live presence)
+- `60e2478`: `reviews/{consultationId}` rules; the `onReviewCreated`
+  function keeps the helper's `rating` / `ratingCount` / `ratingSum`;
+  `ratingSum` is a protected field; account deletion clears the text of
+  reviews the user wrote
+- `c4fb999`: "Rate this session" in My consultations, the rating sheet,
+  the rating and reviews on profiles, the privacy text, and DEPLOY_MVP
 ENDING_SHA: `SELF`
 
 ## Why
 
-`isHelper` is never written by the app, so the old query was always empty
-and the screen fell back to the first 400 users of any kind. Seekers and
-test accounts appeared as helpers.
+Find a helper sorted by and showed `rating`, but nothing wrote it. Ratings
+from real, booked sessions are the main trust signal before a seeker books
+a stranger.
+
+## Design
+
+- One review per consultation: the doc id is the consultation id, so a
+  second write is an update, which rules deny.
+- Only the person who booked can rate (`consultations.userId`), after the
+  start time, not for cancelled sessions, and not themselves.
+- The average is computed by the server in a transaction. `countedAt` stops
+  a retried event from counting a review twice.
+- Reviewers are anonymous on profiles ("Booked session" and the date).
+  Stars-only reviews count in the average but are not listed.
+- No composite index is needed: profile reviews are sorted on the client
+  (up to 50).
 
 ## Validation
 
-- `help_topics_test`: 3/3 (every topic is answerable by some expertise).
-- `flutter analyze` on the touched files: clean.
-- Emulator A: Find a helper shows only helper-role users, with expertise
-  chips and initials.
+- Node: 42/42 (reviews 4, account 5, consultations, call invites).
+- Rules emulator: 19/19 (MVP 5, reviews 4, Call V2 10).
+- Flutter: `test/mvp` 14/14, including the sheet widget test (stars are
+  required and the comment goes through the filter). `flutter analyze` is
+  clean on the touched files.
+- Full suite: 2456 passed, 16 failed. The failures are only the known
+  working-tree guards.
+- Not checked on a device: production rules do not allow `reviews` until
+  the deploy.
 
 ## Not Deployed
 
-Client-only change; ships with the next app build.
+`onReviewCreated` and the rules are in the user's batch
+(`docs/DEPLOY_MVP.md`).

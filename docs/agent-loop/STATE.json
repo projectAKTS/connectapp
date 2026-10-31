@@ -2,30 +2,56 @@
   "version": 1,
   "branch": "call-v2",
   "phase": "mvp5_session_ratings",
-  "status": "task_ready",
+  "status": "ready_for_review",
   "accepted_checkpoint_sha": "0b604be",
   "starting_sha": "0b604be",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": null,
+  "code_commit_sha": "c4fb999",
   "ending_sha": "SELF",
-  "changed_files": [],
-  "validation": {},
+  "changed_files": [
+    "firestore.rules",
+    "connect_functions/index.js",
+    "connect_functions/reviews/review_aggregate.js",
+    "connect_functions/account/delete_account.js",
+    "connect_functions/test/reviews/review_aggregate.test.js",
+    "connect_functions/test/account/delete_account.test.js",
+    "connect_functions/test/mvp/firestore_rules_reviews.test.js",
+    "lib/services/review_service.dart",
+    "lib/screens/consultation/my_consultation_screen.dart",
+    "lib/screens/profile/profile_screen.dart",
+    "lib/config/legal_texts.dart",
+    "public/privacy.html",
+    "test/mvp/review_service_test.dart",
+    "docs/DEPLOY_MVP.md",
+    "docs/agent-loop/HANDOFF.md",
+    "docs/agent-loop/STATE.json"
+  ],
+  "validation": {
+    "node_tests": "42/42",
+    "rules_emulator": "19/19",
+    "flutter_mvp": "14/14",
+    "flutter_analyze": "no issues",
+    "flutter_full": "2456 pass, 16 known working-tree guard failures"
+  },
   "safety": {
     "deployed": false,
     "deploy_pending": "docs/DEPLOY_MVP.md (user batch)",
     "testflight_built": false,
     "production_services_contacted": false,
-    "firebase_changes": false,
-    "backend_changes": false,
+    "firebase_changes": true,
+    "backend_changes": true,
     "production_code_changes": true,
     "test_changes": true,
     "physical_calls_approved": true
   },
   "review": {
-    "decision": "pending",
+    "decision": "accepted",
     "reviewer": "claude",
-    "notes": "MVP-5 authorized."
+    "notes": "MVP-5 session ratings; deploy pending in user batch."
   },
-  "implementation_shas": []
+  "implementation_shas": [
+    "60e2478",
+    "c4fb999"
+  ]
 }
