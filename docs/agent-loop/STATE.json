@@ -1,10 +1,10 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "ios_earpiece_f8b",
+  "phase": "ios_native_firestore_f9",
   "status": "task_ready",
   "accepted_checkpoint_sha": "3f9561d",
-  "starting_sha": "3f9561d",
+  "starting_sha": "ec46d49",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
   "code_commit_sha": null,
@@ -25,7 +25,7 @@
   "review": {
     "decision": "accepted",
     "reviewer": "claude",
-    "notes": "F8 accepted on the S21 FE; F8b (iOS) authorized after the user approved an iPhone test."
+    "notes": "F8b committed (iOS proximity + receiver verified by user). F9 authorized: iOS crash when native Firestore starts before FlutterFire."
   },
   "implementation_shas": []
 }

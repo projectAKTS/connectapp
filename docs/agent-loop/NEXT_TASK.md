@@ -1,55 +1,65 @@
-# Active Task - Earpiece First With Proximity On iOS (F8b)
+# Active Task - Native Firestore Must Not Start Before FlutterFire (F9)
 
 Branch: `call-v2` (known-good tags `stable-calls-oct-26`, `stable-calls-oct-27`;
 do not modify them or `stable/calls-oct-26`)
 
-Starting SHA: `3f9561d`
+Starting SHA: `ec46d49`. The F8b iOS code is uncommitted in the working tree
+and gets committed with its own message first.
 
-## Review Of F8 (Claude, 2026-10-30)
+## Problem (F9) - iOS crash on answering from a call notification
 
-Accepted: `a41c564`.
-- S21 FE: earpiece default, the speaker toggle, the proximity lock and mute
-  are all verified.
-- Extra checks: a video call through a Wi-Fi gap, and F2 decline-elsewhere
-  3/3 on the phone.
+User's iPhone 16 Pro Max (iOS 26.6.2), cable-installed build 135. With the
+app killed and the phone locked, the user tapped the incoming-call
+notification. The app opened, crashed, and the user landed on the home
+screen. The call was never accepted; the caller timed out after 51 s.
+
+Two crash reports (23:56:34 and 23:59:29) are identical. Each is about 1 s
+after process launch, `SIGABRT`:
+`-[FIRFirestore setSettings:]` <- `-[FLTFirebaseFirestorePlugin
+getFIRFirestoreFromAppNameFromPigeon:]` <- `enableNetworkApp`, i.e. Dart's
+first Firestore call (`FirestoreReadHelper` `enableNetwork`).
+
+Cause:
+- The notification response handler (`AppDelegate`, the
+  `incoming_fallback_accept_received` path) calls `syncInviteStatus` before
+  Dart runs. It uses `Firestore.firestore()`, which starts the native
+  instance.
+- FlutterFire then misses its cache, calls `setSettings` on the started
+  instance, and Firestore throws an illegal-state error.
+- The same applies to the fallback decline and to every `syncInviteStatus`
+  caller while Dart has not touched Firestore yet.
+- This has been in place since 255269c (2026-08-05). A TestFlight-build
+  `SIGABRT` on 2026-10-30 is unsymbolicated but is likely the same crash.
 
 ## Goal
 
-Bring F8 to iOS, WhatsApp-like. The user approved an iPhone test, by cable
-or through TestFlight.
-1. `callStartsOnSpeaker`: audio is earpiece-first on iOS too; video stays
-   on the speaker.
-2. `CallProximity` also calls the channel on iOS.
-3. `AppDelegate` gets `connectapp/callProximity`; `setProximityScreenOff`
-   sets `UIDevice.current.isProximityMonitoringEnabled`.
+Native code obtains Firestore only through FlutterFire's cache:
+1. Reuse the cached instance (`FLTFirebaseFirestoreUtils
+   getFirestoreInstanceByName:databaseURL:`).
+2. If there is none, create it as FlutterFire would: default settings plus
+   `dispatchQueue = FLTFirebaseFirestoreReader getFirestoreQueue`. Then
+   register it with `setCachedFIRFirestoreInstance:forAppName:databaseURL:`,
+   with the app name and `(default)`.
+3. If those classes or selectors are missing, skip the native write, because
+   Dart's accept/decline recovery owns it. Never start Firestore natively
+   outside the cache.
 
 ## Allowed Files
 
-- `lib/services/call_audio_route.dart`
-- `ios/Runner/AppDelegate.swift` (the new channel only)
-- `test/call_v2/real_flow/call_audio_route_test.dart`
+- `ios/Runner/AppDelegate.swift` (`syncInviteStatus` and a helper)
 - `docs/agent-loop/NEXT_TASK.md`, `STATE.json`, `HANDOFF.md`
-
-## Strict Non-Goals
-
-- No CallKit, PushKit or audio-session change.
-- No server change, no deploy.
-- No TestFlight upload without the user's per-action approval.
 
 ## Validation
 
-- The route test is updated for iOS; the suite has no new failures, and
-  analyze is clean.
+- iOS release builds, and Dart analyze and tests are unchanged.
 - Physical iPhone:
-  - an audio call starts on the receiver;
-  - proximity blanks the screen at the ear;
-  - the speaker toggle works;
-  - answers work from killed, background and the lock screen;
-  - the F3/F3b reconnect works through a Wi-Fi gap.
-  - The iPhone is never called while it is signed in as Baris.
+  - with the app killed and the phone locked, answering from the
+    notification and from CallKit connects without a crash;
+  - no new `Runner-*.ips` appears;
+  - the foreground and background answers still work.
 
 ## Commit And Handoff
 
-- Implementation: `feat(calls): start iOS audio calls on the receiver with proximity`.
-- Handoff: `chore(agent-loop): record iOS earpiece review handoff`.
+- `fix(ios): never start Firestore natively before FlutterFire`.
+- Handoff: `chore(agent-loop): record native firestore crash review handoff`.
 - Push `call-v2`.
