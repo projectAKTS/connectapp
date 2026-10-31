@@ -37,6 +37,36 @@ class HelpTopics {
   /// Shared personal experience only; never legal advice.
   static const String immigrationExperience = 'Immigration experience';
 
+  /// Which helper expertise answers a seeker's topic.
+  static const Map<String, List<String>> _expertiseForTopic = {
+    'Moving to Canada': ['Settlement tips', immigrationExperience],
+    'Housing': ['Housing search', 'Settlement tips'],
+    'Job hunting': ['Resume review', 'Interview prep', 'Career transitions'],
+    'Student life': ['School applications', 'Settlement tips'],
+    'Daily life in Canada': ['Settlement tips'],
+    'Language learning': ['Language practice'],
+    'Parenting support': ['Settlement tips'],
+    'Quebec-specific help': ['Settlement tips', 'Language practice'],
+    immigrationExperience: [immigrationExperience],
+  };
+
+  /// Whether a helper with [expertiseTags] fits [topic]. [legacyTags] are
+  /// older profiles that stored topics directly.
+  static bool helperFitsTopic({
+    required String topic,
+    required List<String> expertiseTags,
+    List<String> legacyTags = const [],
+  }) {
+    String norm(String v) => v.trim().toLowerCase();
+    final wanted = norm(topic);
+    if (legacyTags.any((t) => norm(t) == wanted)) return true;
+    final related = (_expertiseForTopic[topic] ?? const <String>[])
+        .map(norm)
+        .toSet()
+      ..add(wanted);
+    return expertiseTags.any((t) => related.contains(norm(t)));
+  }
+
   /// Shown wherever people look for or book help.
   static const String adviceNotice =
       'Helpers share personal experience. This is not legal, immigration '

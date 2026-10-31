@@ -64,28 +64,30 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
     try {
       List<QueryDocumentSnapshot<Map<String, dynamic>>> docs = [];
 
-      // Primary: helpers only (kept exactly as-is)
-      try {
-        final snap = await FirestoreReadHelper.getQuery(
-          FirebaseFirestore.instance
-              .collection('users')
-              .where('isHelper', isEqualTo: true)
-              .limit(400),
-          timeout: const Duration(seconds: 5),
-        );
-        docs = snap.docs;
-      } catch (_) {}
-
-      // Fallback: if none returned, pull a broader batch (NO extra filtering)
-      if (docs.isEmpty) {
+      // Helpers are people whose role is helper or both (onboarding and
+      // edit profile write `role`); older profiles may only have isHelper.
+      // Seekers are never listed, even when no helper exists yet.
+      final byId = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{};
+      for (final query in [
+        FirebaseFirestore.instance
+            .collection('users')
+            .where('role', whereIn: const ['helper', 'both']).limit(400),
+        FirebaseFirestore.instance
+            .collection('users')
+            .where('isHelper', isEqualTo: true)
+            .limit(400),
+      ]) {
         try {
-          final broad = await FirestoreReadHelper.getQuery(
-            FirebaseFirestore.instance.collection('users').limit(400),
+          final snap = await FirestoreReadHelper.getQuery(
+            query,
             timeout: const Duration(seconds: 5),
           );
-          docs = broad.docs;
+          for (final d in snap.docs) {
+            byId[d.id] = d;
+          }
         } catch (_) {}
       }
+      docs = byId.values.toList();
 
       final list = <_Helper>[];
       final me = HelperlyTestRuntime.currentUid ?? '';
@@ -102,9 +104,6 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
         final List<String> categoriesRaw = (m['categories'] is List)
             ? List<String>.from(m['categories'])
             : const [];
-        final List<String> interestTags = (m['interestTags'] is List)
-            ? List<String>.from(m['interestTags'])
-            : const [];
         final List<String> languagesRaw = (m['languages'] is List)
             ? List<String>.from(m['languages'])
             : const [];
@@ -113,8 +112,11 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
             (m['photoURL'] ?? m['avatar'] ?? m['profilePicture'] ?? '')
                 .toString();
 
-        final List<String> categories =
-            categoriesRaw.isNotEmpty ? categoriesRaw : interestTags;
+        // What they help with; interestTags are their own needs.
+        final List<String> expertise = (m['expertiseTags'] is List)
+            ? List<String>.from(m['expertiseTags'])
+            : const [];
+        final List<String> categories = categoriesRaw;
         final List<String> languages = languagesRaw.isNotEmpty
             ? languagesRaw.map((e) => e.toString()).toList()
             : (singleLanguage.isNotEmpty
@@ -138,6 +140,7 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
           bio: placeholderBioToEmpty((m['bio'] ?? '').toString()),
           avatar: photo,
           categories: categories.map((e) => e.toString()).toList(),
+          expertise: expertise,
           languages: languages.map((e) => e.toString()).toList(),
           isAvailable: availableFlag || derivedAvailable,
           isVerified: verifiedFlag || badgesVerified,
@@ -203,8 +206,11 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
     // Categories (subset match)
     if (_selectedCategories.isNotEmpty) {
       list = list.where((h) {
-        final helperCats = h.categories.map(_norm).toSet();
-        return _selectedCategories.every((c) => helperCats.contains(_norm(c)));
+        return _selectedCategories.every((topic) => HelpTopics.helperFitsTopic(
+              topic: topic,
+              expertiseTags: h.expertise,
+              legacyTags: h.categories,
+            ));
       }).toList();
     }
 
@@ -413,6 +419,7 @@ class _Helper {
   final String bio;
   final String avatar;
   final List<String> categories;
+  final List<String> expertise;
   final List<String> languages;
   final bool isAvailable;
   final bool isVerified;
@@ -427,6 +434,7 @@ class _Helper {
     required this.bio,
     required this.avatar,
     required this.categories,
+    required this.expertise,
     required this.languages,
     required this.isAvailable,
     required this.isVerified,
@@ -514,8 +522,11 @@ class _HelperTile extends StatelessWidget {
                         if (helper.hourlyRate != null)
                           _Tag('\$${helper.hourlyRate!.toStringAsFixed(0)}/hr'),
                         if (helper.isAvailable) const _Tag('Available now'),
-                        if (helper.categories.isNotEmpty)
-                          ...helper.categories.take(3).map((c) => _Tag(c)),
+                        ...(helper.expertise.isNotEmpty
+                                ? helper.expertise
+                                : helper.categories)
+                            .take(3)
+                            .map((c) => _Tag(c)),
                         if (helper.languages.isNotEmpty)
                           _Tag(helper.languages.take(2).join(' · ')),
                         if (helper.rating > 0)
