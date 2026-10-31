@@ -1,37 +1,16 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "earpiece_proximity_f8",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "fd99084",
-  "starting_sha": "fd99084",
+  "phase": "ios_earpiece_f8b",
+  "status": "task_ready",
+  "accepted_checkpoint_sha": "3f9561d",
+  "starting_sha": "3f9561d",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "a41c564",
+  "code_commit_sha": null,
   "ending_sha": "SELF",
-  "changed_files": [
-    "android/app/src/main/kotlin/com/yakup/helperly/MainActivity.kt",
-    "lib/services/call_audio_route.dart",
-    "lib/screens/call/agora_call_screen.dart",
-    "lib/call_v2/real_flow/call_v2_agora_media_runtime.dart",
-    "test/call_v2/real_flow/call_audio_route_test.dart",
-    "docs/agent-loop/NEXT_TASK.md",
-    "docs/agent-loop/HANDOFF.md",
-    "docs/agent-loop/STATE.json"
-  ],
-  "validation": {
-    "call_audio_route_test": "3/3 (RED +2 -1 without screen change)",
-    "flutter_test_call_v2_multi_device_android": "+2441 -4 (known guards)",
-    "flutter_analyze": "no issues",
-    "s21fe_earpiece_default": "PASS",
-    "s21fe_speaker_toggle_proximity": "PASS",
-    "s21fe_mute_seen_by_caller": "PASS",
-    "s21fe_outgoing_from_phone": "PASS 4/4",
-    "s21fe_audio_by_ear": "PASS (user)",
-    "s21fe_f1_screensaver": "answer 2/2, decline 1/1",
-    "s21fe_video_wifi_gap_12s": "PASS",
-    "s21fe_f2_decline_elsewhere": "PASS 3/3 (0.6-1.1s)"
-  },
+  "changed_files": [],
+  "validation": {},
   "safety": {
     "deployed": false,
     "deploy_pending": null,
@@ -39,16 +18,14 @@
     "production_services_contacted": true,
     "firebase_changes": false,
     "backend_changes": false,
-    "production_code_changes": true,
-    "test_changes": true,
+    "production_code_changes": false,
+    "test_changes": false,
     "physical_calls_approved": true
   },
   "review": {
     "decision": "accepted",
     "reviewer": "claude",
-    "notes": "F8 implemented and verified on the S21 FE; F1 screensaver re-verified on Android 16."
+    "notes": "F8 accepted on the S21 FE; F8b (iOS) authorized after the user approved an iPhone test."
   },
-  "implementation_shas": [
-    "a41c564"
-  ]
+  "implementation_shas": []
 }
