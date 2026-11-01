@@ -1,4 +1,6 @@
 // lib/screens/connections/connections_screen.dart
+import 'package:connect_app/l10n/formatters.dart';
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -125,8 +127,8 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
           elevation: 0,
           centerTitle: true,
           iconTheme: const IconThemeData(color: AppColors.text),
-          title: const Text(
-            'Connections',
+          title: Text(
+            context.l10n.connectionsTitle,
             style: TextStyle(
               color: AppColors.text,
               fontWeight: FontWeight.w600,
@@ -145,7 +147,7 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
                 child: Padding(
                   padding: const EdgeInsets.all(24.0),
                   child: Text(
-                    'Could not load connections.\n${snap.error}',
+                    context.l10n.connectionsLoadFailed,
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       color: AppColors.muted,
@@ -206,14 +208,14 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
                       .get(),
                   builder: (context, userSnap) {
                     if (userSnap.connectionState == ConnectionState.waiting) {
-                      return const ListTile(
+                      return ListTile(
                         leading: CircleAvatar(
                           radius: 22,
                           backgroundColor: AppColors.avatarBg,
                           child: Icon(Icons.person_outline,
                               color: AppColors.avatarFg),
                         ),
-                        title: Text('Loading...',
+                        title: Text(context.l10n.commonLoading,
                             style: TextStyle(color: AppColors.muted)),
                       );
                     }
@@ -233,19 +235,9 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
                             '')
                         .toString();
 
-                    String timeLabel = '';
-                    if (connectedAt != null) {
-                      final diff = DateTime.now().difference(connectedAt);
-                      if (diff.inDays >= 1) {
-                        timeLabel = '${diff.inDays}d ago';
-                      } else if (diff.inHours >= 1) {
-                        timeLabel = '${diff.inHours}h ago';
-                      } else if (diff.inMinutes >= 1) {
-                        timeLabel = '${diff.inMinutes}m ago';
-                      } else {
-                        timeLabel = 'Just now';
-                      }
-                    }
+                    final timeLabel = connectedAt == null
+                        ? ''
+                        : AppFormat.timeAgo(context, connectedAt);
 
                     return ListTile(
                       leading: CircleAvatar(
@@ -267,7 +259,7 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
                         ),
                       ),
                       subtitle: Text(
-                        'Connected $timeLabel',
+                        context.l10n.connectionsConnected(timeLabel),
                         style: const TextStyle(
                           color: AppColors.muted,
                           fontSize: 14,

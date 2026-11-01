@@ -1605,4 +1605,116 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get contentRejected =>
       'Ce contenu semble enfreindre nos règles de la communauté. Veuillez le modifier et réessayer.';
+
+  @override
+  String get callEnded => 'Appel terminé';
+
+  @override
+  String get callConnectionFailed =>
+      'La connexion de l\'appel a échoué. Veuillez réessayer.';
+
+  @override
+  String get callTimedOut =>
+      'La connexion de l\'appel a expiré. Veuillez réessayer.';
+
+  @override
+  String get callNetworkFailed =>
+      'Problème de réseau pendant l\'appel. Veuillez réessayer.';
+
+  @override
+  String get callSetupFailed =>
+      'La préparation de l\'appel a échoué. Veuillez réessayer.';
+
+  @override
+  String get callMicRequired =>
+      'L\'accès au microphone est nécessaire pour cet appel.';
+
+  @override
+  String get callNoAnswer => 'Pas de réponse';
+
+  @override
+  String get callDeclined => 'Appel refusé ou personne indisponible';
+
+  @override
+  String get callUnavailable => 'Personne indisponible';
+
+  @override
+  String get callClose => 'Fermer';
+
+  @override
+  String get callConnecting => 'Connexion…';
+
+  @override
+  String get callAudioTitle => 'Appel audio';
+
+  @override
+  String get callVideoTitle => 'Appel vidéo';
+
+  @override
+  String get callSomethingWrong => 'Un problème est survenu.';
+
+  @override
+  String get callOpenSettings => 'Ouvrir les réglages';
+
+  @override
+  String get callAccept => 'Accepter';
+
+  @override
+  String get callDecline => 'Refuser';
+
+  @override
+  String get connectionsTitle => 'Contacts';
+
+  @override
+  String get connectionsLoadFailed => 'Impossible de charger les contacts.';
+
+  @override
+  String connectionsConnected(String when) {
+    return 'Contact établi $when';
+  }
+
+  @override
+  String get followSignInAgain => 'Veuillez vous reconnecter.';
+
+  @override
+  String get followNoFollowers => 'Aucun abonné pour l\'instant.';
+
+  @override
+  String get followNoFollowing => 'Aucun abonnement pour l\'instant.';
+
+  @override
+  String get payRemoveTitle => 'Retirer la carte?';
+
+  @override
+  String get payRemoveBody => 'Cette carte sera retirée de votre compte.';
+
+  @override
+  String get payRemove => 'Retirer';
+
+  @override
+  String get payMakeDefault => 'Utiliser par défaut';
+
+  @override
+  String get payRemoveCard => 'Retirer la carte';
+
+  @override
+  String get payCardAdded => '✅ Carte ajoutée!';
+
+  @override
+  String get payTitle => 'Mode de paiement';
+
+  @override
+  String get payAddCard => 'Ajouter une carte';
+
+  @override
+  String get paySavedCards => 'Cartes enregistrées';
+
+  @override
+  String get payLoadFailed => 'Impossible de charger les cartes';
+
+  @override
+  String get payCardOptions => 'Options de la carte';
+
+  @override
+  String get paySetupFailed => 'L\'ajout de la carte a échoué.';
 }

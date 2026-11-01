@@ -1,3 +1,4 @@
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:connect_app/theme/tokens.dart';
 
@@ -68,7 +69,7 @@ class IncomingCallScreen extends StatelessWidget {
                     ElevatedButton.icon(
                       onPressed: () => Navigator.of(context).pop(true),
                       icon: const Icon(Icons.call),
-                      label: const Text('Accept'),
+                      label: Text(context.l10n.callAccept),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
@@ -79,7 +80,7 @@ class IncomingCallScreen extends StatelessWidget {
                     ElevatedButton.icon(
                       onPressed: () => Navigator.of(context).pop(false),
                       icon: const Icon(Icons.call_end),
-                      label: const Text('Decline'),
+                      label: Text(context.l10n.callDecline),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.danger,
                         foregroundColor: Colors.white,

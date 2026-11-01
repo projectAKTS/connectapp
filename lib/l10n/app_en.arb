@@ -759,5 +759,47 @@
       }
     }
   },
-  "contentRejected": "This looks like it breaks our Community guidelines. Please edit it and try again."
+  "contentRejected": "This looks like it breaks our Community guidelines. Please edit it and try again.",
+  "callEnded": "Call ended",
+  "callConnectionFailed": "Call connection failed. Please try again.",
+  "callTimedOut": "Call connection timed out. Please try again.",
+  "callNetworkFailed": "Call network failed. Please try again.",
+  "callSetupFailed": "Call setup failed. Please try again.",
+  "callMicRequired": "Microphone permission is required for this call.",
+  "callNoAnswer": "No answer",
+  "callDeclined": "User declined or unavailable",
+  "callUnavailable": "User unavailable",
+  "callClose": "Close",
+  "callConnecting": "Connecting...",
+  "callAudioTitle": "Audio call",
+  "callVideoTitle": "Video call",
+  "callSomethingWrong": "Something went wrong.",
+  "callOpenSettings": "Open Settings",
+  "callAccept": "Accept",
+  "callDecline": "Decline",
+  "connectionsTitle": "Connections",
+  "connectionsLoadFailed": "Could not load connections.",
+  "connectionsConnected": "Connected {when}",
+  "@connectionsConnected": {
+    "placeholders": {
+      "when": {
+        "type": "String"
+      }
+    }
+  },
+  "followSignInAgain": "Please sign in again.",
+  "followNoFollowers": "No followers yet.",
+  "followNoFollowing": "Not following anyone yet.",
+  "payRemoveTitle": "Remove card?",
+  "payRemoveBody": "This card will be removed from your account.",
+  "payRemove": "Remove",
+  "payMakeDefault": "Make default",
+  "payRemoveCard": "Remove card",
+  "payCardAdded": "✅ Card added successfully!",
+  "payTitle": "Payment Method",
+  "payAddCard": "Add a card",
+  "paySavedCards": "Saved cards",
+  "payLoadFailed": "Could not load cards",
+  "payCardOptions": "Card options",
+  "paySetupFailed": "Card setup failed."
 }

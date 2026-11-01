@@ -1,3 +1,4 @@
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
@@ -68,17 +69,18 @@ class _FollowListScreenState extends State<FollowListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final title =
-        widget.type == FollowListType.followers ? 'Followers' : 'Following';
+    final title = widget.type == FollowListType.followers
+        ? context.l10n.profileFollowers
+        : context.l10n.profileFollowingList;
 
     if (_uid.isEmpty) {
       return FullScreenBackGesture(
         child: Scaffold(
           backgroundColor: AppColors.canvas,
           appBar: AppBar(title: Text(title)),
-          body: const Center(
+          body: Center(
             child: Text(
-              'Please sign in again.',
+              context.l10n.followSignInAgain,
               style: TextStyle(color: AppColors.muted),
             ),
           ),
@@ -103,8 +105,8 @@ class _FollowListScreenState extends State<FollowListScreen> {
               return _buildList(
                 ids,
                 emptyText: widget.type == FollowListType.followers
-                    ? 'No followers yet.'
-                    : 'Not following anyone yet.',
+                    ? context.l10n.followNoFollowers
+                    : context.l10n.followNoFollowing,
               );
             },
           ),

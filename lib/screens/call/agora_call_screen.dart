@@ -3,6 +3,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:connect_app/l10n/call_messages.dart';
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -3248,7 +3250,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     CallProximity.instance.hold(
       !widget.isVideo && !_speakerOn && !_ended && !_endingCall,
     );
-    final title = widget.isVideo ? 'Video Call' : 'Audio Call';
+    final title = widget.isVideo
+        ? context.l10n.callVideoTitle
+        : context.l10n.callAudioTitle;
     late final Widget content;
     if (_isLoading) {
       content = Scaffold(
@@ -3256,11 +3260,11 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           automaticallyImplyLeading: false,
           leading: IconButton(
             key: const Key('call-v2-route-close'),
-            tooltip: 'Close',
+            tooltip: context.l10n.callClose,
             icon: const Icon(Icons.close),
             onPressed: _requestManagedRouteExit,
           ),
-          title: const Text('Connecting...'),
+          title: Text(context.l10n.callConnecting),
         ),
         body: Center(
           child: Column(
@@ -3313,13 +3317,13 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         automaticallyImplyLeading: false,
         leading: IconButton(
           key: const Key('call-v2-route-close'),
-          tooltip: 'Close',
+          tooltip: context.l10n.callClose,
           icon: const Icon(Icons.close),
           onPressed: _requestManagedRouteExit,
         ),
         backgroundColor: AppColors.canvas,
         elevation: 0,
-        title: const Text('Audio call'),
+        title: Text(context.l10n.callAudioTitle),
         centerTitle: true,
       ),
       body: Center(
@@ -3363,7 +3367,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
                 alignment: Alignment.center,
                 child: Text(
                   _ended
-                      ? _endedMessage
+                      ? CallMessages.localize(context.l10n, _endedMessage)
                       : (_joined
                           ? 'Simulated video call connected'
                           : 'Simulated video call connecting'),
@@ -3885,7 +3889,7 @@ class _EndedScreen extends StatelessWidget {
         automaticallyImplyLeading: false,
         leading: IconButton(
           key: const Key('call-v2-route-close'),
-          tooltip: 'Close',
+          tooltip: context.l10n.callClose,
           icon: const Icon(Icons.close),
           onPressed: onClose,
         ),
@@ -3899,13 +3903,14 @@ class _EndedScreen extends StatelessWidget {
             const Icon(Icons.info_outline, size: 56, color: AppColors.muted),
             const SizedBox(height: 12),
             Text(
-              message,
+              CallMessages.localize(context.l10n, message),
               style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
             footer,
             const SizedBox(height: 12),
-            ElevatedButton(onPressed: onClose, child: const Text('Close')),
+            ElevatedButton(
+                onPressed: onClose, child: Text(context.l10n.callClose)),
           ],
         ),
       ),
@@ -3936,7 +3941,7 @@ class _ErrorScreen extends StatelessWidget {
         automaticallyImplyLeading: false,
         leading: IconButton(
           key: const Key('call-v2-route-close'),
-          tooltip: 'Close',
+          tooltip: context.l10n.callClose,
           icon: const Icon(Icons.close),
           onPressed: onClose,
         ),
@@ -3952,11 +3957,13 @@ class _ErrorScreen extends StatelessWidget {
               const Icon(Icons.error_outline,
                   color: AppColors.danger, size: 64),
               const SizedBox(height: 12),
-              const Text('Something went wrong.',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              Text(context.l10n.callSomethingWrong,
+                  style: const TextStyle(
+                      fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               Text(
-                message,
+                // Messages stay English in the call flow; translated here.
+                CallMessages.localize(context.l10n, message),
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 14, color: AppColors.muted),
               ),
@@ -3966,11 +3973,12 @@ class _ErrorScreen extends StatelessWidget {
               if (isPermissionError) ...[
                 OutlinedButton(
                   onPressed: openAppSettings,
-                  child: const Text('Open Settings'),
+                  child: Text(context.l10n.callOpenSettings),
                 ),
                 const SizedBox(height: 10),
               ],
-              OutlinedButton(onPressed: onClose, child: const Text('Close')),
+              OutlinedButton(
+                  onPressed: onClose, child: Text(context.l10n.callClose)),
             ],
           ),
         ),

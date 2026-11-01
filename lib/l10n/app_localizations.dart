@@ -2947,6 +2947,216 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'This looks like it breaks our Community guidelines. Please edit it and try again.'**
   String get contentRejected;
+
+  /// No description provided for @callEnded.
+  ///
+  /// In en, this message translates to:
+  /// **'Call ended'**
+  String get callEnded;
+
+  /// No description provided for @callConnectionFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Call connection failed. Please try again.'**
+  String get callConnectionFailed;
+
+  /// No description provided for @callTimedOut.
+  ///
+  /// In en, this message translates to:
+  /// **'Call connection timed out. Please try again.'**
+  String get callTimedOut;
+
+  /// No description provided for @callNetworkFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Call network failed. Please try again.'**
+  String get callNetworkFailed;
+
+  /// No description provided for @callSetupFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Call setup failed. Please try again.'**
+  String get callSetupFailed;
+
+  /// No description provided for @callMicRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Microphone permission is required for this call.'**
+  String get callMicRequired;
+
+  /// No description provided for @callNoAnswer.
+  ///
+  /// In en, this message translates to:
+  /// **'No answer'**
+  String get callNoAnswer;
+
+  /// No description provided for @callDeclined.
+  ///
+  /// In en, this message translates to:
+  /// **'User declined or unavailable'**
+  String get callDeclined;
+
+  /// No description provided for @callUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'User unavailable'**
+  String get callUnavailable;
+
+  /// No description provided for @callClose.
+  ///
+  /// In en, this message translates to:
+  /// **'Close'**
+  String get callClose;
+
+  /// No description provided for @callConnecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Connecting...'**
+  String get callConnecting;
+
+  /// No description provided for @callAudioTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Audio call'**
+  String get callAudioTitle;
+
+  /// No description provided for @callVideoTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Video call'**
+  String get callVideoTitle;
+
+  /// No description provided for @callSomethingWrong.
+  ///
+  /// In en, this message translates to:
+  /// **'Something went wrong.'**
+  String get callSomethingWrong;
+
+  /// No description provided for @callOpenSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Settings'**
+  String get callOpenSettings;
+
+  /// No description provided for @callAccept.
+  ///
+  /// In en, this message translates to:
+  /// **'Accept'**
+  String get callAccept;
+
+  /// No description provided for @callDecline.
+  ///
+  /// In en, this message translates to:
+  /// **'Decline'**
+  String get callDecline;
+
+  /// No description provided for @connectionsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Connections'**
+  String get connectionsTitle;
+
+  /// No description provided for @connectionsLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not load connections.'**
+  String get connectionsLoadFailed;
+
+  /// No description provided for @connectionsConnected.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected {when}'**
+  String connectionsConnected(String when);
+
+  /// No description provided for @followSignInAgain.
+  ///
+  /// In en, this message translates to:
+  /// **'Please sign in again.'**
+  String get followSignInAgain;
+
+  /// No description provided for @followNoFollowers.
+  ///
+  /// In en, this message translates to:
+  /// **'No followers yet.'**
+  String get followNoFollowers;
+
+  /// No description provided for @followNoFollowing.
+  ///
+  /// In en, this message translates to:
+  /// **'Not following anyone yet.'**
+  String get followNoFollowing;
+
+  /// No description provided for @payRemoveTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove card?'**
+  String get payRemoveTitle;
+
+  /// No description provided for @payRemoveBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This card will be removed from your account.'**
+  String get payRemoveBody;
+
+  /// No description provided for @payRemove.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove'**
+  String get payRemove;
+
+  /// No description provided for @payMakeDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Make default'**
+  String get payMakeDefault;
+
+  /// No description provided for @payRemoveCard.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove card'**
+  String get payRemoveCard;
+
+  /// No description provided for @payCardAdded.
+  ///
+  /// In en, this message translates to:
+  /// **'✅ Card added successfully!'**
+  String get payCardAdded;
+
+  /// No description provided for @payTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment Method'**
+  String get payTitle;
+
+  /// No description provided for @payAddCard.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a card'**
+  String get payAddCard;
+
+  /// No description provided for @paySavedCards.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved cards'**
+  String get paySavedCards;
+
+  /// No description provided for @payLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not load cards'**
+  String get payLoadFailed;
+
+  /// No description provided for @payCardOptions.
+  ///
+  /// In en, this message translates to:
+  /// **'Card options'**
+  String get payCardOptions;
+
+  /// No description provided for @paySetupFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Card setup failed.'**
+  String get paySetupFailed;
 }
 
 class _AppLocalizationsDelegate

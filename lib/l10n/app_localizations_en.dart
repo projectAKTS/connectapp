@@ -1568,4 +1568,113 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get contentRejected =>
       'This looks like it breaks our Community guidelines. Please edit it and try again.';
+
+  @override
+  String get callEnded => 'Call ended';
+
+  @override
+  String get callConnectionFailed =>
+      'Call connection failed. Please try again.';
+
+  @override
+  String get callTimedOut => 'Call connection timed out. Please try again.';
+
+  @override
+  String get callNetworkFailed => 'Call network failed. Please try again.';
+
+  @override
+  String get callSetupFailed => 'Call setup failed. Please try again.';
+
+  @override
+  String get callMicRequired =>
+      'Microphone permission is required for this call.';
+
+  @override
+  String get callNoAnswer => 'No answer';
+
+  @override
+  String get callDeclined => 'User declined or unavailable';
+
+  @override
+  String get callUnavailable => 'User unavailable';
+
+  @override
+  String get callClose => 'Close';
+
+  @override
+  String get callConnecting => 'Connecting...';
+
+  @override
+  String get callAudioTitle => 'Audio call';
+
+  @override
+  String get callVideoTitle => 'Video call';
+
+  @override
+  String get callSomethingWrong => 'Something went wrong.';
+
+  @override
+  String get callOpenSettings => 'Open Settings';
+
+  @override
+  String get callAccept => 'Accept';
+
+  @override
+  String get callDecline => 'Decline';
+
+  @override
+  String get connectionsTitle => 'Connections';
+
+  @override
+  String get connectionsLoadFailed => 'Could not load connections.';
+
+  @override
+  String connectionsConnected(String when) {
+    return 'Connected $when';
+  }
+
+  @override
+  String get followSignInAgain => 'Please sign in again.';
+
+  @override
+  String get followNoFollowers => 'No followers yet.';
+
+  @override
+  String get followNoFollowing => 'Not following anyone yet.';
+
+  @override
+  String get payRemoveTitle => 'Remove card?';
+
+  @override
+  String get payRemoveBody => 'This card will be removed from your account.';
+
+  @override
+  String get payRemove => 'Remove';
+
+  @override
+  String get payMakeDefault => 'Make default';
+
+  @override
+  String get payRemoveCard => 'Remove card';
+
+  @override
+  String get payCardAdded => '✅ Card added successfully!';
+
+  @override
+  String get payTitle => 'Payment Method';
+
+  @override
+  String get payAddCard => 'Add a card';
+
+  @override
+  String get paySavedCards => 'Saved cards';
+
+  @override
+  String get payLoadFailed => 'Could not load cards';
+
+  @override
+  String get payCardOptions => 'Card options';
+
+  @override
+  String get paySetupFailed => 'Card setup failed.';
 }

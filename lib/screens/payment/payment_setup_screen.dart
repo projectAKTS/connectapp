@@ -1,4 +1,5 @@
 // lib/screens/payment/payment_setup_screen.dart
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -89,15 +90,15 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Remove card?'),
-        content: const Text('This card will be removed from your account.'),
+        title: Text(context.l10n.payRemoveTitle),
+        content: Text(context.l10n.payRemoveBody),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
+              child: Text(context.l10n.commonCancel)),
           TextButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Remove')),
+              child: Text(context.l10n.payRemove)),
         ],
       ),
     );
@@ -136,7 +137,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
               ),
               ListTile(
                 leading: const Icon(Icons.star_outline),
-                title: const Text('Make default'),
+                title: Text(context.l10n.payMakeDefault),
                 enabled: !isDefault,
                 onTap: isDefault
                     ? null
@@ -148,7 +149,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
               ListTile(
                 leading:
                     const Icon(Icons.delete_outline, color: AppColors.danger),
-                title: const Text('Remove card'),
+                title: Text(context.l10n.payRemoveCard),
                 onTap: () {
                   Navigator.pop(ctx);
                   _removeCard(info.id);
@@ -224,7 +225,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Card added successfully!')),
+        SnackBar(content: Text(context.l10n.payCardAdded)),
       );
       await _refreshCards();
     } on StripeException catch (e) {
@@ -238,16 +239,17 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg)),
       );
-    } on FirebaseFunctionsException catch (e) {
+    } on FirebaseFunctionsException {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text('Setup failed: ${e.code} ${e.message ?? ''}'.trim())),
+        SnackBar(content: Text(context.l10n.paySetupFailed)),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Setup failed: ${_friendlyPaymentError(e)}')),
+        SnackBar(
+            content: Text(
+                '${context.l10n.paySetupFailed} ${_friendlyPaymentError(e)}')),
       );
     } finally {
       if (mounted) setState(() => _isProcessing = false);
@@ -261,7 +263,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
     return Scaffold(
       backgroundColor: AppColors.canvas,
       appBar: AppBar(
-        title: const Text('Payment Method'),
+        title: Text(context.l10n.payTitle),
         backgroundColor: AppColors.canvas,
         foregroundColor: AppColors.text,
         elevation: 0,
@@ -269,7 +271,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
         children: [
-          Text('Add a card', style: textTheme.titleMedium),
+          Text(context.l10n.payAddCard, style: textTheme.titleMedium),
           const SizedBox(height: 6),
           Text(
             'Used for consultation bookings. You can update it anytime.',
@@ -307,7 +309,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
             ),
           ),
           const SizedBox(height: 18),
-          Text('Saved cards', style: textTheme.titleMedium),
+          Text(context.l10n.paySavedCards, style: textTheme.titleMedium),
           const SizedBox(height: 10),
           if (_isLoadingCards && _cards.isEmpty)
             const Center(child: CircularProgressIndicator())
@@ -315,7 +317,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Could not load cards', style: textTheme.bodyLarge),
+                Text(context.l10n.payLoadFailed, style: textTheme.bodyLarge),
                 const SizedBox(height: 6),
                 Text(
                   _cardsError!,
@@ -324,7 +326,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
                 const SizedBox(height: 12),
                 TextButton(
                   onPressed: _refreshCards,
-                  child: const Text('Retry'),
+                  child: Text(context.l10n.commonRetry),
                 ),
               ],
             )
@@ -453,7 +455,7 @@ class _CardRow extends StatelessWidget {
             IconButton(
               onPressed: onMore,
               icon: const Icon(Icons.more_horiz, color: AppColors.muted),
-              tooltip: 'Card options',
+              tooltip: context.l10n.payCardOptions,
             ),
         ],
       ),
