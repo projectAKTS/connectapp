@@ -1,69 +1,128 @@
-## Politique de confidentialité
+## Politique de confidentialité (ÉBAUCHE, non publiée)
 
-_Dernière mise à jour : 31 octobre 2026_
+_Dernière mise à jour : [DATE]_
 
 La présente politique explique quels renseignements personnels Helperly
-recueille et comment nous les utilisons, conformément à la loi canadienne
-(LPRPDE) et à la Loi sur la protection des renseignements personnels dans le
-secteur privé du Québec (Loi 25). [À CONFIRMER : mention de la Loi 25]
+recueille, pourquoi, à qui ils sont communiqués et quels sont vos droits.
+Elle est rédigée en fonction de la LPRPDE (Canada) et de la Loi sur la
+protection des renseignements personnels dans le secteur privé du Québec
+(Loi 25). [RÉVISION JURIDIQUE]
 
-### Responsable de la protection des renseignements personnels
-[À CONFIRMER] Fondateur de Helperly — privacy@helperly.app
+### Qui est responsable
+Helperly est exploité par [NOM LÉGAL DE L'ENTREPRISE INDIVIDUELLE / NOM
+D'ENTREPRISE], [VILLE], Québec. [À VÉRIFIER : immatriculation]
+
+**Personne responsable de la protection des renseignements personnels :**
+[TITRE, p. ex. « Fondateur »] — [COURRIEL DE CONTACT CONFIDENTIALITÉ]
+[NE PAS publier de coordonnées personnelles sans l'approbation du fondateur]
 
 ### Ce que nous recueillons
-- **Compte :** nom, courriel, mode de connexion.
-- **Profil :** photo, bio, pays, langues parlées, sujets et domaines
-  d'expérience que vous ajoutez.
-- **Contenu :** publications, commentaires, messages et pièces jointes que
-  vous partagez.
-- **Avis :** étoiles et commentaires que vous donnez après une séance
-  réservée. Ils apparaissent sur le profil de la personne-ressource sans votre nom.
-- **Appels :** qui a appelé qui, quand et pendant combien de temps. Nous
-  n'enregistrons pas l'audio ni la vidéo des appels.
-- **Paiements :** traités par Stripe. Nous conservons une référence de
-  paiement, jamais votre numéro de carte complet.
-- **Appareil et utilisation :** jetons de notification, version de
-  l'application et rapports de plantage (Firebase Crashlytics), qui nous
-  aident à corriger les problèmes. Les statistiques d'utilisation (Firebase
-  Analytics, par exemple les écrans consultés) ne sont recueillies que si
-  vous les activez dans les Paramètres, et ne sont pas associées à votre
-  compte. [À CONFIRMER : texte mis à jour] Elles n'incluent jamais vos
-  messages ni vos publications.
-- **Langue de l'application :** pour vous envoyer les notifications dans
-  cette langue.
+- **Compte :** nom, adresse courriel, mode de connexion (courriel, Google ou
+  Apple).
+- **Profil :** photo, bio, ville, pays, fuseau horaire, langues que vous
+  parlez, sujets pour lesquels vous cherchez de l'aide, expérience que vous
+  pouvez partager, disponibilités.
+- **Contenu que vous créez :** publications, commentaires, messages et
+  pièces jointes (photos, vidéos), avis donnés après une séance réservée.
+- **Appels :** qui a appelé qui, quand, type et statut de l'appel. L'audio
+  et la vidéo des appels ne sont ni enregistrés ni conservés par Helperly.
+- **Réservations et paiements :** séances réservées, prix,
+  remboursements. Les données de carte sont traitées par Stripe; nous
+  conservons seulement une référence client Stripe ainsi que la marque et
+  les quatre derniers chiffres de la carte affichés dans l'application.
+  [À VÉRIFIER]
+- **Sécurité :** signalements que vous faites ou qui vous concernent, et
+  personnes que vous avez bloquées.
+- **Appareil :** jetons de notification et identifiant d'installation
+  aléatoire, pour vous livrer messages et appels; langue de l'application,
+  pour vous écrire les notifications dans cette langue.
+- **Rapports de plantage (facultatif, désactivé par défaut) :** si vous
+  activez « Envoyer les rapports de plantage », les détails techniques des
+  plantages (modèle d'appareil, versions du système et de l'application,
+  erreur). Non associés à votre compte.
+- **Statistiques d'utilisation (facultatif, désactivé par défaut) :** si
+  vous activez « Partager les statistiques d'utilisation », les écrans et
+  fonctions utilisés. Non associées à votre compte; elles n'incluent jamais
+  vos messages ni vos publications. Aucun identifiant publicitaire n'est
+  recueilli.
 
-### Comment nous les utilisons
-Pour faire fonctionner le service (profils, mise en relation, messages,
-appels, paiements), pour assurer la sécurité de la communauté (modération,
-signalements, blocage), pour envoyer les notifications que vous avez
-activées, et pour corriger des bogues et améliorer l'application.
+Nous n'utilisons pas vos renseignements à des fins publicitaires et nous ne
+les vendons pas.
 
-### Avec qui nous les partageons
-Avec les fournisseurs qui exploitent certaines parties de Helperly pour
-nous : Google Firebase (hébergement, base de données, connexion,
-notifications, rapports de plantage, statistiques), Agora (appels) et Stripe
-(paiements). Les autres utilisateurs voient votre profil public et le
-contenu que vous publiez. Nous ne vendons pas de renseignements personnels.
+### Pourquoi nous les utilisons
+- Pour faire fonctionner Helperly : comptes, profils, mise en relation
+  selon les sujets et les langues, publications, messages, appels,
+  réservations et paiements.
+- Pour assurer la sécurité de la communauté : modération, signalements,
+  blocage, prévention des abus et de la fraude.
+- Pour envoyer les notifications que vous avez activées.
+- Si vous y consentez : pour corriger les plantages et améliorer
+  l'application.
 
-### Où ils sont conservés
-Nos fournisseurs peuvent conserver des données à l'extérieur du Québec et du
-Canada, notamment aux États-Unis. [À CONFIRMER : évaluation des facteurs
-relatifs à la vie privée effectuée avant ce transfert]
+### À qui ils sont communiqués (fournisseurs de services)
+| Fournisseur | Finalité | Données | Lieu |
+|---|---|---|---|
+| Google Firebase (Authentication, Cloud Firestore, Cloud Storage, Cloud Functions, Cloud Messaging, App Check, Hosting) | Comptes, base de données, fichiers, logique serveur, notifications, protection contre les abus, site Web | Toutes les données ci-dessus | [À VÉRIFIER : région, p. ex. États-Unis] |
+| Google Firebase Crashlytics / Analytics | Rapports de plantage / statistiques, seulement si vous les activez | Données d'appareil et d'utilisation ci-dessus | États-Unis [À VÉRIFIER] |
+| Apple (APNs, PushKit, Se connecter avec Apple) et Google (FCM, connexion Google) | Notifications, appels entrants, connexion | Jetons d'appareil, identité de connexion | États-Unis |
+| Agora | Appels audio et vidéo en temps réel | Médias d'appel en transit, métadonnées d'appel, adresse IP | [À VÉRIFIER] |
+| Stripe | Paiements et versements aux personnes-ressources | Renseignements de paiement et de versement | Canada / États-Unis [À VÉRIFIER] |
 
-### Combien de temps nous les conservons
-Tant que votre compte est actif. Lorsque vous supprimez votre compte, nous
-supprimons votre profil, vos publications, vos photos et vos renseignements
-personnels, immédiatement ou au plus tard dans les 30 jours, sauf les
-documents que la loi nous oblige à conserver (par exemple, les dossiers de
-paiement). Les messages déjà envoyés restent dans la conversation de l'autre
-personne. Les commentaires d'avis que vous avez écrits sont supprimés; leurs
-étoiles restent dans la moyenne de la personne-ressource, sans votre nom.
+Les autres utilisateurs voient votre profil public, vos publications et
+commentaires, ainsi que les messages que vous leur envoyez.
+
+### Communication à l'extérieur du Québec et du Canada
+Nos fournisseurs traitent et conservent des renseignements à l'extérieur du
+Québec, notamment aux États-Unis, où ils peuvent être accessibles aux
+autorités selon les lois locales. Avant ces communications, nous évaluons
+la protection qu'elles offrent. [RÉVISION JURIDIQUE : évaluation des
+facteurs relatifs à la vie privée exigée par la Loi 25]
+
+### Durée de conservation
+- **Compte et profil :** tant que votre compte est actif. Lorsque vous
+  supprimez votre compte dans les Paramètres, nous supprimons votre profil,
+  vos photos, vos publications (avec leurs commentaires), vos listes
+  d'abonnés et votre compte de connexion, immédiatement ou dans les 30 jours
+  si la suppression immédiate échoue.
+- **Conservé après la suppression :**
+  - Les messages envoyés restent dans les conversations des destinataires.
+  - Les étoiles des avis restent dans la moyenne de la personne-ressource,
+    sans votre nom; les commentaires d'avis sont supprimés.
+  - Les dossiers de réservation et de paiement sont conservés selon les
+    exigences légales.
+  - Les signalements sont conservés pour des raisons de sécurité.
+  - Les registres d'appels sont conservés [À VÉRIFIER / DÉCIDER : durée;
+    actuellement non supprimés].
+- **Rapports de plantage :** conservés 90 jours par Firebase.
+  [À VÉRIFIER]
+- **Statistiques d'utilisation :** conservées [À VÉRIFIER : 2 ou 14 mois].
 
 ### Vos choix et vos droits
-Vous pouvez consulter et modifier votre profil, gérer les notifications et
-les statistiques d'utilisation, et supprimer votre compte dans les
-Paramètres. Vous pouvez nous demander l'accès à vos renseignements
-personnels ou leur rectification à support@helperly.app.
+- Dans l'application, vous pouvez :
+  - consulter et modifier votre profil;
+  - changer la langue de l'application;
+  - activer ou désactiver les rapports de plantage et les statistiques;
+  - bloquer des personnes;
+  - supprimer votre compte.
+- Écrivez à [COURRIEL DE CONTACT CONFIDENTIALITÉ] pour accéder à vos
+  renseignements, les faire rectifier, retirer votre consentement ou poser
+  une question. Nous répondons dans les 30 jours.
+- Vous pouvez porter plainte auprès de la Commission d'accès à
+  l'information du Québec ou du Commissariat à la protection de la vie
+  privée du Canada.
+
+### Âge
+Helperly s'adresse aux personnes de 18 ans et plus. [DÉCISION : 18+
+provisoire]
+
+### Incidents de confidentialité
+Si un incident de confidentialité présente un risque de préjudice sérieux,
+nous vous aviserons, ainsi que la Commission d'accès à l'information,
+comme l'exige la loi.
+
+### Modifications
+Nous vous informerons dans l'application de tout changement important à la
+présente politique.
 
 ### Contact
-support@helperly.app
+[COURRIEL DE CONTACT CONFIDENTIALITÉ] · [COURRIEL DE SOUTIEN]
