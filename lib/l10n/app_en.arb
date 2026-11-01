@@ -605,5 +605,159 @@
   "editPostContent": "Post Content",
   "editPostUpdate": "Update Post",
   "editPostUpdated": "Post updated successfully!",
-  "editPostFailed": "Could not update the post. Please try again."
+  "editPostFailed": "Could not update the post. Please try again.",
+  "consultCancelTitle": "Cancel consultation?",
+  "consultCancelBody": "Canceling may trigger a refund based on the cancellation policy.",
+  "consultKeep": "Keep",
+  "consultCanceledNoRefund": "Canceled. No refund (within 1 hour).",
+  "consultNotScheduled": "Not scheduled",
+  "consultJoinSoon": "Join soon",
+  "consultExpired": "Expired",
+  "consultReady": "Ready to join",
+  "consultLoginToView": "Please log in to view consultations.",
+  "consultTitle": "My Consultations",
+  "consultLoadError": "Error loading consultations.",
+  "consultNone": "No consultations found.",
+  "consultUpcoming": "Upcoming",
+  "consultNoUpcoming": "No upcoming consultations.",
+  "consultNoPartner": "No partner found for this consultation.",
+  "consultPast": "Past consultations",
+  "consultNoPast": "No past consultations yet.",
+  "consultCompleted": "Completed",
+  "consultRated": "You rated this session",
+  "consultRate": "Rate this session",
+  "consultJoin": "Join",
+  "consultCanceledRefund": "Canceled. Refund: {amount} ({percent}%).",
+  "@consultCanceledRefund": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      },
+      "percent": {
+        "type": "int"
+      }
+    }
+  },
+  "consultCancelFailed": "Could not cancel. Please try again.",
+  "consultJoinIn": "Join available in {wait}",
+  "@consultJoinIn": {
+    "placeholders": {
+      "wait": {
+        "type": "String"
+      }
+    }
+  },
+  "consultJoinOpensEarly": "Join opens {minutes} min early",
+  "@consultJoinOpensEarly": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "consultCanceled": "Canceled",
+  "consultMinutes": "{minutes} min",
+  "@consultMinutes": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "consultCost": "Cost: {cost}",
+  "@consultCost": {
+    "placeholders": {
+      "cost": {
+        "type": "String"
+      }
+    }
+  },
+  "bookRespondsHour": "Usually responds within an hour",
+  "bookResponds2h": "Usually responds within 2 hours",
+  "bookRespondsToday": "Usually responds today",
+  "bookRespondsDay": "Usually responds within a day",
+  "bookPickDateTime": "Please pick a date and time.",
+  "bookSignIn": "Please sign in to continue.",
+  "bookAddCardTitle": "Add a card to continue",
+  "bookAddCardBody": "You don’t have a saved payment method yet. Add one now to complete the booking.",
+  "bookAddCard": "Add Card",
+  "bookSessionExpired": "Session expired. Please sign in again.",
+  "bookPaymentFailed": "Payment failed. Please try again.",
+  "bookBooked": "Consultation booked successfully.",
+  "bookTitle": "Book a Consultation",
+  "bookSelectDuration": "Select duration",
+  "bookCallType": "Call type",
+  "bookAudio": "Audio",
+  "bookVideo": "Video",
+  "bookPickATime": "Pick a time",
+  "bookPickDate": "Pick date",
+  "bookPickTime": "Pick time",
+  "bookSummary": "Summary",
+  "bookPremiumFree": "Premium: 5 min free audio applied",
+  "bookPayout": "{amount} to helper",
+  "@bookPayout": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "bookFailed": "Could not book. Please try again.",
+  "bookScheduled": "Scheduled: {when}",
+  "@bookScheduled": {
+    "placeholders": {
+      "when": {
+        "type": "String"
+      }
+    }
+  },
+  "bookSummaryLine": "Type: {type} • Duration: {minutes} min",
+  "@bookSummaryLine": {
+    "placeholders": {
+      "type": {
+        "type": "String"
+      },
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "bookTotal": "Total: {price}",
+  "@bookTotal": {
+    "placeholders": {
+      "price": {
+        "type": "String"
+      }
+    }
+  },
+  "bookButton": "Book consultation ({price})",
+  "@bookButton": {
+    "placeholders": {
+      "price": {
+        "type": "String"
+      }
+    }
+  },
+  "reviewSaveFailed": "Could not save your rating. Please try again.",
+  "reviewThanks": "Thanks for rating your session.",
+  "reviewShownOnProfile": "Your rating and comment are shown on their profile.",
+  "reviewHint": "What helped? (optional)",
+  "reviewSubmit": "Submit rating",
+  "reviewHowWas": "How was your session with {name}?",
+  "@reviewHowWas": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "reviewStars": "{count, plural, =1{1 star} other{{count} stars}}",
+  "@reviewStars": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "contentRejected": "This looks like it breaks our Community guidelines. Please edit it and try again."
 }

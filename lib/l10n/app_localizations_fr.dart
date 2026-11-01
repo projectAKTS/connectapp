@@ -1373,4 +1373,236 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get editPostFailed =>
       'Impossible de mettre à jour la publication. Veuillez réessayer.';
+
+  @override
+  String get consultCancelTitle => 'Annuler la consultation?';
+
+  @override
+  String get consultCancelBody =>
+      'L\'annulation peut donner lieu à un remboursement selon la politique d\'annulation.';
+
+  @override
+  String get consultKeep => 'Garder';
+
+  @override
+  String get consultCanceledNoRefund =>
+      'Annulée. Aucun remboursement (moins d\'une heure avant).';
+
+  @override
+  String get consultNotScheduled => 'Non planifiée';
+
+  @override
+  String get consultJoinSoon => 'Bientôt accessible';
+
+  @override
+  String get consultExpired => 'Expirée';
+
+  @override
+  String get consultReady => 'Prête à rejoindre';
+
+  @override
+  String get consultLoginToView =>
+      'Connectez-vous pour voir vos consultations.';
+
+  @override
+  String get consultTitle => 'Mes consultations';
+
+  @override
+  String get consultLoadError => 'Erreur de chargement des consultations.';
+
+  @override
+  String get consultNone => 'Aucune consultation.';
+
+  @override
+  String get consultUpcoming => 'À venir';
+
+  @override
+  String get consultNoUpcoming => 'Aucune consultation à venir.';
+
+  @override
+  String get consultNoPartner =>
+      'Aucun participant trouvé pour cette consultation.';
+
+  @override
+  String get consultPast => 'Consultations passées';
+
+  @override
+  String get consultNoPast => 'Aucune consultation passée.';
+
+  @override
+  String get consultCompleted => 'Terminée';
+
+  @override
+  String get consultRated => 'Vous avez évalué cette séance';
+
+  @override
+  String get consultRate => 'Évaluer cette séance';
+
+  @override
+  String get consultJoin => 'Rejoindre';
+
+  @override
+  String consultCanceledRefund(String amount, int percent) {
+    return 'Annulée. Remboursement : $amount ($percent %).';
+  }
+
+  @override
+  String get consultCancelFailed =>
+      'Annulation impossible. Veuillez réessayer.';
+
+  @override
+  String consultJoinIn(String wait) {
+    return 'Accessible dans $wait';
+  }
+
+  @override
+  String consultJoinOpensEarly(int minutes) {
+    return 'Accessible $minutes min avant';
+  }
+
+  @override
+  String get consultCanceled => 'Annulée';
+
+  @override
+  String consultMinutes(int minutes) {
+    return '$minutes min';
+  }
+
+  @override
+  String consultCost(String cost) {
+    return 'Coût : $cost';
+  }
+
+  @override
+  String get bookRespondsHour => 'Répond habituellement en moins d\'une heure';
+
+  @override
+  String get bookResponds2h => 'Répond habituellement en moins de 2 heures';
+
+  @override
+  String get bookRespondsToday => 'Répond habituellement dans la journée';
+
+  @override
+  String get bookRespondsDay => 'Répond habituellement en moins d\'un jour';
+
+  @override
+  String get bookPickDateTime => 'Veuillez choisir une date et une heure.';
+
+  @override
+  String get bookSignIn => 'Veuillez vous connecter pour continuer.';
+
+  @override
+  String get bookAddCardTitle => 'Ajoutez une carte pour continuer';
+
+  @override
+  String get bookAddCardBody =>
+      'Vous n\'avez pas encore de mode de paiement enregistré. Ajoutez-en un pour terminer la réservation.';
+
+  @override
+  String get bookAddCard => 'Ajouter une carte';
+
+  @override
+  String get bookSessionExpired =>
+      'Session expirée. Veuillez vous reconnecter.';
+
+  @override
+  String get bookPaymentFailed => 'Le paiement a échoué. Veuillez réessayer.';
+
+  @override
+  String get bookBooked => 'Consultation réservée.';
+
+  @override
+  String get bookTitle => 'Réserver une consultation';
+
+  @override
+  String get bookSelectDuration => 'Choisir la durée';
+
+  @override
+  String get bookCallType => 'Type d\'appel';
+
+  @override
+  String get bookAudio => 'Audio';
+
+  @override
+  String get bookVideo => 'Vidéo';
+
+  @override
+  String get bookPickATime => 'Choisir un moment';
+
+  @override
+  String get bookPickDate => 'Choisir la date';
+
+  @override
+  String get bookPickTime => 'Choisir l\'heure';
+
+  @override
+  String get bookSummary => 'Récapitulatif';
+
+  @override
+  String get bookPremiumFree => 'Premium : 5 min d\'audio gratuites appliquées';
+
+  @override
+  String bookPayout(String amount) {
+    return '$amount pour l\'aidant';
+  }
+
+  @override
+  String get bookFailed => 'Réservation impossible. Veuillez réessayer.';
+
+  @override
+  String bookScheduled(String when) {
+    return 'Prévue : $when';
+  }
+
+  @override
+  String bookSummaryLine(String type, int minutes) {
+    return 'Type : $type • Durée : $minutes min';
+  }
+
+  @override
+  String bookTotal(String price) {
+    return 'Total : $price';
+  }
+
+  @override
+  String bookButton(String price) {
+    return 'Réserver ($price)';
+  }
+
+  @override
+  String get reviewSaveFailed =>
+      'Impossible d\'enregistrer votre évaluation. Veuillez réessayer.';
+
+  @override
+  String get reviewThanks => 'Merci d\'avoir évalué votre séance.';
+
+  @override
+  String get reviewShownOnProfile =>
+      'Votre note et votre commentaire seront affichés sur son profil.';
+
+  @override
+  String get reviewHint => 'Qu\'est-ce qui vous a aidé? (facultatif)';
+
+  @override
+  String get reviewSubmit => 'Envoyer l\'évaluation';
+
+  @override
+  String reviewHowWas(String name) {
+    return 'Comment s\'est passée votre séance avec $name?';
+  }
+
+  @override
+  String reviewStars(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count étoiles',
+      one: '1 étoile',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get contentRejected =>
+      'Ce contenu semble enfreindre nos règles de la communauté. Veuillez le modifier et réessayer.';
 }

@@ -339,7 +339,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_blockedGuard()) return;
     if (!ContentFilter.isAllowed(t)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(ContentFilter.rejectionMessage)),
+        SnackBar(content: Text(context.l10n.contentRejected)),
       );
       return;
     }

@@ -593,7 +593,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (content.trim().isEmpty && !_hasMedia) return;
     if (!ContentFilter.isAllowed('$content ${selectedTags.join(' ')}')) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(ContentFilter.rejectionMessage)),
+        SnackBar(content: Text(context.l10n.contentRejected)),
       );
       return;
     }

@@ -1,3 +1,4 @@
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/services/app_telemetry.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connect_app/services/content_filter.dart';
@@ -95,16 +96,16 @@ class ReviewService {
       );
     } catch (_) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Could not save your rating. Please try again.'),
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(context.l10n.reviewSaveFailed),
         ));
       }
       return false;
     }
     AppTelemetry.event('consultation_rated', {'stars': result.stars});
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Thanks for rating your session.'),
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(context.l10n.reviewThanks),
       ));
     }
     return true;
@@ -140,7 +141,7 @@ class _RateSheetState extends State<_RateSheet> {
     if (_stars == 0) return;
     final text = _text.text.trim();
     if (!ContentFilter.isAllowed(text)) {
-      setState(() => _error = ContentFilter.rejectionMessage);
+      setState(() => _error = context.l10n.contentRejected);
       return;
     }
     Navigator.pop(context, _RateResult(_stars, text));
@@ -160,13 +161,13 @@ class _RateSheetState extends State<_RateSheet> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'How was your session with ${widget.helperName}?',
+                context.l10n.reviewHowWas(widget.helperName),
                 style:
                     const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 4),
-              const Text(
-                'Your rating and comment are shown on their profile.',
+              Text(
+                context.l10n.reviewShownOnProfile,
                 style: TextStyle(color: AppColors.muted),
               ),
               const SizedBox(height: 12),
@@ -177,7 +178,7 @@ class _RateSheetState extends State<_RateSheet> {
                     IconButton(
                       key: Key('rate_star_$i'),
                       iconSize: 36,
-                      tooltip: '$i star${i == 1 ? '' : 's'}',
+                      tooltip: context.l10n.reviewStars(i),
                       onPressed: () => setState(() => _stars = i),
                       icon: Icon(
                         i <= _stars
@@ -197,7 +198,7 @@ class _RateSheetState extends State<_RateSheet> {
                 minLines: 2,
                 textCapitalization: TextCapitalization.sentences,
                 decoration: InputDecoration(
-                  hintText: 'What helped? (optional)',
+                  hintText: context.l10n.reviewHint,
                   errorText: _error,
                   filled: true,
                   fillColor: AppColors.card,
@@ -218,7 +219,7 @@ class _RateSheetState extends State<_RateSheet> {
                   backgroundColor: AppColors.primary,
                   minimumSize: const Size.fromHeight(48),
                 ),
-                child: const Text('Submit rating'),
+                child: Text(context.l10n.reviewSubmit),
               ),
             ],
           ),

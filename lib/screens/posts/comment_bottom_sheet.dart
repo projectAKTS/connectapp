@@ -34,7 +34,7 @@ class _CommentBottomSheetState extends State<CommentBottomSheet> {
     if (_commentController.text.trim().isEmpty || _isPosting) return;
     if (!ContentFilter.isAllowed(_commentController.text)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(ContentFilter.rejectionMessage)),
+        SnackBar(content: Text(context.l10n.contentRejected)),
       );
       return;
     }

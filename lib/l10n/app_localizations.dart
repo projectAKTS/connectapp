@@ -2563,6 +2563,390 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Could not update the post. Please try again.'**
   String get editPostFailed;
+
+  /// No description provided for @consultCancelTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel consultation?'**
+  String get consultCancelTitle;
+
+  /// No description provided for @consultCancelBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Canceling may trigger a refund based on the cancellation policy.'**
+  String get consultCancelBody;
+
+  /// No description provided for @consultKeep.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep'**
+  String get consultKeep;
+
+  /// No description provided for @consultCanceledNoRefund.
+  ///
+  /// In en, this message translates to:
+  /// **'Canceled. No refund (within 1 hour).'**
+  String get consultCanceledNoRefund;
+
+  /// No description provided for @consultNotScheduled.
+  ///
+  /// In en, this message translates to:
+  /// **'Not scheduled'**
+  String get consultNotScheduled;
+
+  /// No description provided for @consultJoinSoon.
+  ///
+  /// In en, this message translates to:
+  /// **'Join soon'**
+  String get consultJoinSoon;
+
+  /// No description provided for @consultExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'Expired'**
+  String get consultExpired;
+
+  /// No description provided for @consultReady.
+  ///
+  /// In en, this message translates to:
+  /// **'Ready to join'**
+  String get consultReady;
+
+  /// No description provided for @consultLoginToView.
+  ///
+  /// In en, this message translates to:
+  /// **'Please log in to view consultations.'**
+  String get consultLoginToView;
+
+  /// No description provided for @consultTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'My Consultations'**
+  String get consultTitle;
+
+  /// No description provided for @consultLoadError.
+  ///
+  /// In en, this message translates to:
+  /// **'Error loading consultations.'**
+  String get consultLoadError;
+
+  /// No description provided for @consultNone.
+  ///
+  /// In en, this message translates to:
+  /// **'No consultations found.'**
+  String get consultNone;
+
+  /// No description provided for @consultUpcoming.
+  ///
+  /// In en, this message translates to:
+  /// **'Upcoming'**
+  String get consultUpcoming;
+
+  /// No description provided for @consultNoUpcoming.
+  ///
+  /// In en, this message translates to:
+  /// **'No upcoming consultations.'**
+  String get consultNoUpcoming;
+
+  /// No description provided for @consultNoPartner.
+  ///
+  /// In en, this message translates to:
+  /// **'No partner found for this consultation.'**
+  String get consultNoPartner;
+
+  /// No description provided for @consultPast.
+  ///
+  /// In en, this message translates to:
+  /// **'Past consultations'**
+  String get consultPast;
+
+  /// No description provided for @consultNoPast.
+  ///
+  /// In en, this message translates to:
+  /// **'No past consultations yet.'**
+  String get consultNoPast;
+
+  /// No description provided for @consultCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Completed'**
+  String get consultCompleted;
+
+  /// No description provided for @consultRated.
+  ///
+  /// In en, this message translates to:
+  /// **'You rated this session'**
+  String get consultRated;
+
+  /// No description provided for @consultRate.
+  ///
+  /// In en, this message translates to:
+  /// **'Rate this session'**
+  String get consultRate;
+
+  /// No description provided for @consultJoin.
+  ///
+  /// In en, this message translates to:
+  /// **'Join'**
+  String get consultJoin;
+
+  /// No description provided for @consultCanceledRefund.
+  ///
+  /// In en, this message translates to:
+  /// **'Canceled. Refund: {amount} ({percent}%).'**
+  String consultCanceledRefund(String amount, int percent);
+
+  /// No description provided for @consultCancelFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not cancel. Please try again.'**
+  String get consultCancelFailed;
+
+  /// No description provided for @consultJoinIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Join available in {wait}'**
+  String consultJoinIn(String wait);
+
+  /// No description provided for @consultJoinOpensEarly.
+  ///
+  /// In en, this message translates to:
+  /// **'Join opens {minutes} min early'**
+  String consultJoinOpensEarly(int minutes);
+
+  /// No description provided for @consultCanceled.
+  ///
+  /// In en, this message translates to:
+  /// **'Canceled'**
+  String get consultCanceled;
+
+  /// No description provided for @consultMinutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{minutes} min'**
+  String consultMinutes(int minutes);
+
+  /// No description provided for @consultCost.
+  ///
+  /// In en, this message translates to:
+  /// **'Cost: {cost}'**
+  String consultCost(String cost);
+
+  /// No description provided for @bookRespondsHour.
+  ///
+  /// In en, this message translates to:
+  /// **'Usually responds within an hour'**
+  String get bookRespondsHour;
+
+  /// No description provided for @bookResponds2h.
+  ///
+  /// In en, this message translates to:
+  /// **'Usually responds within 2 hours'**
+  String get bookResponds2h;
+
+  /// No description provided for @bookRespondsToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Usually responds today'**
+  String get bookRespondsToday;
+
+  /// No description provided for @bookRespondsDay.
+  ///
+  /// In en, this message translates to:
+  /// **'Usually responds within a day'**
+  String get bookRespondsDay;
+
+  /// No description provided for @bookPickDateTime.
+  ///
+  /// In en, this message translates to:
+  /// **'Please pick a date and time.'**
+  String get bookPickDateTime;
+
+  /// No description provided for @bookSignIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Please sign in to continue.'**
+  String get bookSignIn;
+
+  /// No description provided for @bookAddCardTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a card to continue'**
+  String get bookAddCardTitle;
+
+  /// No description provided for @bookAddCardBody.
+  ///
+  /// In en, this message translates to:
+  /// **'You don’t have a saved payment method yet. Add one now to complete the booking.'**
+  String get bookAddCardBody;
+
+  /// No description provided for @bookAddCard.
+  ///
+  /// In en, this message translates to:
+  /// **'Add Card'**
+  String get bookAddCard;
+
+  /// No description provided for @bookSessionExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'Session expired. Please sign in again.'**
+  String get bookSessionExpired;
+
+  /// No description provided for @bookPaymentFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment failed. Please try again.'**
+  String get bookPaymentFailed;
+
+  /// No description provided for @bookBooked.
+  ///
+  /// In en, this message translates to:
+  /// **'Consultation booked successfully.'**
+  String get bookBooked;
+
+  /// No description provided for @bookTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Book a Consultation'**
+  String get bookTitle;
+
+  /// No description provided for @bookSelectDuration.
+  ///
+  /// In en, this message translates to:
+  /// **'Select duration'**
+  String get bookSelectDuration;
+
+  /// No description provided for @bookCallType.
+  ///
+  /// In en, this message translates to:
+  /// **'Call type'**
+  String get bookCallType;
+
+  /// No description provided for @bookAudio.
+  ///
+  /// In en, this message translates to:
+  /// **'Audio'**
+  String get bookAudio;
+
+  /// No description provided for @bookVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Video'**
+  String get bookVideo;
+
+  /// No description provided for @bookPickATime.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick a time'**
+  String get bookPickATime;
+
+  /// No description provided for @bookPickDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick date'**
+  String get bookPickDate;
+
+  /// No description provided for @bookPickTime.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick time'**
+  String get bookPickTime;
+
+  /// No description provided for @bookSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'Summary'**
+  String get bookSummary;
+
+  /// No description provided for @bookPremiumFree.
+  ///
+  /// In en, this message translates to:
+  /// **'Premium: 5 min free audio applied'**
+  String get bookPremiumFree;
+
+  /// No description provided for @bookPayout.
+  ///
+  /// In en, this message translates to:
+  /// **'{amount} to helper'**
+  String bookPayout(String amount);
+
+  /// No description provided for @bookFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not book. Please try again.'**
+  String get bookFailed;
+
+  /// No description provided for @bookScheduled.
+  ///
+  /// In en, this message translates to:
+  /// **'Scheduled: {when}'**
+  String bookScheduled(String when);
+
+  /// No description provided for @bookSummaryLine.
+  ///
+  /// In en, this message translates to:
+  /// **'Type: {type} • Duration: {minutes} min'**
+  String bookSummaryLine(String type, int minutes);
+
+  /// No description provided for @bookTotal.
+  ///
+  /// In en, this message translates to:
+  /// **'Total: {price}'**
+  String bookTotal(String price);
+
+  /// No description provided for @bookButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Book consultation ({price})'**
+  String bookButton(String price);
+
+  /// No description provided for @reviewSaveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not save your rating. Please try again.'**
+  String get reviewSaveFailed;
+
+  /// No description provided for @reviewThanks.
+  ///
+  /// In en, this message translates to:
+  /// **'Thanks for rating your session.'**
+  String get reviewThanks;
+
+  /// No description provided for @reviewShownOnProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Your rating and comment are shown on their profile.'**
+  String get reviewShownOnProfile;
+
+  /// No description provided for @reviewHint.
+  ///
+  /// In en, this message translates to:
+  /// **'What helped? (optional)'**
+  String get reviewHint;
+
+  /// No description provided for @reviewSubmit.
+  ///
+  /// In en, this message translates to:
+  /// **'Submit rating'**
+  String get reviewSubmit;
+
+  /// No description provided for @reviewHowWas.
+  ///
+  /// In en, this message translates to:
+  /// **'How was your session with {name}?'**
+  String reviewHowWas(String name);
+
+  /// No description provided for @reviewStars.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 star} other{{count} stars}}'**
+  String reviewStars(int count);
+
+  /// No description provided for @contentRejected.
+  ///
+  /// In en, this message translates to:
+  /// **'This looks like it breaks our Community guidelines. Please edit it and try again.'**
+  String get contentRejected;
 }
 
 class _AppLocalizationsDelegate

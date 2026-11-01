@@ -1341,4 +1341,231 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get editPostFailed => 'Could not update the post. Please try again.';
+
+  @override
+  String get consultCancelTitle => 'Cancel consultation?';
+
+  @override
+  String get consultCancelBody =>
+      'Canceling may trigger a refund based on the cancellation policy.';
+
+  @override
+  String get consultKeep => 'Keep';
+
+  @override
+  String get consultCanceledNoRefund => 'Canceled. No refund (within 1 hour).';
+
+  @override
+  String get consultNotScheduled => 'Not scheduled';
+
+  @override
+  String get consultJoinSoon => 'Join soon';
+
+  @override
+  String get consultExpired => 'Expired';
+
+  @override
+  String get consultReady => 'Ready to join';
+
+  @override
+  String get consultLoginToView => 'Please log in to view consultations.';
+
+  @override
+  String get consultTitle => 'My Consultations';
+
+  @override
+  String get consultLoadError => 'Error loading consultations.';
+
+  @override
+  String get consultNone => 'No consultations found.';
+
+  @override
+  String get consultUpcoming => 'Upcoming';
+
+  @override
+  String get consultNoUpcoming => 'No upcoming consultations.';
+
+  @override
+  String get consultNoPartner => 'No partner found for this consultation.';
+
+  @override
+  String get consultPast => 'Past consultations';
+
+  @override
+  String get consultNoPast => 'No past consultations yet.';
+
+  @override
+  String get consultCompleted => 'Completed';
+
+  @override
+  String get consultRated => 'You rated this session';
+
+  @override
+  String get consultRate => 'Rate this session';
+
+  @override
+  String get consultJoin => 'Join';
+
+  @override
+  String consultCanceledRefund(String amount, int percent) {
+    return 'Canceled. Refund: $amount ($percent%).';
+  }
+
+  @override
+  String get consultCancelFailed => 'Could not cancel. Please try again.';
+
+  @override
+  String consultJoinIn(String wait) {
+    return 'Join available in $wait';
+  }
+
+  @override
+  String consultJoinOpensEarly(int minutes) {
+    return 'Join opens $minutes min early';
+  }
+
+  @override
+  String get consultCanceled => 'Canceled';
+
+  @override
+  String consultMinutes(int minutes) {
+    return '$minutes min';
+  }
+
+  @override
+  String consultCost(String cost) {
+    return 'Cost: $cost';
+  }
+
+  @override
+  String get bookRespondsHour => 'Usually responds within an hour';
+
+  @override
+  String get bookResponds2h => 'Usually responds within 2 hours';
+
+  @override
+  String get bookRespondsToday => 'Usually responds today';
+
+  @override
+  String get bookRespondsDay => 'Usually responds within a day';
+
+  @override
+  String get bookPickDateTime => 'Please pick a date and time.';
+
+  @override
+  String get bookSignIn => 'Please sign in to continue.';
+
+  @override
+  String get bookAddCardTitle => 'Add a card to continue';
+
+  @override
+  String get bookAddCardBody =>
+      'You don’t have a saved payment method yet. Add one now to complete the booking.';
+
+  @override
+  String get bookAddCard => 'Add Card';
+
+  @override
+  String get bookSessionExpired => 'Session expired. Please sign in again.';
+
+  @override
+  String get bookPaymentFailed => 'Payment failed. Please try again.';
+
+  @override
+  String get bookBooked => 'Consultation booked successfully.';
+
+  @override
+  String get bookTitle => 'Book a Consultation';
+
+  @override
+  String get bookSelectDuration => 'Select duration';
+
+  @override
+  String get bookCallType => 'Call type';
+
+  @override
+  String get bookAudio => 'Audio';
+
+  @override
+  String get bookVideo => 'Video';
+
+  @override
+  String get bookPickATime => 'Pick a time';
+
+  @override
+  String get bookPickDate => 'Pick date';
+
+  @override
+  String get bookPickTime => 'Pick time';
+
+  @override
+  String get bookSummary => 'Summary';
+
+  @override
+  String get bookPremiumFree => 'Premium: 5 min free audio applied';
+
+  @override
+  String bookPayout(String amount) {
+    return '$amount to helper';
+  }
+
+  @override
+  String get bookFailed => 'Could not book. Please try again.';
+
+  @override
+  String bookScheduled(String when) {
+    return 'Scheduled: $when';
+  }
+
+  @override
+  String bookSummaryLine(String type, int minutes) {
+    return 'Type: $type • Duration: $minutes min';
+  }
+
+  @override
+  String bookTotal(String price) {
+    return 'Total: $price';
+  }
+
+  @override
+  String bookButton(String price) {
+    return 'Book consultation ($price)';
+  }
+
+  @override
+  String get reviewSaveFailed =>
+      'Could not save your rating. Please try again.';
+
+  @override
+  String get reviewThanks => 'Thanks for rating your session.';
+
+  @override
+  String get reviewShownOnProfile =>
+      'Your rating and comment are shown on their profile.';
+
+  @override
+  String get reviewHint => 'What helped? (optional)';
+
+  @override
+  String get reviewSubmit => 'Submit rating';
+
+  @override
+  String reviewHowWas(String name) {
+    return 'How was your session with $name?';
+  }
+
+  @override
+  String reviewStars(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count stars',
+      one: '1 star',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get contentRejected =>
+      'This looks like it breaks our Community guidelines. Please edit it and try again.';
 }

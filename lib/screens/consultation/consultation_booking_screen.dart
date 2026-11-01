@@ -1,3 +1,4 @@
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/l10n/formatters.dart';
 import 'dart:async';
 import 'package:connect_app/services/app_telemetry.dart';
@@ -114,10 +115,10 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
 
   String get _availabilityLabel {
     final simulatedHours = 2;
-    if (simulatedHours <= 1) return 'Usually responds within an hour';
-    if (simulatedHours <= 3) return 'Usually responds within 2 hours';
-    if (simulatedHours <= 6) return 'Usually responds today';
-    return 'Usually responds within a day';
+    if (simulatedHours <= 1) return context.l10n.bookRespondsHour;
+    if (simulatedHours <= 3) return context.l10n.bookResponds2h;
+    if (simulatedHours <= 6) return context.l10n.bookRespondsToday;
+    return context.l10n.bookRespondsDay;
   }
 
   bool get _isSeeker => _userRole != 'helper';
@@ -154,7 +155,8 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
       PricingConfig.getHelperPayout(_selectedDuration, _callType);
   String get _priceLabel => AppFormat.money(context, _finalPrice);
   String get _basePriceLabel => AppFormat.money(context, _basePrice);
-  String get _payoutLabel => '${AppFormat.money(context, _payout)} to helper';
+  String get _payoutLabel =>
+      context.l10n.bookPayout(AppFormat.money(context, _payout));
 
   DateTime? get _scheduledAt {
     if (_selectedDate == null || _selectedTime == null) return null;
@@ -193,7 +195,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
 
     if (_scheduledAt == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please pick a date and time.')),
+        SnackBar(content: Text(context.l10n.bookPickDateTime)),
       );
       return;
     }
@@ -215,7 +217,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
       debugPrint('❌ [Booking] No authenticated user found.');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please sign in to continue.')),
+        SnackBar(content: Text(context.l10n.bookSignIn)),
       );
       return;
     }
@@ -269,17 +271,16 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
             final go = await showDialog<bool>(
               context: context,
               builder: (ctx) => AlertDialog(
-                title: const Text('Add a card to continue'),
-                content: const Text(
-                    'You don’t have a saved payment method yet. Add one now to complete the booking.'),
+                title: Text(context.l10n.bookAddCardTitle),
+                content: Text(context.l10n.bookAddCardBody),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('Cancel'),
+                    child: Text(context.l10n.commonCancel),
                   ),
                   TextButton(
                     onPressed: () => Navigator.pop(ctx, true),
-                    child: const Text('Add Card'),
+                    child: Text(context.l10n.bookAddCard),
                   ),
                 ],
               ),
@@ -295,8 +296,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
             debugPrint('❌ [Booking] Payment failed — unauthenticated.');
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                    content: Text('Session expired. Please sign in again.')),
+                SnackBar(content: Text(context.l10n.bookSessionExpired)),
               );
               setState(() => _isProcessing = false);
             }
@@ -306,8 +306,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
             debugPrint('❌ [Booking] Payment failed at Stripe layer.');
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                    content: Text('Payment failed. Please try again.')),
+                SnackBar(content: Text(context.l10n.bookPaymentFailed)),
               );
               setState(() => _isProcessing = false);
             }
@@ -346,7 +345,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
         'minutes': _selectedDuration,
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Consultation booked successfully.')),
+        SnackBar(content: Text(context.l10n.bookBooked)),
       );
       debugPrint('✅ [Booking] Consultation booked successfully!');
       Navigator.pop(context);
@@ -356,7 +355,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not book: $e')));
+            .showSnackBar(SnackBar(content: Text(context.l10n.bookFailed)));
       }
     } finally {
       debugPrint('🏁 [Booking] Flow finished.');
@@ -368,13 +367,13 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
   Widget build(BuildContext context) {
     final dt = _scheduledAt;
     final scheduledText =
-        dt == null ? 'Not set' : AppFormat.dayTime(context, dt);
+        dt == null ? context.l10n.commonNotSet : AppFormat.dayTime(context, dt);
 
     return FullScreenBackGesture(
       child: Scaffold(
         backgroundColor: AppColors.canvas,
         appBar: AppBar(
-          title: const Text('Book a Consultation'),
+          title: Text(context.l10n.bookTitle),
           backgroundColor: AppColors.canvas,
         ),
         body: SafeArea(
@@ -433,12 +432,14 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                               ],
                             ),
                           ),
-                          _pill(child: Text('$_selectedDuration min')),
+                          _pill(
+                              child: Text(context.l10n
+                                  .consultMinutes(_selectedDuration))),
                         ],
                       ),
                     ),
                     const SizedBox(height: 20),
-                    Text('Select duration',
+                    Text(context.l10n.bookSelectDuration,
                         style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 8),
                     Wrap(
@@ -448,7 +449,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                         final sel = m == _selectedDuration;
                         return ChoiceChip(
                           label: Text(
-                            '$m min',
+                            context.l10n.consultMinutes(m),
                             style: TextStyle(
                               color: sel
                                   ? Colors.black
@@ -472,14 +473,14 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                       }).toList(),
                     ),
                     const SizedBox(height: 20),
-                    Text('Call type',
+                    Text(context.l10n.bookCallType,
                         style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 8),
                     Row(
                       children: [
                         Expanded(
                           child: _choicePill(
-                            label: 'Audio',
+                            label: context.l10n.bookAudio,
                             icon: Icons.call_outlined,
                             selected: _callType == 'audio',
                             onTap: () => setState(() => _callType = 'audio'),
@@ -488,7 +489,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                         const SizedBox(width: 10),
                         Expanded(
                           child: _choicePill(
-                            label: 'Video',
+                            label: context.l10n.bookVideo,
                             icon: Icons.videocam_outlined,
                             selected: _callType == 'video',
                             onTap: () => setState(() => _callType = 'video'),
@@ -497,7 +498,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                       ],
                     ),
                     const SizedBox(height: 20),
-                    Text('Pick a time',
+                    Text(context.l10n.bookPickATime,
                         style: Theme.of(context).textTheme.titleMedium),
                     Row(
                       children: [
@@ -508,7 +509,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(_selectedDate == null
-                                    ? 'Pick date'
+                                    ? context.l10n.bookPickDate
                                     : AppFormat.date(context, _selectedDate!)),
                                 const Icon(Icons.calendar_today_outlined,
                                     color: AppColors.muted, size: 18),
@@ -524,7 +525,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(_selectedTime == null
-                                    ? 'Pick time'
+                                    ? context.l10n.bookPickTime
                                     : _selectedTime!.format(context)),
                                 const Icon(Icons.schedule,
                                     color: AppColors.muted, size: 18),
@@ -535,20 +536,24 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                       ],
                     ),
                     const SizedBox(height: 10),
-                    Text('Scheduled: $scheduledText',
+                    Text(context.l10n.bookScheduled(scheduledText),
                         style: const TextStyle(color: AppColors.muted)),
                     const SizedBox(height: 20),
                     _card(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Summary',
+                          Text(context.l10n.bookSummary,
                               style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   color: AppColors.text)),
                           const SizedBox(height: 6),
                           Text(
-                            'Type: ${_callType.toUpperCase()} • Duration: $_selectedDuration min',
+                            context.l10n.bookSummaryLine(
+                                _callType == 'video'
+                                    ? context.l10n.bookVideo
+                                    : context.l10n.bookAudio,
+                                _selectedDuration),
                             style: const TextStyle(color: AppColors.muted),
                           ),
                           const SizedBox(height: 6),
@@ -573,11 +578,11 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                               ],
                             ),
                           if (_freeAudioEligible)
-                            const Text(
-                              'Premium: 5 min free audio applied',
+                            Text(
+                              context.l10n.bookPremiumFree,
                               style: TextStyle(color: AppColors.primary),
                             ),
-                          Text('Total: $_priceLabel',
+                          Text(context.l10n.bookTotal(_priceLabel),
                               style: const TextStyle(color: AppColors.text)),
                           Text(_payoutLabel,
                               style: const TextStyle(color: AppColors.muted)),
@@ -609,7 +614,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                             height: 22,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : Text('Book consultation ($_priceLabel)'),
+                        : Text(context.l10n.bookButton(_priceLabel)),
                   ),
                 ),
               ),

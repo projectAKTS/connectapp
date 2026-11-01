@@ -1,4 +1,5 @@
 // lib/screens/consultation/my_consultations_screen.dart
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/l10n/formatters.dart';
 import 'dart:async';
 import 'package:flutter/cupertino.dart';
@@ -79,17 +80,17 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Cancel consultation?'),
-        content: const Text(
-          'Canceling may trigger a refund based on the cancellation policy.',
+        title: Text(context.l10n.consultCancelTitle),
+        content: Text(
+          context.l10n.consultCancelBody,
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Keep')),
+              child: Text(context.l10n.consultKeep)),
           TextButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Cancel')),
+              child: Text(context.l10n.commonCancel)),
         ],
       ),
     );
@@ -100,11 +101,12 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
       final refundAmount = (result['refundAmount'] as num?)?.toDouble() ?? 0;
       final refundPercent = (result['refundPercent'] as num?)?.toInt() ?? 0;
       final msg = refundAmount > 0
-          ? 'Canceled. Refund: ${_fmtMoney(refundAmount)} ($refundPercent%).'
-          : 'Canceled. No refund (within 1 hour).';
+          ? context.l10n
+              .consultCanceledRefund(_fmtMoney(refundAmount), refundPercent)
+          : context.l10n.consultCanceledNoRefund;
       _snack(msg);
     } catch (e) {
-      _snack('Cancel failed: $e');
+      _snack(context.l10n.consultCancelFailed);
     }
   }
 
@@ -156,18 +158,18 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
   }
 
   String _joinHint(DateTime now, DateTime? scheduledAt) {
-    if (scheduledAt == null) return 'Not scheduled';
+    if (scheduledAt == null) return context.l10n.consultNotScheduled;
 
     final start = scheduledAt.subtract(_joinEarlyWindow);
     final end = scheduledAt.add(_joinLateWindow);
 
     if (now.isBefore(start)) {
       final mins = start.difference(now).inMinutes;
-      if (mins <= 0) return 'Join soon';
-      return 'Join available in ${_formatWait(mins)}';
+      if (mins <= 0) return context.l10n.consultJoinSoon;
+      return context.l10n.consultJoinIn(_formatWait(mins));
     }
-    if (now.isAfter(end)) return 'Expired';
-    return 'Ready to join';
+    if (now.isAfter(end)) return context.l10n.consultExpired;
+    return context.l10n.consultReady;
   }
 
   String _formatWait(int mins) {
@@ -194,9 +196,9 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
   Widget build(BuildContext context) {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
-      return const FullScreenBackGesture(
+      return FullScreenBackGesture(
         child: Scaffold(
-          body: Center(child: Text('Please log in to view consultations.')),
+          body: Center(child: Text(context.l10n.consultLoginToView)),
         ),
       );
     }
@@ -207,7 +209,7 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
       child: Scaffold(
         backgroundColor: AppColors.canvas,
         appBar: AppBar(
-          title: const Text('My Consultations'),
+          title: Text(context.l10n.consultTitle),
           backgroundColor: AppColors.canvas,
           elevation: 0,
         ),
@@ -218,12 +220,12 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
               .snapshots(),
           builder: (context, snap) {
             if (snap.hasError) {
-              return const Center(child: Text('Error loading consultations.'));
+              return Center(child: Text(context.l10n.consultLoadError));
             }
             if (!snap.hasData || snap.data!.docs.isEmpty) {
-              return const Center(
+              return Center(
                 child: Text(
-                  'No consultations found.',
+                  context.l10n.consultNone,
                   style: TextStyle(color: AppColors.muted),
                 ),
               );
@@ -287,7 +289,7 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                     child: Row(
                       children: [
                         Text(
-                          'Upcoming',
+                          context.l10n.consultUpcoming,
                           style: textTheme.titleMedium
                               ?.copyWith(fontWeight: FontWeight.w800),
                         ),
@@ -296,7 +298,8 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                         const Spacer(),
                         if (upcoming.isNotEmpty)
                           Text(
-                            'Join opens ${_joinEarlyWindow.inMinutes} min early',
+                            context.l10n.consultJoinOpensEarly(
+                                _joinEarlyWindow.inMinutes),
                             style: textTheme.bodyMedium?.copyWith(
                               color: AppColors.muted,
                               fontWeight: FontWeight.w600,
@@ -310,12 +313,12 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
 
                 // ===== UPCOMING LIST =====
                 if (upcoming.isEmpty)
-                  const SliverToBoxAdapter(
+                  SliverToBoxAdapter(
                     child: Padding(
                       padding: EdgeInsets.fromLTRB(16, 18, 16, 18),
                       child: Center(
                         child: Text(
-                          'No upcoming consultations.',
+                          context.l10n.consultNoUpcoming,
                           style:
                               TextStyle(color: AppColors.muted, fontSize: 15),
                         ),
@@ -359,7 +362,7 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
 
                         final fallbackName = (data['otherUserName'] ??
                                 data['partnerName'] ??
-                                'Helper')
+                                context.l10n.searchHelperBadge)
                             .toString();
 
                         _ensureUserLoaded(otherUserId);
@@ -404,7 +407,7 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                           },
                           onJoin: (uid, name) {
                             if (uid.trim().isEmpty) {
-                              _snack('No partner found for this consultation.');
+                              _snack(context.l10n.consultNoPartner);
                               return;
                             }
                             Navigator.of(context, rootNavigator: true).push(
@@ -447,8 +450,8 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                                   const EdgeInsets.fromLTRB(14, 12, 14, 12),
                               child: Row(
                                 children: [
-                                  const Text(
-                                    'Past consultations',
+                                  Text(
+                                    context.l10n.consultPast,
                                     style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.w800,
@@ -478,10 +481,10 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                                 const Divider(
                                     height: 1, color: AppColors.border),
                                 if (past.isEmpty)
-                                  const Padding(
+                                  Padding(
                                     padding: EdgeInsets.all(16),
                                     child: Text(
-                                      'No past consultations yet.',
+                                      context.l10n.consultNoPast,
                                       style: TextStyle(color: AppColors.muted),
                                     ),
                                   )
@@ -536,7 +539,8 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                                       final fallbackName =
                                           (data['otherUserName'] ??
                                                   data['partnerName'] ??
-                                                  'Helper')
+                                                  context
+                                                      .l10n.searchHelperBadge)
                                               .toString();
 
                                       _ensureUserLoaded(otherUserId);
@@ -578,8 +582,8 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                                         avatarUrl: avatarUrl,
                                         joinEnabled: false,
                                         joinHint: isCancelled
-                                            ? 'Canceled'
-                                            : 'Completed',
+                                            ? context.l10n.consultCanceled
+                                            : context.l10n.consultCompleted,
                                         fmtWhen: _fmtWhen,
                                         fmtMoney: _fmtMoney,
                                         canCancel: false,
@@ -708,7 +712,8 @@ class _ConsultationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final whenText = scheduledAt == null ? 'Not set' : fmtWhen(scheduledAt!);
+    final whenText =
+        scheduledAt == null ? context.l10n.commonNotSet : fmtWhen(scheduledAt!);
 
     return Container(
       decoration: BoxDecoration(
@@ -780,11 +785,11 @@ class _RateFooter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (rated) {
-      return const Row(
+      return Row(
         children: [
           Icon(Icons.check_circle_outline, size: 18, color: AppColors.muted),
           SizedBox(width: 6),
-          Text('You rated this session',
+          Text(context.l10n.consultRated,
               style: TextStyle(color: AppColors.muted)),
         ],
       );
@@ -793,7 +798,7 @@ class _RateFooter extends StatelessWidget {
       key: const Key('consultation_rate_button'),
       onPressed: onRate,
       icon: const Icon(Icons.star_outline_rounded, size: 20),
-      label: const Text('Rate this session'),
+      label: Text(context.l10n.consultRate),
       style: OutlinedButton.styleFrom(
         foregroundColor: AppColors.text,
         backgroundColor: AppColors.button,
@@ -911,8 +916,8 @@ class _ConsultationMeta extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            _TinyPill(text: '$minutes min'),
-            _TinyPill(text: 'Cost: $costText'),
+            _TinyPill(text: context.l10n.consultMinutes(minutes)),
+            _TinyPill(text: context.l10n.consultCost(costText)),
           ],
         ),
         const SizedBox(height: 8),
@@ -1006,7 +1011,7 @@ class _ActionsColumn extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 textStyle: const TextStyle(fontWeight: FontWeight.w800),
               ),
-              child: const Text('Join'),
+              child: Text(context.l10n.consultJoin),
             ),
           ),
 
@@ -1018,7 +1023,7 @@ class _ActionsColumn extends StatelessWidget {
               foregroundColor: AppColors.danger,
               textStyle: const TextStyle(fontWeight: FontWeight.w700),
             ),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.commonCancel),
           ),
         ],
       ],

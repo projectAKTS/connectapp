@@ -53,7 +53,7 @@ class _PostScreenState extends State<PostScreen> {
     if (_commentController.text.trim().isEmpty) return;
     if (!ContentFilter.isAllowed(_commentController.text)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(ContentFilter.rejectionMessage)),
+        SnackBar(content: Text(context.l10n.contentRejected)),
       );
       return;
     }
