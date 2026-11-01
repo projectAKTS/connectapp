@@ -250,7 +250,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not save profile: $e')),
+        SnackBar(content: Text(context.l10n.editProfileSaveFailed)),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -383,14 +383,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final availabilityLabel = (_startTime == null || _endTime == null)
-        ? 'Not set'
+        ? context.l10n.commonNotSet
         : '${_startTime!.format(context)} – ${_endTime!.format(context)}';
 
     return Scaffold(
       backgroundColor: AppColors.canvas,
       appBar: AppBar(
         backgroundColor: AppColors.canvas,
-        title: const Text('Edit Profile'),
+        title: Text(context.l10n.editProfileTitle),
       ),
       body: Form(
         key: _formKey,
@@ -401,7 +401,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             children: [
               _section(
                 icon: Icons.account_circle_outlined,
-                title: 'Profile',
+                title: context.l10n.profileTitle,
                 children: [
                   Center(
                     child: GestureDetector(
@@ -442,10 +442,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   TextFormField(
                     controller: _displayNameCtrl,
                     style: _inputTextStyle,
-                    decoration: _fieldDecoration(label: 'Display name'),
+                    decoration: _fieldDecoration(
+                        label: context.l10n.onboardingDisplayName),
                     validator: (v) {
                       if (v == null || v.trim().isEmpty) {
-                        return 'Display name is required.';
+                        return context.l10n.editProfileNameRequired;
                       }
                       return null;
                     },
@@ -457,35 +458,37 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     minLines: 3,
                     maxLines: 5,
                     decoration: _fieldDecoration(
-                      label: 'Bio',
-                      hint: 'Write a short intro about yourself',
+                      label: context.l10n.editProfileBio,
+                      hint: context.l10n.editProfileBioHint,
                     ),
                   ),
                 ],
               ),
               _section(
                 icon: Icons.public_outlined,
-                title: 'Location & Language',
+                title: context.l10n.editProfileLocationLanguage,
                 children: [
                   TextFormField(
                     controller: _cityCtrl,
                     style: _inputTextStyle,
-                    decoration: _fieldDecoration(label: 'City'),
+                    decoration:
+                        _fieldDecoration(label: context.l10n.onboardingCity),
                   ),
                   const SizedBox(height: 10),
                   TextFormField(
                     controller: _timeZoneCtrl,
                     style: _inputTextStyle,
                     decoration: _fieldDecoration(
-                      label: 'Time zone',
-                      hint: 'e.g. GMT-5',
+                      label: context.l10n.onboardingTimeZone,
+                      hint: context.l10n.onboardingTimeZoneHint,
                     ),
                   ),
                   const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
                     key: ValueKey('country_${_country ?? ''}'),
                     initialValue: _country,
-                    decoration: _fieldDecoration(label: 'Country'),
+                    decoration: _fieldDecoration(
+                        label: context.l10n.editProfileCountry),
                     style: _inputTextStyle,
                     isDense: true,
                     dropdownColor: AppColors.card,
@@ -510,10 +513,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               ),
               _section(
                 icon: Icons.tune_outlined,
-                title: 'Preferences',
+                title: context.l10n.editProfilePreferences,
                 children: [
-                  const Text(
-                    'Role',
+                  Text(
+                    context.l10n.editProfileRole,
                     style: _subLabelStyle,
                   ),
                   const SizedBox(height: 8),
@@ -521,10 +524,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      _roleChip('seeker', 'Get Help', Icons.help_outline),
-                      _roleChip('helper', 'Give Help',
+                      _roleChip('seeker', context.l10n.editProfileRoleGetHelp,
+                          Icons.help_outline),
+                      _roleChip('helper', context.l10n.editProfileRoleGiveHelp,
                           Icons.volunteer_activism_outlined),
-                      _roleChip('both', 'Both', Icons.all_inclusive),
+                      _roleChip('both', context.l10n.editProfileRoleBoth,
+                          Icons.all_inclusive),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -532,9 +537,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     controller: _interestTagsCtrl,
                     style: _inputTextStyle,
                     decoration: _fieldDecoration(
-                      label: 'Topics',
-                      helperText:
-                          'Comma separated (e.g. PR Pathways, Student life)',
+                      label: context.l10n.editProfileTopics,
+                      helperText: context.l10n.editProfileTopicsHelper,
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -542,8 +546,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     controller: _skillsCtrl,
                     style: _inputTextStyle,
                     decoration: _fieldDecoration(
-                      label: 'Skills',
-                      helperText: 'Comma separated',
+                      label: context.l10n.editProfileSkills,
+                      helperText: context.l10n.editProfileCommaSeparated,
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -552,17 +556,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     style: _inputTextStyle,
                     minLines: 2,
                     maxLines: 4,
-                    decoration: _fieldDecoration(label: 'Experience'),
+                    decoration: _fieldDecoration(
+                        label: context.l10n.editProfileExperience),
                   ),
                 ],
               ),
               if (_isHelperRole)
                 _section(
                   icon: Icons.handshake_outlined,
-                  title: 'Helper Profile',
+                  title: context.l10n.editProfileHelperProfile,
                   children: [
-                    const Text(
-                      'Areas of expertise',
+                    Text(
+                      context.l10n.onboardingExpertise,
                       style: _subLabelStyle,
                     ),
                     const SizedBox(height: 8),
@@ -574,7 +579,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         return ChoiceChip(
                           selected: selected,
                           showCheckmark: false,
-                          label: Text(e),
+                          label: Text(ValueLabels.topic(context.l10n, e)),
                           avatar: Icon(
                             Icons.check,
                             size: 18,
@@ -603,8 +608,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       }).toList(),
                     ),
                     const SizedBox(height: 14),
-                    const Text(
-                      'Preferred mode',
+                    Text(
+                      context.l10n.onboardingPreferredMode,
                       style: _subLabelStyle,
                     ),
                     const SizedBox(height: 8),
@@ -612,23 +617,23 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        _modePill('chat', 'Chat'),
-                        _modePill('call', 'Call'),
-                        _modePill('video', 'Video'),
+                        _modePill('chat', context.l10n.editProfileModeChat),
+                        _modePill('call', context.l10n.editProfileModeCall),
+                        _modePill('video', context.l10n.editProfileModeVideo),
                       ],
                     ),
                     const SizedBox(height: 14),
                     ListTile(
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.access_time, size: 20),
-                      title: const Text(
-                        'Availability',
+                      title: Text(
+                        context.l10n.onboardingAvailability,
                         style: _subLabelStyle,
                       ),
                       subtitle: Text(availabilityLabel),
                       trailing: TextButton(
                         onPressed: _pickAvailability,
-                        child: const Text('Set'),
+                        child: Text(context.l10n.editProfileSet),
                       ),
                     ),
                   ],
@@ -650,7 +655,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     color: Colors.white,
                   ),
                 )
-              : const Text('Save Changes'),
+              : Text(context.l10n.editProfileSaveChanges),
         ),
       ),
     );

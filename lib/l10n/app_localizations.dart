@@ -1585,6 +1585,444 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Video call'**
   String get actionVideoCall;
+
+  /// No description provided for @profileTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Profile'**
+  String get profileTitle;
+
+  /// No description provided for @profileNotFound.
+  ///
+  /// In en, this message translates to:
+  /// **'User not found!'**
+  String get profileNotFound;
+
+  /// No description provided for @profileLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to load profile.'**
+  String get profileLoadFailed;
+
+  /// No description provided for @profileLoginToFollow.
+  ///
+  /// In en, this message translates to:
+  /// **'Please log in to follow users.'**
+  String get profileLoginToFollow;
+
+  /// No description provided for @profileFollowFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Follow action failed. Please try again.'**
+  String get profileFollowFailed;
+
+  /// No description provided for @profileUnblocked.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} is unblocked.'**
+  String profileUnblocked(String name);
+
+  /// No description provided for @profileSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Settings'**
+  String get profileSettings;
+
+  /// No description provided for @profileMore.
+  ///
+  /// In en, this message translates to:
+  /// **'More'**
+  String get profileMore;
+
+  /// No description provided for @profileReportUser.
+  ///
+  /// In en, this message translates to:
+  /// **'Report user'**
+  String get profileReportUser;
+
+  /// No description provided for @profileUnblock.
+  ///
+  /// In en, this message translates to:
+  /// **'Unblock'**
+  String get profileUnblock;
+
+  /// No description provided for @profileFollowing.
+  ///
+  /// In en, this message translates to:
+  /// **'Following'**
+  String get profileFollowing;
+
+  /// No description provided for @profileFollow.
+  ///
+  /// In en, this message translates to:
+  /// **'Follow'**
+  String get profileFollow;
+
+  /// No description provided for @profileReviews.
+  ///
+  /// In en, this message translates to:
+  /// **'Reviews'**
+  String get profileReviews;
+
+  /// No description provided for @profileSocial.
+  ///
+  /// In en, this message translates to:
+  /// **'Social'**
+  String get profileSocial;
+
+  /// No description provided for @profileFollowers.
+  ///
+  /// In en, this message translates to:
+  /// **'Followers'**
+  String get profileFollowers;
+
+  /// No description provided for @profileFollowingList.
+  ///
+  /// In en, this message translates to:
+  /// **'Following'**
+  String get profileFollowingList;
+
+  /// No description provided for @profilePeopleCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 person} other{{count} people}}'**
+  String profilePeopleCount(int count);
+
+  /// No description provided for @profileMessages.
+  ///
+  /// In en, this message translates to:
+  /// **'Messages'**
+  String get profileMessages;
+
+  /// No description provided for @profileConversationsCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 conversation} other{{count} conversations}}'**
+  String profileConversationsCount(int count);
+
+  /// No description provided for @profileOpenConversations.
+  ///
+  /// In en, this message translates to:
+  /// **'Open conversations'**
+  String get profileOpenConversations;
+
+  /// No description provided for @profileMyConsultations.
+  ///
+  /// In en, this message translates to:
+  /// **'My consultations'**
+  String get profileMyConsultations;
+
+  /// No description provided for @profileConsultationsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Upcoming & past sessions'**
+  String get profileConsultationsSubtitle;
+
+  /// No description provided for @profileBilling.
+  ///
+  /// In en, this message translates to:
+  /// **'Billing'**
+  String get profileBilling;
+
+  /// No description provided for @profileCardOnFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Card on file'**
+  String get profileCardOnFile;
+
+  /// No description provided for @profileAddCard.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a card for consultations'**
+  String get profileAddCard;
+
+  /// No description provided for @profilePremium.
+  ///
+  /// In en, this message translates to:
+  /// **'Premium'**
+  String get profilePremium;
+
+  /// No description provided for @profilePremiumNotActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Not active'**
+  String get profilePremiumNotActive;
+
+  /// No description provided for @profilePremiumExpires.
+  ///
+  /// In en, this message translates to:
+  /// **'{status} • Expires {date}'**
+  String profilePremiumExpires(String status, String date);
+
+  /// No description provided for @profileBadges.
+  ///
+  /// In en, this message translates to:
+  /// **'Badges'**
+  String get profileBadges;
+
+  /// No description provided for @profileMoreBadges.
+  ///
+  /// In en, this message translates to:
+  /// **'+ {count} more'**
+  String profileMoreBadges(int count);
+
+  /// No description provided for @profileFeaturedPosts.
+  ///
+  /// In en, this message translates to:
+  /// **'Featured Posts'**
+  String get profileFeaturedPosts;
+
+  /// No description provided for @profileNoFeaturedPosts.
+  ///
+  /// In en, this message translates to:
+  /// **'No featured posts yet.'**
+  String get profileNoFeaturedPosts;
+
+  /// No description provided for @profileRecentActivity.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent Activity'**
+  String get profileRecentActivity;
+
+  /// No description provided for @profileNoActivity.
+  ///
+  /// In en, this message translates to:
+  /// **'No activity yet.'**
+  String get profileNoActivity;
+
+  /// No description provided for @profileLoadError.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not load this right now.'**
+  String get profileLoadError;
+
+  /// No description provided for @profileStatHelpful.
+  ///
+  /// In en, this message translates to:
+  /// **'Helpful'**
+  String get profileStatHelpful;
+
+  /// No description provided for @profileStatRating.
+  ///
+  /// In en, this message translates to:
+  /// **'Rating'**
+  String get profileStatRating;
+
+  /// No description provided for @profileStatStreak.
+  ///
+  /// In en, this message translates to:
+  /// **'Streak'**
+  String get profileStatStreak;
+
+  /// No description provided for @profileStatXp.
+  ///
+  /// In en, this message translates to:
+  /// **'XP'**
+  String get profileStatXp;
+
+  /// No description provided for @profileStreakDays.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 day} other{{count} days}}'**
+  String profileStreakDays(int count);
+
+  /// No description provided for @profileNoWrittenReviews.
+  ///
+  /// In en, this message translates to:
+  /// **'No written reviews yet.'**
+  String get profileNoWrittenReviews;
+
+  /// No description provided for @profileBookedSession.
+  ///
+  /// In en, this message translates to:
+  /// **'Booked session'**
+  String get profileBookedSession;
+
+  /// No description provided for @profileBookedSessionOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Booked session · {date}'**
+  String profileBookedSessionOn(String date);
+
+  /// No description provided for @profileBioMore.
+  ///
+  /// In en, this message translates to:
+  /// **'More'**
+  String get profileBioMore;
+
+  /// No description provided for @postFilterAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get postFilterAll;
+
+  /// No description provided for @postFilterQuick.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick'**
+  String get postFilterQuick;
+
+  /// No description provided for @postFilterExperience.
+  ///
+  /// In en, this message translates to:
+  /// **'Experience'**
+  String get postFilterExperience;
+
+  /// No description provided for @postFilterAdvice.
+  ///
+  /// In en, this message translates to:
+  /// **'Advice Request'**
+  String get postFilterAdvice;
+
+  /// No description provided for @postFilterHowTo.
+  ///
+  /// In en, this message translates to:
+  /// **'How-To Guide'**
+  String get postFilterHowTo;
+
+  /// No description provided for @postFilterLessons.
+  ///
+  /// In en, this message translates to:
+  /// **'Lessons Learned'**
+  String get postFilterLessons;
+
+  /// No description provided for @editProfileTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit Profile'**
+  String get editProfileTitle;
+
+  /// No description provided for @editProfileSaveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not save your profile. Please try again.'**
+  String get editProfileSaveFailed;
+
+  /// No description provided for @editProfileNameRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Display name is required.'**
+  String get editProfileNameRequired;
+
+  /// No description provided for @editProfileBio.
+  ///
+  /// In en, this message translates to:
+  /// **'Bio'**
+  String get editProfileBio;
+
+  /// No description provided for @editProfileBioHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Write a short intro about yourself'**
+  String get editProfileBioHint;
+
+  /// No description provided for @editProfileLocationLanguage.
+  ///
+  /// In en, this message translates to:
+  /// **'Location & Language'**
+  String get editProfileLocationLanguage;
+
+  /// No description provided for @editProfileCountry.
+  ///
+  /// In en, this message translates to:
+  /// **'Country'**
+  String get editProfileCountry;
+
+  /// No description provided for @editProfilePreferences.
+  ///
+  /// In en, this message translates to:
+  /// **'Preferences'**
+  String get editProfilePreferences;
+
+  /// No description provided for @editProfileRole.
+  ///
+  /// In en, this message translates to:
+  /// **'Role'**
+  String get editProfileRole;
+
+  /// No description provided for @editProfileRoleGetHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Get Help'**
+  String get editProfileRoleGetHelp;
+
+  /// No description provided for @editProfileRoleGiveHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Give Help'**
+  String get editProfileRoleGiveHelp;
+
+  /// No description provided for @editProfileRoleBoth.
+  ///
+  /// In en, this message translates to:
+  /// **'Both'**
+  String get editProfileRoleBoth;
+
+  /// No description provided for @editProfileTopics.
+  ///
+  /// In en, this message translates to:
+  /// **'Topics'**
+  String get editProfileTopics;
+
+  /// No description provided for @editProfileTopicsHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Comma separated (e.g. Housing, Student life)'**
+  String get editProfileTopicsHelper;
+
+  /// No description provided for @editProfileSkills.
+  ///
+  /// In en, this message translates to:
+  /// **'Skills'**
+  String get editProfileSkills;
+
+  /// No description provided for @editProfileCommaSeparated.
+  ///
+  /// In en, this message translates to:
+  /// **'Comma separated'**
+  String get editProfileCommaSeparated;
+
+  /// No description provided for @editProfileExperience.
+  ///
+  /// In en, this message translates to:
+  /// **'Experience'**
+  String get editProfileExperience;
+
+  /// No description provided for @editProfileHelperProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Helper Profile'**
+  String get editProfileHelperProfile;
+
+  /// No description provided for @editProfileModeChat.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat'**
+  String get editProfileModeChat;
+
+  /// No description provided for @editProfileModeCall.
+  ///
+  /// In en, this message translates to:
+  /// **'Call'**
+  String get editProfileModeCall;
+
+  /// No description provided for @editProfileModeVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Video'**
+  String get editProfileModeVideo;
+
+  /// No description provided for @editProfileSet.
+  ///
+  /// In en, this message translates to:
+  /// **'Set'**
+  String get editProfileSet;
+
+  /// No description provided for @editProfileSaveChanges.
+  ///
+  /// In en, this message translates to:
+  /// **'Save Changes'**
+  String get editProfileSaveChanges;
 }
 
 class _AppLocalizationsDelegate

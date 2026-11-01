@@ -802,4 +802,257 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get actionVideoCall => 'Video call';
+
+  @override
+  String get profileTitle => 'Profile';
+
+  @override
+  String get profileNotFound => 'User not found!';
+
+  @override
+  String get profileLoadFailed => 'Failed to load profile.';
+
+  @override
+  String get profileLoginToFollow => 'Please log in to follow users.';
+
+  @override
+  String get profileFollowFailed => 'Follow action failed. Please try again.';
+
+  @override
+  String profileUnblocked(String name) {
+    return '$name is unblocked.';
+  }
+
+  @override
+  String get profileSettings => 'Settings';
+
+  @override
+  String get profileMore => 'More';
+
+  @override
+  String get profileReportUser => 'Report user';
+
+  @override
+  String get profileUnblock => 'Unblock';
+
+  @override
+  String get profileFollowing => 'Following';
+
+  @override
+  String get profileFollow => 'Follow';
+
+  @override
+  String get profileReviews => 'Reviews';
+
+  @override
+  String get profileSocial => 'Social';
+
+  @override
+  String get profileFollowers => 'Followers';
+
+  @override
+  String get profileFollowingList => 'Following';
+
+  @override
+  String profilePeopleCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count people',
+      one: '1 person',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get profileMessages => 'Messages';
+
+  @override
+  String profileConversationsCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count conversations',
+      one: '1 conversation',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get profileOpenConversations => 'Open conversations';
+
+  @override
+  String get profileMyConsultations => 'My consultations';
+
+  @override
+  String get profileConsultationsSubtitle => 'Upcoming & past sessions';
+
+  @override
+  String get profileBilling => 'Billing';
+
+  @override
+  String get profileCardOnFile => 'Card on file';
+
+  @override
+  String get profileAddCard => 'Add a card for consultations';
+
+  @override
+  String get profilePremium => 'Premium';
+
+  @override
+  String get profilePremiumNotActive => 'Not active';
+
+  @override
+  String profilePremiumExpires(String status, String date) {
+    return '$status • Expires $date';
+  }
+
+  @override
+  String get profileBadges => 'Badges';
+
+  @override
+  String profileMoreBadges(int count) {
+    return '+ $count more';
+  }
+
+  @override
+  String get profileFeaturedPosts => 'Featured Posts';
+
+  @override
+  String get profileNoFeaturedPosts => 'No featured posts yet.';
+
+  @override
+  String get profileRecentActivity => 'Recent Activity';
+
+  @override
+  String get profileNoActivity => 'No activity yet.';
+
+  @override
+  String get profileLoadError => 'Could not load this right now.';
+
+  @override
+  String get profileStatHelpful => 'Helpful';
+
+  @override
+  String get profileStatRating => 'Rating';
+
+  @override
+  String get profileStatStreak => 'Streak';
+
+  @override
+  String get profileStatXp => 'XP';
+
+  @override
+  String profileStreakDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count days',
+      one: '1 day',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get profileNoWrittenReviews => 'No written reviews yet.';
+
+  @override
+  String get profileBookedSession => 'Booked session';
+
+  @override
+  String profileBookedSessionOn(String date) {
+    return 'Booked session · $date';
+  }
+
+  @override
+  String get profileBioMore => 'More';
+
+  @override
+  String get postFilterAll => 'All';
+
+  @override
+  String get postFilterQuick => 'Quick';
+
+  @override
+  String get postFilterExperience => 'Experience';
+
+  @override
+  String get postFilterAdvice => 'Advice Request';
+
+  @override
+  String get postFilterHowTo => 'How-To Guide';
+
+  @override
+  String get postFilterLessons => 'Lessons Learned';
+
+  @override
+  String get editProfileTitle => 'Edit Profile';
+
+  @override
+  String get editProfileSaveFailed =>
+      'Could not save your profile. Please try again.';
+
+  @override
+  String get editProfileNameRequired => 'Display name is required.';
+
+  @override
+  String get editProfileBio => 'Bio';
+
+  @override
+  String get editProfileBioHint => 'Write a short intro about yourself';
+
+  @override
+  String get editProfileLocationLanguage => 'Location & Language';
+
+  @override
+  String get editProfileCountry => 'Country';
+
+  @override
+  String get editProfilePreferences => 'Preferences';
+
+  @override
+  String get editProfileRole => 'Role';
+
+  @override
+  String get editProfileRoleGetHelp => 'Get Help';
+
+  @override
+  String get editProfileRoleGiveHelp => 'Give Help';
+
+  @override
+  String get editProfileRoleBoth => 'Both';
+
+  @override
+  String get editProfileTopics => 'Topics';
+
+  @override
+  String get editProfileTopicsHelper =>
+      'Comma separated (e.g. Housing, Student life)';
+
+  @override
+  String get editProfileSkills => 'Skills';
+
+  @override
+  String get editProfileCommaSeparated => 'Comma separated';
+
+  @override
+  String get editProfileExperience => 'Experience';
+
+  @override
+  String get editProfileHelperProfile => 'Helper Profile';
+
+  @override
+  String get editProfileModeChat => 'Chat';
+
+  @override
+  String get editProfileModeCall => 'Call';
+
+  @override
+  String get editProfileModeVideo => 'Video';
+
+  @override
+  String get editProfileSet => 'Set';
+
+  @override
+  String get editProfileSaveChanges => 'Save Changes';
 }

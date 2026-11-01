@@ -362,5 +362,130 @@
   "actionBookCall": "Book a call",
   "actionMessage": "Message",
   "actionAudioCall": "Audio call",
-  "actionVideoCall": "Video call"
+  "actionVideoCall": "Video call",
+  "profileTitle": "Profile",
+  "profileNotFound": "User not found!",
+  "profileLoadFailed": "Failed to load profile.",
+  "profileLoginToFollow": "Please log in to follow users.",
+  "profileFollowFailed": "Follow action failed. Please try again.",
+  "profileUnblocked": "{name} is unblocked.",
+  "@profileUnblocked": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "profileSettings": "Settings",
+  "profileMore": "More",
+  "profileReportUser": "Report user",
+  "profileUnblock": "Unblock",
+  "profileFollowing": "Following",
+  "profileFollow": "Follow",
+  "profileReviews": "Reviews",
+  "profileSocial": "Social",
+  "profileFollowers": "Followers",
+  "profileFollowingList": "Following",
+  "profilePeopleCount": "{count, plural, =1{1 person} other{{count} people}}",
+  "@profilePeopleCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "profileMessages": "Messages",
+  "profileConversationsCount": "{count, plural, =1{1 conversation} other{{count} conversations}}",
+  "@profileConversationsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "profileOpenConversations": "Open conversations",
+  "profileMyConsultations": "My consultations",
+  "profileConsultationsSubtitle": "Upcoming & past sessions",
+  "profileBilling": "Billing",
+  "profileCardOnFile": "Card on file",
+  "profileAddCard": "Add a card for consultations",
+  "profilePremium": "Premium",
+  "profilePremiumNotActive": "Not active",
+  "profilePremiumExpires": "{status} • Expires {date}",
+  "@profilePremiumExpires": {
+    "placeholders": {
+      "status": {
+        "type": "String"
+      },
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "profileBadges": "Badges",
+  "profileMoreBadges": "+ {count} more",
+  "@profileMoreBadges": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "profileFeaturedPosts": "Featured Posts",
+  "profileNoFeaturedPosts": "No featured posts yet.",
+  "profileRecentActivity": "Recent Activity",
+  "profileNoActivity": "No activity yet.",
+  "profileLoadError": "Could not load this right now.",
+  "profileStatHelpful": "Helpful",
+  "profileStatRating": "Rating",
+  "profileStatStreak": "Streak",
+  "profileStatXp": "XP",
+  "profileStreakDays": "{count, plural, =1{1 day} other{{count} days}}",
+  "@profileStreakDays": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "profileNoWrittenReviews": "No written reviews yet.",
+  "profileBookedSession": "Booked session",
+  "profileBookedSessionOn": "Booked session · {date}",
+  "@profileBookedSessionOn": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "profileBioMore": "More",
+  "postFilterAll": "All",
+  "postFilterQuick": "Quick",
+  "postFilterExperience": "Experience",
+  "postFilterAdvice": "Advice Request",
+  "postFilterHowTo": "How-To Guide",
+  "postFilterLessons": "Lessons Learned",
+  "editProfileTitle": "Edit Profile",
+  "editProfileSaveFailed": "Could not save your profile. Please try again.",
+  "editProfileNameRequired": "Display name is required.",
+  "editProfileBio": "Bio",
+  "editProfileBioHint": "Write a short intro about yourself",
+  "editProfileLocationLanguage": "Location & Language",
+  "editProfileCountry": "Country",
+  "editProfilePreferences": "Preferences",
+  "editProfileRole": "Role",
+  "editProfileRoleGetHelp": "Get Help",
+  "editProfileRoleGiveHelp": "Give Help",
+  "editProfileRoleBoth": "Both",
+  "editProfileTopics": "Topics",
+  "editProfileTopicsHelper": "Comma separated (e.g. Housing, Student life)",
+  "editProfileSkills": "Skills",
+  "editProfileCommaSeparated": "Comma separated",
+  "editProfileExperience": "Experience",
+  "editProfileHelperProfile": "Helper Profile",
+  "editProfileModeChat": "Chat",
+  "editProfileModeCall": "Call",
+  "editProfileModeVideo": "Video",
+  "editProfileSet": "Set",
+  "editProfileSaveChanges": "Save Changes"
 }

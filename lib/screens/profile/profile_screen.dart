@@ -1,4 +1,5 @@
 // lib/screens/profile/profile_screen.dart
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/l10n/formatters.dart';
 import 'dart:io';
 import 'package:connect_app/screens/settings/settings_screen.dart';
@@ -59,6 +60,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
     'Lessons Learned': 'lessons',
   };
   String _selectedFilterLabel = 'All';
+
+  /// The filter keys above are ids; this is what the chip shows.
+  String _filterLabel(BuildContext context, String key) {
+    final l = context.l10n;
+    switch (key) {
+      case 'All':
+        return l.postFilterAll;
+      case 'Quick':
+        return l.postFilterQuick;
+      case 'Experience':
+        return l.postFilterExperience;
+      case 'Advice Request':
+        return l.postFilterAdvice;
+      case 'How-To Guide':
+        return l.postFilterHowTo;
+      case 'Lessons Learned':
+        return l.postFilterLessons;
+    }
+    return key;
+  }
 
   bool _bioExpanded = false;
 
@@ -140,7 +161,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => isLoading = false);
-      _snack('Failed to load profile.');
+      _snack(context.l10n.profileLoadFailed);
     }
   }
 
@@ -159,7 +180,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _toggleFollow() async {
     final cur = FirebaseAuth.instance.currentUser;
     if (cur == null) {
-      _snack('Please log in to follow users.');
+      _snack(context.l10n.profileLoginToFollow);
       return;
     }
     if (_followBusy) return;
@@ -194,7 +215,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
     } catch (e) {
       setState(() => isFollowing = previous);
-      _snack('Follow action failed. Please try again.');
+      _snack(context.l10n.profileFollowFailed);
     } finally {
       if (mounted) setState(() => _followBusy = false);
     }
@@ -233,8 +254,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       case 'unblock':
         await safety.setBlocked(widget.userID, false);
         if (mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text('$name is unblocked.')));
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(context.l10n.profileUnblocked(name))));
         }
     }
   }
@@ -285,7 +306,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 10),
 
               // ✅ Global route -> ROOT
-              item(Icons.event_available_outlined, 'Book a call', () {
+              item(Icons.event_available_outlined, context.l10n.actionBookCall,
+                  () {
                 rootNav.pushNamed(
                   '/consultation',
                   arguments: {
@@ -297,7 +319,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               }),
 
               // ✅ Global route -> ROOT
-              item(Icons.chat_bubble_outline, 'Message', () {
+              item(Icons.chat_bubble_outline, context.l10n.actionMessage, () {
                 rootNav.pushNamed(
                   '/chat',
                   arguments: {
@@ -309,8 +331,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 );
               }),
 
-              item(Icons.call, 'Audio call', () => _startCall(isVideo: false)),
-              item(Icons.videocam, 'Video call',
+              item(Icons.call, context.l10n.actionAudioCall,
+                  () => _startCall(isVideo: false)),
+              item(Icons.videocam, context.l10n.actionVideoCall,
                   () => _startCall(isVideo: true)),
               const SizedBox(height: 8),
             ],
@@ -616,7 +639,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         data: theme,
         child: Scaffold(
           appBar: AppBar(
-            title: const Text('Profile'),
+            title: Text(context.l10n.profileTitle),
             leading:
                 canPop ? BackButton(onPressed: () => nav.maybePop()) : null,
           ),
@@ -630,12 +653,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         data: theme,
         child: Scaffold(
           appBar: AppBar(
-            title: const Text('Profile'),
+            title: Text(context.l10n.profileTitle),
             leading:
                 canPop ? BackButton(onPressed: () => nav.maybePop()) : null,
           ),
-          body: const Center(
-            child: Text('User not found!',
+          body: Center(
+            child: Text(context.l10n.profileNotFound,
                 style: TextStyle(color: AppColors.muted)),
           ),
         ),
@@ -664,11 +687,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final hasCard = _s(userData!['defaultPaymentMethodId']).isNotEmpty;
 
     String premiumSubtitle() {
-      if (premiumStatus.isEmpty) return 'Not active';
+      if (premiumStatus.isEmpty) return context.l10n.profilePremiumNotActive;
       final exp = premiumExpiresAt != null
           ? AppFormat.date(context, premiumExpiresAt)
           : null;
-      return exp == null ? premiumStatus : '$premiumStatus • Expires $exp';
+      return exp == null
+          ? premiumStatus
+          : context.l10n.profilePremiumExpires(premiumStatus, exp);
     }
 
     return wrap(Theme(
@@ -676,7 +701,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: Scaffold(
         appBar: AppBar(
           leading: canPop ? BackButton(onPressed: () => nav.maybePop()) : null,
-          title: const Text('Profile'),
+          title: Text(context.l10n.profileTitle),
           actions: [
             if (isCurrentUser) ...[
               IconButton(
@@ -692,7 +717,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               IconButton(
                 icon: const Icon(Icons.settings_outlined),
-                tooltip: 'Settings',
+                tooltip: context.l10n.profileSettings,
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => const SettingsScreen(),
@@ -706,16 +731,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 builder: (context, blocked, _) {
                   final isBlocked = blocked.contains(widget.userID);
                   return PopupMenuButton<String>(
-                    tooltip: 'More',
+                    tooltip: context.l10n.profileMore,
                     onSelected: (action) => _onSafetyAction(action, fullName),
                     itemBuilder: (_) => [
-                      const PopupMenuItem(
+                      PopupMenuItem(
                         value: 'report',
-                        child: Text('Report user'),
+                        child: Text(context.l10n.profileReportUser),
                       ),
                       PopupMenuItem(
                         value: isBlocked ? 'unblock' : 'block',
-                        child: Text(isBlocked ? 'Unblock' : 'Block'),
+                        child: Text(isBlocked
+                            ? context.l10n.profileUnblock
+                            : context.l10n.blockAction),
                       ),
                     ],
                   );
@@ -802,13 +829,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   ? _OutlinedActionButton(
                                       key: const ValueKey('following-pill'),
                                       icon: Icons.check_circle,
-                                      label: 'Following',
+                                      label: context.l10n.profileFollowing,
                                       onTap: _toggleFollow,
                                     )
                                   : _FilledActionButton(
                                       key: const ValueKey('follow-pill'),
                                       icon: Icons.person_add_alt_1,
-                                      label: 'Follow',
+                                      label: context.l10n.profileFollow,
                                       onTap: _toggleFollow,
                                     ),
                             ),
@@ -818,7 +845,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         Expanded(
                           child: _OutlinedActionButton(
                             icon: Icons.flash_on_outlined,
-                            label: 'Connect',
+                            label: context.l10n.actionConnect,
                             onTap: _openConnectSheet,
                           ),
                         ),
@@ -833,7 +860,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 10),
                     child: _StatsStrip(
-                      streakText: '$streakDays days',
+                      streakText: context.l10n.profileStreakDays(streakDays),
                       xpText: '$xpPoints',
                       helpfulText: '$helpfulMarks',
                       ratingText: ratingCount > 0
@@ -844,14 +871,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                   if (ratingCount > 0) ...[
                     const SizedBox(height: 16),
-                    _sectionTitle('Reviews'),
+                    _sectionTitle(context.l10n.profileReviews),
                     _ReviewsList(helperUid: widget.userID),
                   ],
 
                   // ✅ Account hub (ONLY for current user)
                   if (isCurrentUser) ...[
                     const SizedBox(height: 16),
-                    _sectionTitle('Social'),
+                    _sectionTitle(context.l10n.profileSocial),
                     _softCard(
                       padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
                       child: Column(
@@ -867,8 +894,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   followersSnap.data?.docs.length ?? 0;
                               return _accountRow(
                                 icon: Icons.group_outlined,
-                                title: 'Followers',
-                                subtitle: '$followersCount people',
+                                title: context.l10n.profileFollowers,
+                                subtitle: context.l10n
+                                    .profilePeopleCount(followersCount),
                                 onTap: () {
                                   Navigator.of(context).push(
                                     CupertinoPageRoute(
@@ -896,8 +924,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   : 0;
                               return _accountRow(
                                 icon: Icons.person_add_alt_1_outlined,
-                                title: 'Following',
-                                subtitle: '$followingCount people',
+                                title: context.l10n.profileFollowingList,
+                                subtitle: context.l10n
+                                    .profilePeopleCount(followingCount),
                                 onTap: () {
                                   Navigator.of(context).push(
                                     CupertinoPageRoute(
@@ -994,10 +1023,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                                       return _accountRow(
                                         icon: Icons.chat_bubble_outline_rounded,
-                                        title: 'Messages',
+                                        title: context.l10n.profileMessages,
                                         subtitle: conversationCount > 0
-                                            ? '$conversationCount conversations'
-                                            : 'Open conversations',
+                                            ? context.l10n
+                                                .profileConversationsCount(
+                                                    conversationCount)
+                                            : context
+                                                .l10n.profileOpenConversations,
                                         badgeCount: unread,
                                         onTap: () {
                                           Navigator.of(context).push(
@@ -1054,8 +1086,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                                   return _accountRow(
                                     icon: Icons.event_note_outlined,
-                                    title: 'My consultations',
-                                    subtitle: 'Upcoming & past sessions',
+                                    title: context.l10n.profileMyConsultations,
+                                    subtitle: context
+                                        .l10n.profileConsultationsSubtitle,
                                     badgeCount: recentCount,
                                     onTap: () {
                                       Navigator.of(context, rootNavigator: true)
@@ -1069,10 +1102,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           const Divider(height: 1, color: AppColors.border),
                           _accountRow(
                             icon: Icons.credit_card_rounded,
-                            title: 'Billing',
+                            title: context.l10n.profileBilling,
                             subtitle: hasCard
-                                ? 'Card on file'
-                                : 'Add a card for consultations',
+                                ? context.l10n.profileCardOnFile
+                                : context.l10n.profileAddCard,
                             onTap: () {
                               Navigator.of(context, rootNavigator: true)
                                   .pushNamed('/paymentSetup');
@@ -1082,7 +1115,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             const Divider(height: 1, color: AppColors.border),
                             _accountRow(
                               icon: Icons.workspace_premium_outlined,
-                              title: 'Premium',
+                              title: context.l10n.profilePremium,
                               subtitle: premiumSubtitle(),
                               onTap: () {
                                 Navigator.of(context, rootNavigator: true)
@@ -1098,7 +1131,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   // Badges
                   if (badges.isNotEmpty) ...[
                     const SizedBox(height: 16),
-                    _sectionTitle('Badges'),
+                    _sectionTitle(context.l10n.profileBadges),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
@@ -1131,14 +1164,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 ),
                               );
                             },
-                            child: Text('+ ${badges.length - 3} more'),
+                            child: Text(context.l10n
+                                .profileMoreBadges(badges.length - 3)),
                           ),
                       ],
                     ),
                   ],
 
                   const SizedBox(height: 16),
-                  _sectionTitle('Featured Posts'),
+                  _sectionTitle(context.l10n.profileFeaturedPosts),
                   SizedBox(
                     height: 210,
                     child: StreamBuilder<QuerySnapshot>(
@@ -1150,7 +1184,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         }
                         if (snap.hasError) {
                           return Center(
-                            child: Text('Error: ${snap.error}',
+                            child: Text(context.l10n.profileLoadError,
                                 style: const TextStyle(color: Colors.red)),
                           );
                         }
@@ -1166,8 +1200,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                         final featured = all.take(3).toList();
                         if (featured.isEmpty) {
-                          return const Center(
-                            child: Text('No featured posts yet.',
+                          return Center(
+                            child: Text(context.l10n.profileNoFeaturedPosts,
                                 style: TextStyle(color: AppColors.muted)),
                           );
                         }
@@ -1245,7 +1279,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         return ChoiceChip(
                           key: ValueKey(label),
                           label: Text(
-                            label,
+                            _filterLabel(context, label),
                             style: TextStyle(
                               fontWeight: FontWeight.w600,
                               color: selected
@@ -1267,7 +1301,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
 
                   const SizedBox(height: 16),
-                  _sectionTitle('Recent Activity'),
+                  _sectionTitle(context.l10n.profileRecentActivity),
 
                   StreamBuilder<QuerySnapshot>(
                     stream: _postsStream,
@@ -1277,7 +1311,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       }
                       if (snap.hasError) {
                         return Center(
-                          child: Text('Error: ${snap.error}',
+                          child: Text(context.l10n.profileLoadError,
                               style: const TextStyle(color: Colors.red)),
                         );
                       }
@@ -1310,10 +1344,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           : items.where((e) => e.$2 == selectedSlug).toList();
 
                       if (filtered.isEmpty) {
-                        return const Padding(
+                        return Padding(
                           padding: EdgeInsets.symmetric(vertical: 24),
                           child: Center(
-                            child: Text('No activity yet.',
+                            child: Text(context.l10n.profileNoActivity,
                                 style: TextStyle(color: AppColors.muted)),
                           ),
                         );
@@ -1421,15 +1455,17 @@ class _StatsStrip extends StatelessWidget {
         );
 
     if (!MvpFeatures.gamificationStats) {
-      final helpful = cell(Icons.thumb_up_alt_outlined, 'Helpful', helpfulText);
+      final helpful = cell(Icons.thumb_up_alt_outlined,
+          context.l10n.profileStatHelpful, helpfulText);
       if (ratingText == null) return Center(child: helpful);
       return Row(
         children: [
           Expanded(child: Center(child: helpful)),
           divider(),
           Expanded(
-            child:
-                Center(child: cell(Icons.star_rounded, 'Rating', ratingText!)),
+            child: Center(
+                child: cell(Icons.star_rounded, context.l10n.profileStatRating,
+                    ratingText!)),
           ),
         ],
       );
@@ -1439,17 +1475,18 @@ class _StatsStrip extends StatelessWidget {
       children: [
         Expanded(
             child: Center(
-                child: cell(Icons.local_fire_department_rounded, 'Streak',
-                    streakText))),
-        divider(),
-        Expanded(
-            child:
-                Center(child: cell(Icons.emoji_events_outlined, 'XP', xpText))),
+                child: cell(Icons.local_fire_department_rounded,
+                    context.l10n.profileStatStreak, streakText))),
         divider(),
         Expanded(
             child: Center(
-                child:
-                    cell(Icons.thumb_up_alt_outlined, 'Helpful', helpfulText))),
+                child: cell(Icons.emoji_events_outlined,
+                    context.l10n.profileStatXp, xpText))),
+        divider(),
+        Expanded(
+            child: Center(
+                child: cell(Icons.thumb_up_alt_outlined,
+                    context.l10n.profileStatHelpful, helpfulText))),
       ],
     );
   }
@@ -1474,8 +1511,8 @@ class _ReviewsList extends StatelessWidget {
             .take(_shown)
             .toList();
         if (written.isEmpty) {
-          return const Text(
-            'No written reviews yet.',
+          return Text(
+            context.l10n.profileNoWrittenReviews,
             style: TextStyle(color: AppColors.muted),
           );
         }
@@ -1524,8 +1561,9 @@ class _ReviewTile extends StatelessWidget {
               const Spacer(),
               Text(
                 createdAt == null
-                    ? 'Booked session'
-                    : 'Booked session · ${AppFormat.date(context, createdAt)}',
+                    ? context.l10n.profileBookedSession
+                    : context.l10n.profileBookedSessionOn(
+                        AppFormat.date(context, createdAt)),
                 style: const TextStyle(color: AppColors.muted, fontSize: 12.5),
               ),
             ],
@@ -1569,7 +1607,9 @@ class _ExpandableBio extends StatelessWidget {
           GestureDetector(
             onTap: onToggle,
             child: Text(
-              expanded ? 'Show less' : 'More',
+              expanded
+                  ? context.l10n.commonShowLess
+                  : context.l10n.profileBioMore,
               style: const TextStyle(
                 color: AppColors.text,
                 fontWeight: FontWeight.w700,

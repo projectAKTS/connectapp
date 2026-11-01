@@ -821,4 +821,262 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get actionVideoCall => 'Appel vidéo';
+
+  @override
+  String get profileTitle => 'Profil';
+
+  @override
+  String get profileNotFound => 'Utilisateur introuvable!';
+
+  @override
+  String get profileLoadFailed => 'Impossible de charger le profil.';
+
+  @override
+  String get profileLoginToFollow =>
+      'Connectez-vous pour suivre des personnes.';
+
+  @override
+  String get profileFollowFailed =>
+      'L\'abonnement a échoué. Veuillez réessayer.';
+
+  @override
+  String profileUnblocked(String name) {
+    return '$name est débloqué(e).';
+  }
+
+  @override
+  String get profileSettings => 'Paramètres';
+
+  @override
+  String get profileMore => 'Plus';
+
+  @override
+  String get profileReportUser => 'Signaler l\'utilisateur';
+
+  @override
+  String get profileUnblock => 'Débloquer';
+
+  @override
+  String get profileFollowing => 'Abonné';
+
+  @override
+  String get profileFollow => 'Suivre';
+
+  @override
+  String get profileReviews => 'Avis';
+
+  @override
+  String get profileSocial => 'Social';
+
+  @override
+  String get profileFollowers => 'Abonnés';
+
+  @override
+  String get profileFollowingList => 'Abonnements';
+
+  @override
+  String profilePeopleCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count personnes',
+      one: '1 personne',
+      zero: '0 personne',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get profileMessages => 'Messages';
+
+  @override
+  String profileConversationsCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count conversations',
+      one: '1 conversation',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get profileOpenConversations => 'Ouvrir les conversations';
+
+  @override
+  String get profileMyConsultations => 'Mes consultations';
+
+  @override
+  String get profileConsultationsSubtitle => 'Séances à venir et passées';
+
+  @override
+  String get profileBilling => 'Paiement';
+
+  @override
+  String get profileCardOnFile => 'Carte enregistrée';
+
+  @override
+  String get profileAddCard => 'Ajouter une carte pour les consultations';
+
+  @override
+  String get profilePremium => 'Premium';
+
+  @override
+  String get profilePremiumNotActive => 'Inactif';
+
+  @override
+  String profilePremiumExpires(String status, String date) {
+    return '$status • Expire le $date';
+  }
+
+  @override
+  String get profileBadges => 'Badges';
+
+  @override
+  String profileMoreBadges(int count) {
+    return '+ $count autres';
+  }
+
+  @override
+  String get profileFeaturedPosts => 'Publications en vedette';
+
+  @override
+  String get profileNoFeaturedPosts =>
+      'Aucune publication en vedette pour l\'instant.';
+
+  @override
+  String get profileRecentActivity => 'Activité récente';
+
+  @override
+  String get profileNoActivity => 'Aucune activité pour l\'instant.';
+
+  @override
+  String get profileLoadError => 'Chargement impossible pour le moment.';
+
+  @override
+  String get profileStatHelpful => 'Utile';
+
+  @override
+  String get profileStatRating => 'Évaluation';
+
+  @override
+  String get profileStatStreak => 'Série';
+
+  @override
+  String get profileStatXp => 'XP';
+
+  @override
+  String profileStreakDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count jours',
+      one: '1 jour',
+      zero: '0 jour',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get profileNoWrittenReviews => 'Aucun avis écrit pour l\'instant.';
+
+  @override
+  String get profileBookedSession => 'Séance réservée';
+
+  @override
+  String profileBookedSessionOn(String date) {
+    return 'Séance réservée · $date';
+  }
+
+  @override
+  String get profileBioMore => 'Plus';
+
+  @override
+  String get postFilterAll => 'Tout';
+
+  @override
+  String get postFilterQuick => 'Rapide';
+
+  @override
+  String get postFilterExperience => 'Expérience';
+
+  @override
+  String get postFilterAdvice => 'Demande de conseil';
+
+  @override
+  String get postFilterHowTo => 'Guide pratique';
+
+  @override
+  String get postFilterLessons => 'Leçons apprises';
+
+  @override
+  String get editProfileTitle => 'Modifier le profil';
+
+  @override
+  String get editProfileSaveFailed =>
+      'Impossible d\'enregistrer votre profil. Veuillez réessayer.';
+
+  @override
+  String get editProfileNameRequired => 'Le nom affiché est obligatoire.';
+
+  @override
+  String get editProfileBio => 'Bio';
+
+  @override
+  String get editProfileBioHint => 'Présentez-vous en quelques mots';
+
+  @override
+  String get editProfileLocationLanguage => 'Lieu et langues';
+
+  @override
+  String get editProfileCountry => 'Pays';
+
+  @override
+  String get editProfilePreferences => 'Préférences';
+
+  @override
+  String get editProfileRole => 'Rôle';
+
+  @override
+  String get editProfileRoleGetHelp => 'Recevoir de l\'aide';
+
+  @override
+  String get editProfileRoleGiveHelp => 'Offrir de l\'aide';
+
+  @override
+  String get editProfileRoleBoth => 'Les deux';
+
+  @override
+  String get editProfileTopics => 'Sujets';
+
+  @override
+  String get editProfileTopicsHelper =>
+      'Séparés par des virgules (p. ex. Logement, Vie étudiante)';
+
+  @override
+  String get editProfileSkills => 'Compétences';
+
+  @override
+  String get editProfileCommaSeparated => 'Séparés par des virgules';
+
+  @override
+  String get editProfileExperience => 'Expérience';
+
+  @override
+  String get editProfileHelperProfile => 'Profil d\'aidant';
+
+  @override
+  String get editProfileModeChat => 'Clavardage';
+
+  @override
+  String get editProfileModeCall => 'Appel';
+
+  @override
+  String get editProfileModeVideo => 'Vidéo';
+
+  @override
+  String get editProfileSet => 'Définir';
+
+  @override
+  String get editProfileSaveChanges => 'Enregistrer';
 }
