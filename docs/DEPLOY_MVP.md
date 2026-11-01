@@ -27,6 +27,8 @@ functions:onAuthUserCreated,\
 functions:createExpressAccountLink,\
 functions:onCallInviteCreated,\
 functions:onReviewCreated,\
+functions:onChatMessageCreated,\
+functions:scheduledConsultationReminder,\
 functions:createStripeCustomer,\
 functions:createSetupIntent,\
 functions:createStripeCheckoutSession,\
@@ -44,7 +46,9 @@ What each change does:
 | `processAccountDeletionRequests` (new, daily) | Handles deletion requests made from MVP-1 builds. |
 | `onAuthUserCreated` | Puts the email in the private `users/{uid}/private/account` doc; empty bio. |
 | `createExpressAccountLink` | Real Stripe return URLs (hosting pages); email from Auth. |
-| `onCallInviteCreated` | Calls from someone the callee blocked are never delivered. |
+| `onCallInviteCreated` | Calls from someone the callee blocked are never delivered. The alert fallback is in the callee's app language (`appLocale`). |
+| `onChatMessageCreated` | The "Sent you a message" text is in the recipient's app language. Message text is never translated. |
+| `scheduledConsultationReminder` | Reminder in the participant's language; says "Starts in 5 minutes" instead of a clock time that was in the server's UTC zone. |
 | `onReviewCreated` (new) | A session review updates the helper's `rating` / `ratingCount`. |
 | The six Stripe customer functions | The Stripe customer email comes from Auth instead of the public doc. |
 

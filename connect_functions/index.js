@@ -688,15 +688,20 @@ exports.scheduledConsultationReminder = onSchedule(
       const participants = Array.isArray(data.participants)
         ? data.participants
         : [];
-      const time = data.scheduledAt?.toDate?.()?.toLocaleTimeString?.() || "";
+      // "Starts in 5 minutes": a clock time here would be the server's
+      // time zone (UTC), not the participant's.
+      const startsAt = data.scheduledAt?.toDate?.();
+      const minutes = startsAt ? minutesUntil(startsAt, new Date()) : 5;
       for (const uid of participants) {
         const tokens = await getUserTokens(uid);
         if (!tokens.length) continue;
+        const userSnap = await db.collection("users").doc(`${uid}`).get();
+        const locale = userSnap.data()?.appLocale;
         sends.push(
           sendToTokens(tokens, {
             notification: {
-              title: "Upcoming Consultation",
-              body: `Starts at ${time}`,
+              title: pushText(locale, "upcomingConsultation"),
+              body: pushText(locale, "startsInMinutes", { minutes }),
             },
             data: { type: "consultation_reminder", id: doc.id },
           })
@@ -1112,6 +1117,7 @@ const {
   resolveChargeAmount,
 } = require("./consultations/consultation_price");
 const { deleteUserData } = require("./account/delete_account");
+const { minutesUntil, pushText } = require("./i18n/push_text");
 const { addReviewToRating, validStars } = require("./reviews/review_aggregate");
 
 // A seeker's review of a finished consultation updates the helper's average
@@ -1152,6 +1158,8 @@ exports.onCallInviteCreated = onDocumentCreated(
     const inviteId = event.params.inviteId || "";
     if (!toUid || !channel) return;
     const calleeDoc = await db.collection("users").doc(`${toUid}`).get();
+    // The alert fallback is written in the callee's app language.
+    const calleeLocale = calleeDoc.data()?.appLocale;
     if (calleeBlockedCaller(calleeDoc.data(), d.fromUid)) {
       await db.runTransaction(async (tx) => {
         const snap = await tx.get(event.data.ref);
@@ -1283,8 +1291,13 @@ exports.onCallInviteCreated = onDocumentCreated(
 
         if (shouldSendAlert) {
           const apnsRes = await sendApnsAlertToTokens(apnsTokens, {
-            title: isVideo ? "Incoming Video Call" : "Incoming Audio Call",
-            body: `From ${fromName || "Someone"}`,
+            title: pushText(
+              calleeLocale,
+              isVideo ? "incomingVideoCall" : "incomingAudioCall",
+            ),
+            body: pushText(calleeLocale, "callFrom", {
+              name: fromName || pushText(calleeLocale, "someone"),
+            }),
             data: {
               type: "call_invite",
               ...payloadData,
@@ -1562,7 +1575,9 @@ exports.onChatMessageCreated = onDocumentCreated(
     const sDoc = await db.collection("users").doc(authorId).get();
     const s = sDoc.data() || {};
     const fromName = s.displayName || s.fullName || s.name || "Someone";
-    const body = m.text ? m.text.slice(0, 120) : "Sent you a message";
+    const messageText = m.text ? m.text.slice(0, 120) : "";
+    // Recipients' app languages, filled in with the unread counters below.
+    const recipientLocales = {};
     const lastMessageType = `${m.type || (m.text ? "text" : "attachment")}`;
     let lastMessageText = "";
     if (typeof m.text === "string" && m.text.trim()) {
@@ -1603,6 +1618,7 @@ exports.onChatMessageCreated = onDocumentCreated(
           const userRef = db.collection("users").doc(uid);
           const userSnap = await userRef.get();
           const userData = userSnap.data() || {};
+          recipientLocales[uid] = userData.appLocale;
           const lastSeen = userData.lastMessagesSeenAt;
           const lastSeenMs =
             lastSeen && typeof lastSeen.toMillis === "function"
@@ -1645,6 +1661,8 @@ exports.onChatMessageCreated = onDocumentCreated(
     );
 
     for (const uid of recipients) {
+      const body =
+        messageText || pushText(recipientLocales[uid], "sentYouAMessage");
       const tokenSets = await getUserPushTokenSets(uid);
       const tokens = tokenSets.fcmAll;
       let fcmDelivered = false;
