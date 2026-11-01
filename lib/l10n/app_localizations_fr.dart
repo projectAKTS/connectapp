@@ -379,4 +379,189 @@ class AppLocalizationsFr extends AppLocalizations {
   String pricePerHour(String amount) {
     return '$amount/h';
   }
+
+  @override
+  String get tabHome => 'Accueil';
+
+  @override
+  String get tabSearch => 'Recherche';
+
+  @override
+  String get tabPost => 'Publier';
+
+  @override
+  String get tabProfile => 'Profil';
+
+  @override
+  String get adviceNotice =>
+      'Les aidants partagent leur expérience personnelle. Il ne s\'agit pas de conseils juridiques, d\'immigration ou médicaux.';
+
+  @override
+  String get authEmail => 'Courriel';
+
+  @override
+  String get authEmailHint => 'nom@exemple.com';
+
+  @override
+  String get authPassword => 'Mot de passe';
+
+  @override
+  String get authOr => 'ou';
+
+  @override
+  String get loginWelcomeBack => 'Bon retour';
+
+  @override
+  String get loginSubtitle => 'Connectez-vous pour continuer';
+
+  @override
+  String get loginButton => 'Se connecter';
+
+  @override
+  String get loginForgotPassword => 'Mot de passe oublié?';
+
+  @override
+  String get loginContinueGoogle => 'Continuer avec Google';
+
+  @override
+  String get loginContinueApple => 'Continuer avec Apple';
+
+  @override
+  String get loginNewHere => 'Nouveau sur Helperly?';
+
+  @override
+  String get loginCreateAccount => 'Créer un compte';
+
+  @override
+  String get loginFailed => 'Échec de la connexion. Veuillez réessayer.';
+
+  @override
+  String get loginCheckCredentials =>
+      'Connexion impossible. Vérifiez votre courriel et votre mot de passe.';
+
+  @override
+  String get googleCancelled => 'La connexion avec Google a été annulée.';
+
+  @override
+  String get googleTimedOut =>
+      'La connexion avec Google a expiré. Veuillez réessayer.';
+
+  @override
+  String get googleFailed =>
+      'Échec de la connexion avec Google. Veuillez réessayer.';
+
+  @override
+  String get appleOnlyApple =>
+      'La connexion avec Apple n\'est offerte que sur les appareils Apple.';
+
+  @override
+  String get appleCancelled => 'La connexion avec Apple a été annulée.';
+
+  @override
+  String get appleTimedOut =>
+      'La connexion avec Apple a expiré. Veuillez réessayer.';
+
+  @override
+  String get appleFailed =>
+      'Échec de la connexion avec Apple. Veuillez réessayer.';
+
+  @override
+  String get signupTitle => 'Créer un compte';
+
+  @override
+  String get signupSubtitle =>
+      'Rejoignez la communauté et commencez à échanger.';
+
+  @override
+  String get signupFirstName => 'Prénom';
+
+  @override
+  String get signupLastNameOptional => 'Nom (facultatif)';
+
+  @override
+  String get signupLastName => 'Nom';
+
+  @override
+  String get signupEmailHint => 'vous@domaine.com';
+
+  @override
+  String get signupPasswordHint => '8 caractères minimum';
+
+  @override
+  String get signupConfirmPassword => 'Confirmer le mot de passe';
+
+  @override
+  String get signupRepeatPassword => 'Répétez le mot de passe';
+
+  @override
+  String get signupButton => 'Créer le compte';
+
+  @override
+  String get signupWithGoogle => 'S\'inscrire avec Google';
+
+  @override
+  String get signupWithApple => 'S\'inscrire avec Apple';
+
+  @override
+  String get signupHaveAccount => 'Déjà un compte? Connectez-vous';
+
+  @override
+  String get signupAgree => 'En créant un compte, vous acceptez nos';
+
+  @override
+  String get signupAnd => 'et notre';
+
+  @override
+  String get signupFirstNameRequired => 'Le prénom est obligatoire';
+
+  @override
+  String get signupEmailPasswordRequired =>
+      'Le courriel et le mot de passe sont obligatoires';
+
+  @override
+  String get signupPasswordsDontMatch =>
+      'Les mots de passe ne correspondent pas';
+
+  @override
+  String get signupRegistered => 'Inscription réussie! Terminons votre profil.';
+
+  @override
+  String get signupEmailInUse => 'Ce courriel est déjà utilisé.';
+
+  @override
+  String get signupInvalidEmail => 'Adresse courriel invalide.';
+
+  @override
+  String get signupWeakPassword => 'Le mot de passe est trop faible.';
+
+  @override
+  String get signupFailed => 'Échec de l\'inscription. Veuillez réessayer.';
+
+  @override
+  String get resetTitle => 'Réinitialiser le mot de passe';
+
+  @override
+  String get resetHeading => 'Mot de passe oublié?';
+
+  @override
+  String get resetBody =>
+      'Entrez le courriel utilisé pour créer votre compte. Nous vous enverrons un lien pour réinitialiser votre mot de passe.';
+
+  @override
+  String get resetSend => 'Envoyer le lien';
+
+  @override
+  String get resetEnterEmail => 'Veuillez entrer votre courriel.';
+
+  @override
+  String resetSent(String email) {
+    return 'Courriel de réinitialisation envoyé à $email';
+  }
+
+  @override
+  String get resetTimedOut => 'La demande a expiré. Veuillez réessayer.';
+
+  @override
+  String get resetFailed =>
+      'Impossible d\'envoyer le courriel de réinitialisation. Veuillez réessayer.';
 }

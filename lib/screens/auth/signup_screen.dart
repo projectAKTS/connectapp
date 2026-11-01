@@ -1,3 +1,4 @@
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
@@ -55,19 +56,19 @@ class _SignupScreenState extends State<SignupScreen> {
 
     if (first.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('First name is required')),
+        SnackBar(content: Text(context.l10n.signupFirstNameRequired)),
       );
       return;
     }
     if (email.isEmpty || pass.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Email and password are required')),
+        SnackBar(content: Text(context.l10n.signupEmailPasswordRequired)),
       );
       return;
     }
     if (pass != conf) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Passwords do not match')),
+        SnackBar(content: Text(context.l10n.signupPasswordsDontMatch)),
       );
       return;
     }
@@ -109,22 +110,22 @@ class _SignupScreenState extends State<SignupScreen> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Registered! Let’s finish onboarding.')),
+        SnackBar(content: Text(context.l10n.signupRegistered)),
       );
       _goOnboarding();
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       final msg = switch (e.code) {
-        'email-already-in-use' => 'That email is already registered.',
-        'invalid-email' => 'Invalid email address.',
-        'weak-password' => 'Password is too weak.',
-        _ => e.message ?? 'Registration failed',
+        'email-already-in-use' => context.l10n.signupEmailInUse,
+        'invalid-email' => context.l10n.signupInvalidEmail,
+        'weak-password' => context.l10n.signupWeakPassword,
+        _ => context.l10n.signupFailed,
       };
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
+        SnackBar(content: Text(context.l10n.signupFailed)),
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -141,7 +142,7 @@ class _SignupScreenState extends State<SignupScreen> {
 
       if (u == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Google sign-in was cancelled.')),
+          SnackBar(content: Text(context.l10n.googleCancelled)),
         );
         return;
       }
@@ -151,7 +152,7 @@ class _SignupScreenState extends State<SignupScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Google sign-in failed: $e')),
+        SnackBar(content: Text(context.l10n.googleFailed)),
       );
     } finally {
       if (mounted) setState(() => _isSocialLoading = false);
@@ -171,7 +172,7 @@ class _SignupScreenState extends State<SignupScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Apple sign-in failed: $e')),
+        SnackBar(content: Text(context.l10n.appleFailed)),
       );
     } finally {
       if (mounted) setState(() => _isSocialLoading = false);
@@ -194,7 +195,7 @@ class _SignupScreenState extends State<SignupScreen> {
         backgroundColor: AppColors.canvas,
         centerTitle: true,
         elevation: 0,
-        title: const Text('Create account'),
+        title: Text(context.l10n.signupTitle),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -203,7 +204,7 @@ class _SignupScreenState extends State<SignupScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'Join the community and start connecting.',
+                context.l10n.signupSubtitle,
                 style: t.textTheme.bodyMedium,
               ),
               const SizedBox(height: 16),
@@ -221,12 +222,12 @@ class _SignupScreenState extends State<SignupScreen> {
                       children: [
                         Expanded(
                           child: _LabeledField(
-                            label: 'First name',
+                            label: context.l10n.signupFirstName,
                             child: TextField(
                               controller: _firstNameCtrl,
                               textInputAction: TextInputAction.next,
-                              decoration: const InputDecoration(
-                                hintText: 'First name',
+                              decoration: InputDecoration(
+                                hintText: context.l10n.signupFirstName,
                                 prefixIcon: Icon(
                                   Icons.person_outline,
                                   color: AppColors.muted,
@@ -238,12 +239,12 @@ class _SignupScreenState extends State<SignupScreen> {
                         const SizedBox(width: 12),
                         Expanded(
                           child: _LabeledField(
-                            label: 'Last name (optional)',
+                            label: context.l10n.signupLastNameOptional,
                             child: TextField(
                               controller: _lastNameCtrl,
                               textInputAction: TextInputAction.next,
-                              decoration: const InputDecoration(
-                                hintText: 'Last name',
+                              decoration: InputDecoration(
+                                hintText: context.l10n.signupLastName,
                                 prefixIcon: Icon(
                                   Icons.person_outline,
                                   color: AppColors.muted,
@@ -256,14 +257,14 @@ class _SignupScreenState extends State<SignupScreen> {
                     ),
                     const SizedBox(height: 12),
                     _LabeledField(
-                      label: 'Email',
+                      label: context.l10n.authEmail,
                       child: TextField(
                         controller: _emailCtrl,
                         keyboardType: TextInputType.emailAddress,
                         autofillHints: const [AutofillHints.email],
                         textInputAction: TextInputAction.next,
-                        decoration: const InputDecoration(
-                          hintText: 'you@domain.com',
+                        decoration: InputDecoration(
+                          hintText: context.l10n.signupEmailHint,
                           prefixIcon: Icon(
                             Icons.alternate_email,
                             color: AppColors.muted,
@@ -273,14 +274,14 @@ class _SignupScreenState extends State<SignupScreen> {
                     ),
                     const SizedBox(height: 12),
                     _LabeledField(
-                      label: 'Password',
+                      label: context.l10n.authPassword,
                       child: TextField(
                         controller: _passwordCtrl,
                         obscureText: _obscure1,
                         autofillHints: const [AutofillHints.newPassword],
                         textInputAction: TextInputAction.next,
                         decoration: InputDecoration(
-                          hintText: 'Min 8 characters',
+                          hintText: context.l10n.signupPasswordHint,
                           prefixIcon: const Icon(
                             Icons.lock_outline,
                             color: AppColors.muted,
@@ -299,13 +300,13 @@ class _SignupScreenState extends State<SignupScreen> {
                     ),
                     const SizedBox(height: 12),
                     _LabeledField(
-                      label: 'Confirm password',
+                      label: context.l10n.signupConfirmPassword,
                       child: TextField(
                         controller: _confirmCtrl,
                         obscureText: _obscure2,
                         textInputAction: TextInputAction.done,
                         decoration: InputDecoration(
-                          hintText: 'Repeat password',
+                          hintText: context.l10n.signupRepeatPassword,
                           prefixIcon: const Icon(
                             Icons.lock_outline,
                             color: AppColors.muted,
@@ -329,7 +330,7 @@ class _SignupScreenState extends State<SignupScreen> {
                             width: double.infinity,
                             child: ElevatedButton(
                               onPressed: _register,
-                              child: const Text('Create Account'),
+                              child: Text(context.l10n.signupButton),
                             ),
                           ),
                   ],
@@ -340,14 +341,14 @@ class _SignupScreenState extends State<SignupScreen> {
               const SizedBox(height: 12),
               _SoftButton(
                 icon: Icons.g_mobiledata,
-                label: 'Sign up with Google',
+                label: context.l10n.signupWithGoogle,
                 onPressed: _isSocialLoading ? null : _signUpWithGoogle,
                 loading: _isSocialLoading,
               ),
               const SizedBox(height: 10),
               _SoftButton(
                 icon: Icons.apple,
-                label: 'Sign up with Apple',
+                label: context.l10n.signupWithApple,
                 onPressed: _isSocialLoading ? null : _signUpWithApple,
                 loading: _isSocialLoading,
               ),
@@ -355,11 +356,11 @@ class _SignupScreenState extends State<SignupScreen> {
               TextButton(
                 onPressed: () =>
                     Navigator.pushReplacementNamed(context, '/login'),
-                child: const Text('Already have an account? Log in'),
+                child: Text(context.l10n.signupHaveAccount),
               ),
               const SizedBox(height: 8),
               Text(
-                'By creating an account, you agree to our',
+                context.l10n.signupAgree,
                 style: t.textTheme.bodyMedium,
                 textAlign: TextAlign.center,
               ),
@@ -367,15 +368,15 @@ class _SignupScreenState extends State<SignupScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   TextButton(
-                    onPressed: () =>
-                        _openLegal('Terms of Use', LegalTexts.terms),
-                    child: const Text('Terms of Use'),
+                    onPressed: () => _openLegal(
+                        context.l10n.settingsTerms, LegalTexts.terms),
+                    child: Text(context.l10n.settingsTerms),
                   ),
-                  Text('and', style: t.textTheme.bodyMedium),
+                  Text(context.l10n.signupAnd, style: t.textTheme.bodyMedium),
                   TextButton(
-                    onPressed: () =>
-                        _openLegal('Privacy Policy', LegalTexts.privacy),
-                    child: const Text('Privacy Policy'),
+                    onPressed: () => _openLegal(
+                        context.l10n.settingsPrivacy, LegalTexts.privacy),
+                    child: Text(context.l10n.settingsPrivacy),
                   ),
                 ],
               ),
@@ -419,7 +420,8 @@ class _OrDivider extends StatelessWidget {
         const Expanded(child: Divider()),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Text('or', style: Theme.of(context).textTheme.bodyMedium),
+          child: Text(context.l10n.authOr,
+              style: Theme.of(context).textTheme.bodyMedium),
         ),
         const Expanded(child: Divider()),
       ],

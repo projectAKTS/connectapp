@@ -1,4 +1,4 @@
-import 'package:connect_app/models/help_topics.dart';
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/theme/tokens.dart';
 import 'package:flutter/material.dart';
 
@@ -15,15 +15,15 @@ class AdviceNotice extends StatelessWidget {
         color: AppColors.button,
         borderRadius: BorderRadius.circular(12),
       ),
-      child: const Row(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.info_outline, size: 18, color: AppColors.muted),
-          SizedBox(width: 8),
+          const Icon(Icons.info_outline, size: 18, color: AppColors.muted),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(
-              HelpTopics.adviceNotice,
-              style: TextStyle(color: AppColors.muted, fontSize: 13),
+              context.l10n.adviceNotice,
+              style: const TextStyle(color: AppColors.muted, fontSize: 13),
             ),
           ),
         ],

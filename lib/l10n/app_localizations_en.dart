@@ -378,4 +378,181 @@ class AppLocalizationsEn extends AppLocalizations {
   String pricePerHour(String amount) {
     return '$amount/hr';
   }
+
+  @override
+  String get tabHome => 'Home';
+
+  @override
+  String get tabSearch => 'Search';
+
+  @override
+  String get tabPost => 'Post';
+
+  @override
+  String get tabProfile => 'Profile';
+
+  @override
+  String get adviceNotice =>
+      'Helpers share personal experience. This is not legal, immigration or medical advice.';
+
+  @override
+  String get authEmail => 'Email';
+
+  @override
+  String get authEmailHint => 'name@example.com';
+
+  @override
+  String get authPassword => 'Password';
+
+  @override
+  String get authOr => 'or';
+
+  @override
+  String get loginWelcomeBack => 'Welcome back';
+
+  @override
+  String get loginSubtitle => 'Sign in to continue';
+
+  @override
+  String get loginButton => 'Log in';
+
+  @override
+  String get loginForgotPassword => 'Forgot password?';
+
+  @override
+  String get loginContinueGoogle => 'Continue with Google';
+
+  @override
+  String get loginContinueApple => 'Continue with Apple';
+
+  @override
+  String get loginNewHere => 'New here?';
+
+  @override
+  String get loginCreateAccount => 'Create an account';
+
+  @override
+  String get loginFailed => 'Login failed. Please try again.';
+
+  @override
+  String get loginCheckCredentials =>
+      'Could not log in. Check your email and password.';
+
+  @override
+  String get googleCancelled => 'Google sign-in was cancelled.';
+
+  @override
+  String get googleTimedOut => 'Google sign-in timed out. Please try again.';
+
+  @override
+  String get googleFailed => 'Google sign-in failed. Please try again.';
+
+  @override
+  String get appleOnlyApple =>
+      'Apple Sign-In is only available on Apple devices.';
+
+  @override
+  String get appleCancelled => 'Apple sign-in was cancelled.';
+
+  @override
+  String get appleTimedOut => 'Apple sign-in timed out. Please try again.';
+
+  @override
+  String get appleFailed => 'Apple sign-in failed. Please try again.';
+
+  @override
+  String get signupTitle => 'Create account';
+
+  @override
+  String get signupSubtitle => 'Join the community and start connecting.';
+
+  @override
+  String get signupFirstName => 'First name';
+
+  @override
+  String get signupLastNameOptional => 'Last name (optional)';
+
+  @override
+  String get signupLastName => 'Last name';
+
+  @override
+  String get signupEmailHint => 'you@domain.com';
+
+  @override
+  String get signupPasswordHint => 'Min 8 characters';
+
+  @override
+  String get signupConfirmPassword => 'Confirm password';
+
+  @override
+  String get signupRepeatPassword => 'Repeat password';
+
+  @override
+  String get signupButton => 'Create Account';
+
+  @override
+  String get signupWithGoogle => 'Sign up with Google';
+
+  @override
+  String get signupWithApple => 'Sign up with Apple';
+
+  @override
+  String get signupHaveAccount => 'Already have an account? Log in';
+
+  @override
+  String get signupAgree => 'By creating an account, you agree to our';
+
+  @override
+  String get signupAnd => 'and';
+
+  @override
+  String get signupFirstNameRequired => 'First name is required';
+
+  @override
+  String get signupEmailPasswordRequired => 'Email and password are required';
+
+  @override
+  String get signupPasswordsDontMatch => 'Passwords do not match';
+
+  @override
+  String get signupRegistered => 'Registered! Let’s finish onboarding.';
+
+  @override
+  String get signupEmailInUse => 'That email is already registered.';
+
+  @override
+  String get signupInvalidEmail => 'Invalid email address.';
+
+  @override
+  String get signupWeakPassword => 'Password is too weak.';
+
+  @override
+  String get signupFailed => 'Registration failed. Please try again.';
+
+  @override
+  String get resetTitle => 'Reset password';
+
+  @override
+  String get resetHeading => 'Forgot your password?';
+
+  @override
+  String get resetBody =>
+      'Enter the email you used to create your account. We’ll send you a link to reset your password.';
+
+  @override
+  String get resetSend => 'Send reset link';
+
+  @override
+  String get resetEnterEmail => 'Please enter your email.';
+
+  @override
+  String resetSent(String email) {
+    return 'Password reset email sent to $email';
+  }
+
+  @override
+  String get resetTimedOut => 'Request timed out. Try again.';
+
+  @override
+  String get resetFailed => 'Could not send the reset email. Please try again.';
 }

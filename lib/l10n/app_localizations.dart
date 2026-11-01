@@ -793,6 +793,348 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{amount}/hr'**
   String pricePerHour(String amount);
+
+  /// No description provided for @tabHome.
+  ///
+  /// In en, this message translates to:
+  /// **'Home'**
+  String get tabHome;
+
+  /// No description provided for @tabSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Search'**
+  String get tabSearch;
+
+  /// No description provided for @tabPost.
+  ///
+  /// In en, this message translates to:
+  /// **'Post'**
+  String get tabPost;
+
+  /// No description provided for @tabProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Profile'**
+  String get tabProfile;
+
+  /// No description provided for @adviceNotice.
+  ///
+  /// In en, this message translates to:
+  /// **'Helpers share personal experience. This is not legal, immigration or medical advice.'**
+  String get adviceNotice;
+
+  /// No description provided for @authEmail.
+  ///
+  /// In en, this message translates to:
+  /// **'Email'**
+  String get authEmail;
+
+  /// No description provided for @authEmailHint.
+  ///
+  /// In en, this message translates to:
+  /// **'name@example.com'**
+  String get authEmailHint;
+
+  /// No description provided for @authPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Password'**
+  String get authPassword;
+
+  /// No description provided for @authOr.
+  ///
+  /// In en, this message translates to:
+  /// **'or'**
+  String get authOr;
+
+  /// No description provided for @loginWelcomeBack.
+  ///
+  /// In en, this message translates to:
+  /// **'Welcome back'**
+  String get loginWelcomeBack;
+
+  /// No description provided for @loginSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in to continue'**
+  String get loginSubtitle;
+
+  /// No description provided for @loginButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Log in'**
+  String get loginButton;
+
+  /// No description provided for @loginForgotPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Forgot password?'**
+  String get loginForgotPassword;
+
+  /// No description provided for @loginContinueGoogle.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue with Google'**
+  String get loginContinueGoogle;
+
+  /// No description provided for @loginContinueApple.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue with Apple'**
+  String get loginContinueApple;
+
+  /// No description provided for @loginNewHere.
+  ///
+  /// In en, this message translates to:
+  /// **'New here?'**
+  String get loginNewHere;
+
+  /// No description provided for @loginCreateAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Create an account'**
+  String get loginCreateAccount;
+
+  /// No description provided for @loginFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Login failed. Please try again.'**
+  String get loginFailed;
+
+  /// No description provided for @loginCheckCredentials.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not log in. Check your email and password.'**
+  String get loginCheckCredentials;
+
+  /// No description provided for @googleCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Google sign-in was cancelled.'**
+  String get googleCancelled;
+
+  /// No description provided for @googleTimedOut.
+  ///
+  /// In en, this message translates to:
+  /// **'Google sign-in timed out. Please try again.'**
+  String get googleTimedOut;
+
+  /// No description provided for @googleFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Google sign-in failed. Please try again.'**
+  String get googleFailed;
+
+  /// No description provided for @appleOnlyApple.
+  ///
+  /// In en, this message translates to:
+  /// **'Apple Sign-In is only available on Apple devices.'**
+  String get appleOnlyApple;
+
+  /// No description provided for @appleCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Apple sign-in was cancelled.'**
+  String get appleCancelled;
+
+  /// No description provided for @appleTimedOut.
+  ///
+  /// In en, this message translates to:
+  /// **'Apple sign-in timed out. Please try again.'**
+  String get appleTimedOut;
+
+  /// No description provided for @appleFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Apple sign-in failed. Please try again.'**
+  String get appleFailed;
+
+  /// No description provided for @signupTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Create account'**
+  String get signupTitle;
+
+  /// No description provided for @signupSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Join the community and start connecting.'**
+  String get signupSubtitle;
+
+  /// No description provided for @signupFirstName.
+  ///
+  /// In en, this message translates to:
+  /// **'First name'**
+  String get signupFirstName;
+
+  /// No description provided for @signupLastNameOptional.
+  ///
+  /// In en, this message translates to:
+  /// **'Last name (optional)'**
+  String get signupLastNameOptional;
+
+  /// No description provided for @signupLastName.
+  ///
+  /// In en, this message translates to:
+  /// **'Last name'**
+  String get signupLastName;
+
+  /// No description provided for @signupEmailHint.
+  ///
+  /// In en, this message translates to:
+  /// **'you@domain.com'**
+  String get signupEmailHint;
+
+  /// No description provided for @signupPasswordHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Min 8 characters'**
+  String get signupPasswordHint;
+
+  /// No description provided for @signupConfirmPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm password'**
+  String get signupConfirmPassword;
+
+  /// No description provided for @signupRepeatPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Repeat password'**
+  String get signupRepeatPassword;
+
+  /// No description provided for @signupButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Create Account'**
+  String get signupButton;
+
+  /// No description provided for @signupWithGoogle.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign up with Google'**
+  String get signupWithGoogle;
+
+  /// No description provided for @signupWithApple.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign up with Apple'**
+  String get signupWithApple;
+
+  /// No description provided for @signupHaveAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Already have an account? Log in'**
+  String get signupHaveAccount;
+
+  /// No description provided for @signupAgree.
+  ///
+  /// In en, this message translates to:
+  /// **'By creating an account, you agree to our'**
+  String get signupAgree;
+
+  /// No description provided for @signupAnd.
+  ///
+  /// In en, this message translates to:
+  /// **'and'**
+  String get signupAnd;
+
+  /// No description provided for @signupFirstNameRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'First name is required'**
+  String get signupFirstNameRequired;
+
+  /// No description provided for @signupEmailPasswordRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Email and password are required'**
+  String get signupEmailPasswordRequired;
+
+  /// No description provided for @signupPasswordsDontMatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Passwords do not match'**
+  String get signupPasswordsDontMatch;
+
+  /// No description provided for @signupRegistered.
+  ///
+  /// In en, this message translates to:
+  /// **'Registered! Let’s finish onboarding.'**
+  String get signupRegistered;
+
+  /// No description provided for @signupEmailInUse.
+  ///
+  /// In en, this message translates to:
+  /// **'That email is already registered.'**
+  String get signupEmailInUse;
+
+  /// No description provided for @signupInvalidEmail.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid email address.'**
+  String get signupInvalidEmail;
+
+  /// No description provided for @signupWeakPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Password is too weak.'**
+  String get signupWeakPassword;
+
+  /// No description provided for @signupFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Registration failed. Please try again.'**
+  String get signupFailed;
+
+  /// No description provided for @resetTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset password'**
+  String get resetTitle;
+
+  /// No description provided for @resetHeading.
+  ///
+  /// In en, this message translates to:
+  /// **'Forgot your password?'**
+  String get resetHeading;
+
+  /// No description provided for @resetBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the email you used to create your account. We’ll send you a link to reset your password.'**
+  String get resetBody;
+
+  /// No description provided for @resetSend.
+  ///
+  /// In en, this message translates to:
+  /// **'Send reset link'**
+  String get resetSend;
+
+  /// No description provided for @resetEnterEmail.
+  ///
+  /// In en, this message translates to:
+  /// **'Please enter your email.'**
+  String get resetEnterEmail;
+
+  /// No description provided for @resetSent.
+  ///
+  /// In en, this message translates to:
+  /// **'Password reset email sent to {email}'**
+  String resetSent(String email);
+
+  /// No description provided for @resetTimedOut.
+  ///
+  /// In en, this message translates to:
+  /// **'Request timed out. Try again.'**
+  String get resetTimedOut;
+
+  /// No description provided for @resetFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not send the reset email. Please try again.'**
+  String get resetFailed;
 }
 
 class _AppLocalizationsDelegate

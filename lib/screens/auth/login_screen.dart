@@ -1,4 +1,5 @@
 // lib/screens/auth/login_screen.dart
+import 'package:connect_app/l10n/l10n.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -62,12 +63,12 @@ class _LoginScreenState extends State<LoginScreen> {
             onTimeout: () => throw TimeoutException('Login timed out'),
           );
       if (user == null) {
-        _showSnack('Login failed. Please try again.');
+        _showSnack(context.l10n.loginFailed);
         return;
       }
       // Auth listener handles navigation when sign-in is confirmed.
     } catch (e) {
-      _showSnack('Error: $e');
+      _showSnack(context.l10n.loginCheckCredentials);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -85,14 +86,14 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       if (user == null) {
-        _showSnack('Google sign-in was cancelled.');
+        _showSnack(context.l10n.googleCancelled);
         return;
       }
       // Auth listener handles navigation when sign-in is confirmed.
     } on TimeoutException {
-      _showSnack('Google sign-in timed out. Please try again.');
+      _showSnack(context.l10n.googleTimedOut);
     } catch (e) {
-      _showSnack('Google sign-in failed: $e');
+      _showSnack(context.l10n.googleFailed);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -101,7 +102,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _loginWithApple() async {
     if (_isLoading) return;
     if (!Platform.isIOS && !Platform.isMacOS) {
-      _showSnack('Apple Sign-In is only available on Apple devices.');
+      _showSnack(context.l10n.appleOnlyApple);
       return;
     }
     setState(() => _isLoading = true);
@@ -113,14 +114,14 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       if (user == null) {
-        _showSnack('Apple sign-in was cancelled.');
+        _showSnack(context.l10n.appleCancelled);
         return;
       }
       // Auth listener handles navigation when sign-in is confirmed.
     } on TimeoutException {
-      _showSnack('Apple sign-in timed out. Please try again.');
+      _showSnack(context.l10n.appleTimedOut);
     } catch (e) {
-      _showSnack('Apple sign-in failed: $e');
+      _showSnack(context.l10n.appleFailed);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -142,12 +143,12 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final title = Text(
-      'Welcome back',
+      context.l10n.loginWelcomeBack,
       style: Theme.of(context).textTheme.displaySmall,
     );
 
     final subtitle = Text(
-      'Sign in to continue',
+      context.l10n.loginSubtitle,
       style: Theme.of(context).textTheme.bodyMedium,
     );
 
@@ -155,9 +156,9 @@ class _LoginScreenState extends State<LoginScreen> {
       controller: _emailController,
       keyboardType: TextInputType.emailAddress,
       autofillHints: const [AutofillHints.email],
-      decoration: const InputDecoration(
-        labelText: 'Email',
-        hintText: 'name@example.com',
+      decoration: InputDecoration(
+        labelText: context.l10n.authEmail,
+        hintText: context.l10n.authEmailHint,
       ),
     );
 
@@ -165,8 +166,8 @@ class _LoginScreenState extends State<LoginScreen> {
       controller: _passwordController,
       obscureText: true,
       autofillHints: const [AutofillHints.password],
-      decoration: const InputDecoration(
-        labelText: 'Password',
+      decoration: InputDecoration(
+        labelText: context.l10n.authPassword,
         hintText: '••••••••',
       ),
     );
@@ -182,7 +183,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: CircularProgressIndicator(
                     strokeWidth: 2, color: Colors.white),
               )
-            : const Text('Log in'),
+            : Text(context.l10n.loginButton),
       ),
     );
 
@@ -190,7 +191,7 @@ class _LoginScreenState extends State<LoginScreen> {
       alignment: Alignment.centerRight,
       child: TextButton(
         onPressed: _isLoading ? null : _goForgotPassword,
-        child: const Text('Forgot password?'),
+        child: Text(context.l10n.loginForgotPassword),
       ),
     );
 
@@ -217,26 +218,27 @@ class _LoginScreenState extends State<LoginScreen> {
 
     final googleBtn = socialBtn(
       icon: const Icon(Icons.login, color: AppColors.text),
-      label: 'Continue with Google',
+      label: context.l10n.loginContinueGoogle,
       onTap: _isLoading ? null : _loginWithGoogle,
     );
 
     final appleBtn = socialBtn(
       icon: const Icon(Icons.apple, color: AppColors.text),
-      label: 'Continue with Apple',
+      label: context.l10n.loginContinueApple,
       onTap: _isLoading ? null : _loginWithApple,
     );
 
     final toSignup = Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Text('New here?', style: Theme.of(context).textTheme.bodyMedium),
+        Text(context.l10n.loginNewHere,
+            style: Theme.of(context).textTheme.bodyMedium),
         const SizedBox(width: 6),
         TextButton(
           onPressed: _isLoading
               ? null
               : () => Navigator.pushReplacementNamed(context, '/register'),
-          child: const Text('Create an account'),
+          child: Text(context.l10n.loginCreateAccount),
         ),
       ],
     );
@@ -284,11 +286,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 20),
                   Row(
-                    children: const [
+                    children: [
                       Expanded(child: Divider()),
                       Padding(
                         padding: EdgeInsets.symmetric(horizontal: 12),
-                        child: Text('or'),
+                        child: Text(context.l10n.authOr),
                       ),
                       Expanded(child: Divider()),
                     ],

@@ -1,4 +1,5 @@
 // lib/screens/auth/forgot_password_screen.dart
+import 'package:connect_app/l10n/l10n.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../services/firebase_auth_service.dart';
@@ -23,19 +24,19 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     if (_sending) return;
     final email = _emailCtrl.text.trim();
     if (email.isEmpty) {
-      _show('Please enter your email.');
+      _show(context.l10n.resetEnterEmail);
       return;
     }
     setState(() => _sending = true);
     try {
       await _auth.sendPasswordReset(email);
       if (!mounted) return;
-      _show('Password reset email sent to $email');
+      _show(context.l10n.resetSent(email));
       Navigator.pop(context); // back to Login
     } on TimeoutException {
-      _show('Request timed out. Try again.');
+      _show(context.l10n.resetTimedOut);
     } catch (e) {
-      _show('Failed to send reset email: $e');
+      _show(context.l10n.resetFailed);
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -51,7 +52,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.canvas,
-      appBar: AppBar(title: const Text('Reset password')),
+      appBar: AppBar(title: Text(context.l10n.resetTitle)),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -61,12 +62,11 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Forgot your password?',
+                  Text(context.l10n.resetHeading,
                       style: Theme.of(context).textTheme.displaySmall),
                   const SizedBox(height: 6),
                   Text(
-                    'Enter the email you used to create your account. '
-                    'We’ll send you a link to reset your password.',
+                    context.l10n.resetBody,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 20),
@@ -84,9 +84,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                           controller: _emailCtrl,
                           keyboardType: TextInputType.emailAddress,
                           autofillHints: const [AutofillHints.email],
-                          decoration: const InputDecoration(
-                            labelText: 'Email',
-                            hintText: 'name@example.com',
+                          decoration: InputDecoration(
+                            labelText: context.l10n.authEmail,
+                            hintText: context.l10n.authEmailHint,
                           ),
                         ),
                         const SizedBox(height: 16),
@@ -103,7 +103,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                                       color: Colors.white,
                                     ),
                                   )
-                                : const Text('Send reset link'),
+                                : Text(context.l10n.resetSend),
                           ),
                         ),
                       ],

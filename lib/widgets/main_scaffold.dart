@@ -1,3 +1,4 @@
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -118,7 +119,8 @@ class _MainScaffoldState extends State<MainScaffold> {
             _buildTabNavigator(2, _createRoot),
             _buildTabNavigator(
               3,
-              ProfileScreen(userID: FirebaseAuth.instance.currentUser?.uid ?? ''),
+              ProfileScreen(
+                  userID: FirebaseAuth.instance.currentUser?.uid ?? ''),
             ),
           ],
         ),
@@ -139,11 +141,15 @@ class _MainScaffoldState extends State<MainScaffold> {
             fontSize: 12,
           ),
           onTap: _onItemTapped,
-          items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-            BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
-            BottomNavigationBarItem(icon: Icon(Icons.add_box), label: 'Post'),
-            BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+          items: [
+            BottomNavigationBarItem(
+                icon: const Icon(Icons.home), label: context.l10n.tabHome),
+            BottomNavigationBarItem(
+                icon: const Icon(Icons.search), label: context.l10n.tabSearch),
+            BottomNavigationBarItem(
+                icon: const Icon(Icons.add_box), label: context.l10n.tabPost),
+            BottomNavigationBarItem(
+                icon: const Icon(Icons.person), label: context.l10n.tabProfile),
           ],
         ),
       ),

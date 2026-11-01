@@ -9,6 +9,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:crypto/crypto.dart' as crypto;
 
+import 'locale_controller.dart';
 import 'notification_service.dart';
 
 class FirebaseAuthService {
@@ -109,6 +110,11 @@ class FirebaseAuthService {
   }
 
   Future<void> sendPasswordReset(String email) async {
+    // The reset email uses Firebase's template in the app's language.
+    try {
+      await _auth
+          .setLanguageCode(LocaleController.instance.effective.languageCode);
+    } catch (_) {}
     await _auth.sendPasswordResetEmail(email: email);
   }
 
