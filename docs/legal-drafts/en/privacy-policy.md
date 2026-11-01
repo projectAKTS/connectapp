@@ -23,9 +23,13 @@ Helperly is operated by [LEGAL NAME OF THE SOLE PROPRIETOR / BUSINESS NAME],
   videos), reviews you give after a booked session.
 - **Calls:** who called whom, when, call type and status. The audio and
   video of calls are not recorded or stored by Helperly.
-- **Bookings and payments:** booked sessions, prices, refunds. Card details
-  are handled by Stripe; we store only a Stripe customer reference and the
-  card brand and last four digits shown in the app. [VERIFY]
+- **Bookings and payments:** booked sessions, prices, refunds, and a
+  record of each payment attempt (amount, status, Stripe payment id) so a
+  payment is never taken twice. Card details are handled by Stripe; we
+  store only a Stripe customer reference. [VERIFY: card brand and last four
+  digits are shown in the app from Stripe, not stored]
+- **Age declaration:** your confirmation that you are 18 or older, with
+  its date. We do not collect your birthdate or ID.
 - **Safety:** reports you file or that concern you, and who you blocked.
 - **Device:** push notification tokens and a random installation id, used
   to deliver messages and calls to your device; your app language, used to
@@ -82,6 +86,12 @@ law. Before such transfers we assess the privacy protection they provide.
 - **Crash reports:** kept by Firebase for 90 days. [VERIFY]
 - **Usage statistics:** kept by Firebase for [VERIFY: 2 or 14 months,
   per project setting].
+
+### Optional data: how we ask
+After sign-up we ask once, separately, whether you want to share crash
+reports and usage statistics. Both are off unless you turn them on, and
+saying no changes nothing else. You can change either at any time in
+Settings.
 
 ### Your choices and rights
 - View and edit your profile, change the app language, turn crash reports

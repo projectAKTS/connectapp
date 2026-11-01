@@ -27,10 +27,13 @@ D'ENTREPRISE], [VILLE], Québec. [À VÉRIFIER : immatriculation]
 - **Appels :** qui a appelé qui, quand, type et statut de l'appel. L'audio
   et la vidéo des appels ne sont ni enregistrés ni conservés par Helperly.
 - **Réservations et paiements :** séances réservées, prix,
-  remboursements. Les données de carte sont traitées par Stripe; nous
-  conservons seulement une référence client Stripe ainsi que la marque et
-  les quatre derniers chiffres de la carte affichés dans l'application.
-  [À VÉRIFIER]
+  remboursements, et un registre de chaque tentative de paiement (montant,
+  statut, identifiant de paiement Stripe) pour qu'un paiement ne soit
+  jamais prélevé deux fois. Les données de carte sont traitées par Stripe;
+  nous conservons seulement une référence client Stripe. [À VÉRIFIER]
+- **Déclaration d'âge :** votre confirmation d'avoir 18 ans ou plus, avec
+  sa date. Nous ne recueillons ni votre date de naissance ni de pièce
+  d'identité.
 - **Sécurité :** signalements que vous faites ou qui vous concernent, et
   personnes que vous avez bloquées.
 - **Appareil :** jetons de notification et identifiant d'installation
@@ -96,6 +99,13 @@ facteurs relatifs à la vie privée exigée par la Loi 25]
 - **Rapports de plantage :** conservés 90 jours par Firebase.
   [À VÉRIFIER]
 - **Statistiques d'utilisation :** conservées [À VÉRIFIER : 2 ou 14 mois].
+
+### Données facultatives : comment nous vous le demandons
+Après l'inscription, nous vous demandons une seule fois, séparément, si
+vous voulez partager les rapports de plantage et les statistiques
+d'utilisation. Les deux sont désactivés sauf si vous les activez, et
+refuser ne change rien d'autre. Vous pouvez modifier ces choix en tout
+temps dans les Paramètres.
 
 ### Vos choix et vos droits
 - Dans l'application, vous pouvez :
