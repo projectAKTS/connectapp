@@ -80,6 +80,44 @@ service cloud.firestore {
           .data.get('blockedUids', []).hasAny([request.auth.uid]);
     }
 
+    // ---- 18+ policy (server-side; see lib/models/age_policy.dart) ----
+    // Accounts created before the policy keep working until they confirm
+    // in a new build; accounts created after it must have declared 'adult'
+    // (old builds cannot, so they cannot bypass it). Declared minors are
+    // restricted. Set agePolicyStart() to the rules deploy date.
+    function agePolicyStart() {
+      return timestamp.date(2026, 11, 1);
+    }
+
+    function ageAllowedFor(userData) {
+      let declaration = userData.get('ageDeclaration', '');
+      let createdAt = userData.get('createdAt', null);
+      return declaration == 'adult'
+        || (declaration == ''
+          && (createdAt == null || createdAt < agePolicyStart()));
+    }
+
+    // A missing user doc counts as legacy: onAuthUserCreated creates it
+    // (with createdAt) at sign-up, so this only avoids locking anyone out.
+    function callerAgeAllowed() {
+      let path = /databases/$(database)/documents/users/$(request.auth.uid);
+      return !exists(path) || ageAllowedFor(get(path).data);
+    }
+
+    function notRestrictedMinor(uid) {
+      let path = /databases/$(database)/documents/users/$(uid);
+      return !exists(path) || get(path).data.get('ageDeclaration', '') != 'minor';
+    }
+
+    // The other person in a two-person chat is not a restricted minor.
+    function otherNotMinorInChat(chat) {
+      let people = chat.keys().hasAny(['participants'])
+        ? chat.participants
+        : (chat.keys().hasAny(['users']) ? chat.users : []);
+      let others = people.removeAll([request.auth.uid]);
+      return others.size() != 1 || notRestrictedMinor(others[0]);
+    }
+
     function optionalString(data, key) {
       return !(data.keys().hasAny([key])) || data[key] is string;
     }
@@ -127,16 +165,26 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null && request.auth.uid == userId
-        && !request.resource.data.keys().hasAny(protectedUserFields());
+        && !request.resource.data.keys().hasAny(protectedUserFields())
+        && request.resource.data.get('createdAt', request.time) == request.time;
       allow update: if request.auth != null
         && request.auth.uid == userId
         && !request.resource.data.diff(resource.data).affectedKeys()
           .hasAny(protectedUserFields())
-        && keepsMinorRestriction();
+        && keepsMinorRestriction()
+        && keepsCreatedAt();
       allow delete: if false;
 
       // 18+ policy: a self-declared minor stays restricted. Only an
       // operator (console / Admin SDK) can lift it after review.
+      // createdAt decides who is covered by the 18+ policy: it can only be
+      // set to "now" (never backdated) and never removed.
+      function keepsCreatedAt() {
+        return !request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['createdAt'])
+          || request.resource.data.get('createdAt', null) == request.time;
+      }
+
       function keepsMinorRestriction() {
         return resource.data.get('ageDeclaration', '') != 'minor'
           || request.resource.data.get('ageDeclaration', '') == 'minor';
@@ -155,7 +203,8 @@ service cloud.firestore {
     match /posts/{postId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null
-        && request.auth.uid == request.resource.data.userID;
+        && request.auth.uid == request.resource.data.userID
+        && callerAgeAllowed();
       
       // — Editing content/tags/timestamp (by owner)
       allow update: if request.auth != null
@@ -205,7 +254,7 @@ service cloud.firestore {
     // ✅ Comments
     match /posts/{postId}/comments/{commentId} {
       allow read: if request.auth != null;
-      allow create: if request.auth != null;
+      allow create: if request.auth != null && callerAgeAllowed();
       allow update: if request.auth != null
         && request.auth.uid == resource.data.userID
         && request.resource.data.keys().hasOnly([
@@ -218,7 +267,7 @@ service cloud.firestore {
     // ✅ Replies
     match /posts/{postId}/comments/{commentId}/replies/{replyId} {
       allow read: if request.auth != null;
-      allow create: if request.auth != null;
+      allow create: if request.auth != null && callerAgeAllowed();
       allow update: if request.auth != null
         && request.auth.uid == resource.data.userID
         && request.resource.data.keys().hasOnly([
@@ -247,8 +296,12 @@ service cloud.firestore {
 
     // ✅ Call invites
     match /callInvites/{inviteId} {
+      // New calls only between people allowed by the 18+ policy; ending or
+      // declining existing calls (update) is unaffected.
       allow create: if request.auth != null
-        && request.resource.data.fromUid == request.auth.uid;
+        && request.resource.data.fromUid == request.auth.uid
+        && callerAgeAllowed()
+        && notRestrictedMinor(request.resource.data.toUid);
       allow read: if request.auth != null
         && (resource.data.fromUid == request.auth.uid
           || resource.data.toUid == request.auth.uid);
@@ -355,6 +408,8 @@ service cloud.firestore {
           && request.resource.data.authorId == request.auth.uid
           // Set by the server when it notifies; a client must not pre-set it.
           && !request.resource.data.keys().hasAny(['notifiedAt'])
+          && callerAgeAllowed()
+          && otherNotMinorInChat(get(/databases/$(database)/documents/chats/$(chatId)).data)
           && notBlockedInChat(get(/databases/$(database)/documents/chats/$(chatId)).data)
           && (
             (get(/databases/$(database)/documents/chats/$(chatId)).data.keys().hasAny(['participants']) &&
@@ -372,7 +427,8 @@ service cloud.firestore {
 
     // ✅ Connections (both schemas supported)
     match /connections/{connectionId} {
-      allow create: if isConnectionParticipant(request.resource.data);
+      allow create: if isConnectionParticipant(request.resource.data)
+        && callerAgeAllowed();
       allow read: if isConnectionParticipant(resource.data);
       // Allow legacy connection docs to be migrated by accepting updates
       // when the user is participant in either current OR incoming data.
@@ -390,7 +446,8 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.participants is list
-        && request.resource.data.participants.hasAny([request.auth.uid]);
+        && request.resource.data.participants.hasAny([request.auth.uid])
+        && callerAgeAllowed();
     }
 
     // Reviews: the payer rates a consultation once, after its start time and
@@ -412,7 +469,8 @@ service cloud.firestore {
         && request.resource.data.get('text', '') is string
         && request.resource.data.get('text', '').size() <= 500
         && request.resource.data.createdAt == request.time
-        && reviewableConsultation(consultationId, request.resource.data.helperUid);
+        && reviewableConsultation(consultationId, request.resource.data.helperUid)
+        && callerAgeAllowed();
       allow update, delete: if false;
     }
 

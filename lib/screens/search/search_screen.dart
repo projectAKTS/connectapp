@@ -210,6 +210,7 @@ class _SearchScreenState extends State<SearchScreen> {
   _UserHit? _userFromDoc(String id, Map<String, dynamic> m) {
     if (id == (HelperlyTestRuntime.currentUid ?? '')) return null;
     if (m['deletionRequestedAt'] != null) return null;
+    if (m['ageDeclaration'] == 'minor') return null; // restricted account
     if (SafetyService.instance.isBlocked(id)) return null;
     String first(List<String> keys) {
       for (final k in keys) {

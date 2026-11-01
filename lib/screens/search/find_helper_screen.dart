@@ -98,7 +98,13 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
       final me = HelperlyTestRuntime.currentUid ?? '';
       for (final d in docs) {
         final m = d.data();
-        if (d.id == me || m['deletionRequestedAt'] != null) continue;
+        // Skip yourself, accounts being deleted and restricted (under-18)
+        // accounts, which cannot be called or messaged.
+        if (d.id == me ||
+            m['deletionRequestedAt'] != null ||
+            m['ageDeclaration'] == 'minor') {
+          continue;
+        }
         // Unfinished profiles (no name) are not listed.
         final name = [m['displayName'], m['fullName'], m['userName']]
             .map((v) => (v ?? '').toString().trim())
