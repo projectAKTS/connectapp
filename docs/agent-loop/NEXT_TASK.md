@@ -1,38 +1,50 @@
-# Active Task - Search Results Fixes (MVP-6)
+# Active Task - English/French Foundation (I18N-1)
 
 Branch: `call-v2`
 
-Starting SHA: `3b7e7ea`
+Starting SHA: `de0e1fb`
 
-Search read profile photos from `photoURL`/`avatar`, but the app stores
-them as `profilePicture`, so search never showed a photo. It also listed
-you, people you blocked and accounts being deleted, and a slow, older query
-could overwrite newer results.
+Approved by the founder on 2026-10-31 after
+`docs/research/I18N_ARCHITECTURE_REPORT.md`, with conditions. The
+founder's conditions are binding.
 
-## Scope
+## Stages (one or more focused commits each)
 
-- People results: photo from `profilePicture` (older fields as fallback),
-  name with a `fullName` fallback, a "Helper" label for helper roles; skip
-  yourself, blocked people and accounts with `deletionRequestedAt`.
-- Post results: skip blocked authors.
-- Only the newest search writes results.
-- A shared `InitialsAvatar` widget for Search and Find a helper.
-- Search history stays off: it would be written to the public user doc.
+1. Localization infrastructure: `gen_l10n`, `app_en.arb` / `app_fr.arb`,
+   device locale detection, a persisted manual choice (System / English /
+   Français), and an English fallback.
+2. Locale-aware date, time and currency formatting.
+3. Display labels for stored values (topics, expertise, countries,
+   languages). **Stored values and matching IDs stay unchanged.**
+   Regression tests: English and French users match the same categories.
+4. `spokenLanguages` (ISO 639-1), separate from the interface language.
+   Legacy `language` stays readable and is still written for old
+   installed builds. Location fields are kept; the device time zone
+   pre-fills the editable field.
+5. Localize the active user-facing screens. Unreachable screens (Explore,
+   Comment, Boost) are excluded, **not deleted**.
+6. Native strings: iOS permission strings and localizations; Android
+   per-app language; incoming-call texts.
+7. Backend push text per recipient language; fix the UTC time in the
+   consultation reminder.
+8. Privacy defaults: Analytics off until the user turns it on.
+   Crash-reporting behaviour reviewed and documented; changes need
+   approval.
+9. French legal texts as **drafts only**, not wired into the app or the
+   site.
 
-## Allowed Files
+## Not Allowed
 
-- `lib/screens/search/search_screen.dart`
-- `lib/screens/search/find_helper_screen.dart`
-- `lib/widgets/initials_avatar.dart`
-- `test/mvp/initials_avatar_test.dart`
-- `docs/agent-loop/**`
+- Deleting Firebase data, deploying, publishing, or changing payments.
+- Replacing published legal texts.
+- Deleting unused screens.
+- Changing stored category, country or language values.
+- Breaking older installed builds.
 
-## Validation
+## Validation Per Stage
 
-- `flutter test test/mvp/`, and `flutter analyze` on the touched files.
-- Emulator A: search shows initials and the Helper label, and never shows
-  yourself.
-
-## Safety
-
-Client only. No deploys.
+- `flutter analyze` on touched files; `flutter test test/mvp/` plus the
+  related suites; the full suite at the end.
+- Emulator: English/French switching, persistence after restart, fallback,
+  login/onboarding, Find a helper results unchanged.
+- Node tests for the Functions changes.

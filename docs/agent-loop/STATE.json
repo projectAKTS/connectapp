@@ -1,27 +1,16 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "mvp6_search_results",
-  "status": "ready_for_review",
-  "accepted_checkpoint_sha": "3b7e7ea",
-  "starting_sha": "3b7e7ea",
+  "phase": "i18n1_en_fr_foundation",
+  "status": "task_ready",
+  "accepted_checkpoint_sha": "de0e1fb",
+  "starting_sha": "de0e1fb",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "d4fd8ef",
+  "code_commit_sha": null,
   "ending_sha": "SELF",
-  "changed_files": [
-    "lib/screens/search/search_screen.dart",
-    "lib/screens/search/find_helper_screen.dart",
-    "lib/widgets/initials_avatar.dart",
-    "test/mvp/initials_avatar_test.dart",
-    "docs/agent-loop/HANDOFF.md",
-    "docs/agent-loop/STATE.json"
-  ],
-  "validation": {
-    "flutter_mvp": "16/16",
-    "flutter_analyze": "no issues",
-    "emulator_search": "initials + Helper label; self not listed"
-  },
+  "changed_files": [],
+  "validation": {},
   "safety": {
     "deployed": false,
     "deploy_pending": "docs/DEPLOY_MVP.md (user batch)",
@@ -34,11 +23,9 @@
     "physical_calls_approved": true
   },
   "review": {
-    "decision": "accepted",
+    "decision": "pending",
     "reviewer": "claude",
-    "notes": "MVP-6 search results fixes."
+    "notes": "I18N-1 approved by founder with conditions."
   },
-  "implementation_shas": [
-    "d4fd8ef"
-  ]
+  "implementation_shas": []
 }
