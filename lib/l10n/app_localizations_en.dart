@@ -1705,4 +1705,57 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get callIncomingAudioSubtitle => 'Incoming audio call';
+
+  @override
+  String get payCanceled => 'Card setup canceled.';
+
+  @override
+  String get payUsedFor =>
+      'Used for consultation bookings. You can update it anytime.';
+
+  @override
+  String get paySecurely => 'Securely save a default card for faster checkout.';
+
+  @override
+  String get payNoCards => 'No saved cards yet.';
+
+  @override
+  String get payRefreshing => 'Refreshing cards…';
+
+  @override
+  String get callFlip => 'Flip';
+
+  @override
+  String get consultCallTitle => 'Consultation Call';
+
+  @override
+  String consultCallWith(String name) {
+    return 'Consultation • $name';
+  }
+
+  @override
+  String get callMuted => 'Muted';
+
+  @override
+  String get callMic => 'Mic';
+
+  @override
+  String get callCameraOff => 'Camera off';
+
+  @override
+  String get callCamera => 'Camera';
+
+  @override
+  String get callEnd => 'End';
+
+  @override
+  String get payDefault => 'Default';
+
+  @override
+  String payExpires(String month, String year) {
+    return 'Expires $month/$year';
+  }
+
+  @override
+  String get consultWaitingOther => 'Waiting for the other participant…';
 }

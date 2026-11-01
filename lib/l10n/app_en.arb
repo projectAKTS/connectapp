@@ -810,5 +810,38 @@
   "callIncomingVideo": "Incoming Video Call",
   "callIncomingAudio": "Incoming Audio Call",
   "callIncomingVideoSubtitle": "Incoming video call",
-  "callIncomingAudioSubtitle": "Incoming audio call"
+  "callIncomingAudioSubtitle": "Incoming audio call",
+  "payCanceled": "Card setup canceled.",
+  "payUsedFor": "Used for consultation bookings. You can update it anytime.",
+  "paySecurely": "Securely save a default card for faster checkout.",
+  "payNoCards": "No saved cards yet.",
+  "payRefreshing": "Refreshing cards…",
+  "callFlip": "Flip",
+  "consultCallTitle": "Consultation Call",
+  "consultCallWith": "Consultation • {name}",
+  "@consultCallWith": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "callMuted": "Muted",
+  "callMic": "Mic",
+  "callCameraOff": "Camera off",
+  "callCamera": "Camera",
+  "callEnd": "End",
+  "payDefault": "Default",
+  "payExpires": "Expires {month}/{year}",
+  "@payExpires": {
+    "placeholders": {
+      "month": {
+        "type": "String"
+      },
+      "year": {
+        "type": "String"
+      }
+    }
+  },
+  "consultWaitingOther": "Waiting for the other participant…"
 }

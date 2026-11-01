@@ -518,5 +518,21 @@
   "callIncomingVideo": "Appel vidéo entrant",
   "callIncomingAudio": "Appel audio entrant",
   "callIncomingVideoSubtitle": "Appel vidéo entrant",
-  "callIncomingAudioSubtitle": "Appel audio entrant"
+  "callIncomingAudioSubtitle": "Appel audio entrant",
+  "payCanceled": "Ajout de la carte annulé.",
+  "payUsedFor": "Utilisée pour réserver des consultations. Vous pouvez la modifier en tout temps.",
+  "paySecurely": "Enregistrez une carte par défaut en toute sécurité pour payer plus vite.",
+  "payNoCards": "Aucune carte enregistrée.",
+  "payRefreshing": "Actualisation des cartes…",
+  "callFlip": "Inverser",
+  "consultCallTitle": "Appel de consultation",
+  "consultCallWith": "Consultation • {name}",
+  "callMuted": "Micro coupé",
+  "callMic": "Micro",
+  "callCameraOff": "Caméra coupée",
+  "callCamera": "Caméra",
+  "callEnd": "Raccrocher",
+  "payDefault": "Par défaut",
+  "payExpires": "Expire le {month}/{year}",
+  "consultWaitingOther": "En attente de l'autre participant…"
 }

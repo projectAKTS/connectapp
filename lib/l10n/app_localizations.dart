@@ -3211,6 +3211,102 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Incoming audio call'**
   String get callIncomingAudioSubtitle;
+
+  /// No description provided for @payCanceled.
+  ///
+  /// In en, this message translates to:
+  /// **'Card setup canceled.'**
+  String get payCanceled;
+
+  /// No description provided for @payUsedFor.
+  ///
+  /// In en, this message translates to:
+  /// **'Used for consultation bookings. You can update it anytime.'**
+  String get payUsedFor;
+
+  /// No description provided for @paySecurely.
+  ///
+  /// In en, this message translates to:
+  /// **'Securely save a default card for faster checkout.'**
+  String get paySecurely;
+
+  /// No description provided for @payNoCards.
+  ///
+  /// In en, this message translates to:
+  /// **'No saved cards yet.'**
+  String get payNoCards;
+
+  /// No description provided for @payRefreshing.
+  ///
+  /// In en, this message translates to:
+  /// **'Refreshing cards…'**
+  String get payRefreshing;
+
+  /// No description provided for @callFlip.
+  ///
+  /// In en, this message translates to:
+  /// **'Flip'**
+  String get callFlip;
+
+  /// No description provided for @consultCallTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Consultation Call'**
+  String get consultCallTitle;
+
+  /// No description provided for @consultCallWith.
+  ///
+  /// In en, this message translates to:
+  /// **'Consultation • {name}'**
+  String consultCallWith(String name);
+
+  /// No description provided for @callMuted.
+  ///
+  /// In en, this message translates to:
+  /// **'Muted'**
+  String get callMuted;
+
+  /// No description provided for @callMic.
+  ///
+  /// In en, this message translates to:
+  /// **'Mic'**
+  String get callMic;
+
+  /// No description provided for @callCameraOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Camera off'**
+  String get callCameraOff;
+
+  /// No description provided for @callCamera.
+  ///
+  /// In en, this message translates to:
+  /// **'Camera'**
+  String get callCamera;
+
+  /// No description provided for @callEnd.
+  ///
+  /// In en, this message translates to:
+  /// **'End'**
+  String get callEnd;
+
+  /// No description provided for @payDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Default'**
+  String get payDefault;
+
+  /// No description provided for @payExpires.
+  ///
+  /// In en, this message translates to:
+  /// **'Expires {month}/{year}'**
+  String payExpires(String month, String year);
+
+  /// No description provided for @consultWaitingOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for the other participant…'**
+  String get consultWaitingOther;
 }
 
 class _AppLocalizationsDelegate

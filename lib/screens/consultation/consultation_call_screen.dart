@@ -1,4 +1,5 @@
 // lib/screens/consultation/consultation_call_screen.dart
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
@@ -223,7 +224,7 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
         backgroundColor: AppColors.canvas,
         appBar: AppBar(
           backgroundColor: AppColors.canvas,
-          title: const Text('Consultation Call'),
+          title: Text(context.l10n.consultCallTitle),
         ),
         body: const Center(child: CircularProgressIndicator()),
       );
@@ -236,7 +237,7 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
         backgroundColor: AppColors.canvas,
         appBar: AppBar(
           backgroundColor: AppColors.canvas,
-          title: const Text('Consultation Call'),
+          title: Text(context.l10n.consultCallTitle),
         ),
         body: Center(
           child: Padding(
@@ -255,13 +256,13 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
                 if (isPermissionError) ...[
                   OutlinedButton(
                     onPressed: openAppSettings,
-                    child: const Text('Open Settings'),
+                    child: Text(context.l10n.callOpenSettings),
                   ),
                   const SizedBox(height: 10),
                 ],
                 OutlinedButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Close'),
+                  child: Text(context.l10n.callClose),
                 ),
               ],
             ),
@@ -279,7 +280,7 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
         elevation: 0,
-        title: Text('Consultation • ${widget.otherUserName}'),
+        title: Text(context.l10n.consultCallWith(widget.otherUserName)),
       ),
       body: Stack(
         children: [
@@ -336,17 +337,21 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
                   children: [
                     _ctrlButton(
                       icon: _micMuted ? Icons.mic_off : Icons.mic,
-                      label: _micMuted ? 'Muted' : 'Mic',
+                      label: _micMuted
+                          ? context.l10n.callMuted
+                          : context.l10n.callMic,
                       onTap: _toggleMic,
                     ),
                     _ctrlButton(
                       icon: _camOff ? Icons.videocam_off : Icons.videocam,
-                      label: _camOff ? 'Camera off' : 'Camera',
+                      label: _camOff
+                          ? context.l10n.callCameraOff
+                          : context.l10n.callCamera,
                       onTap: _toggleCam,
                     ),
                     _ctrlButton(
                       icon: Icons.cameraswitch,
-                      label: 'Flip',
+                      label: context.l10n.callFlip,
                       onTap: _switchCamera,
                     ),
                     _hangupButton(onTap: _endCall),
@@ -366,11 +371,11 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
         padding: const EdgeInsets.all(20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: const [
+          children: [
             CircularProgressIndicator(color: Colors.white),
             SizedBox(height: 14),
             Text(
-              'Waiting for the other participant…',
+              context.l10n.consultWaitingOther,
               style: TextStyle(color: Colors.white70, fontSize: 16),
               textAlign: TextAlign.center,
             ),
@@ -424,12 +429,13 @@ class _ConsultationCallScreenState extends State<ConsultationCallScreen> {
           color: Colors.redAccent,
           borderRadius: BorderRadius.circular(18),
         ),
-        child: const Column(
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.call_end, color: Colors.white, size: 24),
             SizedBox(height: 6),
-            Text('End', style: TextStyle(color: Colors.white, fontSize: 11)),
+            Text(context.l10n.callEnd,
+                style: const TextStyle(color: Colors.white, fontSize: 11)),
           ],
         ),
       ),

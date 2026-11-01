@@ -233,7 +233,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
       final code = e.error.code.toString().toLowerCase();
       final msg =
           code.contains('canceled') || rawMsg.toLowerCase().contains('cancel')
-              ? 'Card setup canceled.'
+              ? context.l10n.payCanceled
               : rawMsg;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -274,7 +274,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
           Text(context.l10n.payAddCard, style: textTheme.titleMedium),
           const SizedBox(height: 6),
           Text(
-            'Used for consultation bookings. You can update it anytime.',
+            context.l10n.payUsedFor,
             style: textTheme.bodyMedium,
           ),
           const SizedBox(height: 16),
@@ -301,7 +301,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Securely save a default card for faster checkout.',
+                    context.l10n.paySecurely,
                     style: textTheme.bodyLarge,
                   ),
                 ),
@@ -332,7 +332,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
             )
           else if (_cards.isEmpty)
             Text(
-              'No saved cards yet.',
+              context.l10n.payNoCards,
               style: textTheme.bodyMedium?.copyWith(color: AppColors.muted),
             )
           else
@@ -350,7 +350,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
           if (_isLoadingCards && _cards.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(
-              'Refreshing cards…',
+              context.l10n.payRefreshing,
               style: textTheme.bodySmall?.copyWith(color: AppColors.muted),
             ),
           ],
@@ -429,7 +429,7 @@ class _CardRow extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Expires $expMonth/$expYear',
+                  context.l10n.payExpires(expMonth, expYear),
                   style: textTheme.bodyMedium?.copyWith(color: AppColors.muted),
                 ),
               ],
@@ -444,7 +444,7 @@ class _CardRow extends StatelessWidget {
                 border: Border.all(color: AppColors.border),
               ),
               child: Text(
-                'Default',
+                context.l10n.payDefault,
                 style: textTheme.bodyMedium?.copyWith(
                   color: AppColors.text,
                   fontWeight: FontWeight.w700,
