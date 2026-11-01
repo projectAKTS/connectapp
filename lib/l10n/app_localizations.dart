@@ -3157,6 +3157,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Card setup failed.'**
   String get paySetupFailed;
+
+  /// No description provided for @callAlreadyInProgress.
+  ///
+  /// In en, this message translates to:
+  /// **'A call is already in progress.'**
+  String get callAlreadyInProgress;
+
+  /// No description provided for @callFinishingPrevious.
+  ///
+  /// In en, this message translates to:
+  /// **'Finishing previous call...'**
+  String get callFinishingPrevious;
+
+  /// No description provided for @callUnableToStart.
+  ///
+  /// In en, this message translates to:
+  /// **'Unable to start call. Check your connection.'**
+  String get callUnableToStart;
+
+  /// No description provided for @callWaitingOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for the other user to join…'**
+  String get callWaitingOther;
+
+  /// No description provided for @callTapToSwap.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap to swap'**
+  String get callTapToSwap;
+
+  /// No description provided for @callIncomingVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Incoming Video Call'**
+  String get callIncomingVideo;
+
+  /// No description provided for @callIncomingAudio.
+  ///
+  /// In en, this message translates to:
+  /// **'Incoming Audio Call'**
+  String get callIncomingAudio;
+
+  /// No description provided for @callIncomingVideoSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Incoming video call'**
+  String get callIncomingVideoSubtitle;
+
+  /// No description provided for @callIncomingAudioSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Incoming audio call'**
+  String get callIncomingAudioSubtitle;
 }
 
 class _AppLocalizationsDelegate

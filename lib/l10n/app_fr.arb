@@ -509,5 +509,14 @@
   "paySavedCards": "Cartes enregistrées",
   "payLoadFailed": "Impossible de charger les cartes",
   "payCardOptions": "Options de la carte",
-  "paySetupFailed": "L'ajout de la carte a échoué."
+  "paySetupFailed": "L'ajout de la carte a échoué.",
+  "callAlreadyInProgress": "Un appel est déjà en cours.",
+  "callFinishingPrevious": "Fin de l'appel précédent…",
+  "callUnableToStart": "Impossible de lancer l'appel. Vérifiez votre connexion.",
+  "callWaitingOther": "En attente de l'autre personne…",
+  "callTapToSwap": "Touchez pour inverser",
+  "callIncomingVideo": "Appel vidéo entrant",
+  "callIncomingAudio": "Appel audio entrant",
+  "callIncomingVideoSubtitle": "Appel vidéo entrant",
+  "callIncomingAudioSubtitle": "Appel audio entrant"
 }

@@ -1677,4 +1677,32 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get paySetupFailed => 'Card setup failed.';
+
+  @override
+  String get callAlreadyInProgress => 'A call is already in progress.';
+
+  @override
+  String get callFinishingPrevious => 'Finishing previous call...';
+
+  @override
+  String get callUnableToStart =>
+      'Unable to start call. Check your connection.';
+
+  @override
+  String get callWaitingOther => 'Waiting for the other user to join…';
+
+  @override
+  String get callTapToSwap => 'Tap to swap';
+
+  @override
+  String get callIncomingVideo => 'Incoming Video Call';
+
+  @override
+  String get callIncomingAudio => 'Incoming Audio Call';
+
+  @override
+  String get callIncomingVideoSubtitle => 'Incoming video call';
+
+  @override
+  String get callIncomingAudioSubtitle => 'Incoming audio call';
 }

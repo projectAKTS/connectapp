@@ -1717,4 +1717,32 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get paySetupFailed => 'L\'ajout de la carte a échoué.';
+
+  @override
+  String get callAlreadyInProgress => 'Un appel est déjà en cours.';
+
+  @override
+  String get callFinishingPrevious => 'Fin de l\'appel précédent…';
+
+  @override
+  String get callUnableToStart =>
+      'Impossible de lancer l\'appel. Vérifiez votre connexion.';
+
+  @override
+  String get callWaitingOther => 'En attente de l\'autre personne…';
+
+  @override
+  String get callTapToSwap => 'Touchez pour inverser';
+
+  @override
+  String get callIncomingVideo => 'Appel vidéo entrant';
+
+  @override
+  String get callIncomingAudio => 'Appel audio entrant';
+
+  @override
+  String get callIncomingVideoSubtitle => 'Appel vidéo entrant';
+
+  @override
+  String get callIncomingAudioSubtitle => 'Appel audio entrant';
 }

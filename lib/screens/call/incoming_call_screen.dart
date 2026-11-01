@@ -16,7 +16,9 @@ class IncomingCallScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = isVideo ? 'Incoming Video Call' : 'Incoming Audio Call';
+    final title = isVideo
+        ? context.l10n.callIncomingVideo
+        : context.l10n.callIncomingAudio;
 
     return PopScope<bool>(
       canPop: false,
@@ -59,7 +61,9 @@ class IncomingCallScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Incoming ${isVideo ? 'video' : 'audio'} call',
+                  isVideo
+                      ? context.l10n.callIncomingVideoSubtitle
+                      : context.l10n.callIncomingAudioSubtitle,
                   style: const TextStyle(fontSize: 14, color: AppColors.muted),
                 ),
                 const SizedBox(height: 28),

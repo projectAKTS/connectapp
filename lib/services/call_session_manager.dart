@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 
+import 'package:connect_app/l10n/call_messages.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
@@ -1662,9 +1663,11 @@ class CallSessionManager {
       });
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
         SnackBar(
-          content: Text(_callLifecycleArbiter.teardownInProgress
-              ? 'Finishing previous call...'
-              : 'A call is already in progress.'),
+          content: Text(CallMessages.of(
+              context,
+              _callLifecycleArbiter.teardownInProgress
+                  ? 'Finishing previous call...'
+                  : 'A call is already in progress.')),
         ),
       );
       return false;
@@ -1721,7 +1724,9 @@ class CallSessionManager {
       };
       await _diagManager('start_blocked', meta: blockedMeta);
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        const SnackBar(content: Text('A call is already in progress.')),
+        SnackBar(
+            content: Text(
+                CallMessages.of(context, 'A call is already in progress.'))),
       );
       _callLifecycleArbiter.releaseOutgoingReservation(
         outgoingReservation.generation,
@@ -1801,8 +1806,9 @@ class CallSessionManager {
         outgoingReservation.generation,
       );
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        const SnackBar(
-          content: Text('Unable to start call. Check your connection.'),
+        SnackBar(
+          content: Text(CallMessages.of(
+              context, 'Unable to start call. Check your connection.')),
         ),
       );
       return false;

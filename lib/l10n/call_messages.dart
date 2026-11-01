@@ -1,4 +1,5 @@
 import 'package:connect_app/l10n/l10n.dart';
+import 'package:flutter/widgets.dart';
 
 /// Call status messages are set as English text deep in the call flow,
 /// including during teardown when no BuildContext is safe to use. They are
@@ -26,7 +27,24 @@ class CallMessages {
         return l.callDeclined;
       case 'User unavailable':
         return l.callUnavailable;
+      case 'A call is already in progress.':
+        return l.callAlreadyInProgress;
+      case 'Finishing previous call...':
+        return l.callFinishingPrevious;
+      case 'Unable to start call. Check your connection.':
+        return l.callUnableToStart;
     }
     return message;
+  }
+
+  /// [english] in [context]'s language, or as is when [context] is no
+  /// longer mounted (the call flow may show this after an await).
+  static String of(BuildContext context, String english) {
+    if (!context.mounted) return english;
+    try {
+      return localize(context.l10n, english);
+    } catch (_) {
+      return english;
+    }
   }
 }

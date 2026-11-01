@@ -3421,7 +3421,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     }
 
     final remotePlaceholder = _remoteUid == null
-        ? 'Waiting for the other user to join…'
+        ? context.l10n.callWaitingOther
         : (_remoteVideoMuted
             ? 'Remote camera is off'
             : 'Waiting for remote video…');
@@ -3502,13 +3502,13 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
                 ),
               ),
               if (_localIsBig && _remoteUid == null)
-                const Positioned(
+                Positioned(
                   left: 0,
                   right: 0,
                   bottom: 110,
                   child: Center(
                     child: Text(
-                      'Waiting for the other user to join…',
+                      context.l10n.callWaitingOther,
                       style: TextStyle(
                         color: Colors.white70,
                         fontSize: 16,
@@ -3605,8 +3605,8 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
                                 borderRadius: BorderRadius.circular(999),
                                 border: Border.all(color: Colors.white24),
                               ),
-                              child: const Text(
-                                'Tap to swap',
+                              child: Text(
+                                context.l10n.callTapToSwap,
                                 style: TextStyle(
                                   color: Colors.white,
                                   fontSize: 10,

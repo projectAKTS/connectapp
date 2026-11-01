@@ -801,5 +801,14 @@
   "paySavedCards": "Saved cards",
   "payLoadFailed": "Could not load cards",
   "payCardOptions": "Card options",
-  "paySetupFailed": "Card setup failed."
+  "paySetupFailed": "Card setup failed.",
+  "callAlreadyInProgress": "A call is already in progress.",
+  "callFinishingPrevious": "Finishing previous call...",
+  "callUnableToStart": "Unable to start call. Check your connection.",
+  "callWaitingOther": "Waiting for the other user to join…",
+  "callTapToSwap": "Tap to swap",
+  "callIncomingVideo": "Incoming Video Call",
+  "callIncomingAudio": "Incoming Audio Call",
+  "callIncomingVideoSubtitle": "Incoming video call",
+  "callIncomingAudioSubtitle": "Incoming audio call"
 }
