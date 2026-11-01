@@ -45,10 +45,10 @@ delivery can happen.
 |---|---|---|
 | `onReviewCreated` | Would double-count a rating | **Idempotent:** a transaction sets `countedAt` and skips if it is already set |
 | `onCallInviteCreated` | A second push for the same call | Pre-existing. Clients dedupe by invite/callkit id; the blocked path writes in a transaction that only acts on `ringing` |
-| `onChatMessageCreated` | A second push and +1 unread | Pre-existing, **no guard**. Rare; the badge self-corrects when the chat is opened. Suggested later: a `notifiedAt` marker on the message |
-| `scheduledConsultationReminder` | Can send two reminders: the window is inclusive at both ends and there is no "sent" marker | Pre-existing. Suggested: a `reminderSentAt` field set in a transaction |
+| `onChatMessageCreated` | A second push and +1 unread | **Fixed:** `notifiedAt` is claimed in a transaction (`9378e43`) |
+| `scheduledConsultationReminder` | Can send two reminders (overlapping window) | **Fixed:** `reminderSentAt` is claimed in a transaction (`9378e43`) |
 | `processAccountDeletionRequests` / `deleteAccount` | Re-running deletes what is left | Safe: deleting missing docs is a no-op; Auth `user-not-found` is tolerated |
-| `chargeStoredPaymentMethod` | **A client retry could charge twice** | **No Stripe idempotency key, a pre-existing risk.** Recommended before paid sessions launch: pass `idempotencyKey` (for example the booking id) to `paymentIntents.create`. This is a payment-logic change, so it needs approval. |
+| `chargeStoredPaymentMethod` | A retry could charge twice (before `2ceb2ee`) | **Fixed:** `paymentOperations` + Stripe idempotency key `charge_<operationId>`, lookup of existing PaymentIntents, forward-only reconciliation (see `payments/charge_operation.js`, 9 tests) |
 
 ## Cost (MVP Scale, Estimate)
 
@@ -122,8 +122,13 @@ functions:createSetupIntent,\
 functions:createStripeCheckoutSession,\
 functions:listPaymentMethods,\
 functions:removePaymentMethod,\
-functions:setDefaultPaymentMethod
+functions:setDefaultPaymentMethod,\
+functions:handleStripeWebhook
 ```
+
+`handleStripeWebhook` was added on 2026-11-01: it now reconciles
+`paymentOperations`. The order and smoke tests are in
+`docs/RELEASE_CHECKLIST.md`.
 
 **Recommendation:** first diff the deployed source against local (method
 in the project notes), then deploy in two steps:
