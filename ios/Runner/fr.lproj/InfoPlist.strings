@@ -1,0 +1,5 @@
+/* Permission prompts in French. English stays in Info.plist. */
+"NSCameraUsageDescription" = "Nous utilisons l'appareil photo pour les appels vidéo et le partage de photos.";
+"NSMicrophoneUsageDescription" = "Nous utilisons le microphone pour les appels audio et vidéo.";
+"NSPhotoLibraryAddUsageDescription" = "Nous enregistrons les images et vidéos que vous prenez dans l'application.";
+"NSPhotoLibraryUsageDescription" = "Nous utilisons votre photothèque pour vous permettre de choisir des images à partager.";

@@ -1758,4 +1758,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get consultWaitingOther => 'Waiting for the other participant…';
+
+  @override
+  String get callCaller => 'Caller';
+
+  @override
+  String get callChannelName => 'Incoming calls';
 }

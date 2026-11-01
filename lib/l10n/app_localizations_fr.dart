@@ -1799,4 +1799,10 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get consultWaitingOther => 'En attente de l\'autre participant…';
+
+  @override
+  String get callCaller => 'Appelant';
+
+  @override
+  String get callChannelName => 'Appels entrants';
 }

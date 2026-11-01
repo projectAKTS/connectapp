@@ -1,3 +1,6 @@
+import 'dart:ui';
+
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
@@ -37,7 +40,12 @@ class AndroidIncomingCall {
     DateTime? sentTime,
     required DateTime now,
     String ownInstallationId = '',
+    String? languageCode,
   }) {
+    // Device language, read without I/O: this runs in the background
+    // messaging isolate. The in-app choice is not read here.
+    final l = lookupAppLocalizations(AppLanguages.resolve(Locale(
+        languageCode ?? PlatformDispatcher.instance.locale.languageCode)));
     final type = '${data['type'] ?? data['action'] ?? ''}'.trim();
     final channel = '${data['channel'] ?? ''}'.trim();
     final inviteId = '${data['callId'] ?? data['inviteId'] ?? channel}'.trim();
@@ -75,18 +83,18 @@ class AndroidIncomingCall {
 
     final isVideo = '${data['isVideo'] ?? ''}'.trim().toLowerCase() == 'true';
     final rawName = '${data['fromName'] ?? ''}'.trim();
-    final fromName = rawName.isEmpty ? 'Caller' : rawName;
+    final fromName = rawName.isEmpty ? l.callCaller : rawName;
     return AndroidIncomingCallDecision.present(
       callkitId: callkitId,
       params: CallKitParams(
         id: callkitId,
         nameCaller: fromName,
         appName: 'Helperly',
-        handle: isVideo ? 'Video call' : 'Audio call',
+        handle: isVideo ? l.callVideoTitle : l.callAudioTitle,
         type: isVideo ? 1 : 0,
         duration: ring.inMilliseconds,
-        textAccept: 'Accept',
-        textDecline: 'Decline',
+        textAccept: l.callAccept,
+        textDecline: l.callDecline,
         missedCallNotification: const NotificationParams(
           showNotification: false,
         ),
@@ -99,14 +107,14 @@ class AndroidIncomingCall {
           'fromUid': '${data['fromUid'] ?? ''}'.trim(),
           'isVideo': '$isVideo',
         },
-        android: const AndroidParams(
+        android: AndroidParams(
           isCustomNotification: true,
           isShowLogo: false,
           ringtonePath: 'system_ringtone_default',
           backgroundColor: '#0E4A42',
           actionColor: '#4CAF50',
           textColor: '#ffffff',
-          incomingCallNotificationChannelName: 'Incoming calls',
+          incomingCallNotificationChannelName: l.callChannelName,
           isShowFullLockedScreen: true,
           isImportant: true,
         ),

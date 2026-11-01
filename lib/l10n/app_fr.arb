@@ -534,5 +534,7 @@
   "callEnd": "Raccrocher",
   "payDefault": "Par défaut",
   "payExpires": "Expire le {month}/{year}",
-  "consultWaitingOther": "En attente de l'autre participant…"
+  "consultWaitingOther": "En attente de l'autre participant…",
+  "callCaller": "Appelant",
+  "callChannelName": "Appels entrants"
 }

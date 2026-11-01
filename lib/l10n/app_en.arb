@@ -843,5 +843,7 @@
       }
     }
   },
-  "consultWaitingOther": "Waiting for the other participant…"
+  "consultWaitingOther": "Waiting for the other participant…",
+  "callCaller": "Caller",
+  "callChannelName": "Incoming calls"
 }

@@ -3307,6 +3307,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Waiting for the other participant…'**
   String get consultWaitingOther;
+
+  /// No description provided for @callCaller.
+  ///
+  /// In en, this message translates to:
+  /// **'Caller'**
+  String get callCaller;
+
+  /// No description provided for @callChannelName.
+  ///
+  /// In en, this message translates to:
+  /// **'Incoming calls'**
+  String get callChannelName;
 }
 
 class _AppLocalizationsDelegate

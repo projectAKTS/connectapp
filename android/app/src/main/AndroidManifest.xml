@@ -13,6 +13,7 @@
         android:label="Helperly"
         tools:replace="android:label"
         android:name=".HelperlyApplication"
+        android:localeConfig="@xml/locales_config"
         android:icon="@mipmap/ic_launcher">
 
         <!-- Usage statistics stay off until the user turns them on in
