@@ -2023,6 +2023,222 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Save Changes'**
   String get editProfileSaveChanges;
+
+  /// No description provided for @commonUser.
+  ///
+  /// In en, this message translates to:
+  /// **'User'**
+  String get commonUser;
+
+  /// No description provided for @commonLoading.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading...'**
+  String get commonLoading;
+
+  /// No description provided for @messagesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Messages'**
+  String get messagesTitle;
+
+  /// No description provided for @messagesEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No conversations yet.'**
+  String get messagesEmpty;
+
+  /// No description provided for @messagesLoginAgain.
+  ///
+  /// In en, this message translates to:
+  /// **'Please log in again.'**
+  String get messagesLoginAgain;
+
+  /// No description provided for @messagesOpenToView.
+  ///
+  /// In en, this message translates to:
+  /// **'(Open to view messages)'**
+  String get messagesOpenToView;
+
+  /// No description provided for @messagePhoto.
+  ///
+  /// In en, this message translates to:
+  /// **'Photo'**
+  String get messagePhoto;
+
+  /// No description provided for @messageVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Video'**
+  String get messageVideo;
+
+  /// No description provided for @messageFile.
+  ///
+  /// In en, this message translates to:
+  /// **'File'**
+  String get messageFile;
+
+  /// No description provided for @messageMissedCall.
+  ///
+  /// In en, this message translates to:
+  /// **'Missed call'**
+  String get messageMissedCall;
+
+  /// No description provided for @chatTitleFallback.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat'**
+  String get chatTitleFallback;
+
+  /// No description provided for @chatThisPerson.
+  ///
+  /// In en, this message translates to:
+  /// **'this person'**
+  String get chatThisPerson;
+
+  /// No description provided for @chatYouBlocked.
+  ///
+  /// In en, this message translates to:
+  /// **'You blocked this person. Unblock them to send messages.'**
+  String get chatYouBlocked;
+
+  /// No description provided for @chatSendFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Message could not be sent. Please try again.'**
+  String get chatSendFailed;
+
+  /// No description provided for @chatAttachFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn’t attach the file. Please try again.'**
+  String get chatAttachFailed;
+
+  /// No description provided for @chatAttachmentSendFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn’t send the attachment. Please try again.'**
+  String get chatAttachmentSendFailed;
+
+  /// No description provided for @chatReport.
+  ///
+  /// In en, this message translates to:
+  /// **'Report'**
+  String get chatReport;
+
+  /// No description provided for @chatInitFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat could not open. Please reopen this chat.'**
+  String get chatInitFailed;
+
+  /// No description provided for @chatInputHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Message'**
+  String get chatInputHint;
+
+  /// No description provided for @chatEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No messages here yet'**
+  String get chatEmpty;
+
+  /// No description provided for @chatAttachLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Send media'**
+  String get chatAttachLabel;
+
+  /// No description provided for @chatFileLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'File'**
+  String get chatFileLabel;
+
+  /// No description provided for @chatSendLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Send'**
+  String get chatSendLabel;
+
+  /// No description provided for @chatTyping.
+  ///
+  /// In en, this message translates to:
+  /// **'is typing'**
+  String get chatTyping;
+
+  /// No description provided for @chatOthers.
+  ///
+  /// In en, this message translates to:
+  /// **'others'**
+  String get chatOthers;
+
+  /// No description provided for @chatAnd.
+  ///
+  /// In en, this message translates to:
+  /// **'and'**
+  String get chatAnd;
+
+  /// No description provided for @chatUnread.
+  ///
+  /// In en, this message translates to:
+  /// **'Unread messages'**
+  String get chatUnread;
+
+  /// No description provided for @searchTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Search'**
+  String get searchTitle;
+
+  /// No description provided for @searchHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search users or posts…'**
+  String get searchHint;
+
+  /// No description provided for @searchSuggested.
+  ///
+  /// In en, this message translates to:
+  /// **'Suggested categories'**
+  String get searchSuggested;
+
+  /// No description provided for @searchPeople.
+  ///
+  /// In en, this message translates to:
+  /// **'People'**
+  String get searchPeople;
+
+  /// No description provided for @searchPosts.
+  ///
+  /// In en, this message translates to:
+  /// **'Posts'**
+  String get searchPosts;
+
+  /// No description provided for @searchAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get searchAll;
+
+  /// No description provided for @searchNoResults.
+  ///
+  /// In en, this message translates to:
+  /// **'No results. Try another keyword.'**
+  String get searchNoResults;
+
+  /// No description provided for @searchHelperBadge.
+  ///
+  /// In en, this message translates to:
+  /// **'Helper'**
+  String get searchHelperBadge;
+
+  /// No description provided for @searchViewFullPost.
+  ///
+  /// In en, this message translates to:
+  /// **'View full post'**
+  String get searchViewFullPost;
 }
 
 class _AppLocalizationsDelegate

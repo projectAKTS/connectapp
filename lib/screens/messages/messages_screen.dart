@@ -1,3 +1,4 @@
+import 'package:connect_app/l10n/l10n.dart';
 import 'dart:async';
 
 import 'package:connect_app/services/safety_service.dart';
@@ -141,18 +142,22 @@ class _MessagesScreenState extends State<MessagesScreen> {
       if (_looksLikeUid(candidate)) continue;
       return candidate;
     }
-    return 'User';
+    return context.l10n.commonUser;
   }
 
+  /// Attachments and missed calls are labelled from `lastMessageType` in
+  /// the reader's language; `lastMessageText` for them is English text
+  /// written by the server or older builds.
   String _previewFromChatData(Map<String, dynamic> chatData) {
+    final l = context.l10n;
+    final type = (chatData['lastMessageType'] ?? '').toString().trim();
+    if (type == 'image') return l.messagePhoto;
+    if (type == 'video') return l.messageVideo;
+    if (type == 'file') return l.messageFile;
+    if (type == 'missed_call') return l.messageMissedCall;
     final text = (chatData['lastMessageText'] ?? '').toString().trim();
     if (text.isNotEmpty) return text;
-    final type = (chatData['lastMessageType'] ?? '').toString().trim();
-    if (type == 'image') return 'Photo';
-    if (type == 'video') return 'Video';
-    if (type == 'file') return 'File';
-    if (type == 'missed_call') return 'Missed call';
-    return '(Open to view messages)';
+    return l.messagesOpenToView;
   }
 
   Widget _buildConnectionsFallback({
@@ -168,10 +173,10 @@ class _MessagesScreenState extends State<MessagesScreen> {
 
         final rows = snap.data ?? const <Map<String, String>>[];
         if (rows.isEmpty) {
-          return const Center(
+          return Center(
             child: Text(
-              'No conversations yet.',
-              style: TextStyle(color: AppColors.muted, fontSize: 16),
+              context.l10n.messagesEmpty,
+              style: const TextStyle(color: AppColors.muted, fontSize: 16),
             ),
           );
         }
@@ -188,7 +193,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
               builder: (context, userSnap) {
                 if (userSnap.connectionState == ConnectionState.waiting &&
                     !userSnap.hasData) {
-                  return const ListTile(
+                  return ListTile(
                     leading: CircleAvatar(
                       radius: 24,
                       backgroundColor: AppColors.avatarBg,
@@ -196,7 +201,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
                           Icon(Icons.person_outline, color: AppColors.avatarFg),
                     ),
                     title: Text(
-                      'Loading...',
+                      context.l10n.commonLoading,
                       style: TextStyle(
                         color: AppColors.muted,
                         fontWeight: FontWeight.w600,
@@ -234,8 +239,8 @@ class _MessagesScreenState extends State<MessagesScreen> {
                       fontSize: 16,
                     ),
                   ),
-                  subtitle: const Text(
-                    '(Open to view messages)',
+                  subtitle: Text(
+                    context.l10n.messagesOpenToView,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -336,11 +341,11 @@ class _MessagesScreenState extends State<MessagesScreen> {
         ? requestedUid
         : authUid;
     if (currentUid.isEmpty) {
-      return const FullScreenBackGesture(
+      return FullScreenBackGesture(
         child: Scaffold(
           body: Center(
             child: Text(
-              'Please log in again.',
+              context.l10n.messagesLoginAgain,
               style: TextStyle(color: AppColors.muted),
             ),
           ),
@@ -357,9 +362,9 @@ class _MessagesScreenState extends State<MessagesScreen> {
           elevation: 0,
           centerTitle: true,
           iconTheme: const IconThemeData(color: AppColors.text),
-          title: const Text(
-            'Messages',
-            style: TextStyle(
+          title: Text(
+            context.l10n.messagesTitle,
+            style: const TextStyle(
                 color: AppColors.text,
                 fontWeight: FontWeight.w600,
                 fontSize: 18),
@@ -476,7 +481,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
                       builder: (context, userSnap) {
                         if (userSnap.connectionState ==
                             ConnectionState.waiting) {
-                          return const ListTile(
+                          return ListTile(
                             leading: CircleAvatar(
                               radius: 24,
                               backgroundColor: AppColors.avatarBg,
@@ -484,7 +489,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
                                   color: AppColors.avatarFg),
                             ),
                             title: Text(
-                              'Loading...',
+                              context.l10n.commonLoading,
                               style: TextStyle(
                                 color: AppColors.muted,
                                 fontWeight: FontWeight.w600,

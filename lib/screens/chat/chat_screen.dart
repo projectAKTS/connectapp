@@ -1,4 +1,6 @@
 // lib/screens/chat/chat_screen.dart
+import 'package:connect_app/l10n/formatters.dart';
+import 'package:connect_app/l10n/l10n.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -301,14 +303,16 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Blocking stops sending; the person stays reachable after unblocking.
   bool _blockedGuard() {
     if (!SafetyService.instance.isBlocked(widget.otherUserId)) return false;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('You blocked this person. Unblock them to send messages.'),
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(context.l10n.chatYouBlocked),
     ));
     return true;
   }
 
   Future<void> _onSafetyAction(String action) async {
-    final name = _titleName?.isNotEmpty == true ? _titleName! : 'this person';
+    final name = _titleName?.isNotEmpty == true
+        ? _titleName!
+        : context.l10n.chatThisPerson;
     final safety = SafetyService.instance;
     switch (action) {
       case 'report':
@@ -388,7 +392,7 @@ class _ChatScreenState extends State<ChatScreen> {
       debugPrint('[Chat] sendText ERROR: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Message could not be sent: $e')),
+          SnackBar(content: Text(context.l10n.chatSendFailed)),
         );
       }
     }
@@ -409,12 +413,12 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.photo_outlined),
-              title: const Text('Photo'),
+              title: Text(context.l10n.messagePhoto),
               onTap: () => Navigator.pop(context, 'photo'),
             ),
             ListTile(
               leading: const Icon(Icons.videocam_outlined),
-              title: const Text('Video'),
+              title: Text(context.l10n.messageVideo),
               onTap: () => Navigator.pop(context, 'video'),
             ),
           ],
@@ -452,7 +456,7 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Couldn’t attach file: $e')),
+        SnackBar(content: Text(context.l10n.chatAttachFailed)),
       );
     }
   }
@@ -468,7 +472,7 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Couldn’t send attachment: $e')),
+        SnackBar(content: Text(context.l10n.chatAttachmentSendFailed)),
       );
     }
   }
@@ -602,7 +606,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 child: GestureDetector(
                   onTap: openProfile,
                   child: Text(
-                    _titleName?.isNotEmpty == true ? _titleName! : 'Chat',
+                    _titleName?.isNotEmpty == true
+                        ? _titleName!
+                        : context.l10n.chatTitleFallback,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -621,16 +627,18 @@ class _ChatScreenState extends State<ChatScreen> {
               builder: (context, blocked, _) {
                 final isBlocked = blocked.contains(widget.otherUserId);
                 return PopupMenuButton<String>(
-                  tooltip: 'More',
+                  tooltip: context.l10n.profileMore,
                   onSelected: _onSafetyAction,
                   itemBuilder: (_) => [
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: 'report',
-                      child: Text('Report'),
+                      child: Text(context.l10n.chatReport),
                     ),
                     PopupMenuItem(
                       value: isBlocked ? 'unblock' : 'block',
-                      child: Text(isBlocked ? 'Unblock' : 'Block'),
+                      child: Text(isBlocked
+                          ? context.l10n.profileUnblock
+                          : context.l10n.blockAction),
                     ),
                   ],
                 );
@@ -649,7 +657,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 child: Padding(
                   padding: const EdgeInsets.all(20),
                   child: Text(
-                    'Chat could not initialize. Please reopen this chat.\n${s.error}',
+                    context.l10n.chatInitFailed,
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: AppColors.muted),
                   ),
@@ -684,6 +692,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 }
 
                 return Chat(
+                  l10n: _AppChatL10n(context.l10n),
+                  dateLocale: AppFormat.localeOf(context),
                   messages: msgs,
                   onSendPressed: (_) {},
                   user: types.User(id: _me),
@@ -701,7 +711,9 @@ class _ChatScreenState extends State<ChatScreen> {
                         : p.basename(_pendingAttachment!.path),
                     pendingAttachmentType: _pendingAttachment == null
                         ? null
-                        : (_pendingIsImage ? 'Photo' : 'Video'),
+                        : (_pendingIsImage
+                            ? context.l10n.messagePhoto
+                            : context.l10n.messageVideo),
                     pendingAttachmentPath: _pendingAttachment == null
                         ? null
                         : _pendingAttachment!.path,
@@ -852,9 +864,9 @@ class _Composer extends StatelessWidget {
                       maxLines: null,
                       keyboardType: TextInputType.multiline,
                       style: const TextStyle(color: Colors.black, fontSize: 16),
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         isCollapsed: true,
-                        hintText: 'Message',
+                        hintText: context.l10n.chatInputHint,
                         hintStyle: TextStyle(color: AppColors.muted),
                         border: InputBorder.none,
                       ),
@@ -1271,4 +1283,21 @@ class _ChromeIconButton extends StatelessWidget {
       ),
     );
   }
+}
+
+/// flutter_chat_ui's own texts, from the app's translations (the package
+/// has no French).
+class _AppChatL10n extends ChatL10n {
+  _AppChatL10n(AppLocalizations l)
+      : super(
+          and: l.chatAnd,
+          attachmentButtonAccessibilityLabel: l.chatAttachLabel,
+          emptyChatPlaceholder: l.chatEmpty,
+          fileButtonAccessibilityLabel: l.chatFileLabel,
+          inputPlaceholder: l.chatInputHint,
+          isTyping: l.chatTyping,
+          others: l.chatOthers,
+          sendButtonAccessibilityLabel: l.chatSendLabel,
+          unreadMessagesLabel: l.chatUnread,
+        );
 }

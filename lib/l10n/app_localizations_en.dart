@@ -1055,4 +1055,114 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get editProfileSaveChanges => 'Save Changes';
+
+  @override
+  String get commonUser => 'User';
+
+  @override
+  String get commonLoading => 'Loading...';
+
+  @override
+  String get messagesTitle => 'Messages';
+
+  @override
+  String get messagesEmpty => 'No conversations yet.';
+
+  @override
+  String get messagesLoginAgain => 'Please log in again.';
+
+  @override
+  String get messagesOpenToView => '(Open to view messages)';
+
+  @override
+  String get messagePhoto => 'Photo';
+
+  @override
+  String get messageVideo => 'Video';
+
+  @override
+  String get messageFile => 'File';
+
+  @override
+  String get messageMissedCall => 'Missed call';
+
+  @override
+  String get chatTitleFallback => 'Chat';
+
+  @override
+  String get chatThisPerson => 'this person';
+
+  @override
+  String get chatYouBlocked =>
+      'You blocked this person. Unblock them to send messages.';
+
+  @override
+  String get chatSendFailed => 'Message could not be sent. Please try again.';
+
+  @override
+  String get chatAttachFailed => 'Couldn’t attach the file. Please try again.';
+
+  @override
+  String get chatAttachmentSendFailed =>
+      'Couldn’t send the attachment. Please try again.';
+
+  @override
+  String get chatReport => 'Report';
+
+  @override
+  String get chatInitFailed => 'Chat could not open. Please reopen this chat.';
+
+  @override
+  String get chatInputHint => 'Message';
+
+  @override
+  String get chatEmpty => 'No messages here yet';
+
+  @override
+  String get chatAttachLabel => 'Send media';
+
+  @override
+  String get chatFileLabel => 'File';
+
+  @override
+  String get chatSendLabel => 'Send';
+
+  @override
+  String get chatTyping => 'is typing';
+
+  @override
+  String get chatOthers => 'others';
+
+  @override
+  String get chatAnd => 'and';
+
+  @override
+  String get chatUnread => 'Unread messages';
+
+  @override
+  String get searchTitle => 'Search';
+
+  @override
+  String get searchHint => 'Search users or posts…';
+
+  @override
+  String get searchSuggested => 'Suggested categories';
+
+  @override
+  String get searchPeople => 'People';
+
+  @override
+  String get searchPosts => 'Posts';
+
+  @override
+  String get searchAll => 'All';
+
+  @override
+  String get searchNoResults => 'No results. Try another keyword.';
+
+  @override
+  String get searchHelperBadge => 'Helper';
+
+  @override
+  String get searchViewFullPost => 'View full post';
 }

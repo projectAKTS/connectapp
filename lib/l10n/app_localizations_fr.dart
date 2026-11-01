@@ -1079,4 +1079,117 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get editProfileSaveChanges => 'Enregistrer';
+
+  @override
+  String get commonUser => 'Utilisateur';
+
+  @override
+  String get commonLoading => 'Chargement…';
+
+  @override
+  String get messagesTitle => 'Messages';
+
+  @override
+  String get messagesEmpty => 'Aucune conversation pour l\'instant.';
+
+  @override
+  String get messagesLoginAgain => 'Veuillez vous reconnecter.';
+
+  @override
+  String get messagesOpenToView => '(Ouvrir pour voir les messages)';
+
+  @override
+  String get messagePhoto => 'Photo';
+
+  @override
+  String get messageVideo => 'Vidéo';
+
+  @override
+  String get messageFile => 'Fichier';
+
+  @override
+  String get messageMissedCall => 'Appel manqué';
+
+  @override
+  String get chatTitleFallback => 'Clavardage';
+
+  @override
+  String get chatThisPerson => 'cette personne';
+
+  @override
+  String get chatYouBlocked =>
+      'Vous avez bloqué cette personne. Débloquez-la pour lui écrire.';
+
+  @override
+  String get chatSendFailed =>
+      'Le message n\'a pas pu être envoyé. Veuillez réessayer.';
+
+  @override
+  String get chatAttachFailed =>
+      'Impossible de joindre le fichier. Veuillez réessayer.';
+
+  @override
+  String get chatAttachmentSendFailed =>
+      'Impossible d\'envoyer la pièce jointe. Veuillez réessayer.';
+
+  @override
+  String get chatReport => 'Signaler';
+
+  @override
+  String get chatInitFailed =>
+      'Impossible d\'ouvrir la conversation. Veuillez la rouvrir.';
+
+  @override
+  String get chatInputHint => 'Message';
+
+  @override
+  String get chatEmpty => 'Aucun message pour l\'instant';
+
+  @override
+  String get chatAttachLabel => 'Envoyer un média';
+
+  @override
+  String get chatFileLabel => 'Fichier';
+
+  @override
+  String get chatSendLabel => 'Envoyer';
+
+  @override
+  String get chatTyping => 'écrit';
+
+  @override
+  String get chatOthers => 'autres';
+
+  @override
+  String get chatAnd => 'et';
+
+  @override
+  String get chatUnread => 'Messages non lus';
+
+  @override
+  String get searchTitle => 'Recherche';
+
+  @override
+  String get searchHint => 'Rechercher des personnes ou des publications…';
+
+  @override
+  String get searchSuggested => 'Catégories suggérées';
+
+  @override
+  String get searchPeople => 'Personnes';
+
+  @override
+  String get searchPosts => 'Publications';
+
+  @override
+  String get searchAll => 'Tout';
+
+  @override
+  String get searchNoResults => 'Aucun résultat. Essayez un autre mot-clé.';
+
+  @override
+  String get searchHelperBadge => 'Aidant';
+
+  @override
+  String get searchViewFullPost => 'Voir la publication';
 }

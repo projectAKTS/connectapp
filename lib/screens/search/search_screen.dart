@@ -1,4 +1,7 @@
 // lib/screens/search/search_screen.dart
+import 'package:connect_app/l10n/formatters.dart';
+import 'package:connect_app/l10n/value_labels.dart';
+import 'package:connect_app/l10n/l10n.dart';
 import 'dart:async';
 
 import 'package:connect_app/models/help_topics.dart';
@@ -211,7 +214,7 @@ class _SearchScreenState extends State<SearchScreen> {
     final role = '${m['role'] ?? ''}';
     return _UserHit(
       userId: id,
-      name: name.isEmpty ? 'User' : name,
+      name: name.isEmpty ? context.l10n.commonUser : name,
       handle: first(['userName']),
       bio: first(['bio']),
       // The app stores the photo as profilePicture; the others are older.
@@ -256,7 +259,7 @@ class _SearchScreenState extends State<SearchScreen> {
         backgroundColor: AppColors.canvas,
         elevation: 0,
         automaticallyImplyLeading: false, // 🔹 no back button in Search tab
-        title: const Text('Search'),
+        title: Text(context.l10n.searchTitle),
       ),
       body: Column(
         children: [
@@ -266,7 +269,7 @@ class _SearchScreenState extends State<SearchScreen> {
             child: _SearchPill(
               controller: _controller,
               focusNode: _focus,
-              hint: 'Search users or posts…',
+              hint: context.l10n.searchHint,
               showClear: _controller.text.isNotEmpty,
               onClear: () {
                 _controller.clear();
@@ -444,7 +447,7 @@ class _SuggestedCategoriesState extends State<SuggestedCategories> {
       children: [
         const SizedBox(height: 8),
         Text(
-          'Suggested categories',
+          context.l10n.searchSuggested,
           style: Theme.of(context)
               .textTheme
               .titleMedium
@@ -460,16 +463,19 @@ class _SuggestedCategoriesState extends State<SuggestedCategories> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: _suggestions
-                .map((s) => ActionChip(
-                      label: Text(s,
-                          style: const TextStyle(fontWeight: FontWeight.w600)),
-                      backgroundColor: AppColors.button,
-                      onPressed: () => widget.onTap(s),
-                      shape: const StadiumBorder(
-                          side: BorderSide(color: AppColors.border)),
-                    ))
-                .toList(),
+            children: _suggestions.map((s) {
+              // Topic suggestions are stored ids; show and search the
+              // label in the app language.
+              final label = ValueLabels.topic(context.l10n, s);
+              return ActionChip(
+                label: Text(label,
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
+                backgroundColor: AppColors.button,
+                onPressed: () => widget.onTap(label),
+                shape: const StadiumBorder(
+                    side: BorderSide(color: AppColors.border)),
+              );
+            }).toList(),
           ),
       ],
     );
@@ -503,7 +509,7 @@ class _ResultsList extends StatelessWidget {
 
     if (tab == _Tab.all || tab == _Tab.people) {
       if (people.isNotEmpty) {
-        children.add(_SectionHeader('People'));
+        children.add(_SectionHeader(context.l10n.searchPeople));
         for (final u in people) {
           children.add(_UserTile(hit: u));
         }
@@ -515,7 +521,8 @@ class _ResultsList extends StatelessWidget {
 
     if (tab == _Tab.all || tab == _Tab.posts) {
       if (posts.isNotEmpty) {
-        children.add(_SectionHeader(tab == _Tab.all ? 'Posts' : ''));
+        children.add(
+            _SectionHeader(tab == _Tab.all ? context.l10n.searchPosts : ''));
         for (final p in posts) {
           children.add(_PostTile(hit: p));
         }
@@ -544,7 +551,7 @@ class _EmptyState extends StatelessWidget {
       padding: const EdgeInsets.all(28.0),
       child: Center(
         child: Text(
-          'No results. Try another keyword.',
+          context.l10n.searchNoResults,
           style: Theme.of(context).textTheme.bodyMedium,
           textAlign: TextAlign.center,
         ),
@@ -578,9 +585,9 @@ class _UserTile extends StatelessWidget {
   final _UserHit hit;
   const _UserTile({required this.hit});
 
-  static Widget? _subtitle(_UserHit hit) {
+  static Widget? _subtitle(BuildContext context, _UserHit hit) {
     final parts = [
-      if (hit.isHelper) 'Helper',
+      if (hit.isHelper) context.l10n.searchHelperBadge,
       if (hit.handle.isNotEmpty) '@${hit.handle}',
     ];
     if (parts.isEmpty) return null;
@@ -601,7 +608,7 @@ class _UserTile extends StatelessWidget {
         title: Text(hit.name,
             style: const TextStyle(
                 fontWeight: FontWeight.w700, color: AppColors.text)),
-        subtitle: _subtitle(hit),
+        subtitle: _subtitle(context, hit),
         onTap: () {
           Navigator.of(context, rootNavigator: true).push(
             MaterialPageRoute(
@@ -620,18 +627,9 @@ class _PostTile extends StatelessWidget {
   final _PostHit hit;
   const _PostTile({required this.hit});
 
-  String _ago(dynamic ts) {
+  String _ago(BuildContext context, dynamic ts) {
     final dt = parseFirestoreTimestamp(ts);
-    if (dt == null) return '';
-    final now = DateTime.now();
-    final diff = now.difference(dt);
-    if (diff.inMinutes < 1) return 'now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m';
-    if (diff.inHours < 24) return '${diff.inHours}h';
-    if (diff.inDays < 7) return '${diff.inDays}d';
-    if (diff.inDays < 30) return '${(diff.inDays / 7).floor()}w';
-    if (diff.inDays < 365) return '${(diff.inDays / 30).floor()}mo';
-    return '${(diff.inDays / 365).floor()}y';
+    return dt == null ? '' : AppFormat.timeAgo(context, dt);
   }
 
   // ---- Pull "**Something Post**" from first non-empty line
@@ -716,7 +714,7 @@ class _PostTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (maybeBadge, body) = _extractBadgeAndBody(hit.content);
-    final badgeLabel = maybeBadge ?? 'Quick Post';
+    final badgeLabel = maybeBadge ?? context.l10n.postTypeQuick;
     final contentSpan = _mdSpan(body);
 
     void openDetail() {
@@ -782,7 +780,7 @@ class _PostTile extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    _ago(hit.ts),
+                    _ago(context, hit.ts),
                     style:
                         const TextStyle(fontSize: 13, color: AppColors.muted),
                   ),
@@ -812,9 +810,9 @@ class _PostTile extends StatelessWidget {
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
-                  children: const [
+                  children: [
                     Text(
-                      'View full post',
+                      context.l10n.searchViewFullPost,
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -941,9 +939,9 @@ class _Tabs extends StatelessWidget {
     return Wrap(
       spacing: 8,
       children: [
-        chip('All', _Tab.all),
-        chip('People', _Tab.people),
-        chip('Posts', _Tab.posts),
+        chip(context.l10n.searchAll, _Tab.all),
+        chip(context.l10n.searchPeople, _Tab.people),
+        chip(context.l10n.searchPosts, _Tab.posts),
       ],
     );
   }
