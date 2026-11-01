@@ -68,6 +68,8 @@
 	<string>We save images and videos you capture in the app.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>We use your photo library to let you choose images to share.</string>
+	<key>FIREBASE_ANALYTICS_COLLECTION_ENABLED</key>
+	<false/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>

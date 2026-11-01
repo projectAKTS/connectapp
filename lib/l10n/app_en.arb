@@ -1,0 +1,42 @@
+{
+  "@@locale": "en",
+
+  "languageName": "English",
+  "@languageName": {"description": "This language's own name, shown in the language picker."},
+
+  "commonCancel": "Cancel",
+  "commonOk": "OK",
+  "commonDelete": "Delete",
+  "commonSave": "Save",
+  "commonTryAgain": "Please try again.",
+
+  "settingsTitle": "Settings",
+  "settingsSectionHelp": "Help",
+  "settingsSectionLegal": "Legal",
+  "settingsSectionAccount": "Account",
+  "settingsSectionPreferences": "Preferences",
+  "settingsHelpSafety": "Help & safety",
+  "settingsGuidelines": "Community guidelines",
+  "settingsTerms": "Terms of Use",
+  "settingsPrivacy": "Privacy Policy",
+  "settingsLogOut": "Log out",
+  "settingsDeleteAccount": "Delete account",
+  "settingsDeleteTitle": "Delete your account?",
+  "settingsDeleteBody": "Your profile, posts and messages will be deleted and you will be signed out. This can't be undone.",
+  "settingsDeleteFailed": "Could not delete your account. Please try again.",
+  "settingsDeletedTitle": "Account deleted",
+  "settingsDeletedBody": "Your account and personal data have been deleted.",
+  "settingsDeletionRequestedTitle": "Account deletion requested",
+  "settingsDeletionRequestedBody": "Your account and personal data will be deleted within 30 days. You will now be signed out.",
+  "settingsLegalEnglishOnly": "This document is currently available in English only.",
+
+  "settingsLanguage": "App language",
+  "languageSystemDefault": "Device language",
+  "languageSystemDefaultSubtitle": "Currently {language}",
+  "@languageSystemDefaultSubtitle": {"placeholders": {"language": {"type": "String"}}},
+  "languagePickerTitle": "App language",
+  "languagePickerNote": "This only changes the app's text. The languages you speak are set in your profile.",
+
+  "settingsUsageStats": "Share usage statistics",
+  "settingsUsageStatsSubtitle": "Which screens and features are used, to help us improve Helperly. Never includes your messages or posts. Off unless you turn it on."
+}

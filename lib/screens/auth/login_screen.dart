@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:connect_app/widgets/language_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../services/firebase_auth_service.dart';
 import '../../theme/tokens.dart';
@@ -246,6 +247,7 @@ class _LoginScreenState extends State<LoginScreen> {
         backgroundColor: AppColors.canvas,
         elevation: 0,
         title: const Text(''),
+        actions: const [LanguageButton()],
       ),
       body: SafeArea(
         child: Center(

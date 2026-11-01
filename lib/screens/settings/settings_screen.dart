@@ -2,16 +2,20 @@ import 'package:connect_app/services/app_telemetry.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connect_app/config/legal_texts.dart';
+import 'package:connect_app/l10n/l10n.dart';
+import 'package:connect_app/services/locale_controller.dart';
 import 'package:connect_app/screens/settings/legal_screen.dart';
 import 'package:connect_app/services/helperly_test_runtime.dart';
 import 'package:connect_app/services/notification_service.dart';
 import 'package:connect_app/services/safety_service.dart';
 import 'package:connect_app/theme/tokens.dart';
+import 'package:connect_app/widgets/language_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-/// Account settings: help and safety, legal texts, delete account, log out.
-class SettingsScreen extends StatelessWidget {
+/// Account settings: help and safety, legal texts, app language, usage
+/// statistics, delete account, log out.
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
   static Future<void> signOut(BuildContext context,
@@ -26,30 +30,40 @@ class SettingsScreen extends StatelessWidget {
         .pushNamedAndRemoveUntil('/login', (route) => false);
   }
 
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  bool _usageStats = AppTelemetry.usageStatsEnabled;
+
   void _open(BuildContext context, String title, String markdown) {
+    // The legal texts are English until the French versions are reviewed
+    // and approved; say so instead of silently switching language.
+    final note = Localizations.localeOf(context).languageCode == 'en'
+        ? ''
+        : '_${context.l10n.settingsLegalEnglishOnly}_\n\n';
     Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => LegalScreen(title: title, markdown: markdown),
+      builder: (_) => LegalScreen(title: title, markdown: '$note$markdown'),
     ));
   }
 
   Future<void> _deleteAccount(BuildContext context) async {
+    final l10n = context.l10n;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete your account?'),
-        content: const Text(
-          'Your profile, posts and messages will be deleted and you will be '
-          "signed out. This can't be undone.",
-        ),
+        title: Text(l10n.settingsDeleteTitle),
+        content: Text(l10n.settingsDeleteBody),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(l10n.commonCancel),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child:
-                const Text('Delete', style: TextStyle(color: AppColors.danger)),
+            child: Text(l10n.commonDelete,
+                style: const TextStyle(color: AppColors.danger)),
           ),
         ],
       ),
@@ -78,8 +92,8 @@ class SettingsScreen extends StatelessWidget {
         }, SetOptions(merge: true));
       } catch (_) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Could not delete your account. Please try again.'),
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(l10n.settingsDeleteFailed),
           ));
         }
         return;
@@ -89,21 +103,23 @@ class SettingsScreen extends StatelessWidget {
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title:
-            Text(deletedNow ? 'Account deleted' : 'Account deletion requested'),
+        title: Text(deletedNow
+            ? l10n.settingsDeletedTitle
+            : l10n.settingsDeletionRequestedTitle),
         content: Text(deletedNow
-            ? 'Your account and personal data have been deleted.'
-            : 'Your account and personal data will be deleted within 30 '
-                'days. You will now be signed out.'),
+            ? l10n.settingsDeletedBody
+            : l10n.settingsDeletionRequestedBody),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('OK'),
+            child: Text(l10n.commonOk),
           ),
         ],
       ),
     );
-    if (context.mounted) await signOut(context, pushAlreadyReleased: true);
+    if (context.mounted) {
+      await SettingsScreen.signOut(context, pushAlreadyReleased: true);
+    }
   }
 
   @override
@@ -125,27 +141,53 @@ class SettingsScreen extends StatelessWidget {
                   color: AppColors.muted, fontWeight: FontWeight.w600)),
         );
 
+    final l10n = context.l10n;
+    final languageName =
+        lookupAppLocalizations(LocaleController.instance.effective)
+            .languageName;
     return Scaffold(
       backgroundColor: AppColors.canvas,
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: AppBar(title: Text(l10n.settingsTitle)),
       body: ListView(
         children: [
-          section('Help'),
-          row(Icons.health_and_safety_outlined, 'Help & safety',
-              () => _open(context, 'Help & safety', LegalTexts.safety)),
+          section(l10n.settingsSectionPreferences),
+          ListTile(
+            key: const Key('settings_language'),
+            leading: const Icon(Icons.language, color: AppColors.text),
+            title: Text(l10n.settingsLanguage),
+            subtitle: Text(languageName),
+            trailing: const Icon(Icons.chevron_right, color: AppColors.muted),
+            onTap: () => showLanguagePicker(context),
+          ),
+          SwitchListTile(
+            key: const Key('settings_usage_stats'),
+            secondary:
+                const Icon(Icons.insights_outlined, color: AppColors.text),
+            title: Text(l10n.settingsUsageStats),
+            subtitle: Text(l10n.settingsUsageStatsSubtitle),
+            value: _usageStats,
+            onChanged: (v) {
+              setState(() => _usageStats = v);
+              AppTelemetry.setUsageStatsEnabled(v);
+            },
+          ),
+          section(l10n.settingsSectionHelp),
+          row(Icons.health_and_safety_outlined, l10n.settingsHelpSafety,
+              () => _open(context, l10n.settingsHelpSafety, LegalTexts.safety)),
           row(
               Icons.groups_outlined,
-              'Community guidelines',
+              l10n.settingsGuidelines,
               () => _open(
-                  context, 'Community guidelines', LegalTexts.guidelines)),
-          section('Legal'),
-          row(Icons.description_outlined, 'Terms of Use',
-              () => _open(context, 'Terms of Use', LegalTexts.terms)),
-          row(Icons.privacy_tip_outlined, 'Privacy Policy',
-              () => _open(context, 'Privacy Policy', LegalTexts.privacy)),
-          section('Account'),
-          row(Icons.logout, 'Log out', () => signOut(context)),
-          row(Icons.delete_outline, 'Delete account',
+                  context, l10n.settingsGuidelines, LegalTexts.guidelines)),
+          section(l10n.settingsSectionLegal),
+          row(Icons.description_outlined, l10n.settingsTerms,
+              () => _open(context, l10n.settingsTerms, LegalTexts.terms)),
+          row(Icons.privacy_tip_outlined, l10n.settingsPrivacy,
+              () => _open(context, l10n.settingsPrivacy, LegalTexts.privacy)),
+          section(l10n.settingsSectionAccount),
+          row(Icons.logout, l10n.settingsLogOut,
+              () => SettingsScreen.signOut(context)),
+          row(Icons.delete_outline, l10n.settingsDeleteAccount,
               () => _deleteAccount(context),
               color: AppColors.danger),
           const SizedBox(height: 32),

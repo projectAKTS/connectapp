@@ -1,0 +1,7 @@
+# Flutter gen_l10n. English is the template and the fallback; every key must
+# exist in app_en.arb. Generated code lands next to the ARB files.
+arb-dir: lib/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+nullable-getter: false

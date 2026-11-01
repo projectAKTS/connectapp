@@ -2,6 +2,10 @@ import 'dart:async';
 import 'package:connect_app/services/app_telemetry.dart';
 import 'package:connect_app/config/mvp_features.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:connect_app/l10n/l10n.dart';
+import 'package:connect_app/services/app_prefs.dart';
+import 'package:connect_app/services/locale_controller.dart';
 
 // Firebase
 import 'package:firebase_core/firebase_core.dart';
@@ -100,9 +104,13 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Device settings load alongside Firebase, so startup takes no longer.
+  final prefsLoading = AppPrefs.load();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  await prefsLoading;
+  LocaleController.instance.loadSaved();
   await AppTelemetry.init();
   unawaited(
     FirestoreReadHelper.ensureNetworkEnabled(reason: 'app_start'),
@@ -256,11 +264,28 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<Locale?>(
+      valueListenable: LocaleController.instance.choice,
+      builder: (context, chosenLocale, _) => _buildApp(chosenLocale),
+    );
+  }
+
+  Widget _buildApp(Locale? chosenLocale) {
     return MaterialApp(
       navigatorKey: navigatorKey,
       navigatorObservers: [_RouteLogger(), AppTelemetry.observer],
       title: 'Connect App',
       debugShowCheckedModeBanner: false,
+      // Null follows the device; unsupported device languages get English.
+      locale: chosenLocale,
+      supportedLocales: AppLanguages.supported,
+      localeResolutionCallback: (device, _) => AppLanguages.resolve(device),
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       theme: buildAppTheme(),
       builder: (context, child) => CallV2PhysicalDiagnosticsOverlay(
         enabled: const CallV2RealCallFlowConfig().enabled,
@@ -404,6 +429,8 @@ class _AuthGateState extends State<AuthGate> {
           : (authName.isNotEmpty ? authName : 'User');
 
       final patch = <String, dynamic>{
+        // Lets the server write push notifications in the app's language.
+        'appLocale': LocaleController.instance.effective.languageCode,
         'displayName': resolvedName,
         'displayName_lc': resolvedName.toLowerCase(),
         'fullName': resolvedName,

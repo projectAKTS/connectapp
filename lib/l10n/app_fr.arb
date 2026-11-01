@@ -1,0 +1,40 @@
+{
+  "@@locale": "fr",
+
+  "languageName": "Français",
+
+  "commonCancel": "Annuler",
+  "commonOk": "OK",
+  "commonDelete": "Supprimer",
+  "commonSave": "Enregistrer",
+  "commonTryAgain": "Veuillez réessayer.",
+
+  "settingsTitle": "Paramètres",
+  "settingsSectionHelp": "Aide",
+  "settingsSectionLegal": "Mentions légales",
+  "settingsSectionAccount": "Compte",
+  "settingsSectionPreferences": "Préférences",
+  "settingsHelpSafety": "Aide et sécurité",
+  "settingsGuidelines": "Règles de la communauté",
+  "settingsTerms": "Conditions d'utilisation",
+  "settingsPrivacy": "Politique de confidentialité",
+  "settingsLogOut": "Se déconnecter",
+  "settingsDeleteAccount": "Supprimer le compte",
+  "settingsDeleteTitle": "Supprimer votre compte?",
+  "settingsDeleteBody": "Votre profil, vos publications et vos messages seront supprimés et vous serez déconnecté. Cette action est irréversible.",
+  "settingsDeleteFailed": "Impossible de supprimer votre compte. Veuillez réessayer.",
+  "settingsDeletedTitle": "Compte supprimé",
+  "settingsDeletedBody": "Votre compte et vos données personnelles ont été supprimés.",
+  "settingsDeletionRequestedTitle": "Suppression du compte demandée",
+  "settingsDeletionRequestedBody": "Votre compte et vos données personnelles seront supprimés d'ici 30 jours. Vous allez maintenant être déconnecté.",
+  "settingsLegalEnglishOnly": "Ce document est pour l'instant offert en anglais seulement.",
+
+  "settingsLanguage": "Langue de l'application",
+  "languageSystemDefault": "Langue de l'appareil",
+  "languageSystemDefaultSubtitle": "Actuellement : {language}",
+  "languagePickerTitle": "Langue de l'application",
+  "languagePickerNote": "Ce choix ne change que les textes de l'application. Les langues que vous parlez se règlent dans votre profil.",
+
+  "settingsUsageStats": "Partager les statistiques d'utilisation",
+  "settingsUsageStatsSubtitle": "Les écrans et fonctions utilisés, pour nous aider à améliorer Helperly. N'inclut jamais vos messages ni vos publications. Désactivé sauf si vous l'activez."
+}
