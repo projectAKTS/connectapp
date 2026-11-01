@@ -1,4 +1,5 @@
 // lib/screens/onboarding_screen.dart
+import 'package:connect_app/models/age_policy.dart';
 import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/l10n/value_labels.dart';
 import 'package:connect_app/models/profile_languages.dart';
@@ -42,6 +43,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   /// Languages the person speaks (ISO codes); not the app language.
   List<String> _spoken = [];
+
+  /// 18+ self-declaration (AgePolicy); required to finish onboarding.
+  bool _ageConfirmed = false;
 
   String _role = 'seeker'; // seeker | helper | both
 
@@ -152,6 +156,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       _country =
           (d['country']?.toString().isNotEmpty ?? false) ? d['country'] : null;
       _spoken = ProfileLanguages.read(d);
+      _ageConfirmed = AgePolicy.statusOf(d) == AgeStatus.adult;
       _countryCtrl.text =
           _country == null ? '' : ValueLabels.country(context.l10n, _country!);
       _role = d['role'] ?? 'seeker';
@@ -233,7 +238,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     if (user == null) return;
     final displayName = _displayNameCtrl.text.trim();
     final data = _buildOnboardingPayload(completed: true)
-      ..removeWhere((k, v) => v == null);
+      ..removeWhere((k, v) => v == null)
+      ..addAll(AgePolicy.declaration(adult: true));
 
     try {
       await FirebaseFirestore.instance
@@ -262,6 +268,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       if (_spoken.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(context.l10n.spokenLanguagesRequired)),
+        );
+        return;
+      }
+      if (!_ageConfirmed) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.ageRequired)),
         );
         return;
       }
@@ -620,6 +632,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   onChanged: (codes) => setState(() => _spoken = codes),
                 ),
               ),
+            ),
+            const SizedBox(height: 12),
+            CheckboxListTile(
+              key: const Key('onboarding_age_18'),
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              activeColor: AppColors.primary,
+              value: _ageConfirmed,
+              title: Text(context.l10n.ageCheckbox,
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text(context.l10n.ageRequired),
+              onChanged: (v) => setState(() => _ageConfirmed = v ?? false),
             ),
             const SizedBox(height: 16),
             _sectionLabel(context.l10n.onboardingHowUse),

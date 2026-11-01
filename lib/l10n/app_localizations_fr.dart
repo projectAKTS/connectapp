@@ -1862,4 +1862,49 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get bookPaymentPending =>
       'Nous n\'avons pas encore pu confirmer le paiement. Touchez Réserver de nouveau dans un instant; vous ne serez pas débité deux fois.';
+
+  @override
+  String get ageCheckbox => 'Je confirme avoir 18 ans ou plus.';
+
+  @override
+  String get ageRequired =>
+      'Helperly s\'adresse aux personnes de 18 ans et plus.';
+
+  @override
+  String get ageConfirmTitle => 'Helperly s\'adresse aux adultes';
+
+  @override
+  String get ageConfirmBody =>
+      'Helperly met en contact des personnes qui ne se connaissent pas, notamment par message et par appel. L\'application est donc réservée aux personnes de 18 ans et plus. Veuillez confirmer votre âge pour continuer.';
+
+  @override
+  String get ageImAdult => 'J\'ai 18 ans ou plus';
+
+  @override
+  String get ageImMinor => 'J\'ai moins de 18 ans';
+
+  @override
+  String get ageMinorConfirmTitle => 'Avez-vous moins de 18 ans?';
+
+  @override
+  String get ageMinorConfirmBody =>
+      'Votre compte sera suspendu. Vous pourrez ensuite le supprimer, ou nous écrire s\'il s\'agit d\'une erreur.';
+
+  @override
+  String get ageMinorConfirm => 'Oui, j\'ai moins de 18 ans';
+
+  @override
+  String get ageRestrictedTitle => 'Votre compte est suspendu';
+
+  @override
+  String ageRestrictedBody(String email) {
+    return 'Helperly est réservé aux personnes de 18 ans et plus; ce compte ne peut donc pas être utilisé. Vos données sont conservées jusqu\'à ce que vous supprimiez le compte ou que nous l\'examinions. S\'il s\'agit d\'une erreur, écrivez-nous à $email.';
+  }
+
+  @override
+  String get consentTitle => 'Aidez-nous à améliorer Helperly';
+
+  @override
+  String get consentBody =>
+      'Les deux sont facultatifs et désactivés sauf si vous les activez. Vous pouvez les modifier en tout temps dans les Paramètres.';
 }

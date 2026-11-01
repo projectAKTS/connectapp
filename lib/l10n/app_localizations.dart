@@ -3427,6 +3427,84 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'We couldn’t confirm the payment yet. Tap Book again in a moment; you won’t be charged twice.'**
   String get bookPaymentPending;
+
+  /// No description provided for @ageCheckbox.
+  ///
+  /// In en, this message translates to:
+  /// **'I confirm I am 18 or older.'**
+  String get ageCheckbox;
+
+  /// No description provided for @ageRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Helperly is for people 18 and older.'**
+  String get ageRequired;
+
+  /// No description provided for @ageConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Helperly is for adults'**
+  String get ageConfirmTitle;
+
+  /// No description provided for @ageConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Helperly connects people who don\'t know each other, including by message and call, so it is only for people 18 and older. Please confirm your age to continue.'**
+  String get ageConfirmBody;
+
+  /// No description provided for @ageImAdult.
+  ///
+  /// In en, this message translates to:
+  /// **'I\'m 18 or older'**
+  String get ageImAdult;
+
+  /// No description provided for @ageImMinor.
+  ///
+  /// In en, this message translates to:
+  /// **'I\'m under 18'**
+  String get ageImMinor;
+
+  /// No description provided for @ageMinorConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Are you under 18?'**
+  String get ageMinorConfirmTitle;
+
+  /// No description provided for @ageMinorConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Your account will be paused. You can then delete it, or contact us if this was a mistake.'**
+  String get ageMinorConfirmBody;
+
+  /// No description provided for @ageMinorConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Yes, I\'m under 18'**
+  String get ageMinorConfirm;
+
+  /// No description provided for @ageRestrictedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Your account is paused'**
+  String get ageRestrictedTitle;
+
+  /// No description provided for @ageRestrictedBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Helperly is only for people 18 and older, so this account can\'t be used. Your data is kept until you delete the account or we review it. If this is a mistake, contact us at {email}.'**
+  String ageRestrictedBody(String email);
+
+  /// No description provided for @consentTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Help us improve Helperly'**
+  String get consentTitle;
+
+  /// No description provided for @consentBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Both are optional and off unless you turn them on. You can change them anytime in Settings.'**
+  String get consentBody;
 }
 
 class _AppLocalizationsDelegate

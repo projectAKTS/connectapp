@@ -132,3 +132,13 @@ test("senders cannot pre-set the server's notification marker", async () => {
     }),
   );
 });
+
+test("a self-declared minor stays restricted until an operator reviews it", async () => {
+  const alice = as("alice");
+  await assertSucceeds(updateDoc(doc(alice, "users/alice"), { ageDeclaration: "minor" }));
+  await assertFails(updateDoc(doc(alice, "users/alice"), { ageDeclaration: "adult" }));
+  await assertFails(updateDoc(doc(alice, "users/alice"), { ageDeclaration: null }));
+  await assertSucceeds(updateDoc(doc(alice, "users/alice"), { bio: "still editable" }));
+  const bob = as("bob");
+  await assertSucceeds(updateDoc(doc(bob, "users/bob"), { ageDeclaration: "adult" }));
+});

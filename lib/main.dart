@@ -6,6 +6,9 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/l10n/formatters.dart';
 import 'package:connect_app/models/profile_languages.dart';
+import 'package:connect_app/models/age_policy.dart';
+import 'package:connect_app/screens/age/age_gate_screens.dart';
+import 'package:connect_app/widgets/telemetry_consent_prompt.dart';
 import 'package:connect_app/services/app_prefs.dart';
 import 'package:connect_app/services/locale_controller.dart';
 
@@ -571,9 +574,19 @@ class _AuthGateState extends State<AuthGate> {
 
             final needsOnboarding =
                 !(hasOnboardingFlag && hasName && hasLanguage && hasTopics);
-            return needsOnboarding
-                ? const FullScreenBackGesture(child: OnboardingScreen())
-                : const MainScaffold();
+            if (needsOnboarding) {
+              return const FullScreenBackGesture(child: OnboardingScreen());
+            }
+            // 18+ policy: accounts from before it confirm once; declared
+            // minors are restricted (not deleted).
+            switch (AgePolicy.statusOf(data)) {
+              case AgeStatus.minor:
+                return const AgeRestrictedScreen();
+              case AgeStatus.unknown:
+                return const AgeConfirmScreen();
+              case AgeStatus.adult:
+                return const TelemetryConsentPrompt(child: MainScaffold());
+            }
           },
         );
       },

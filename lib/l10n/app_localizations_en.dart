@@ -1820,4 +1820,48 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get bookPaymentPending =>
       'We couldn’t confirm the payment yet. Tap Book again in a moment; you won’t be charged twice.';
+
+  @override
+  String get ageCheckbox => 'I confirm I am 18 or older.';
+
+  @override
+  String get ageRequired => 'Helperly is for people 18 and older.';
+
+  @override
+  String get ageConfirmTitle => 'Helperly is for adults';
+
+  @override
+  String get ageConfirmBody =>
+      'Helperly connects people who don\'t know each other, including by message and call, so it is only for people 18 and older. Please confirm your age to continue.';
+
+  @override
+  String get ageImAdult => 'I\'m 18 or older';
+
+  @override
+  String get ageImMinor => 'I\'m under 18';
+
+  @override
+  String get ageMinorConfirmTitle => 'Are you under 18?';
+
+  @override
+  String get ageMinorConfirmBody =>
+      'Your account will be paused. You can then delete it, or contact us if this was a mistake.';
+
+  @override
+  String get ageMinorConfirm => 'Yes, I\'m under 18';
+
+  @override
+  String get ageRestrictedTitle => 'Your account is paused';
+
+  @override
+  String ageRestrictedBody(String email) {
+    return 'Helperly is only for people 18 and older, so this account can\'t be used. Your data is kept until you delete the account or we review it. If this is a mistake, contact us at $email.';
+  }
+
+  @override
+  String get consentTitle => 'Help us improve Helperly';
+
+  @override
+  String get consentBody =>
+      'Both are optional and off unless you turn them on. You can change them anytime in Settings.';
 }

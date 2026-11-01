@@ -863,5 +863,25 @@
   "badgeSkilledHelper": "Skilled Helper",
   "badgeBeginnerHelper": "Beginner Helper",
   "badgeCommunityMentor": "Community Mentor",
-  "bookPaymentPending": "We couldn’t confirm the payment yet. Tap Book again in a moment; you won’t be charged twice."
+  "bookPaymentPending": "We couldn’t confirm the payment yet. Tap Book again in a moment; you won’t be charged twice.",
+  "ageCheckbox": "I confirm I am 18 or older.",
+  "ageRequired": "Helperly is for people 18 and older.",
+  "ageConfirmTitle": "Helperly is for adults",
+  "ageConfirmBody": "Helperly connects people who don't know each other, including by message and call, so it is only for people 18 and older. Please confirm your age to continue.",
+  "ageImAdult": "I'm 18 or older",
+  "ageImMinor": "I'm under 18",
+  "ageMinorConfirmTitle": "Are you under 18?",
+  "ageMinorConfirmBody": "Your account will be paused. You can then delete it, or contact us if this was a mistake.",
+  "ageMinorConfirm": "Yes, I'm under 18",
+  "ageRestrictedTitle": "Your account is paused",
+  "ageRestrictedBody": "Helperly is only for people 18 and older, so this account can't be used. Your data is kept until you delete the account or we review it. If this is a mistake, contact us at {email}.",
+  "@ageRestrictedBody": {
+    "placeholders": {
+      "email": {
+        "type": "String"
+      }
+    }
+  },
+  "consentTitle": "Help us improve Helperly",
+  "consentBody": "Both are optional and off unless you turn them on. You can change them anytime in Settings."
 }

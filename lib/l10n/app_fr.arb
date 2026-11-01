@@ -554,5 +554,18 @@
   "badgeSkilledHelper": "Personne-ressource aguerrie",
   "badgeBeginnerHelper": "Personne-ressource débutante",
   "badgeCommunityMentor": "Mentor de la communauté",
-  "bookPaymentPending": "Nous n'avons pas encore pu confirmer le paiement. Touchez Réserver de nouveau dans un instant; vous ne serez pas débité deux fois."
+  "bookPaymentPending": "Nous n'avons pas encore pu confirmer le paiement. Touchez Réserver de nouveau dans un instant; vous ne serez pas débité deux fois.",
+  "ageCheckbox": "Je confirme avoir 18 ans ou plus.",
+  "ageRequired": "Helperly s'adresse aux personnes de 18 ans et plus.",
+  "ageConfirmTitle": "Helperly s'adresse aux adultes",
+  "ageConfirmBody": "Helperly met en contact des personnes qui ne se connaissent pas, notamment par message et par appel. L'application est donc réservée aux personnes de 18 ans et plus. Veuillez confirmer votre âge pour continuer.",
+  "ageImAdult": "J'ai 18 ans ou plus",
+  "ageImMinor": "J'ai moins de 18 ans",
+  "ageMinorConfirmTitle": "Avez-vous moins de 18 ans?",
+  "ageMinorConfirmBody": "Votre compte sera suspendu. Vous pourrez ensuite le supprimer, ou nous écrire s'il s'agit d'une erreur.",
+  "ageMinorConfirm": "Oui, j'ai moins de 18 ans",
+  "ageRestrictedTitle": "Votre compte est suspendu",
+  "ageRestrictedBody": "Helperly est réservé aux personnes de 18 ans et plus; ce compte ne peut donc pas être utilisé. Vos données sont conservées jusqu'à ce que vous supprimiez le compte ou que nous l'examinions. S'il s'agit d'une erreur, écrivez-nous à {email}.",
+  "consentTitle": "Aidez-nous à améliorer Helperly",
+  "consentBody": "Les deux sont facultatifs et désactivés sauf si vous les activez. Vous pouvez les modifier en tout temps dans les Paramètres."
 }

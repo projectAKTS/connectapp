@@ -131,8 +131,16 @@ service cloud.firestore {
       allow update: if request.auth != null
         && request.auth.uid == userId
         && !request.resource.data.diff(resource.data).affectedKeys()
-          .hasAny(protectedUserFields());
+          .hasAny(protectedUserFields())
+        && keepsMinorRestriction();
       allow delete: if false;
+
+      // 18+ policy: a self-declared minor stays restricted. Only an
+      // operator (console / Admin SDK) can lift it after review.
+      function keepsMinorRestriction() {
+        return resource.data.get('ageDeclaration', '') != 'minor'
+          || request.resource.data.get('ageDeclaration', '') == 'minor';
+      }
 
       match /pushInstallations/{installationId} {
         allow read: if request.auth != null && request.auth.uid == userId;
