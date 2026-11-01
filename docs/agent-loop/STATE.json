@@ -1,13 +1,13 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "mvp7_stabilization",
+  "phase": "mvp8_prebeta_gate",
   "status": "ready_for_review",
   "accepted_checkpoint_sha": "de0e1fb",
   "starting_sha": "de0e1fb",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "ec3d51c",
+  "code_commit_sha": "5aa3961",
   "ending_sha": "SELF",
   "changed_files": [
     "pubspec.yaml",
@@ -31,13 +31,11 @@
     "docs/agent-loop/STATE.json"
   ],
   "validation": {
-    "node": "60/60",
-    "rules_emulator": "268/268",
-    "flutter_targeted": "79/79",
-    "ci_full_clean_checkout": "2529 pass, 0 fail (run 41278268754)",
-    "ci_test_mode": "1 pass, 1 known fail (tracked)",
-    "guards_local_clean_worktree": "221/221",
-    "emulator_a": "18+ gate shown for existing account (not confirmed: no prod write)"
+    "flutter_local": "2515 pass, 14 dirty-tree guard failures only",
+    "ci_clean_checkout": "success on cc74672",
+    "node": "62/62",
+    "rules_emulator": "274/274",
+    "deletion_e2e_emulators": "pass"
   },
   "safety": {
     "deployed": false,
@@ -55,14 +53,12 @@
   "review": {
     "decision": "pending",
     "reviewer": "founder",
-    "notes": "Stabilization round; deploy not approved."
+    "notes": "Pre-beta gate; deploy not approved."
   },
   "implementation_shas": [
-    "2ceb2ee",
-    "9378e43",
-    "bf318dc",
-    "bdfae39",
-    "c4bf0c7",
-    "ec3d51c"
+    "6ed2c8d",
+    "cc74672",
+    "d1ef290",
+    "5aa3961"
   ]
 }

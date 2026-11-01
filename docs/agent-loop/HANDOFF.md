@@ -220,3 +220,31 @@ exclude them by tag in the default run. Move the 2 stability tests into
   not the founder's, so they cannot be read and might be real people. A
   founder-controlled test address is needed (for example a `+alias` of
   the founder's Gmail).
+
+---
+
+## Pre-Beta Gate Round (2026-11-01)
+
+| Item | SHA |
+|---|---|
+| Free beta: `PAID_SESSIONS_ENABLED` (default false) gates charges, Checkout and payout onboarding on the server; booking and billing are hidden in the app | `6ed2c8d` |
+| 18+ enforced in Firestore rules (legacy-safe, sticky minors, `createdAt` integrity); restricted accounts hidden from lists | `cc74672` |
+| Account deletion end-to-end in the emulators; call-test root cause | `d1ef290` |
+| Minimum retention, manual device tests, pre-beta deploy checks | `5aa3961` |
+
+### Validation
+
+- **Flutter local:** 2515 passed, 14 failed (only the dirty-tree
+  guards). `flutter analyze lib` clean.
+- **CI on `cc74672`:** success on a clean checkout.
+- **Node:** 62/62.
+- **Rules emulator:** 274/274 (age 6).
+- **Deletion E2E (Auth + Firestore + Storage emulators):** pass.
+
+### Findings
+
+- **Deletion gaps:** A's comments on other people's posts, and reviews
+  about A, remain (see `docs/ACCOUNT_DELETION_E2E.md`).
+- **Web deletion page:** uses the placeholder `support@helperly.app`.
+- **Known call test:** an outdated test-mode helper, no production impact
+  (see `docs/TESTING.md`).
