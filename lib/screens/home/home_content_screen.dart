@@ -1,4 +1,5 @@
 // lib/screens/home/home_content_screen.dart
+import 'package:connect_app/config/mvp_features.dart';
 import 'package:connect_app/l10n/formatters.dart';
 import 'package:connect_app/l10n/value_labels.dart';
 import 'package:connect_app/l10n/l10n.dart';
@@ -219,17 +220,19 @@ class HomeContentScreenState extends State<HomeContentScreen>
               }),
 
               // ✅ NOW ALSO tab pushNamed (future-proof, consistent, keeps scroll)
-              item(Icons.event_available_outlined, context.l10n.actionBookCall,
-                  () {
-                tabNav.pushNamed(
-                  '/consultation',
-                  arguments: {
-                    'targetUserId': otherUserId,
-                    'targetUserName': otherUserName,
-                    'ratePerMinute': 0,
-                  },
-                );
-              }),
+              if (MvpFeatures.paidSessions)
+                item(
+                    Icons.event_available_outlined, context.l10n.actionBookCall,
+                    () {
+                  tabNav.pushNamed(
+                    '/consultation',
+                    arguments: {
+                      'targetUserId': otherUserId,
+                      'targetUserName': otherUserName,
+                      'ratePerMinute': 0,
+                    },
+                  );
+                }),
 
               item(Icons.chat_bubble_outline, context.l10n.actionMessage, () {
                 tabNav.pushNamed(

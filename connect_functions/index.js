@@ -37,6 +37,11 @@ const APNS_TEAM_ID = defineSecret("APNS_TEAM_ID");
 const APNS_BUNDLE_ID = defineSecret("APNS_BUNDLE_ID");
 const APNS_VOIP_KEY_P8 = defineSecret("APNS_VOIP_KEY_P8");
 const CALL_V2_ENABLED = defineBoolean("CALL_V2_ENABLED", { default: false });
+// Free beta: card charges, Checkout and helper payout onboarding stay off
+// unless this is set to true in .env and redeployed (separate approval).
+const PAID_SESSIONS_ENABLED = defineBoolean("PAID_SESSIONS_ENABLED", {
+  default: false,
+});
 const CALL_V2_INTERNAL_TASKS_ENABLED = defineBoolean(
   "CALL_V2_INTERNAL_TASKS_ENABLED",
   { default: false }
@@ -915,6 +920,7 @@ exports.chargeStoredPaymentMethod = onCall(
   { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated");
+    assertPaidSessionsEnabled(PAID_SESSIONS_ENABLED.value(), HttpsError);
     const stripe = getStripeClient();
     const uid = request.auth.uid;
     const data = request.data || {};
@@ -1004,6 +1010,7 @@ exports.createExpressAccountLink = onCall(
   { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated");
+    assertPaidSessionsEnabled(PAID_SESSIONS_ENABLED.value(), HttpsError);
     const stripe = getStripeClient();
     const uid = request.auth.uid;
     const ref = db.collection("users").doc(uid);
@@ -1038,6 +1045,7 @@ exports.createStripeCheckoutSession = onCall(
   { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated");
+    assertPaidSessionsEnabled(PAID_SESSIONS_ENABLED.value(), HttpsError);
     const stripe = getStripeClient();
     const uid = request.auth.uid;
     const {
@@ -1137,6 +1145,7 @@ const {
 const { deleteUserData } = require("./account/delete_account");
 const { minutesUntil, pushText } = require("./i18n/push_text");
 const { claimOnce } = require("./notifications/claim_once");
+const { assertPaidSessionsEnabled } = require("./payments/paid_sessions");
 const {
   ChargeError,
   chargeOnce,

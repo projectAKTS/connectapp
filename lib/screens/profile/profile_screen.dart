@@ -307,17 +307,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 10),
 
               // ✅ Global route -> ROOT
-              item(Icons.event_available_outlined, context.l10n.actionBookCall,
-                  () {
-                rootNav.pushNamed(
-                  '/consultation',
-                  arguments: {
-                    'targetUserId': widget.userID,
-                    'targetUserName': otherName,
-                    'ratePerMinute': ratePerMinute,
-                  },
-                );
-              }),
+              if (MvpFeatures.paidSessions)
+                item(
+                    Icons.event_available_outlined, context.l10n.actionBookCall,
+                    () {
+                  rootNav.pushNamed(
+                    '/consultation',
+                    arguments: {
+                      'targetUserId': widget.userID,
+                      'targetUserName': otherName,
+                      'ratePerMinute': ratePerMinute,
+                    },
+                  );
+                }),
 
               // ✅ Global route -> ROOT
               item(Icons.chat_bubble_outline, context.l10n.actionMessage, () {
@@ -1100,18 +1102,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               );
                             },
                           ),
-                          const Divider(height: 1, color: AppColors.border),
-                          _accountRow(
-                            icon: Icons.credit_card_rounded,
-                            title: context.l10n.profileBilling,
-                            subtitle: hasCard
-                                ? context.l10n.profileCardOnFile
-                                : context.l10n.profileAddCard,
-                            onTap: () {
-                              Navigator.of(context, rootNavigator: true)
-                                  .pushNamed('/paymentSetup');
-                            },
-                          ),
+                          if (MvpFeatures.paidSessions) ...[
+                            const Divider(height: 1, color: AppColors.border),
+                            _accountRow(
+                              icon: Icons.credit_card_rounded,
+                              title: context.l10n.profileBilling,
+                              subtitle: hasCard
+                                  ? context.l10n.profileCardOnFile
+                                  : context.l10n.profileAddCard,
+                              onTap: () {
+                                Navigator.of(context, rootNavigator: true)
+                                    .pushNamed('/paymentSetup');
+                              },
+                            ),
+                          ],
                           if (MvpFeatures.premium) ...[
                             const Divider(height: 1, color: AppColors.border),
                             _accountRow(
