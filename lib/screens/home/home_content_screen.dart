@@ -1,4 +1,7 @@
 // lib/screens/home/home_content_screen.dart
+import 'package:connect_app/l10n/formatters.dart';
+import 'package:connect_app/l10n/value_labels.dart';
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/services/safety_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
@@ -21,23 +24,6 @@ import 'package:connect_app/screens/posts/post_image_viewer.dart';
 import 'package:connect_app/widgets/main_scaffold.dart';
 
 // ===== Utility functions =====
-String _timeAgoShort(DateTime dt) {
-  final now = DateTime.now();
-  final diff = now.difference(dt);
-  if (diff.inSeconds < 60) return '${diff.inSeconds}s';
-  if (diff.inMinutes < 60) return '${diff.inMinutes}m';
-  if (diff.inHours < 24) return '${diff.inHours}h';
-  if (diff.inDays < 7) return '${diff.inDays}d';
-  if (diff.inDays < 30) return '${(diff.inDays / 7).floor()}w';
-  if (diff.inDays < 365) return '${(diff.inDays / 30).floor()}mo';
-  return '${(diff.inDays / 365).floor()}y';
-}
-
-String _shortFromTs(dynamic ts) {
-  final dt = parseFirestoreTimestamp(ts);
-  if (dt == null) return 'now';
-  return _timeAgoShort(dt);
-}
 
 int _asUnreadCount(dynamic raw) {
   if (raw is int) return raw;
@@ -221,7 +207,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
               const SizedBox(height: 10),
 
               // ✅ Keep as tab push (perfectly preserves position)
-              item(Icons.person_outline, 'View profile', () {
+              item(Icons.person_outline, context.l10n.actionViewProfile, () {
                 tabNav.push(
                   CupertinoPageRoute(
                     builder: (_) => ProfileScreen(userID: otherUserId),
@@ -233,7 +219,8 @@ class HomeContentScreenState extends State<HomeContentScreen>
               }),
 
               // ✅ NOW ALSO tab pushNamed (future-proof, consistent, keeps scroll)
-              item(Icons.event_available_outlined, 'Book a call', () {
+              item(Icons.event_available_outlined, context.l10n.actionBookCall,
+                  () {
                 tabNav.pushNamed(
                   '/consultation',
                   arguments: {
@@ -244,7 +231,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
                 );
               }),
 
-              item(Icons.chat_bubble_outline, 'Message', () {
+              item(Icons.chat_bubble_outline, context.l10n.actionMessage, () {
                 tabNav.pushNamed(
                   '/chat',
                   arguments: {
@@ -254,7 +241,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
                 );
               }),
 
-              item(Icons.call, 'Audio call', () {
+              item(Icons.call, context.l10n.actionAudioCall, () {
                 _startCall(
                   toUid: otherUserId,
                   toName: otherUserName,
@@ -262,7 +249,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
                 );
               }),
 
-              item(Icons.videocam, 'Video call', () {
+              item(Icons.videocam, context.l10n.actionVideoCall, () {
                 _startCall(
                   toUid: otherUserId,
                   toName: otherUserName,
@@ -316,7 +303,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
     final fallbackName = (HelperlyTestRuntime.currentDisplayName ?? '').trim();
     String firstFrom(String name) {
       final n = name.trim();
-      if (n.isEmpty) return 'there';
+      if (n.isEmpty) return context.l10n.homeWelcomeThere;
       return n.split(' ').first;
     }
 
@@ -363,7 +350,8 @@ class HomeContentScreenState extends State<HomeContentScreen>
                         },
                       ),
               ),
-              const SliverToBoxAdapter(child: _SectionTitle('Recent posts')),
+              SliverToBoxAdapter(
+                  child: _SectionTitle(context.l10n.homeRecentPosts)),
               SliverToBoxAdapter(
                 child: StreamBuilder<QuerySnapshot>(
                   key: ValueKey('home_posts_$_postsReloadTick'),
@@ -383,7 +371,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Could not load posts right now.',
+                              context.l10n.homeLoadFailed,
                               style: Theme.of(context)
                                   .textTheme
                                   .titleSmall
@@ -399,7 +387,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
                               onPressed: () {
                                 setState(() => _postsReloadTick++);
                               },
-                              child: const Text('Retry'),
+                              child: Text(context.l10n.commonRetry),
                             ),
                           ],
                         ),
@@ -407,10 +395,10 @@ class HomeContentScreenState extends State<HomeContentScreen>
                     }
                     final docs = snap.data?.docs ?? const [];
                     if (docs.isEmpty) {
-                      return const Padding(
+                      return Padding(
                         padding: EdgeInsets.all(16),
                         child: Text(
-                          'No posts yet! Create one to get started.',
+                          context.l10n.homeNoPosts,
                           style: TextStyle(color: AppColors.muted),
                         ),
                       );
@@ -481,8 +469,11 @@ class HomeContentScreenState extends State<HomeContentScreen>
                             final avatar = (raw['userAvatar'] ?? '') as String;
                             final body = (raw['content'] ?? '').toString();
 
-                            final right = _shortFromTs(raw['timestamp']);
-                            final subtitle = '$right ago';
+                            final postedAt =
+                                parseFirestoreTimestamp(raw['timestamp']);
+                            final subtitle = postedAt == null
+                                ? context.l10n.timeNow
+                                : AppFormat.timeAgo(context, postedAt);
 
                             final imageUrls = _extractImageUrls(raw);
 
@@ -579,7 +570,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
                             padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
                             child: OutlinedButton(
                               onPressed: _loadMorePosts,
-                              child: const Text('Load more'),
+                              child: Text(context.l10n.commonLoadMore),
                             ),
                           ),
                       ],
@@ -662,7 +653,7 @@ class _HomeTopBarState extends State<_HomeTopBar> {
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
       child: Row(
         children: [
-          Text('Home', style: titleStyle),
+          Text(context.l10n.homeTitle, style: titleStyle),
           const Spacer(),
           StreamBuilder<DocumentSnapshot>(
             stream: _userStream,
@@ -733,7 +724,7 @@ class _HomeTopBarState extends State<_HomeTopBar> {
                                 Icons.chat_bubble_outline_rounded,
                                 color: AppColors.primary,
                               ),
-                              tooltip: 'Messages',
+                              tooltip: context.l10n.homeMessages,
                               onPressed: () {
                                 Navigator.of(context).push(
                                   CupertinoPageRoute(
@@ -850,12 +841,12 @@ class _WelcomeCardState extends State<_WelcomeCard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Welcome, $name',
+            Text(context.l10n.homeWelcome(name),
                 style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 14),
             _TaupePill(
               icon: Icons.manage_search_rounded,
-              label: 'Find a helper',
+              label: context.l10n.findHelperTitle,
               onTap: onFindHelper,
             ),
             const SizedBox(height: 12),
@@ -935,7 +926,7 @@ class _WelcomeCardState extends State<_WelcomeCard> {
                                 children: [
                                   _TaupePill(
                                     icon: Icons.people_alt_outlined,
-                                    label: 'My connections',
+                                    label: context.l10n.homeMyConnections,
                                     onTap: () {
                                       Navigator.of(context).push(
                                         CupertinoPageRoute(
@@ -1054,7 +1045,7 @@ class _UploadBanner extends StatelessWidget {
         border: Border.all(color: AppColors.border),
       ),
       child: Row(
-        children: const [
+        children: [
           SizedBox(
             width: 16,
             height: 16,
@@ -1063,7 +1054,7 @@ class _UploadBanner extends StatelessWidget {
           ),
           SizedBox(width: 8),
           Text(
-            'Posting in background…',
+            context.l10n.homePostingInBackground,
             style:
                 TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700),
           ),
@@ -1150,15 +1141,15 @@ class _PostCellState extends State<_PostCell> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete post?'),
-        content: const Text('This cannot be undone.'),
+        title: Text(context.l10n.postDeleteTitle),
+        content: Text(context.l10n.postDeleteBody),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
+              child: Text(context.l10n.commonCancel)),
           TextButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Delete')),
+              child: Text(context.l10n.commonDelete)),
         ],
       ),
     );
@@ -1257,27 +1248,29 @@ class _PostCellState extends State<_PostCell> {
                 ? IconButton(
                     onPressed: _confirmDelete,
                     icon: const Icon(Icons.more_horiz, color: AppColors.muted),
-                    tooltip: 'Post options',
+                    tooltip: context.l10n.postOptions,
                   )
                 : PopupMenuButton<String>(
-                    tooltip: 'Post options',
+                    tooltip: context.l10n.postOptions,
                     icon: const Icon(Icons.more_horiz, color: AppColors.muted),
                     onSelected: _onOtherPostAction,
                     itemBuilder: (_) => [
-                      const PopupMenuItem(
+                      PopupMenuItem(
                         value: 'report',
-                        child: Text('Report post'),
+                        child: Text(context.l10n.postReport),
                       ),
                       if (widget.authorId.isNotEmpty)
                         PopupMenuItem(
                           value: 'block',
-                          child: Text('Block ${widget.authorName}'),
+                          child: Text(
+                              context.l10n.postBlockAuthor(widget.authorName)),
                         ),
                     ],
                   ),
           ),
           const SizedBox(height: 8),
-          _PostTypeBadge(label: _typeToBadge(widget.postType)),
+          _PostTypeBadge(
+              label: ValueLabels.postType(context.l10n, widget.postType)),
           if (widget.body.isNotEmpty) const SizedBox(height: 8),
           if (widget.body.isNotEmpty)
             _ExpandableStructuredText(
@@ -1311,7 +1304,7 @@ class _PostCellState extends State<_PostCell> {
                       color: isHelpful ? AppColors.primary : AppColors.muted,
                     ),
                     label: Text(
-                      'Helpful',
+                      context.l10n.postHelpful,
                       style: TextStyle(
                         color: isHelpful ? AppColors.primary : AppColors.muted,
                         fontWeight: FontWeight.w600,
@@ -1348,19 +1341,12 @@ class _PostCellState extends State<_PostCell> {
                   fontSize: 14,
                 ),
               ),
-              child: const Text('Connect'),
+              child: Text(context.l10n.actionConnect),
             ),
           ],
         ],
       ),
     );
-  }
-
-  String _typeToBadge(String raw) {
-    final t = raw.trim();
-    if (t.isEmpty) return 'Quick Post';
-    if (t.toLowerCase() == 'quick') return 'Quick Post';
-    return t.endsWith('Post') ? t : '$t Post';
   }
 }
 
@@ -1609,7 +1595,9 @@ class _ShowMoreButton extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            expanded ? 'Show less' : 'Show more',
+            expanded
+                ? context.l10n.commonShowLess
+                : context.l10n.commonShowMore,
             style: const TextStyle(
               fontWeight: FontWeight.w500,
               fontSize: 13,

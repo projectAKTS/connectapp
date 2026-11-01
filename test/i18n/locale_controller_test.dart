@@ -110,7 +110,8 @@ void main() {
     test('placeholders match between languages', () {
       final en = arb('app_en.arb');
       final fr = arb('app_fr.arb');
-      final ph = RegExp(r'\{(\w+)');
+      // {name} or {name, plural, ...}; not words inside plural branches.
+      final ph = RegExp(r'\{(\w+)\s*[},]');
       for (final key in keys(en)) {
         final a = ph.allMatches('${en[key]}').map((m) => m[1]).toSet();
         final b = ph.allMatches('${fr[key]}').map((m) => m[1]).toSet();

@@ -65,4 +65,18 @@ class AppFormat {
             locale: known, name: currency, decimalDigits: decimals);
     return format.format(amount);
   }
+
+  /// "3h ago" / "il y a 3 h"; "now" under a minute or for future times.
+  static String timeAgo(BuildContext context, DateTime dt, {DateTime? now}) {
+    final l = context.l10n;
+    final diff = (now ?? DateTime.now()).difference(dt);
+    if (diff.inSeconds < 1) return l.timeNow;
+    if (diff.inSeconds < 60) return l.timeAgoSeconds(diff.inSeconds);
+    if (diff.inMinutes < 60) return l.timeAgoMinutes(diff.inMinutes);
+    if (diff.inHours < 24) return l.timeAgoHours(diff.inHours);
+    if (diff.inDays < 7) return l.timeAgoDays(diff.inDays);
+    if (diff.inDays < 30) return l.timeAgoWeeks((diff.inDays / 7).floor());
+    if (diff.inDays < 365) return l.timeAgoMonths((diff.inDays / 30).floor());
+    return l.timeAgoYears((diff.inDays / 365).floor());
+  }
 }

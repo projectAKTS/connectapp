@@ -564,4 +564,261 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get resetFailed =>
       'Impossible d\'envoyer le courriel de réinitialisation. Veuillez réessayer.';
+
+  @override
+  String get commonBack => 'Retour';
+
+  @override
+  String get commonContinue => 'Continuer';
+
+  @override
+  String get commonFinish => 'Terminer';
+
+  @override
+  String get commonRequired => 'Obligatoire';
+
+  @override
+  String get commonNotSet => 'Non défini';
+
+  @override
+  String get commonRetry => 'Réessayer';
+
+  @override
+  String get commonLoadMore => 'Voir plus';
+
+  @override
+  String get commonShowMore => 'Voir plus';
+
+  @override
+  String get commonShowLess => 'Voir moins';
+
+  @override
+  String get commonTakePhoto => 'Prendre une photo';
+
+  @override
+  String get commonChooseFromLibrary => 'Choisir dans la galerie';
+
+  @override
+  String get commonSaveFailed =>
+      'Enregistrement impossible pour le moment. Veuillez réessayer.';
+
+  @override
+  String get commonSavedLocally =>
+      'Enregistré sur cet appareil. La synchronisation se fera plus tard.';
+
+  @override
+  String get commonPhotoUploadFailed =>
+      'Impossible de téléverser la photo. Veuillez réessayer.';
+
+  @override
+  String get onboardingTitle => 'Bienvenue';
+
+  @override
+  String get onboardingProfileTitle => 'Votre profil';
+
+  @override
+  String get onboardingProfileSubtitle =>
+      'Ajoutez l\'essentiel pour personnaliser votre expérience.';
+
+  @override
+  String get onboardingDisplayName => 'Nom affiché';
+
+  @override
+  String get onboardingYourName => 'Votre nom';
+
+  @override
+  String get onboardingCity => 'Ville';
+
+  @override
+  String get onboardingCityHint => 'p. ex. Montréal';
+
+  @override
+  String get onboardingTimeZone => 'Fuseau horaire';
+
+  @override
+  String get onboardingTimeZoneHint => 'p. ex. GMT-5';
+
+  @override
+  String get onboardingCountry => 'Pays de résidence';
+
+  @override
+  String get onboardingSelectCountry => 'Choisir un pays';
+
+  @override
+  String get onboardingHowUse => 'Comment utiliserez-vous Helperly?';
+
+  @override
+  String get roleSeeker => 'Je cherche de l\'aide';
+
+  @override
+  String get roleHelper => 'Je veux aider';
+
+  @override
+  String get roleBoth => 'Les deux';
+
+  @override
+  String get onboardingHelperTitle => 'Profil d\'aidant';
+
+  @override
+  String get onboardingHelperSubtitle =>
+      'Choisissez votre mode d\'aide préféré et vos disponibilités.';
+
+  @override
+  String get onboardingExpertise => 'Domaines d\'expérience';
+
+  @override
+  String get onboardingPreferredMode => 'Mode préféré';
+
+  @override
+  String get modeChat => 'CLAVARDAGE';
+
+  @override
+  String get modeCall => 'APPEL';
+
+  @override
+  String get modeVideo => 'VIDÉO';
+
+  @override
+  String get onboardingAvailability => 'Disponibilités';
+
+  @override
+  String get onboardingTopicsTitle => 'Sujets';
+
+  @override
+  String get onboardingTopicsSubtitle =>
+      'Choisissez les sujets pour lesquels vous cherchez ou offrez de l\'aide.';
+
+  @override
+  String get onboardingPickTopics => 'Choisissez quelques sujets';
+
+  @override
+  String get onboardingPickOneTopic => 'Choisissez au moins un sujet.';
+
+  @override
+  String get timeNow => 'à l\'instant';
+
+  @override
+  String timeAgoSeconds(int n) {
+    return 'il y a $n s';
+  }
+
+  @override
+  String timeAgoMinutes(int n) {
+    return 'il y a $n min';
+  }
+
+  @override
+  String timeAgoHours(int n) {
+    return 'il y a $n h';
+  }
+
+  @override
+  String timeAgoDays(int n) {
+    return 'il y a $n j';
+  }
+
+  @override
+  String timeAgoWeeks(int n) {
+    return 'il y a $n sem.';
+  }
+
+  @override
+  String timeAgoMonths(int n) {
+    return 'il y a $n mois';
+  }
+
+  @override
+  String timeAgoYears(int n) {
+    String _temp0 = intl.Intl.pluralLogic(
+      n,
+      locale: localeName,
+      other: 'il y a $n ans',
+      one: 'il y a 1 an',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get postTypeQuick => 'Publication rapide';
+
+  @override
+  String get postTypeExperience => 'Expérience';
+
+  @override
+  String get postTypeAdvice => 'Demande de conseil';
+
+  @override
+  String get postTypeHowTo => 'Guide pratique';
+
+  @override
+  String get postTypeLessons => 'Leçons apprises';
+
+  @override
+  String get homeTitle => 'Accueil';
+
+  @override
+  String get homeMessages => 'Messages';
+
+  @override
+  String homeWelcome(String name) {
+    return 'Bienvenue, $name';
+  }
+
+  @override
+  String get homeWelcomeThere => 'à vous';
+
+  @override
+  String get homeMyConnections => 'Mes contacts';
+
+  @override
+  String get homeRecentPosts => 'Publications récentes';
+
+  @override
+  String get homeLoadFailed =>
+      'Impossible de charger les publications pour le moment.';
+
+  @override
+  String get homeNoPosts =>
+      'Aucune publication pour l\'instant! Créez-en une pour commencer.';
+
+  @override
+  String get homePostingInBackground => 'Publication en arrière-plan…';
+
+  @override
+  String get postDeleteTitle => 'Supprimer la publication?';
+
+  @override
+  String get postDeleteBody => 'Cette action est irréversible.';
+
+  @override
+  String get postOptions => 'Options de la publication';
+
+  @override
+  String get postReport => 'Signaler la publication';
+
+  @override
+  String postBlockAuthor(String name) {
+    return 'Bloquer $name';
+  }
+
+  @override
+  String get postHelpful => 'Utile';
+
+  @override
+  String get actionConnect => 'Contacter';
+
+  @override
+  String get actionViewProfile => 'Voir le profil';
+
+  @override
+  String get actionBookCall => 'Réserver un appel';
+
+  @override
+  String get actionMessage => 'Message';
+
+  @override
+  String get actionAudioCall => 'Appel audio';
+
+  @override
+  String get actionVideoCall => 'Appel vidéo';
 }

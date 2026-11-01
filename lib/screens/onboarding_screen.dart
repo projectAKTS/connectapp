@@ -223,7 +223,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Couldn’t save right now: $e')),
+        SnackBar(content: Text(context.l10n.commonSaveFailed)),
       );
     }
   }
@@ -246,7 +246,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Saved locally. Sync later. ($e)')),
+          SnackBar(content: Text(context.l10n.commonSavedLocally)),
         );
       }
     }
@@ -268,7 +268,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
     if (_index == 1 && _selectedTopics.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pick at least one topic.')),
+        SnackBar(content: Text(context.l10n.onboardingPickOneTopic)),
       );
       return;
     }
@@ -330,12 +330,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             children: [
               ListTile(
                 leading: const Icon(Icons.photo_camera_outlined),
-                title: const Text('Take photo'),
+                title: Text(context.l10n.commonTakePhoto),
                 onTap: () => Navigator.pop(context, ImageSource.camera),
               ),
               ListTile(
                 leading: const Icon(Icons.photo_library_outlined),
-                title: const Text('Choose from library'),
+                title: Text(context.l10n.commonChooseFromLibrary),
                 onTap: () => Navigator.pop(context, ImageSource.gallery),
               ),
               const SizedBox(height: 6),
@@ -362,7 +362,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Couldn’t upload photo: $e')),
+        SnackBar(content: Text(context.l10n.commonPhotoUploadFailed)),
       );
     }
   }
@@ -382,7 +382,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         appBar: AppBar(
           backgroundColor: AppColors.canvas,
           elevation: 0,
-          title: const Text('Onboarding'),
+          title: Text(context.l10n.onboardingTitle),
         ),
         body: _loading
             ? _ExcludedSemanticsSkeleton()
@@ -449,7 +449,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                         color: AppColors.border),
                                   ),
                                 ),
-                                child: const Text('Back'),
+                                child: Text(context.l10n.commonBack),
                               ),
                             ),
                           if (_index > 0) const SizedBox(width: 10),
@@ -459,8 +459,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                               onPressed: _next,
                               style: _ctaStyle(),
                               child: Text(_index < _lastStepIndex
-                                  ? 'Continue'
-                                  : 'Finish'),
+                                  ? context.l10n.commonContinue
+                                  : context.l10n.commonFinish),
                             ),
                           ),
                         ],
@@ -484,8 +484,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _stepHeader(
-              title: 'Profile basics',
-              subtitle: 'Add basics so we can personalize your experience.',
+              title: context.l10n.onboardingProfileTitle,
+              subtitle: context.l10n.onboardingProfileSubtitle,
             ),
             const SizedBox(height: 12),
             // Avatar with real picker
@@ -526,18 +526,20 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             Align(
               alignment: Alignment.centerLeft,
               child: _LabeledField(
-                label: 'Display name',
+                label: context.l10n.onboardingDisplayName,
                 compact: true,
                 child: TextFormField(
                   controller: _displayNameCtrl,
-                  decoration:
-                      _compactInput(hint: 'Your name', fill: AppColors.card),
+                  decoration: _compactInput(
+                      hint: context.l10n.onboardingYourName,
+                      fill: AppColors.card),
                   style: const TextStyle(
                       fontSize: 14,
                       color: AppColors.text,
                       fontWeight: FontWeight.w600),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  validator: (v) => (v == null || v.trim().isEmpty)
+                      ? context.l10n.commonRequired
+                      : null,
                 ),
               ),
             ),
@@ -546,12 +548,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             Align(
               alignment: Alignment.centerLeft,
               child: _LabeledField(
-                label: 'City',
+                label: context.l10n.onboardingCity,
                 compact: true,
                 child: TextFormField(
                   controller: _cityCtrl,
-                  decoration:
-                      _compactInput(hint: 'e.g. Toronto', fill: AppColors.card),
+                  decoration: _compactInput(
+                      hint: context.l10n.onboardingCityHint,
+                      fill: AppColors.card),
                   style: const TextStyle(
                       fontSize: 14,
                       color: AppColors.text,
@@ -564,12 +567,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             Align(
               alignment: Alignment.centerLeft,
               child: _LabeledField(
-                label: 'Time zone',
+                label: context.l10n.onboardingTimeZone,
                 compact: true,
                 child: TextFormField(
                   controller: _timeZoneCtrl,
-                  decoration:
-                      _compactInput(hint: 'e.g. GMT-5', fill: AppColors.card),
+                  decoration: _compactInput(
+                      hint: context.l10n.onboardingTimeZoneHint,
+                      fill: AppColors.card),
                   style: const TextStyle(
                       fontSize: 14,
                       color: AppColors.text,
@@ -583,12 +587,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             Align(
               alignment: Alignment.centerLeft,
               child: _LabeledField(
-                label: 'Country of residence',
+                label: context.l10n.onboardingCountry,
                 compact: true,
                 child: _anchoredDropdown(
                   controller: _countryCtrl,
                   value: _country,
-                  hint: 'Select country',
+                  hint: context.l10n.onboardingSelectCountry,
                   options: const ['Canada', 'USA', 'Other'],
                   labelOf: (v) => ValueLabels.country(context.l10n, v),
                   fill: AppColors.card,
@@ -618,16 +622,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            _sectionLabel('How will you use Connect?'),
+            _sectionLabel(context.l10n.onboardingHowUse),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                _roleChip('seeker', Icons.help_outline, 'I’m here to get help'),
+                _roleChip(
+                    'seeker', Icons.help_outline, context.l10n.roleSeeker),
                 _roleChip('helper', Icons.volunteer_activism_outlined,
-                    'I’m here to give help'),
-                _roleChip('both', Icons.all_inclusive, 'I’m open to both'),
+                    context.l10n.roleHelper),
+                _roleChip('both', Icons.all_inclusive, context.l10n.roleBoth),
               ],
             ),
           ],
@@ -643,11 +648,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _stepHeader(
-            title: 'Helper setup',
-            subtitle: 'Set your preferred support mode and availability.',
+            title: context.l10n.onboardingHelperTitle,
+            subtitle: context.l10n.onboardingHelperSubtitle,
           ),
           const SizedBox(height: 12),
-          _sectionLabel('Areas of expertise'),
+          _sectionLabel(context.l10n.onboardingExpertise),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
@@ -660,7 +665,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   size: 18,
                   color: selected ? AppColors.text : Colors.transparent,
                 ),
-                label: Text(e),
+                label: Text(ValueLabels.topic(context.l10n, e)),
                 selected: selected,
                 showCheckmark: false,
                 onSelected: (_) {
@@ -686,7 +691,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             }).toList(),
           ),
           const SizedBox(height: 16),
-          _sectionLabel('Preferred mode'),
+          _sectionLabel(context.l10n.onboardingPreferredMode),
           const SizedBox(height: 8),
 
           // Booking-style for chat/call/video
@@ -695,7 +700,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             runSpacing: 8,
             children: [
               _bookingPill(
-                label: 'CHAT',
+                label: context.l10n.modeChat,
                 selected: _mode == 'chat',
                 onTap: () {
                   HapticFeedback.selectionClick();
@@ -703,7 +708,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 },
               ),
               _bookingPill(
-                label: 'CALL',
+                label: context.l10n.modeCall,
                 selected: _mode == 'call',
                 onTap: () {
                   HapticFeedback.selectionClick();
@@ -711,7 +716,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 },
               ),
               _bookingPill(
-                label: 'VIDEO',
+                label: context.l10n.modeVideo,
                 selected: _mode == 'video',
                 onTap: () {
                   HapticFeedback.selectionClick();
@@ -726,10 +731,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             child: ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.access_time, color: AppColors.text),
-              title: const Text('Availability'),
+              title: Text(context.l10n.onboardingAvailability),
               subtitle: Text(
                 _startTime == null || _endTime == null
-                    ? 'Not set'
+                    ? context.l10n.commonNotSet
                     : '${_startTime!.format(context)} – ${_endTime!.format(context)}',
                 style: const TextStyle(color: AppColors.muted),
               ),
@@ -765,11 +770,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _stepHeader(
-            title: 'Topics',
-            subtitle: 'Pick what you need help with or can help others with.',
+            title: context.l10n.onboardingTopicsTitle,
+            subtitle: context.l10n.onboardingTopicsSubtitle,
           ),
           const SizedBox(height: 12),
-          _sectionLabel('Pick a few topics'),
+          _sectionLabel(context.l10n.onboardingPickTopics),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
@@ -782,7 +787,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     color: selected
                         ? AppColors.text
                         : Colors.transparent), // tick kept
-                label: Text(t),
+                label: Text(ValueLabels.topic(context.l10n, t)),
                 selected: selected,
                 showCheckmark: false,
                 onSelected: (_) {

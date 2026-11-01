@@ -224,5 +224,143 @@
     }
   },
   "resetTimedOut": "Request timed out. Try again.",
-  "resetFailed": "Could not send the reset email. Please try again."
+  "resetFailed": "Could not send the reset email. Please try again.",
+  "commonBack": "Back",
+  "commonContinue": "Continue",
+  "commonFinish": "Finish",
+  "commonRequired": "Required",
+  "commonNotSet": "Not set",
+  "commonRetry": "Retry",
+  "commonLoadMore": "Load more",
+  "commonShowMore": "Show more",
+  "commonShowLess": "Show less",
+  "commonTakePhoto": "Take photo",
+  "commonChooseFromLibrary": "Choose from library",
+  "commonSaveFailed": "Couldn’t save right now. Please try again.",
+  "commonSavedLocally": "Saved on this device. It will sync later.",
+  "commonPhotoUploadFailed": "Couldn’t upload the photo. Please try again.",
+  "onboardingTitle": "Onboarding",
+  "onboardingProfileTitle": "Profile basics",
+  "onboardingProfileSubtitle": "Add basics so we can personalize your experience.",
+  "onboardingDisplayName": "Display name",
+  "onboardingYourName": "Your name",
+  "onboardingCity": "City",
+  "onboardingCityHint": "e.g. Montreal",
+  "onboardingTimeZone": "Time zone",
+  "onboardingTimeZoneHint": "e.g. GMT-5",
+  "onboardingCountry": "Country of residence",
+  "onboardingSelectCountry": "Select country",
+  "onboardingHowUse": "How will you use Helperly?",
+  "roleSeeker": "I’m here to get help",
+  "roleHelper": "I’m here to give help",
+  "roleBoth": "I’m open to both",
+  "onboardingHelperTitle": "Helper setup",
+  "onboardingHelperSubtitle": "Set your preferred support mode and availability.",
+  "onboardingExpertise": "Areas of expertise",
+  "onboardingPreferredMode": "Preferred mode",
+  "modeChat": "CHAT",
+  "modeCall": "CALL",
+  "modeVideo": "VIDEO",
+  "onboardingAvailability": "Availability",
+  "onboardingTopicsTitle": "Topics",
+  "onboardingTopicsSubtitle": "Pick what you need help with or can help others with.",
+  "onboardingPickTopics": "Pick a few topics",
+  "onboardingPickOneTopic": "Pick at least one topic.",
+  "timeNow": "now",
+  "timeAgoSeconds": "{n}s ago",
+  "@timeAgoSeconds": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "timeAgoMinutes": "{n}m ago",
+  "@timeAgoMinutes": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "timeAgoHours": "{n}h ago",
+  "@timeAgoHours": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "timeAgoDays": "{n}d ago",
+  "@timeAgoDays": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "timeAgoWeeks": "{n}w ago",
+  "@timeAgoWeeks": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "timeAgoMonths": "{n}mo ago",
+  "@timeAgoMonths": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "timeAgoYears": "{n}y ago",
+  "@timeAgoYears": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "postTypeQuick": "Quick Post",
+  "postTypeExperience": "Experience Post",
+  "postTypeAdvice": "Advice Request Post",
+  "postTypeHowTo": "How-To Guide Post",
+  "postTypeLessons": "Lessons Learned Post",
+  "homeTitle": "Home",
+  "homeMessages": "Messages",
+  "homeWelcome": "Welcome, {name}",
+  "@homeWelcome": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "homeWelcomeThere": "there",
+  "homeMyConnections": "My connections",
+  "homeRecentPosts": "Recent posts",
+  "homeLoadFailed": "Could not load posts right now.",
+  "homeNoPosts": "No posts yet! Create one to get started.",
+  "homePostingInBackground": "Posting in background…",
+  "postDeleteTitle": "Delete post?",
+  "postDeleteBody": "This cannot be undone.",
+  "postOptions": "Post options",
+  "postReport": "Report post",
+  "postBlockAuthor": "Block {name}",
+  "@postBlockAuthor": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "postHelpful": "Helpful",
+  "actionConnect": "Connect",
+  "actionViewProfile": "View profile",
+  "actionBookCall": "Book a call",
+  "actionMessage": "Message",
+  "actionAudioCall": "Audio call",
+  "actionVideoCall": "Video call"
 }

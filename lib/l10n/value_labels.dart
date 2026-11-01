@@ -153,4 +153,30 @@ class ValueLabels {
     }
     return id;
   }
+
+  /// The badge for a stored post type ('Quick', 'Experience', ...). English
+  /// badges are unchanged ("Experience Post"); unknown types keep the old
+  /// rule of appending " Post".
+  static String postType(AppLocalizations l, String raw) {
+    final t = raw.trim();
+    switch (t.toLowerCase()) {
+      case '':
+      case 'quick':
+      case 'quick post':
+        return l.postTypeQuick;
+      case 'experience':
+      case 'experience post':
+        return l.postTypeExperience;
+      case 'advice request':
+      case 'advice request post':
+        return l.postTypeAdvice;
+      case 'how-to guide':
+      case 'how-to guide post':
+        return l.postTypeHowTo;
+      case 'lessons learned':
+      case 'lessons learned post':
+        return l.postTypeLessons;
+    }
+    return t.endsWith('Post') ? t : '$t Post';
+  }
 }

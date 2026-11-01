@@ -555,4 +555,251 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get resetFailed => 'Could not send the reset email. Please try again.';
+
+  @override
+  String get commonBack => 'Back';
+
+  @override
+  String get commonContinue => 'Continue';
+
+  @override
+  String get commonFinish => 'Finish';
+
+  @override
+  String get commonRequired => 'Required';
+
+  @override
+  String get commonNotSet => 'Not set';
+
+  @override
+  String get commonRetry => 'Retry';
+
+  @override
+  String get commonLoadMore => 'Load more';
+
+  @override
+  String get commonShowMore => 'Show more';
+
+  @override
+  String get commonShowLess => 'Show less';
+
+  @override
+  String get commonTakePhoto => 'Take photo';
+
+  @override
+  String get commonChooseFromLibrary => 'Choose from library';
+
+  @override
+  String get commonSaveFailed => 'Couldn’t save right now. Please try again.';
+
+  @override
+  String get commonSavedLocally => 'Saved on this device. It will sync later.';
+
+  @override
+  String get commonPhotoUploadFailed =>
+      'Couldn’t upload the photo. Please try again.';
+
+  @override
+  String get onboardingTitle => 'Onboarding';
+
+  @override
+  String get onboardingProfileTitle => 'Profile basics';
+
+  @override
+  String get onboardingProfileSubtitle =>
+      'Add basics so we can personalize your experience.';
+
+  @override
+  String get onboardingDisplayName => 'Display name';
+
+  @override
+  String get onboardingYourName => 'Your name';
+
+  @override
+  String get onboardingCity => 'City';
+
+  @override
+  String get onboardingCityHint => 'e.g. Montreal';
+
+  @override
+  String get onboardingTimeZone => 'Time zone';
+
+  @override
+  String get onboardingTimeZoneHint => 'e.g. GMT-5';
+
+  @override
+  String get onboardingCountry => 'Country of residence';
+
+  @override
+  String get onboardingSelectCountry => 'Select country';
+
+  @override
+  String get onboardingHowUse => 'How will you use Helperly?';
+
+  @override
+  String get roleSeeker => 'I’m here to get help';
+
+  @override
+  String get roleHelper => 'I’m here to give help';
+
+  @override
+  String get roleBoth => 'I’m open to both';
+
+  @override
+  String get onboardingHelperTitle => 'Helper setup';
+
+  @override
+  String get onboardingHelperSubtitle =>
+      'Set your preferred support mode and availability.';
+
+  @override
+  String get onboardingExpertise => 'Areas of expertise';
+
+  @override
+  String get onboardingPreferredMode => 'Preferred mode';
+
+  @override
+  String get modeChat => 'CHAT';
+
+  @override
+  String get modeCall => 'CALL';
+
+  @override
+  String get modeVideo => 'VIDEO';
+
+  @override
+  String get onboardingAvailability => 'Availability';
+
+  @override
+  String get onboardingTopicsTitle => 'Topics';
+
+  @override
+  String get onboardingTopicsSubtitle =>
+      'Pick what you need help with or can help others with.';
+
+  @override
+  String get onboardingPickTopics => 'Pick a few topics';
+
+  @override
+  String get onboardingPickOneTopic => 'Pick at least one topic.';
+
+  @override
+  String get timeNow => 'now';
+
+  @override
+  String timeAgoSeconds(int n) {
+    return '${n}s ago';
+  }
+
+  @override
+  String timeAgoMinutes(int n) {
+    return '${n}m ago';
+  }
+
+  @override
+  String timeAgoHours(int n) {
+    return '${n}h ago';
+  }
+
+  @override
+  String timeAgoDays(int n) {
+    return '${n}d ago';
+  }
+
+  @override
+  String timeAgoWeeks(int n) {
+    return '${n}w ago';
+  }
+
+  @override
+  String timeAgoMonths(int n) {
+    return '${n}mo ago';
+  }
+
+  @override
+  String timeAgoYears(int n) {
+    return '${n}y ago';
+  }
+
+  @override
+  String get postTypeQuick => 'Quick Post';
+
+  @override
+  String get postTypeExperience => 'Experience Post';
+
+  @override
+  String get postTypeAdvice => 'Advice Request Post';
+
+  @override
+  String get postTypeHowTo => 'How-To Guide Post';
+
+  @override
+  String get postTypeLessons => 'Lessons Learned Post';
+
+  @override
+  String get homeTitle => 'Home';
+
+  @override
+  String get homeMessages => 'Messages';
+
+  @override
+  String homeWelcome(String name) {
+    return 'Welcome, $name';
+  }
+
+  @override
+  String get homeWelcomeThere => 'there';
+
+  @override
+  String get homeMyConnections => 'My connections';
+
+  @override
+  String get homeRecentPosts => 'Recent posts';
+
+  @override
+  String get homeLoadFailed => 'Could not load posts right now.';
+
+  @override
+  String get homeNoPosts => 'No posts yet! Create one to get started.';
+
+  @override
+  String get homePostingInBackground => 'Posting in background…';
+
+  @override
+  String get postDeleteTitle => 'Delete post?';
+
+  @override
+  String get postDeleteBody => 'This cannot be undone.';
+
+  @override
+  String get postOptions => 'Post options';
+
+  @override
+  String get postReport => 'Report post';
+
+  @override
+  String postBlockAuthor(String name) {
+    return 'Block $name';
+  }
+
+  @override
+  String get postHelpful => 'Helpful';
+
+  @override
+  String get actionConnect => 'Connect';
+
+  @override
+  String get actionViewProfile => 'View profile';
+
+  @override
+  String get actionBookCall => 'Book a call';
+
+  @override
+  String get actionMessage => 'Message';
+
+  @override
+  String get actionAudioCall => 'Audio call';
+
+  @override
+  String get actionVideoCall => 'Video call';
 }

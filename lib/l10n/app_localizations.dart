@@ -1135,6 +1135,456 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Could not send the reset email. Please try again.'**
   String get resetFailed;
+
+  /// No description provided for @commonBack.
+  ///
+  /// In en, this message translates to:
+  /// **'Back'**
+  String get commonBack;
+
+  /// No description provided for @commonContinue.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue'**
+  String get commonContinue;
+
+  /// No description provided for @commonFinish.
+  ///
+  /// In en, this message translates to:
+  /// **'Finish'**
+  String get commonFinish;
+
+  /// No description provided for @commonRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Required'**
+  String get commonRequired;
+
+  /// No description provided for @commonNotSet.
+  ///
+  /// In en, this message translates to:
+  /// **'Not set'**
+  String get commonNotSet;
+
+  /// No description provided for @commonRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get commonRetry;
+
+  /// No description provided for @commonLoadMore.
+  ///
+  /// In en, this message translates to:
+  /// **'Load more'**
+  String get commonLoadMore;
+
+  /// No description provided for @commonShowMore.
+  ///
+  /// In en, this message translates to:
+  /// **'Show more'**
+  String get commonShowMore;
+
+  /// No description provided for @commonShowLess.
+  ///
+  /// In en, this message translates to:
+  /// **'Show less'**
+  String get commonShowLess;
+
+  /// No description provided for @commonTakePhoto.
+  ///
+  /// In en, this message translates to:
+  /// **'Take photo'**
+  String get commonTakePhoto;
+
+  /// No description provided for @commonChooseFromLibrary.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose from library'**
+  String get commonChooseFromLibrary;
+
+  /// No description provided for @commonSaveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn’t save right now. Please try again.'**
+  String get commonSaveFailed;
+
+  /// No description provided for @commonSavedLocally.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved on this device. It will sync later.'**
+  String get commonSavedLocally;
+
+  /// No description provided for @commonPhotoUploadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn’t upload the photo. Please try again.'**
+  String get commonPhotoUploadFailed;
+
+  /// No description provided for @onboardingTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Onboarding'**
+  String get onboardingTitle;
+
+  /// No description provided for @onboardingProfileTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Profile basics'**
+  String get onboardingProfileTitle;
+
+  /// No description provided for @onboardingProfileSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Add basics so we can personalize your experience.'**
+  String get onboardingProfileSubtitle;
+
+  /// No description provided for @onboardingDisplayName.
+  ///
+  /// In en, this message translates to:
+  /// **'Display name'**
+  String get onboardingDisplayName;
+
+  /// No description provided for @onboardingYourName.
+  ///
+  /// In en, this message translates to:
+  /// **'Your name'**
+  String get onboardingYourName;
+
+  /// No description provided for @onboardingCity.
+  ///
+  /// In en, this message translates to:
+  /// **'City'**
+  String get onboardingCity;
+
+  /// No description provided for @onboardingCityHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. Montreal'**
+  String get onboardingCityHint;
+
+  /// No description provided for @onboardingTimeZone.
+  ///
+  /// In en, this message translates to:
+  /// **'Time zone'**
+  String get onboardingTimeZone;
+
+  /// No description provided for @onboardingTimeZoneHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. GMT-5'**
+  String get onboardingTimeZoneHint;
+
+  /// No description provided for @onboardingCountry.
+  ///
+  /// In en, this message translates to:
+  /// **'Country of residence'**
+  String get onboardingCountry;
+
+  /// No description provided for @onboardingSelectCountry.
+  ///
+  /// In en, this message translates to:
+  /// **'Select country'**
+  String get onboardingSelectCountry;
+
+  /// No description provided for @onboardingHowUse.
+  ///
+  /// In en, this message translates to:
+  /// **'How will you use Helperly?'**
+  String get onboardingHowUse;
+
+  /// No description provided for @roleSeeker.
+  ///
+  /// In en, this message translates to:
+  /// **'I’m here to get help'**
+  String get roleSeeker;
+
+  /// No description provided for @roleHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'I’m here to give help'**
+  String get roleHelper;
+
+  /// No description provided for @roleBoth.
+  ///
+  /// In en, this message translates to:
+  /// **'I’m open to both'**
+  String get roleBoth;
+
+  /// No description provided for @onboardingHelperTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Helper setup'**
+  String get onboardingHelperTitle;
+
+  /// No description provided for @onboardingHelperSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Set your preferred support mode and availability.'**
+  String get onboardingHelperSubtitle;
+
+  /// No description provided for @onboardingExpertise.
+  ///
+  /// In en, this message translates to:
+  /// **'Areas of expertise'**
+  String get onboardingExpertise;
+
+  /// No description provided for @onboardingPreferredMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Preferred mode'**
+  String get onboardingPreferredMode;
+
+  /// No description provided for @modeChat.
+  ///
+  /// In en, this message translates to:
+  /// **'CHAT'**
+  String get modeChat;
+
+  /// No description provided for @modeCall.
+  ///
+  /// In en, this message translates to:
+  /// **'CALL'**
+  String get modeCall;
+
+  /// No description provided for @modeVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'VIDEO'**
+  String get modeVideo;
+
+  /// No description provided for @onboardingAvailability.
+  ///
+  /// In en, this message translates to:
+  /// **'Availability'**
+  String get onboardingAvailability;
+
+  /// No description provided for @onboardingTopicsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Topics'**
+  String get onboardingTopicsTitle;
+
+  /// No description provided for @onboardingTopicsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick what you need help with or can help others with.'**
+  String get onboardingTopicsSubtitle;
+
+  /// No description provided for @onboardingPickTopics.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick a few topics'**
+  String get onboardingPickTopics;
+
+  /// No description provided for @onboardingPickOneTopic.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick at least one topic.'**
+  String get onboardingPickOneTopic;
+
+  /// No description provided for @timeNow.
+  ///
+  /// In en, this message translates to:
+  /// **'now'**
+  String get timeNow;
+
+  /// No description provided for @timeAgoSeconds.
+  ///
+  /// In en, this message translates to:
+  /// **'{n}s ago'**
+  String timeAgoSeconds(int n);
+
+  /// No description provided for @timeAgoMinutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{n}m ago'**
+  String timeAgoMinutes(int n);
+
+  /// No description provided for @timeAgoHours.
+  ///
+  /// In en, this message translates to:
+  /// **'{n}h ago'**
+  String timeAgoHours(int n);
+
+  /// No description provided for @timeAgoDays.
+  ///
+  /// In en, this message translates to:
+  /// **'{n}d ago'**
+  String timeAgoDays(int n);
+
+  /// No description provided for @timeAgoWeeks.
+  ///
+  /// In en, this message translates to:
+  /// **'{n}w ago'**
+  String timeAgoWeeks(int n);
+
+  /// No description provided for @timeAgoMonths.
+  ///
+  /// In en, this message translates to:
+  /// **'{n}mo ago'**
+  String timeAgoMonths(int n);
+
+  /// No description provided for @timeAgoYears.
+  ///
+  /// In en, this message translates to:
+  /// **'{n}y ago'**
+  String timeAgoYears(int n);
+
+  /// No description provided for @postTypeQuick.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick Post'**
+  String get postTypeQuick;
+
+  /// No description provided for @postTypeExperience.
+  ///
+  /// In en, this message translates to:
+  /// **'Experience Post'**
+  String get postTypeExperience;
+
+  /// No description provided for @postTypeAdvice.
+  ///
+  /// In en, this message translates to:
+  /// **'Advice Request Post'**
+  String get postTypeAdvice;
+
+  /// No description provided for @postTypeHowTo.
+  ///
+  /// In en, this message translates to:
+  /// **'How-To Guide Post'**
+  String get postTypeHowTo;
+
+  /// No description provided for @postTypeLessons.
+  ///
+  /// In en, this message translates to:
+  /// **'Lessons Learned Post'**
+  String get postTypeLessons;
+
+  /// No description provided for @homeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Home'**
+  String get homeTitle;
+
+  /// No description provided for @homeMessages.
+  ///
+  /// In en, this message translates to:
+  /// **'Messages'**
+  String get homeMessages;
+
+  /// No description provided for @homeWelcome.
+  ///
+  /// In en, this message translates to:
+  /// **'Welcome, {name}'**
+  String homeWelcome(String name);
+
+  /// No description provided for @homeWelcomeThere.
+  ///
+  /// In en, this message translates to:
+  /// **'there'**
+  String get homeWelcomeThere;
+
+  /// No description provided for @homeMyConnections.
+  ///
+  /// In en, this message translates to:
+  /// **'My connections'**
+  String get homeMyConnections;
+
+  /// No description provided for @homeRecentPosts.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent posts'**
+  String get homeRecentPosts;
+
+  /// No description provided for @homeLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not load posts right now.'**
+  String get homeLoadFailed;
+
+  /// No description provided for @homeNoPosts.
+  ///
+  /// In en, this message translates to:
+  /// **'No posts yet! Create one to get started.'**
+  String get homeNoPosts;
+
+  /// No description provided for @homePostingInBackground.
+  ///
+  /// In en, this message translates to:
+  /// **'Posting in background…'**
+  String get homePostingInBackground;
+
+  /// No description provided for @postDeleteTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete post?'**
+  String get postDeleteTitle;
+
+  /// No description provided for @postDeleteBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This cannot be undone.'**
+  String get postDeleteBody;
+
+  /// No description provided for @postOptions.
+  ///
+  /// In en, this message translates to:
+  /// **'Post options'**
+  String get postOptions;
+
+  /// No description provided for @postReport.
+  ///
+  /// In en, this message translates to:
+  /// **'Report post'**
+  String get postReport;
+
+  /// No description provided for @postBlockAuthor.
+  ///
+  /// In en, this message translates to:
+  /// **'Block {name}'**
+  String postBlockAuthor(String name);
+
+  /// No description provided for @postHelpful.
+  ///
+  /// In en, this message translates to:
+  /// **'Helpful'**
+  String get postHelpful;
+
+  /// No description provided for @actionConnect.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect'**
+  String get actionConnect;
+
+  /// No description provided for @actionViewProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'View profile'**
+  String get actionViewProfile;
+
+  /// No description provided for @actionBookCall.
+  ///
+  /// In en, this message translates to:
+  /// **'Book a call'**
+  String get actionBookCall;
+
+  /// No description provided for @actionMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Message'**
+  String get actionMessage;
+
+  /// No description provided for @actionAudioCall.
+  ///
+  /// In en, this message translates to:
+  /// **'Audio call'**
+  String get actionAudioCall;
+
+  /// No description provided for @actionVideoCall.
+  ///
+  /// In en, this message translates to:
+  /// **'Video call'**
+  String get actionVideoCall;
 }
 
 class _AppLocalizationsDelegate
