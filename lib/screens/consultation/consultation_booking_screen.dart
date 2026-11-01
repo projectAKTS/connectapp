@@ -1,3 +1,4 @@
+import 'package:connect_app/l10n/formatters.dart';
 import 'dart:async';
 import 'package:connect_app/services/app_telemetry.dart';
 import 'package:connect_app/config/mvp_features.dart';
@@ -6,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
-import 'package:intl/intl.dart';
 import 'package:connect_app/theme/tokens.dart';
 import '/services/consultation_service.dart';
 import '/services/payment_service.dart';
@@ -152,9 +152,9 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
 
   double get _payout =>
       PricingConfig.getHelperPayout(_selectedDuration, _callType);
-  String get _priceLabel => '\$${_finalPrice.toStringAsFixed(2)} CAD';
-  String get _basePriceLabel => '\$${_basePrice.toStringAsFixed(2)} CAD';
-  String get _payoutLabel => '\$${_payout.toStringAsFixed(2)} to helper';
+  String get _priceLabel => AppFormat.money(context, _finalPrice);
+  String get _basePriceLabel => AppFormat.money(context, _basePrice);
+  String get _payoutLabel => '${AppFormat.money(context, _payout)} to helper';
 
   DateTime? get _scheduledAt {
     if (_selectedDate == null || _selectedTime == null) return null;
@@ -368,7 +368,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
   Widget build(BuildContext context) {
     final dt = _scheduledAt;
     final scheduledText =
-        dt == null ? 'Not set' : DateFormat('EEE, MMM d • h:mm a').format(dt);
+        dt == null ? 'Not set' : AppFormat.dayTime(context, dt);
 
     return FullScreenBackGesture(
       child: Scaffold(
@@ -509,8 +509,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                               children: [
                                 Text(_selectedDate == null
                                     ? 'Pick date'
-                                    : DateFormat('MMM d, yyyy')
-                                        .format(_selectedDate!)),
+                                    : AppFormat.date(context, _selectedDate!)),
                                 const Icon(Icons.calendar_today_outlined,
                                     color: AppColors.muted, size: 18),
                               ],

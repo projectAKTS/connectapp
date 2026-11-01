@@ -4,6 +4,7 @@ import 'package:connect_app/config/mvp_features.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:connect_app/l10n/l10n.dart';
+import 'package:connect_app/l10n/formatters.dart';
 import 'package:connect_app/services/app_prefs.dart';
 import 'package:connect_app/services/locale_controller.dart';
 
@@ -111,6 +112,7 @@ Future<void> main() async {
   );
   await prefsLoading;
   LocaleController.instance.loadSaved();
+  await AppFormat.init();
   await AppTelemetry.init();
   unawaited(
     FirestoreReadHelper.ensureNetworkEnabled(reason: 'app_start'),

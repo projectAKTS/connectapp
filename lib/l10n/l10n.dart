@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:connect_app/l10n/app_localizations.dart';
 import 'package:flutter/widgets.dart';
 
@@ -27,7 +25,8 @@ class AppLanguages {
   /// device's region when there is one ('fr' on a fr_CA or en_CA device ->
   /// 'fr_CA'), so Canadian users get "4,99 $" and 24-hour times in French.
   static String formatLocale(Locale appLocale, [Locale? device]) {
-    final region = (device ?? PlatformDispatcher.instance.locale).countryCode;
+    final region = (device ?? WidgetsBinding.instance.platformDispatcher.locale)
+        .countryCode;
     if (region == null || region.isEmpty) return appLocale.languageCode;
     return '${appLocale.languageCode}_$region';
   }

@@ -1,4 +1,5 @@
 // lib/screens/profile/profile_screen.dart
+import 'package:connect_app/l10n/formatters.dart';
 import 'dart:io';
 import 'package:connect_app/screens/settings/settings_screen.dart';
 import 'package:connect_app/utils/profile_text.dart';
@@ -10,7 +11,6 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:intl/intl.dart';
 
 import 'package:connect_app/utils/time_utils.dart';
 import '../posts/post_detail_screen.dart';
@@ -666,7 +666,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     String premiumSubtitle() {
       if (premiumStatus.isEmpty) return 'Not active';
       final exp = premiumExpiresAt != null
-          ? DateFormat.yMMMd().format(premiumExpiresAt)
+          ? AppFormat.date(context, premiumExpiresAt)
           : null;
       return exp == null ? premiumStatus : '$premiumStatus • Expires $exp';
     }
@@ -1214,7 +1214,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       ),
                                       if (date != null)
                                         Text(
-                                          DateFormat.yMMMd().format(date),
+                                          AppFormat.date(context, date),
                                           style: const TextStyle(
                                               fontSize: 12,
                                               color: AppColors.muted),
@@ -1356,7 +1356,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   if (dt != null) ...[
                                     const SizedBox(height: 8),
                                     Text(
-                                      DateFormat.yMMMd().format(dt),
+                                      AppFormat.date(context, dt),
                                       style: const TextStyle(
                                           fontSize: 12, color: AppColors.muted),
                                     ),
@@ -1525,7 +1525,7 @@ class _ReviewTile extends StatelessWidget {
               Text(
                 createdAt == null
                     ? 'Booked session'
-                    : 'Booked session · ${DateFormat.yMMMd().format(createdAt)}',
+                    : 'Booked session · ${AppFormat.date(context, createdAt)}',
                 style: const TextStyle(color: AppColors.muted, fontSize: 12.5),
               ),
             ],

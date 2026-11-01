@@ -1,3 +1,4 @@
+import 'package:connect_app/l10n/formatters.dart';
 import 'dart:async';
 
 import 'package:connect_app/widgets/advice_notice.dart';
@@ -521,7 +522,8 @@ class _HelperTile extends StatelessWidget {
                       runSpacing: 6,
                       children: [
                         if (helper.hourlyRate != null)
-                          _Tag('\$${helper.hourlyRate!.toStringAsFixed(0)}/hr'),
+                          _Tag(
+                              '${AppFormat.money(context, helper.hourlyRate!, decimals: 0)}/hr'),
                         // Derived from a stated time window, not live
                         // presence, so it must not claim "now".
                         if (helper.isAvailable) const _Tag('Available'),
@@ -826,7 +828,7 @@ class _PricePill extends StatelessWidget {
       icon: Icons.attach_money,
       label: (minPrice == null && maxPrice == null)
           ? 'Price'
-          : '\$${minPrice?.toStringAsFixed(0) ?? '0'}–\$${maxPrice?.toStringAsFixed(0) ?? '∞'}',
+          : '${AppFormat.money(context, minPrice ?? 0, decimals: 0)}–${maxPrice == null ? '∞' : AppFormat.money(context, maxPrice!, decimals: 0)}',
       onTap: () async {
         final res = await showModalBottomSheet<_PriceRange>(
           context: context,

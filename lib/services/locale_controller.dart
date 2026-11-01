@@ -1,10 +1,9 @@
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/services/app_prefs.dart';
 import 'package:connect_app/services/helperly_test_runtime.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 /// The app's interface language: the device language by default, or the
 /// user's choice in Settings. Separate from the languages a user speaks
@@ -38,7 +37,8 @@ class LocaleController {
 
   /// The language the app is shown in right now.
   Locale get effective =>
-      choice.value ?? AppLanguages.resolve(PlatformDispatcher.instance.locale);
+      choice.value ??
+      AppLanguages.resolve(WidgetsBinding.instance.platformDispatcher.locale);
 
   /// Saves [locale] (null = follow the device) and tells the server.
   Future<void> select(Locale? locale) async {

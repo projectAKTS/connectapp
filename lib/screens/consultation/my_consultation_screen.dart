@@ -1,10 +1,10 @@
 // lib/screens/consultation/my_consultations_screen.dart
+import 'package:connect_app/l10n/formatters.dart';
 import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:intl/intl.dart';
 
 import 'package:connect_app/theme/tokens.dart';
 import 'package:connect_app/utils/time_utils.dart';
@@ -100,7 +100,7 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
       final refundAmount = (result['refundAmount'] as num?)?.toDouble() ?? 0;
       final refundPercent = (result['refundPercent'] as num?)?.toInt() ?? 0;
       final msg = refundAmount > 0
-          ? 'Canceled. Refund: \$${refundAmount.toStringAsFixed(2)} ($refundPercent%).'
+          ? 'Canceled. Refund: ${_fmtMoney(refundAmount)} ($refundPercent%).'
           : 'Canceled. No refund (within 1 hour).';
       _snack(msg);
     } catch (e) {
@@ -187,8 +187,8 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
     return now.isAfter(endAt.add(_pastGrace));
   }
 
-  String _fmtWhen(DateTime dt) => DateFormat('EEE, MMM d • h:mm a').format(dt);
-  String _fmtMoney(num v) => '\$${v.toDouble().toStringAsFixed(2)}';
+  String _fmtWhen(DateTime dt) => AppFormat.dayTime(context, dt);
+  String _fmtMoney(num v) => AppFormat.money(context, v);
 
   @override
   Widget build(BuildContext context) {

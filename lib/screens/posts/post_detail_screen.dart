@@ -1,6 +1,6 @@
+import 'package:connect_app/l10n/formatters.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:intl/intl.dart';
 import 'package:video_player/video_player.dart';
 import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/theme/tokens.dart';
@@ -136,9 +136,8 @@ class PostDetailScreen extends StatelessWidget {
 
             final data = snapshot.data!.data() as Map<String, dynamic>;
             final dt = parseFirestoreTimestamp(data['timestamp']);
-            final date = dt != null
-                ? DateFormat.yMMMd().add_jm().format(dt)
-                : 'Unknown date';
+            final date =
+                dt != null ? AppFormat.dateTime(context, dt) : 'Unknown date';
             final content = (data['content'] ?? '').toString();
             final (maybeBadge, body) = _extractBadgeAndBody(content);
             final badge = maybeBadge ?? 'Quick Post';

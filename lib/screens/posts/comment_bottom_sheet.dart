@@ -1,8 +1,8 @@
+import 'package:connect_app/l10n/formatters.dart';
 import 'package:connect_app/services/content_filter.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:intl/intl.dart';
 import 'package:connect_app/utils/time_utils.dart';
 
 class CommentBottomSheet extends StatefulWidget {
@@ -155,7 +155,7 @@ class _CommentBottomSheetState extends State<CommentBottomSheet> {
                     final dt =
                         parseFirestoreTimestamp(commentData['timestamp']);
                     String formattedTime = dt != null
-                        ? DateFormat('MMM d, yyyy - hh:mm a').format(dt)
+                        ? AppFormat.dateTime(context, dt)
                         : 'Just now';
 
                     return ListTile(

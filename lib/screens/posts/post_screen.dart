@@ -1,9 +1,9 @@
+import 'package:connect_app/l10n/formatters.dart';
 import 'package:connect_app/services/content_filter.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:connect_app/utils/time_utils.dart';
-import 'package:intl/intl.dart';
 
 class PostScreen extends StatefulWidget {
   final Map<String, dynamic> postData;
@@ -168,9 +168,8 @@ class _PostScreenState extends State<PostScreen> {
                       // Robust timestamp parsing
                       final dt =
                           parseFirestoreTimestamp(commentData['timestamp']);
-                      final formatted = dt != null
-                          ? DateFormat('MMM d, yyyy – hh:mm a').format(dt)
-                          : '';
+                      final formatted =
+                          dt != null ? AppFormat.dateTime(context, dt) : '';
 
                       return ListTile(
                         leading: const Icon(Icons.comment, color: Colors.grey),
