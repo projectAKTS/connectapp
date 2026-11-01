@@ -72,3 +72,23 @@ confirmation by the accountant or lawyer.
   how long.
 - Handling data of declared minors (Québec Law 25: minors under 14
   require parental consent).
+
+## Revised: Minimum Justified Retention (2026-11-01)
+
+The founder asked for the shortest period each purpose justifies. This
+table replaces the "Proposed" column above where they differ. Nothing is
+implemented.
+
+| Data | Purpose | Minimum retention | Automatic? |
+|---|---|---|---|
+| Pending call invitations (`ringing`) | Deliver a call (rings 45 s) | **24 hours** | Yes (TTL) |
+| Signaling and diagnostics (`serverDiag*`, Call V2 ops / commands / locks) | Debug one call | **24 hours to 7 days** (existing V2 TTLs) | Yes |
+| Missed / declined / unavailable invites | Show recent missed calls; the chat already keeps a "Missed call" message | **7 days** | Yes |
+| Completed call metadata | Investigate a harassment report | **30 days**. When a report names a call, copy who/when/duration into the report instead of keeping all calls longer | Yes |
+| Messages | User content, the conversation itself | **While the chat has a participant with an account**. Proposal: delete a chat once both accounts are deleted | Later; needs a product decision |
+| Reports and disputes | Safety, repeat abuse, legal claims | **12 months after closure** (2 years only if a lawyer advises it); indefinitely while a legal hold is open | No; reviewed purge |
+| Reviews | Helper reputation | **While the helper's account exists**; review text is already removed when the reviewer deletes their account | Deletion-time, not TTL |
+| Account deletion requests | Prove that a request was handled | Processed within 24 h; keep a minimal log (hashed uid, request and completion dates) for **12 months** | Yes |
+| Financial records (consultations, succeeded payment attempts, Stripe) | Tax and accounting | **6 years** after the tax year [VERIFY with an accountant]. None exist during the free beta | No |
+| Failed payment attempts | Debugging | **30 days** | Yes |
+| Push installations | Deliver notifications | Until sign-out or deletion; **90 days** unused | Yes |

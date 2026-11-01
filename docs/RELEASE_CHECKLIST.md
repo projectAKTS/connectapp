@@ -131,3 +131,60 @@ Existing functions get new code; three are new.
 - Live Stripe charges or payouts (not authorized).
 - TTL / retention (`docs/RETENTION_POLICY_PROPOSAL.md`, needs approval).
 - Publishing legal texts (drafts only).
+
+---
+
+## Pre-Beta Additions (2026-11-01)
+
+### Staging First (Recommended)
+- **Project:** use the existing dev project `helperly-call-v2-dev` (or a
+  new `helperly-staging`) for one full end-to-end pass before production:
+  - deploy the same 16 functions, rules and hosting there;
+  - run `docs/BETA_MANUAL_TESTS.md` with the app pointed at staging.
+- **Needs:**
+  - the Blaze plan on staging;
+  - Stripe **test** keys as secrets;
+  - an APNs key for the dev bundle (or test pushes on Android only).
+- **Why:** the emulators cover rules and logic, but not real FCM/APNs
+  delivery, scheduled triggers, or deployed IAM.
+
+### Project And Scope Checks (Every Command)
+- [ ] `firebase use` shows `helperly-call-v2-dev`, so production commands
+  always pass `--project connectapp-278b4` explicitly.
+- [ ] `firebase functions:list --project connectapp-278b4` shows **no**
+  Call V2 functions (`startCallV2`, `acceptCallV2`, ...). The deploy
+  command lists functions one by one, never `--only functions`.
+- [ ] `.env.connectapp-278b4` contains `PAID_SESSIONS_ENABLED=false` (or
+  omits it; the default is false), and `CALL_V2_ENABLED` is unchanged.
+- [ ] In `firestore.rules`, `agePolicyStart()` is set to the rules deploy
+  date. Accounts created before it are treated as legacy.
+
+### Backup: Restorable, Not Just Started
+1. Run
+   `gcloud firestore export gs://<backup-bucket>/<date> --project connectapp-278b4`.
+   This only **starts** an operation.
+2. Run `gcloud firestore operations list --project connectapp-278b4` and
+   wait for `done: true` with no error. Note the output URI.
+3. **Prove the backup restores:** run `gcloud firestore import <URI>` into
+   the **staging** project, then spot-check a few `users` and `posts`
+   documents. Only then is the backup counted as restorable.
+4. Storage media is not in the Firestore export. Copy it if needed:
+   `gsutil -m cp -r gs://connectapp-278b4.appspot.com gs://<backup-bucket>/storage-<date>`.
+
+### Side Effects Of Newly Enabled Triggers
+
+| Trigger | First run after deploy |
+|---|---|
+| `processAccountDeletionRequests` (daily) | Processes every existing user with `deletionRequestedAt` (at most 100 per run). **Before deploying, list them read-only** (`where deletionRequestedAt != null`) and confirm each one is a real request. |
+| `onReviewCreated` | Only new reviews; nothing retroactive |
+| `onChatMessageCreated` (new claim) | Only new messages; writes `notifiedAt` on each new message |
+| `scheduledConsultationReminder` (claim) | Writes `reminderSentAt` on consultations in the next 5-minute window |
+| Rules: 18+ | New accounts on old builds can no longer post, message or call; everyone else is unaffected |
+| Rules: `notifiedAt`, `paymentOperations` | No effect on current builds |
+
+### Logs And Monitoring
+- **Logs:** Cloud Logging filter `resource.type="cloud_function"` for the
+  16 names. Watch `duplicate delivery skipped`, `Paid sessions are not
+  available`, `Charge error`, and `account_deleted` summaries.
+- **Alerts:** a Firebase alert (or a log-based metric) on error rate per
+  function for the first week.
