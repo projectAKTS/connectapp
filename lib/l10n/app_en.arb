@@ -847,5 +847,20 @@
   "callCaller": "Caller",
   "callChannelName": "Incoming calls",
   "settingsCrashReports": "Send crash reports",
-  "settingsCrashReportsSubtitle": "Technical details when the app crashes (device model, app version, error), not linked to your account. Off unless you turn it on."
+  "settingsCrashReportsSubtitle": "Technical details when the app crashes (device model, app version, error), not linked to your account. Off unless you turn it on.",
+  "badgeKindContributor": "Kind Contributor",
+  "badgePremiumTrial": "Premium Trial",
+  "badgeProfileHighlight": "Profile Highlight",
+  "badgeTrustedProblemSolver": "Trusted Problem Solver",
+  "badgeFirstContributor": "First Contributor",
+  "badgeLegendaryHelper": "Legendary Helper",
+  "badgeDedicatedContributor": "Dedicated Contributor",
+  "badgeConversationalist": "Conversationalist",
+  "badgeStreakStarter": "Streak Starter",
+  "badgeBoostEnthusiast": "Boost Enthusiast",
+  "badgePriorityPostBoost": "Priority Post Boost",
+  "badgeExpertHelper": "Expert Helper",
+  "badgeSkilledHelper": "Skilled Helper",
+  "badgeBeginnerHelper": "Beginner Helper",
+  "badgeCommunityMentor": "Community Mentor"
 }

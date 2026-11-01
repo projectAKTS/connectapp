@@ -538,5 +538,20 @@
   "callCaller": "Appelant",
   "callChannelName": "Appels entrants",
   "settingsCrashReports": "Envoyer les rapports de plantage",
-  "settingsCrashReportsSubtitle": "Détails techniques en cas de plantage (modèle d'appareil, version de l'application, erreur), non associés à votre compte. Désactivé sauf si vous l'activez."
+  "settingsCrashReportsSubtitle": "Détails techniques en cas de plantage (modèle d'appareil, version de l'application, erreur), non associés à votre compte. Désactivé sauf si vous l'activez.",
+  "badgeKindContributor": "Contributeur bienveillant",
+  "badgePremiumTrial": "Essai Premium",
+  "badgeProfileHighlight": "Profil en vedette",
+  "badgeTrustedProblemSolver": "Solutionneur de confiance",
+  "badgeFirstContributor": "Première contribution",
+  "badgeLegendaryHelper": "Personne-ressource légendaire",
+  "badgeDedicatedContributor": "Contributeur assidu",
+  "badgeConversationalist": "Grand communicateur",
+  "badgeStreakStarter": "Série lancée",
+  "badgeBoostEnthusiast": "Adepte du rehaussement",
+  "badgePriorityPostBoost": "Publication prioritaire",
+  "badgeExpertHelper": "Personne-ressource experte",
+  "badgeSkilledHelper": "Personne-ressource aguerrie",
+  "badgeBeginnerHelper": "Personne-ressource débutante",
+  "badgeCommunityMentor": "Mentor de la communauté"
 }

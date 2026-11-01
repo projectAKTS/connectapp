@@ -1,4 +1,5 @@
 // lib/screens/profile/profile_screen.dart
+import 'package:connect_app/l10n/value_labels.dart';
 import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/l10n/formatters.dart';
 import 'dart:io';
@@ -1137,7 +1138,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       runSpacing: 8,
                       children: [
                         for (var i = 0; i < badges.length && i < 3; i++)
-                          _badgeChip(badges[i]),
+                          _badgeChip(
+                              ValueLabels.badge(context.l10n, badges[i])),
                         if (badges.length > 3)
                           TextButton(
                             onPressed: () {

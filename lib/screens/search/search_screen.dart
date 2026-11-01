@@ -105,23 +105,29 @@ class _SearchScreenState extends State<SearchScreen> {
         anyIndexedHit = people.isNotEmpty;
       } catch (_) {}
 
-      // displayName_lc prefix
-      try {
-        final qs = await FirestoreReadHelper.getQuery(
-          FirebaseFirestore.instance
-              .collection('users')
-              .orderBy('displayName_lc')
-              .startAt([query]).endAt(['$query\uf8ff']).limit(40),
-          timeout: const Duration(seconds: 5),
-        );
-        for (final d in qs.docs) {
-          final hit = _userFromDoc(d.id, d.data());
-          if (hit != null && !people.any((p) => p.userId == hit.userId)) {
-            people.add(hit);
+      // displayName_lc prefix. The field is lowercased but keeps accents
+      // ("élodie"), while [query] has them folded ("elodie"), so the typed
+      // text is tried as well.
+      final rawLower = raw.trim().toLowerCase();
+      for (final prefix in {query, rawLower}) {
+        if (prefix.isEmpty) continue;
+        try {
+          final qs = await FirestoreReadHelper.getQuery(
+            FirebaseFirestore.instance
+                .collection('users')
+                .orderBy('displayName_lc')
+                .startAt([prefix]).endAt(['$prefix\uf8ff']).limit(40),
+            timeout: const Duration(seconds: 5),
+          );
+          for (final d in qs.docs) {
+            final hit = _userFromDoc(d.id, d.data());
+            if (hit != null && !people.any((p) => p.userId == hit.userId)) {
+              people.add(hit);
+            }
           }
-        }
-        anyIndexedHit = anyIndexedHit || people.isNotEmpty;
-      } catch (_) {}
+          anyIndexedHit = anyIndexedHit || people.isNotEmpty;
+        } catch (_) {}
+      }
 
       // Fallback scan (still fast enough for small datasets)
       if (!anyIndexedHit) {
@@ -146,6 +152,9 @@ class _SearchScreenState extends State<SearchScreen> {
 
       // POSTS
       final posts = <_PostHit>[];
+      // A topic named in any language also finds posts tagged with its id
+      // ("logement" finds "Housing").
+      final postTerms = ValueLabels.topicSearchTerms(query, _norm);
       final postsSnap = await FirestoreReadHelper.getQuery(
         FirebaseFirestore.instance
             .collection('posts')
@@ -167,7 +176,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
         final hay =
             '${_norm(content)} ${_norm(userName)} ${_norm(tags.join(" "))}';
-        if (hay.contains(query)) {
+        if (postTerms.any(hay.contains)) {
           posts.add(_PostHit(
             id: d.id,
             authorId: userId,

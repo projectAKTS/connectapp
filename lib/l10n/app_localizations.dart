@@ -3331,6 +3331,96 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Technical details when the app crashes (device model, app version, error), not linked to your account. Off unless you turn it on.'**
   String get settingsCrashReportsSubtitle;
+
+  /// No description provided for @badgeKindContributor.
+  ///
+  /// In en, this message translates to:
+  /// **'Kind Contributor'**
+  String get badgeKindContributor;
+
+  /// No description provided for @badgePremiumTrial.
+  ///
+  /// In en, this message translates to:
+  /// **'Premium Trial'**
+  String get badgePremiumTrial;
+
+  /// No description provided for @badgeProfileHighlight.
+  ///
+  /// In en, this message translates to:
+  /// **'Profile Highlight'**
+  String get badgeProfileHighlight;
+
+  /// No description provided for @badgeTrustedProblemSolver.
+  ///
+  /// In en, this message translates to:
+  /// **'Trusted Problem Solver'**
+  String get badgeTrustedProblemSolver;
+
+  /// No description provided for @badgeFirstContributor.
+  ///
+  /// In en, this message translates to:
+  /// **'First Contributor'**
+  String get badgeFirstContributor;
+
+  /// No description provided for @badgeLegendaryHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Legendary Helper'**
+  String get badgeLegendaryHelper;
+
+  /// No description provided for @badgeDedicatedContributor.
+  ///
+  /// In en, this message translates to:
+  /// **'Dedicated Contributor'**
+  String get badgeDedicatedContributor;
+
+  /// No description provided for @badgeConversationalist.
+  ///
+  /// In en, this message translates to:
+  /// **'Conversationalist'**
+  String get badgeConversationalist;
+
+  /// No description provided for @badgeStreakStarter.
+  ///
+  /// In en, this message translates to:
+  /// **'Streak Starter'**
+  String get badgeStreakStarter;
+
+  /// No description provided for @badgeBoostEnthusiast.
+  ///
+  /// In en, this message translates to:
+  /// **'Boost Enthusiast'**
+  String get badgeBoostEnthusiast;
+
+  /// No description provided for @badgePriorityPostBoost.
+  ///
+  /// In en, this message translates to:
+  /// **'Priority Post Boost'**
+  String get badgePriorityPostBoost;
+
+  /// No description provided for @badgeExpertHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Expert Helper'**
+  String get badgeExpertHelper;
+
+  /// No description provided for @badgeSkilledHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Skilled Helper'**
+  String get badgeSkilledHelper;
+
+  /// No description provided for @badgeBeginnerHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Beginner Helper'**
+  String get badgeBeginnerHelper;
+
+  /// No description provided for @badgeCommunityMentor.
+  ///
+  /// In en, this message translates to:
+  /// **'Community Mentor'**
+  String get badgeCommunityMentor;
 }
 
 class _AppLocalizationsDelegate

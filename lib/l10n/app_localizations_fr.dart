@@ -1813,4 +1813,49 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get settingsCrashReportsSubtitle =>
       'Détails techniques en cas de plantage (modèle d\'appareil, version de l\'application, erreur), non associés à votre compte. Désactivé sauf si vous l\'activez.';
+
+  @override
+  String get badgeKindContributor => 'Contributeur bienveillant';
+
+  @override
+  String get badgePremiumTrial => 'Essai Premium';
+
+  @override
+  String get badgeProfileHighlight => 'Profil en vedette';
+
+  @override
+  String get badgeTrustedProblemSolver => 'Solutionneur de confiance';
+
+  @override
+  String get badgeFirstContributor => 'Première contribution';
+
+  @override
+  String get badgeLegendaryHelper => 'Personne-ressource légendaire';
+
+  @override
+  String get badgeDedicatedContributor => 'Contributeur assidu';
+
+  @override
+  String get badgeConversationalist => 'Grand communicateur';
+
+  @override
+  String get badgeStreakStarter => 'Série lancée';
+
+  @override
+  String get badgeBoostEnthusiast => 'Adepte du rehaussement';
+
+  @override
+  String get badgePriorityPostBoost => 'Publication prioritaire';
+
+  @override
+  String get badgeExpertHelper => 'Personne-ressource experte';
+
+  @override
+  String get badgeSkilledHelper => 'Personne-ressource aguerrie';
+
+  @override
+  String get badgeBeginnerHelper => 'Personne-ressource débutante';
+
+  @override
+  String get badgeCommunityMentor => 'Mentor de la communauté';
 }

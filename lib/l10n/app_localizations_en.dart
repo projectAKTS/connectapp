@@ -1771,4 +1771,49 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsCrashReportsSubtitle =>
       'Technical details when the app crashes (device model, app version, error), not linked to your account. Off unless you turn it on.';
+
+  @override
+  String get badgeKindContributor => 'Kind Contributor';
+
+  @override
+  String get badgePremiumTrial => 'Premium Trial';
+
+  @override
+  String get badgeProfileHighlight => 'Profile Highlight';
+
+  @override
+  String get badgeTrustedProblemSolver => 'Trusted Problem Solver';
+
+  @override
+  String get badgeFirstContributor => 'First Contributor';
+
+  @override
+  String get badgeLegendaryHelper => 'Legendary Helper';
+
+  @override
+  String get badgeDedicatedContributor => 'Dedicated Contributor';
+
+  @override
+  String get badgeConversationalist => 'Conversationalist';
+
+  @override
+  String get badgeStreakStarter => 'Streak Starter';
+
+  @override
+  String get badgeBoostEnthusiast => 'Boost Enthusiast';
+
+  @override
+  String get badgePriorityPostBoost => 'Priority Post Boost';
+
+  @override
+  String get badgeExpertHelper => 'Expert Helper';
+
+  @override
+  String get badgeSkilledHelper => 'Skilled Helper';
+
+  @override
+  String get badgeBeginnerHelper => 'Beginner Helper';
+
+  @override
+  String get badgeCommunityMentor => 'Community Mentor';
 }

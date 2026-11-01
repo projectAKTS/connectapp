@@ -179,4 +179,63 @@ class ValueLabels {
     }
     return t.endsWith('Post') ? t : '$t Post';
   }
+
+  /// A stored badge such as "🏅 First Contributor": the emoji is kept and
+  /// the name translated. Unknown badges are shown as stored.
+  static String badge(AppLocalizations l, String stored) {
+    final m = RegExp(r'^(\S+)\s+(.+)$').firstMatch(stored.trim());
+    if (m == null) return stored;
+    final emoji = m[1]!;
+    final name = m[2]!;
+    final label = switch (name) {
+      'Kind Contributor' => l.badgeKindContributor,
+      'Premium Trial' => l.badgePremiumTrial,
+      'Profile Highlight' => l.badgeProfileHighlight,
+      'Trusted Problem Solver' => l.badgeTrustedProblemSolver,
+      'First Contributor' => l.badgeFirstContributor,
+      'Legendary Helper' => l.badgeLegendaryHelper,
+      'Dedicated Contributor' => l.badgeDedicatedContributor,
+      'Conversationalist' => l.badgeConversationalist,
+      'Streak Starter' => l.badgeStreakStarter,
+      'Boost Enthusiast' => l.badgeBoostEnthusiast,
+      'Priority Post Boost' => l.badgePriorityPostBoost,
+      'Expert Helper' => l.badgeExpertHelper,
+      'Skilled Helper' => l.badgeSkilledHelper,
+      'Beginner Helper' => l.badgeBeginnerHelper,
+      'Community Mentor' => l.badgeCommunityMentor,
+      _ => null,
+    };
+    return label == null ? stored : '$emoji $label';
+  }
+
+  /// Search needles for [normalizedQuery]: the query itself, plus every
+  /// language's label and the stored id of each topic or expertise whose
+  /// label (in any language) contains it. So "logement" also finds posts
+  /// tagged "Housing". [normalize] must be the caller's text normalizer.
+  static Set<String> topicSearchTerms(
+      String normalizedQuery, String Function(String) normalize) {
+    final terms = <String>{normalizedQuery};
+    if (normalizedQuery.length < 3) return terms;
+    final locales =
+        AppLocalizations.supportedLocales.map(lookupAppLocalizations).toList();
+    for (final id in topicIds) {
+      final labels = {
+        id,
+        for (final l in locales) topic(l, id),
+      }.map(normalize).toSet();
+      if (labels.any((label) => label.contains(normalizedQuery))) {
+        terms.addAll(labels);
+      }
+    }
+    return terms;
+  }
+
+  /// Every stored topic and expertise id with a label.
+  static const List<String> topicIds = [
+    'Moving to Canada', 'Housing', 'Job hunting', 'Student life', //
+    'Daily life in Canada', 'Language learning', 'Parenting support',
+    'Quebec-specific help', 'Immigration experience', 'Resume review',
+    'Interview prep', 'Career transitions', 'Housing search',
+    'School applications', 'Language practice', 'Settlement tips',
+  ];
 }
