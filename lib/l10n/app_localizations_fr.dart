@@ -112,4 +112,176 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get settingsUsageStatsSubtitle =>
       'Les écrans et fonctions utilisés, pour nous aider à améliorer Helperly. N\'inclut jamais vos messages ni vos publications. Désactivé sauf si vous l\'activez.';
+
+  @override
+  String get topicMovingToCanada => 'Déménager au Canada';
+
+  @override
+  String get topicHousing => 'Logement';
+
+  @override
+  String get topicJobHunting => 'Recherche d\'emploi';
+
+  @override
+  String get topicStudentLife => 'Vie étudiante';
+
+  @override
+  String get topicDailyLife => 'Vie quotidienne au Canada';
+
+  @override
+  String get topicLanguageLearning => 'Apprentissage des langues';
+
+  @override
+  String get topicParenting => 'Soutien aux parents';
+
+  @override
+  String get topicQuebec => 'Aide propre au Québec';
+
+  @override
+  String get topicImmigrationExperience => 'Expérience d\'immigration';
+
+  @override
+  String get expertiseResume => 'Révision de CV';
+
+  @override
+  String get expertiseInterview => 'Préparation aux entrevues';
+
+  @override
+  String get expertiseCareer => 'Réorientation de carrière';
+
+  @override
+  String get expertiseHousingSearch => 'Recherche de logement';
+
+  @override
+  String get expertiseSchool => 'Demandes d\'admission scolaire';
+
+  @override
+  String get expertiseLanguagePractice => 'Pratique linguistique';
+
+  @override
+  String get expertiseSettlement => 'Conseils d\'installation';
+
+  @override
+  String get countryCanada => 'Canada';
+
+  @override
+  String get countryUsa => 'États-Unis';
+
+  @override
+  String get countryOther => 'Autre';
+
+  @override
+  String get langEn => 'Anglais';
+
+  @override
+  String get langFr => 'Français';
+
+  @override
+  String get langAr => 'Arabe';
+
+  @override
+  String get langEs => 'Espagnol';
+
+  @override
+  String get langPt => 'Portugais';
+
+  @override
+  String get langZh => 'Chinois';
+
+  @override
+  String get langHi => 'Hindi';
+
+  @override
+  String get langPa => 'Pendjabi';
+
+  @override
+  String get langUr => 'Ourdou';
+
+  @override
+  String get langFa => 'Persan';
+
+  @override
+  String get langTr => 'Turc';
+
+  @override
+  String get langRu => 'Russe';
+
+  @override
+  String get langUk => 'Ukrainien';
+
+  @override
+  String get langTl => 'Tagalog';
+
+  @override
+  String get langVi => 'Vietnamien';
+
+  @override
+  String get langKo => 'Coréen';
+
+  @override
+  String get langIt => 'Italien';
+
+  @override
+  String get langDe => 'Allemand';
+
+  @override
+  String get langRo => 'Roumain';
+
+  @override
+  String get langBn => 'Bengali';
+
+  @override
+  String get langHt => 'Créole haïtien';
+
+  @override
+  String get langOther => 'Autre';
+
+  @override
+  String get reportSpam => 'Pourriel ou arnaque';
+
+  @override
+  String get reportHarassment => 'Harcèlement ou haine';
+
+  @override
+  String get reportInappropriate => 'Contenu inapproprié';
+
+  @override
+  String get reportHarmfulAdvice => 'Conseil dangereux ou trompeur';
+
+  @override
+  String get reportImpersonation => 'Usurpation d\'identité';
+
+  @override
+  String get reportOther => 'Autre chose';
+
+  @override
+  String get reportSheetTitle => 'Pourquoi signalez-vous ce contenu?';
+
+  @override
+  String get reportSheetSubtitle =>
+      'Les signalements sont confidentiels. Notre équipe les examine.';
+
+  @override
+  String get reportFailed =>
+      'Impossible d\'envoyer le signalement. Veuillez réessayer.';
+
+  @override
+  String get reportSent => 'Merci. Nous avons reçu votre signalement.';
+
+  @override
+  String blockTitle(String name) {
+    return 'Bloquer $name?';
+  }
+
+  @override
+  String get blockBody =>
+      'Vous ne verrez plus ses publications ni ses messages, et cette personne n\'apparaîtra plus dans votre liste d\'aidants. Vous pouvez la débloquer depuis son profil.';
+
+  @override
+  String get blockAction => 'Bloquer';
+
+  @override
+  String blockDone(String name) {
+    return '$name est bloqué(e).';
+  }
 }

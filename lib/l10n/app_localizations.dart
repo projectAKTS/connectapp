@@ -289,6 +289,336 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Which screens and features are used, to help us improve Helperly. Never includes your messages or posts. Off unless you turn it on.'**
   String get settingsUsageStatsSubtitle;
+
+  /// No description provided for @topicMovingToCanada.
+  ///
+  /// In en, this message translates to:
+  /// **'Moving to Canada'**
+  String get topicMovingToCanada;
+
+  /// No description provided for @topicHousing.
+  ///
+  /// In en, this message translates to:
+  /// **'Housing'**
+  String get topicHousing;
+
+  /// No description provided for @topicJobHunting.
+  ///
+  /// In en, this message translates to:
+  /// **'Job hunting'**
+  String get topicJobHunting;
+
+  /// No description provided for @topicStudentLife.
+  ///
+  /// In en, this message translates to:
+  /// **'Student life'**
+  String get topicStudentLife;
+
+  /// No description provided for @topicDailyLife.
+  ///
+  /// In en, this message translates to:
+  /// **'Daily life in Canada'**
+  String get topicDailyLife;
+
+  /// No description provided for @topicLanguageLearning.
+  ///
+  /// In en, this message translates to:
+  /// **'Language learning'**
+  String get topicLanguageLearning;
+
+  /// No description provided for @topicParenting.
+  ///
+  /// In en, this message translates to:
+  /// **'Parenting support'**
+  String get topicParenting;
+
+  /// No description provided for @topicQuebec.
+  ///
+  /// In en, this message translates to:
+  /// **'Quebec-specific help'**
+  String get topicQuebec;
+
+  /// No description provided for @topicImmigrationExperience.
+  ///
+  /// In en, this message translates to:
+  /// **'Immigration experience'**
+  String get topicImmigrationExperience;
+
+  /// No description provided for @expertiseResume.
+  ///
+  /// In en, this message translates to:
+  /// **'Resume review'**
+  String get expertiseResume;
+
+  /// No description provided for @expertiseInterview.
+  ///
+  /// In en, this message translates to:
+  /// **'Interview prep'**
+  String get expertiseInterview;
+
+  /// No description provided for @expertiseCareer.
+  ///
+  /// In en, this message translates to:
+  /// **'Career transitions'**
+  String get expertiseCareer;
+
+  /// No description provided for @expertiseHousingSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Housing search'**
+  String get expertiseHousingSearch;
+
+  /// No description provided for @expertiseSchool.
+  ///
+  /// In en, this message translates to:
+  /// **'School applications'**
+  String get expertiseSchool;
+
+  /// No description provided for @expertiseLanguagePractice.
+  ///
+  /// In en, this message translates to:
+  /// **'Language practice'**
+  String get expertiseLanguagePractice;
+
+  /// No description provided for @expertiseSettlement.
+  ///
+  /// In en, this message translates to:
+  /// **'Settlement tips'**
+  String get expertiseSettlement;
+
+  /// No description provided for @countryCanada.
+  ///
+  /// In en, this message translates to:
+  /// **'Canada'**
+  String get countryCanada;
+
+  /// No description provided for @countryUsa.
+  ///
+  /// In en, this message translates to:
+  /// **'USA'**
+  String get countryUsa;
+
+  /// No description provided for @countryOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Other'**
+  String get countryOther;
+
+  /// No description provided for @langEn.
+  ///
+  /// In en, this message translates to:
+  /// **'English'**
+  String get langEn;
+
+  /// No description provided for @langFr.
+  ///
+  /// In en, this message translates to:
+  /// **'French'**
+  String get langFr;
+
+  /// No description provided for @langAr.
+  ///
+  /// In en, this message translates to:
+  /// **'Arabic'**
+  String get langAr;
+
+  /// No description provided for @langEs.
+  ///
+  /// In en, this message translates to:
+  /// **'Spanish'**
+  String get langEs;
+
+  /// No description provided for @langPt.
+  ///
+  /// In en, this message translates to:
+  /// **'Portuguese'**
+  String get langPt;
+
+  /// No description provided for @langZh.
+  ///
+  /// In en, this message translates to:
+  /// **'Chinese'**
+  String get langZh;
+
+  /// No description provided for @langHi.
+  ///
+  /// In en, this message translates to:
+  /// **'Hindi'**
+  String get langHi;
+
+  /// No description provided for @langPa.
+  ///
+  /// In en, this message translates to:
+  /// **'Punjabi'**
+  String get langPa;
+
+  /// No description provided for @langUr.
+  ///
+  /// In en, this message translates to:
+  /// **'Urdu'**
+  String get langUr;
+
+  /// No description provided for @langFa.
+  ///
+  /// In en, this message translates to:
+  /// **'Persian'**
+  String get langFa;
+
+  /// No description provided for @langTr.
+  ///
+  /// In en, this message translates to:
+  /// **'Turkish'**
+  String get langTr;
+
+  /// No description provided for @langRu.
+  ///
+  /// In en, this message translates to:
+  /// **'Russian'**
+  String get langRu;
+
+  /// No description provided for @langUk.
+  ///
+  /// In en, this message translates to:
+  /// **'Ukrainian'**
+  String get langUk;
+
+  /// No description provided for @langTl.
+  ///
+  /// In en, this message translates to:
+  /// **'Tagalog'**
+  String get langTl;
+
+  /// No description provided for @langVi.
+  ///
+  /// In en, this message translates to:
+  /// **'Vietnamese'**
+  String get langVi;
+
+  /// No description provided for @langKo.
+  ///
+  /// In en, this message translates to:
+  /// **'Korean'**
+  String get langKo;
+
+  /// No description provided for @langIt.
+  ///
+  /// In en, this message translates to:
+  /// **'Italian'**
+  String get langIt;
+
+  /// No description provided for @langDe.
+  ///
+  /// In en, this message translates to:
+  /// **'German'**
+  String get langDe;
+
+  /// No description provided for @langRo.
+  ///
+  /// In en, this message translates to:
+  /// **'Romanian'**
+  String get langRo;
+
+  /// No description provided for @langBn.
+  ///
+  /// In en, this message translates to:
+  /// **'Bengali'**
+  String get langBn;
+
+  /// No description provided for @langHt.
+  ///
+  /// In en, this message translates to:
+  /// **'Haitian Creole'**
+  String get langHt;
+
+  /// No description provided for @langOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Other'**
+  String get langOther;
+
+  /// No description provided for @reportSpam.
+  ///
+  /// In en, this message translates to:
+  /// **'Spam or scam'**
+  String get reportSpam;
+
+  /// No description provided for @reportHarassment.
+  ///
+  /// In en, this message translates to:
+  /// **'Harassment or hate'**
+  String get reportHarassment;
+
+  /// No description provided for @reportInappropriate.
+  ///
+  /// In en, this message translates to:
+  /// **'Inappropriate content'**
+  String get reportInappropriate;
+
+  /// No description provided for @reportHarmfulAdvice.
+  ///
+  /// In en, this message translates to:
+  /// **'Harmful or misleading advice'**
+  String get reportHarmfulAdvice;
+
+  /// No description provided for @reportImpersonation.
+  ///
+  /// In en, this message translates to:
+  /// **'Pretending to be someone else'**
+  String get reportImpersonation;
+
+  /// No description provided for @reportOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Something else'**
+  String get reportOther;
+
+  /// No description provided for @reportSheetTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Why are you reporting this?'**
+  String get reportSheetTitle;
+
+  /// No description provided for @reportSheetSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Reports are private. Our team reviews them.'**
+  String get reportSheetSubtitle;
+
+  /// No description provided for @reportFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not send the report. Please try again.'**
+  String get reportFailed;
+
+  /// No description provided for @reportSent.
+  ///
+  /// In en, this message translates to:
+  /// **'Thanks. We received your report.'**
+  String get reportSent;
+
+  /// No description provided for @blockTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Block {name}?'**
+  String blockTitle(String name);
+
+  /// No description provided for @blockBody.
+  ///
+  /// In en, this message translates to:
+  /// **'You won\'t see their posts or messages, and they won\'t appear in your helper list. You can unblock them from their profile.'**
+  String get blockBody;
+
+  /// No description provided for @blockAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Block'**
+  String get blockAction;
+
+  /// No description provided for @blockDone.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} is blocked.'**
+  String blockDone(String name);
 }
 
 class _AppLocalizationsDelegate

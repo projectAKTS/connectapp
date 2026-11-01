@@ -112,4 +112,175 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsUsageStatsSubtitle =>
       'Which screens and features are used, to help us improve Helperly. Never includes your messages or posts. Off unless you turn it on.';
+
+  @override
+  String get topicMovingToCanada => 'Moving to Canada';
+
+  @override
+  String get topicHousing => 'Housing';
+
+  @override
+  String get topicJobHunting => 'Job hunting';
+
+  @override
+  String get topicStudentLife => 'Student life';
+
+  @override
+  String get topicDailyLife => 'Daily life in Canada';
+
+  @override
+  String get topicLanguageLearning => 'Language learning';
+
+  @override
+  String get topicParenting => 'Parenting support';
+
+  @override
+  String get topicQuebec => 'Quebec-specific help';
+
+  @override
+  String get topicImmigrationExperience => 'Immigration experience';
+
+  @override
+  String get expertiseResume => 'Resume review';
+
+  @override
+  String get expertiseInterview => 'Interview prep';
+
+  @override
+  String get expertiseCareer => 'Career transitions';
+
+  @override
+  String get expertiseHousingSearch => 'Housing search';
+
+  @override
+  String get expertiseSchool => 'School applications';
+
+  @override
+  String get expertiseLanguagePractice => 'Language practice';
+
+  @override
+  String get expertiseSettlement => 'Settlement tips';
+
+  @override
+  String get countryCanada => 'Canada';
+
+  @override
+  String get countryUsa => 'USA';
+
+  @override
+  String get countryOther => 'Other';
+
+  @override
+  String get langEn => 'English';
+
+  @override
+  String get langFr => 'French';
+
+  @override
+  String get langAr => 'Arabic';
+
+  @override
+  String get langEs => 'Spanish';
+
+  @override
+  String get langPt => 'Portuguese';
+
+  @override
+  String get langZh => 'Chinese';
+
+  @override
+  String get langHi => 'Hindi';
+
+  @override
+  String get langPa => 'Punjabi';
+
+  @override
+  String get langUr => 'Urdu';
+
+  @override
+  String get langFa => 'Persian';
+
+  @override
+  String get langTr => 'Turkish';
+
+  @override
+  String get langRu => 'Russian';
+
+  @override
+  String get langUk => 'Ukrainian';
+
+  @override
+  String get langTl => 'Tagalog';
+
+  @override
+  String get langVi => 'Vietnamese';
+
+  @override
+  String get langKo => 'Korean';
+
+  @override
+  String get langIt => 'Italian';
+
+  @override
+  String get langDe => 'German';
+
+  @override
+  String get langRo => 'Romanian';
+
+  @override
+  String get langBn => 'Bengali';
+
+  @override
+  String get langHt => 'Haitian Creole';
+
+  @override
+  String get langOther => 'Other';
+
+  @override
+  String get reportSpam => 'Spam or scam';
+
+  @override
+  String get reportHarassment => 'Harassment or hate';
+
+  @override
+  String get reportInappropriate => 'Inappropriate content';
+
+  @override
+  String get reportHarmfulAdvice => 'Harmful or misleading advice';
+
+  @override
+  String get reportImpersonation => 'Pretending to be someone else';
+
+  @override
+  String get reportOther => 'Something else';
+
+  @override
+  String get reportSheetTitle => 'Why are you reporting this?';
+
+  @override
+  String get reportSheetSubtitle =>
+      'Reports are private. Our team reviews them.';
+
+  @override
+  String get reportFailed => 'Could not send the report. Please try again.';
+
+  @override
+  String get reportSent => 'Thanks. We received your report.';
+
+  @override
+  String blockTitle(String name) {
+    return 'Block $name?';
+  }
+
+  @override
+  String get blockBody =>
+      'You won\'t see their posts or messages, and they won\'t appear in your helper list. You can unblock them from their profile.';
+
+  @override
+  String get blockAction => 'Block';
+
+  @override
+  String blockDone(String name) {
+    return '$name is blocked.';
+  }
 }

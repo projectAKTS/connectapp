@@ -1,15 +1,14 @@
 {
   "@@locale": "en",
-
   "languageName": "English",
-  "@languageName": {"description": "This language's own name, shown in the language picker."},
-
+  "@languageName": {
+    "description": "This language's own name, shown in the language picker."
+  },
   "commonCancel": "Cancel",
   "commonOk": "OK",
   "commonDelete": "Delete",
   "commonSave": "Save",
   "commonTryAgain": "Please try again.",
-
   "settingsTitle": "Settings",
   "settingsSectionHelp": "Help",
   "settingsSectionLegal": "Legal",
@@ -29,14 +28,87 @@
   "settingsDeletionRequestedTitle": "Account deletion requested",
   "settingsDeletionRequestedBody": "Your account and personal data will be deleted within 30 days. You will now be signed out.",
   "settingsLegalEnglishOnly": "This document is currently available in English only.",
-
   "settingsLanguage": "App language",
   "languageSystemDefault": "Device language",
   "languageSystemDefaultSubtitle": "Currently {language}",
-  "@languageSystemDefaultSubtitle": {"placeholders": {"language": {"type": "String"}}},
+  "@languageSystemDefaultSubtitle": {
+    "placeholders": {
+      "language": {
+        "type": "String"
+      }
+    }
+  },
   "languagePickerTitle": "App language",
   "languagePickerNote": "This only changes the app's text. The languages you speak are set in your profile.",
-
   "settingsUsageStats": "Share usage statistics",
-  "settingsUsageStatsSubtitle": "Which screens and features are used, to help us improve Helperly. Never includes your messages or posts. Off unless you turn it on."
+  "settingsUsageStatsSubtitle": "Which screens and features are used, to help us improve Helperly. Never includes your messages or posts. Off unless you turn it on.",
+  "topicMovingToCanada": "Moving to Canada",
+  "topicHousing": "Housing",
+  "topicJobHunting": "Job hunting",
+  "topicStudentLife": "Student life",
+  "topicDailyLife": "Daily life in Canada",
+  "topicLanguageLearning": "Language learning",
+  "topicParenting": "Parenting support",
+  "topicQuebec": "Quebec-specific help",
+  "topicImmigrationExperience": "Immigration experience",
+  "expertiseResume": "Resume review",
+  "expertiseInterview": "Interview prep",
+  "expertiseCareer": "Career transitions",
+  "expertiseHousingSearch": "Housing search",
+  "expertiseSchool": "School applications",
+  "expertiseLanguagePractice": "Language practice",
+  "expertiseSettlement": "Settlement tips",
+  "countryCanada": "Canada",
+  "countryUsa": "USA",
+  "countryOther": "Other",
+  "langEn": "English",
+  "langFr": "French",
+  "langAr": "Arabic",
+  "langEs": "Spanish",
+  "langPt": "Portuguese",
+  "langZh": "Chinese",
+  "langHi": "Hindi",
+  "langPa": "Punjabi",
+  "langUr": "Urdu",
+  "langFa": "Persian",
+  "langTr": "Turkish",
+  "langRu": "Russian",
+  "langUk": "Ukrainian",
+  "langTl": "Tagalog",
+  "langVi": "Vietnamese",
+  "langKo": "Korean",
+  "langIt": "Italian",
+  "langDe": "German",
+  "langRo": "Romanian",
+  "langBn": "Bengali",
+  "langHt": "Haitian Creole",
+  "langOther": "Other",
+  "reportSpam": "Spam or scam",
+  "reportHarassment": "Harassment or hate",
+  "reportInappropriate": "Inappropriate content",
+  "reportHarmfulAdvice": "Harmful or misleading advice",
+  "reportImpersonation": "Pretending to be someone else",
+  "reportOther": "Something else",
+  "reportSheetTitle": "Why are you reporting this?",
+  "reportSheetSubtitle": "Reports are private. Our team reviews them.",
+  "reportFailed": "Could not send the report. Please try again.",
+  "reportSent": "Thanks. We received your report.",
+  "blockTitle": "Block {name}?",
+  "blockBody": "You won't see their posts or messages, and they won't appear in your helper list. You can unblock them from their profile.",
+  "blockAction": "Block",
+  "blockDone": "{name} is blocked.",
+  "@blockTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "@blockDone": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  }
 }

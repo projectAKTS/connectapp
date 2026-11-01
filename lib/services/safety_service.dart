@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:connect_app/l10n/l10n.dart';
+import 'package:connect_app/l10n/value_labels.dart';
 import 'package:connect_app/services/app_telemetry.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connect_app/services/helperly_test_runtime.dart';
@@ -18,6 +20,7 @@ class SafetyService {
 
   static final SafetyService instance = SafetyService._();
 
+  /// Stored as-is in `reports.reason` for moderators; shown translated.
   static const List<String> reportReasons = [
     'Spam or scam',
     'Harassment or hate',
@@ -97,37 +100,42 @@ class SafetyService {
     required String targetId,
     String targetUid = '',
   }) async {
+    final l10n = context.l10n;
     final reason = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: AppColors.canvas,
       showDragHandle: true,
+      // Scrolls on small screens; French reasons are longer.
+      isScrollControlled: true,
       builder: (ctx) => SafeArea(
-        child: Column(
+        child: SingleChildScrollView(
+            child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 4),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
               child: Text(
-                'Why are you reporting this?',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                l10n.reportSheetTitle,
+                style:
+                    const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
               ),
             ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
               child: Text(
-                'Reports are private. Our team reviews them.',
-                style: TextStyle(color: AppColors.muted),
+                l10n.reportSheetSubtitle,
+                style: const TextStyle(color: AppColors.muted),
               ),
             ),
             for (final r in reportReasons)
               ListTile(
-                title: Text(r),
+                title: Text(ValueLabels.reportReason(l10n, r)),
                 onTap: () => Navigator.pop(ctx, r),
               ),
             const SizedBox(height: 8),
           ],
-        ),
+        )),
       ),
     );
     if (reason == null) return false;
@@ -140,15 +148,15 @@ class SafetyService {
       );
     } catch (_) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Could not send the report. Please try again.'),
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(l10n.reportFailed),
         ));
       }
       return false;
     }
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Thanks. We received your report.'),
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(l10n.reportSent),
       ));
       AppTelemetry.event('report_submitted', {'type': type});
     }
@@ -161,23 +169,21 @@ class SafetyService {
     required String targetUid,
     required String name,
   }) async {
+    final l10n = context.l10n;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Block $name?'),
-        content: const Text(
-          "You won't see their posts or messages, and they won't appear in "
-          'your helper list. You can unblock them from their profile.',
-        ),
+        title: Text(l10n.blockTitle(name)),
+        content: Text(l10n.blockBody),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(l10n.commonCancel),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child:
-                const Text('Block', style: TextStyle(color: AppColors.danger)),
+            child: Text(l10n.blockAction,
+                style: const TextStyle(color: AppColors.danger)),
           ),
         ],
       ),
@@ -187,7 +193,7 @@ class SafetyService {
     AppTelemetry.event('user_blocked');
     if (context.mounted) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$name is blocked.')));
+          .showSnackBar(SnackBar(content: Text(l10n.blockDone(name))));
     }
     return true;
   }
