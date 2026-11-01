@@ -619,6 +619,180 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{name} is blocked.'**
   String blockDone(String name);
+
+  /// No description provided for @commonDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get commonDone;
+
+  /// No description provided for @spokenLanguagesLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Languages you speak'**
+  String get spokenLanguagesLabel;
+
+  /// No description provided for @spokenLanguagesHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Select languages'**
+  String get spokenLanguagesHint;
+
+  /// No description provided for @spokenLanguagesNote.
+  ///
+  /// In en, this message translates to:
+  /// **'People can find helpers who speak their language. This is separate from the app\'s language.'**
+  String get spokenLanguagesNote;
+
+  /// No description provided for @spokenLanguagesRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Please select at least one language you speak.'**
+  String get spokenLanguagesRequired;
+
+  /// No description provided for @commonApply.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply'**
+  String get commonApply;
+
+  /// No description provided for @commonClear.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear'**
+  String get commonClear;
+
+  /// No description provided for @commonNoResults.
+  ///
+  /// In en, this message translates to:
+  /// **'No results.'**
+  String get commonNoResults;
+
+  /// No description provided for @findHelperTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Find a helper'**
+  String get findHelperTitle;
+
+  /// No description provided for @findHelperResetFilters.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset filters'**
+  String get findHelperResetFilters;
+
+  /// No description provided for @findHelperSearchHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search helpers…'**
+  String get findHelperSearchHint;
+
+  /// No description provided for @findHelperNoMatches.
+  ///
+  /// In en, this message translates to:
+  /// **'No helpers match your filters.'**
+  String get findHelperNoMatches;
+
+  /// No description provided for @findHelperAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Available'**
+  String get findHelperAvailable;
+
+  /// No description provided for @filterCategory.
+  ///
+  /// In en, this message translates to:
+  /// **'Category'**
+  String get filterCategory;
+
+  /// No description provided for @filterCategoryCount.
+  ///
+  /// In en, this message translates to:
+  /// **'Category ({count})'**
+  String filterCategoryCount(int count);
+
+  /// No description provided for @filterSelectCategories.
+  ///
+  /// In en, this message translates to:
+  /// **'Select categories'**
+  String get filterSelectCategories;
+
+  /// No description provided for @filterLanguage.
+  ///
+  /// In en, this message translates to:
+  /// **'Language'**
+  String get filterLanguage;
+
+  /// No description provided for @filterLanguageCount.
+  ///
+  /// In en, this message translates to:
+  /// **'Language ({count})'**
+  String filterLanguageCount(int count);
+
+  /// No description provided for @filterSelectLanguages.
+  ///
+  /// In en, this message translates to:
+  /// **'Select languages'**
+  String get filterSelectLanguages;
+
+  /// No description provided for @filterVerified.
+  ///
+  /// In en, this message translates to:
+  /// **'Verified'**
+  String get filterVerified;
+
+  /// No description provided for @filterPrice.
+  ///
+  /// In en, this message translates to:
+  /// **'Price'**
+  String get filterPrice;
+
+  /// No description provided for @filterPriceMin.
+  ///
+  /// In en, this message translates to:
+  /// **'Min'**
+  String get filterPriceMin;
+
+  /// No description provided for @filterPriceMax.
+  ///
+  /// In en, this message translates to:
+  /// **'Max'**
+  String get filterPriceMax;
+
+  /// No description provided for @sortRelevance.
+  ///
+  /// In en, this message translates to:
+  /// **'Relevance'**
+  String get sortRelevance;
+
+  /// No description provided for @sortRating.
+  ///
+  /// In en, this message translates to:
+  /// **'Rating'**
+  String get sortRating;
+
+  /// No description provided for @sortPrice.
+  ///
+  /// In en, this message translates to:
+  /// **'Price'**
+  String get sortPrice;
+
+  /// No description provided for @sortPriceLowHigh.
+  ///
+  /// In en, this message translates to:
+  /// **'Price (low → high)'**
+  String get sortPriceLowHigh;
+
+  /// No description provided for @sortNewest.
+  ///
+  /// In en, this message translates to:
+  /// **'Newest'**
+  String get sortNewest;
+
+  /// No description provided for @pricePerHour.
+  ///
+  /// In en, this message translates to:
+  /// **'{amount}/hr'**
+  String pricePerHour(String amount);
 }
 
 class _AppLocalizationsDelegate

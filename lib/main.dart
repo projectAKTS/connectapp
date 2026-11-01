@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/l10n/formatters.dart';
+import 'package:connect_app/models/profile_languages.dart';
 import 'package:connect_app/services/app_prefs.dart';
 import 'package:connect_app/services/locale_controller.dart';
 
@@ -563,8 +564,8 @@ class _AuthGateState extends State<AuthGate> {
                 .toString()
                 .trim()
                 .isNotEmpty);
-            final hasLanguage =
-                (data['language'] ?? '').toString().trim().isNotEmpty;
+            // spokenLanguages or the legacy single `language` field.
+            final hasLanguage = ProfileLanguages.hasAny(data);
             final hasTopics = data['interestTags'] is List &&
                 (data['interestTags'] as List).isNotEmpty;
 

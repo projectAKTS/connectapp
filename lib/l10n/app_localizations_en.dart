@@ -283,4 +283,99 @@ class AppLocalizationsEn extends AppLocalizations {
   String blockDone(String name) {
     return '$name is blocked.';
   }
+
+  @override
+  String get commonDone => 'Done';
+
+  @override
+  String get spokenLanguagesLabel => 'Languages you speak';
+
+  @override
+  String get spokenLanguagesHint => 'Select languages';
+
+  @override
+  String get spokenLanguagesNote =>
+      'People can find helpers who speak their language. This is separate from the app\'s language.';
+
+  @override
+  String get spokenLanguagesRequired =>
+      'Please select at least one language you speak.';
+
+  @override
+  String get commonApply => 'Apply';
+
+  @override
+  String get commonClear => 'Clear';
+
+  @override
+  String get commonNoResults => 'No results.';
+
+  @override
+  String get findHelperTitle => 'Find a helper';
+
+  @override
+  String get findHelperResetFilters => 'Reset filters';
+
+  @override
+  String get findHelperSearchHint => 'Search helpers…';
+
+  @override
+  String get findHelperNoMatches => 'No helpers match your filters.';
+
+  @override
+  String get findHelperAvailable => 'Available';
+
+  @override
+  String get filterCategory => 'Category';
+
+  @override
+  String filterCategoryCount(int count) {
+    return 'Category ($count)';
+  }
+
+  @override
+  String get filterSelectCategories => 'Select categories';
+
+  @override
+  String get filterLanguage => 'Language';
+
+  @override
+  String filterLanguageCount(int count) {
+    return 'Language ($count)';
+  }
+
+  @override
+  String get filterSelectLanguages => 'Select languages';
+
+  @override
+  String get filterVerified => 'Verified';
+
+  @override
+  String get filterPrice => 'Price';
+
+  @override
+  String get filterPriceMin => 'Min';
+
+  @override
+  String get filterPriceMax => 'Max';
+
+  @override
+  String get sortRelevance => 'Relevance';
+
+  @override
+  String get sortRating => 'Rating';
+
+  @override
+  String get sortPrice => 'Price';
+
+  @override
+  String get sortPriceLowHigh => 'Price (low → high)';
+
+  @override
+  String get sortNewest => 'Newest';
+
+  @override
+  String pricePerHour(String amount) {
+    return '$amount/hr';
+  }
 }

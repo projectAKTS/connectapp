@@ -1,3 +1,6 @@
+import 'package:connect_app/l10n/l10n.dart';
+import 'package:connect_app/l10n/value_labels.dart';
+import 'package:connect_app/models/profile_languages.dart';
 import 'package:connect_app/l10n/formatters.dart';
 import 'dart:async';
 
@@ -106,10 +109,6 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
         final List<String> categoriesRaw = (m['categories'] is List)
             ? List<String>.from(m['categories'])
             : const [];
-        final List<String> languagesRaw = (m['languages'] is List)
-            ? List<String>.from(m['languages'])
-            : const [];
-        final String singleLanguage = (m['language'] ?? '').toString().trim();
         final String photo =
             (m['photoURL'] ?? m['avatar'] ?? m['profilePicture'] ?? '')
                 .toString();
@@ -119,11 +118,8 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
             ? List<String>.from(m['expertiseTags'])
             : const [];
         final List<String> categories = categoriesRaw;
-        final List<String> languages = languagesRaw.isNotEmpty
-            ? languagesRaw.map((e) => e.toString()).toList()
-            : (singleLanguage.isNotEmpty
-                ? <String>[singleLanguage]
-                : <String>[]);
+        // Spoken-language codes; older profiles map from `language`.
+        final List<String> languages = ProfileLanguages.read(m);
 
         final bool availableFlag = (m['isAvailable'] == true);
         final String availabilityStr = (m['availability'] ?? '').toString();
@@ -296,7 +292,7 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
         appBar: AppBar(
           backgroundColor: AppColors.canvas,
           elevation: 0,
-          title: const Text('Find a helper'),
+          title: Text(context.l10n.findHelperTitle),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () => Navigator.of(context).maybePop(),
@@ -317,8 +313,8 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
                     ),
                     backgroundColor: AppColors.card,
                   ),
-                  child: const Text('Reset filters',
-                      style: TextStyle(fontWeight: FontWeight.w700)),
+                  child: Text(context.l10n.findHelperResetFilters,
+                      style: const TextStyle(fontWeight: FontWeight.w700)),
                 ),
               ),
           ],
@@ -331,7 +327,7 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
               child: _SearchPill(
                 controller: _q,
                 focusNode: _focus,
-                hint: 'Search helpers by name, bio, or handle…',
+                hint: context.l10n.findHelperSearchHint,
                 showClear: hasQuery,
                 onClear: () {
                   _q.clear();
@@ -398,8 +394,7 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : _hits.isEmpty
-                      ? const _EmptyState(
-                          text: 'No helpers match your filters.')
+                      ? _EmptyState(text: context.l10n.findHelperNoMatches)
                       : ListView.builder(
                           padding: const EdgeInsets.fromLTRB(12, 6, 12, 24),
                           itemCount: _hits.length,
@@ -522,18 +517,24 @@ class _HelperTile extends StatelessWidget {
                       runSpacing: 6,
                       children: [
                         if (helper.hourlyRate != null)
-                          _Tag(
-                              '${AppFormat.money(context, helper.hourlyRate!, decimals: 0)}/hr'),
+                          _Tag(context.l10n.pricePerHour(AppFormat.money(
+                              context, helper.hourlyRate!,
+                              decimals: 0))),
                         // Derived from a stated time window, not live
                         // presence, so it must not claim "now".
-                        if (helper.isAvailable) const _Tag('Available'),
+                        if (helper.isAvailable)
+                          _Tag(context.l10n.findHelperAvailable),
                         ...(helper.expertise.isNotEmpty
                                 ? helper.expertise
                                 : helper.categories)
                             .take(3)
-                            .map((c) => _Tag(c)),
+                            .map((c) =>
+                                _Tag(ValueLabels.topic(context.l10n, c))),
                         if (helper.languages.isNotEmpty)
-                          _Tag(helper.languages.take(2).join(' · ')),
+                          _Tag(helper.languages
+                              .take(2)
+                              .map((c) => ValueLabels.language(context.l10n, c))
+                              .join(' · ')),
                         if (helper.rating > 0)
                           _Tag('★ ${helper.rating.toStringAsFixed(1)}'),
                       ],
@@ -610,13 +611,14 @@ class _FilterRow extends StatelessWidget {
           _FilterChipButton(
             icon: Icons.category_outlined,
             label: selectedCategories.isEmpty
-                ? 'Category'
-                : 'Category (${selectedCategories.length})',
+                ? context.l10n.filterCategory
+                : context.l10n.filterCategoryCount(selectedCategories.length),
             onTap: () async {
               final result = await _pickListSheet(
                 context,
-                title: 'Select categories',
+                title: context.l10n.filterSelectCategories,
                 options: HelpTopics.topics,
+                labelOf: (id) => ValueLabels.topic(context.l10n, id),
                 initial: selectedCategories,
               );
               if (result != null) {
@@ -636,14 +638,15 @@ class _FilterRow extends StatelessWidget {
           _FilterChipButton(
             icon: Icons.language,
             label: selectedLanguages.isEmpty
-                ? 'Language'
-                : 'Language (${selectedLanguages.length})',
+                ? context.l10n.filterLanguage
+                : context.l10n.filterLanguageCount(selectedLanguages.length),
             onTap: () async {
               final result = await _pickListSheet(
                 context,
-                title: 'Select languages',
-                // Use onboarding languages
-                options: const ['English', 'French', 'Other'],
+                title: context.l10n.filterSelectLanguages,
+                // Spoken-language codes, as stored on profiles.
+                options: ValueLabels.languageCodes,
+                labelOf: (code) => ValueLabels.language(context.l10n, code),
                 initial: selectedLanguages,
               );
               if (result != null) {
@@ -661,7 +664,7 @@ class _FilterRow extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           _TogglePill(
-            label: 'Available',
+            label: context.l10n.findHelperAvailable,
             value: onlyAvailable,
             onChanged: (v) => onChanged(
               categories: _copy(selectedCategories),
@@ -683,7 +686,7 @@ class _FilterRow extends StatelessWidget {
       runSpacing: 10,
       children: [
         _TogglePill(
-          label: 'Verified',
+          label: context.l10n.filterVerified,
           value: onlyVerified,
           onChanged: (v) => onChanged(
             categories: _copy(selectedCategories),
@@ -827,7 +830,7 @@ class _PricePill extends StatelessWidget {
     return _FilterChipButton(
       icon: Icons.attach_money,
       label: (minPrice == null && maxPrice == null)
-          ? 'Price'
+          ? context.l10n.filterPrice
           : '${AppFormat.money(context, minPrice ?? 0, decimals: 0)}–${maxPrice == null ? '∞' : AppFormat.money(context, maxPrice!, decimals: 0)}',
       onTap: () async {
         final res = await showModalBottomSheet<_PriceRange>(
@@ -854,10 +857,10 @@ class _SortPill extends StatelessWidget {
     return _FilterChipButton(
       icon: Icons.sort,
       label: {
-        _Sort.relevance: 'Relevance',
-        _Sort.rating: 'Rating',
-        _Sort.price: 'Price',
-        _Sort.newest: 'Newest',
+        _Sort.relevance: context.l10n.sortRelevance,
+        _Sort.rating: context.l10n.sortRating,
+        _Sort.price: context.l10n.sortPrice,
+        _Sort.newest: context.l10n.sortNewest,
       }[current]!,
       onTap: () async {
         final res = await showModalBottomSheet<_Sort>(
@@ -909,9 +912,9 @@ class _PriceSheetState extends State<_PriceSheet> {
             const SizedBox(height: 12),
             Row(
               children: [
-                Expanded(child: _priceField(_min, 'Min')),
+                Expanded(child: _priceField(_min, context.l10n.filterPriceMin)),
                 const SizedBox(width: 12),
-                Expanded(child: _priceField(_max, 'Max')),
+                Expanded(child: _priceField(_max, context.l10n.filterPriceMax)),
               ],
             ),
             const SizedBox(height: 16),
@@ -928,7 +931,7 @@ class _PriceSheetState extends State<_PriceSheet> {
                           borderRadius: BorderRadius.circular(14)),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
-                    child: const Text('Clear'),
+                    child: Text(context.l10n.commonClear),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -939,7 +942,7 @@ class _PriceSheetState extends State<_PriceSheet> {
                       final max = double.tryParse(_max.text.trim());
                       Navigator.pop(context, _PriceRange(min, max));
                     },
-                    child: const Text('Apply'),
+                    child: Text(context.l10n.commonApply),
                   ),
                 ),
               ],
@@ -978,10 +981,10 @@ class _SortSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = <_Sort, String>{
-      _Sort.relevance: 'Relevance',
-      _Sort.rating: 'Rating',
-      _Sort.price: 'Price (low → high)',
-      _Sort.newest: 'Newest',
+      _Sort.relevance: context.l10n.sortRelevance,
+      _Sort.rating: context.l10n.sortRating,
+      _Sort.price: context.l10n.sortPriceLowHigh,
+      _Sort.newest: context.l10n.sortNewest,
     };
     return SafeArea(
       child: Padding(
@@ -1026,6 +1029,7 @@ Future<Set<String>?> _pickListSheet(
   required String title,
   required List<String> options,
   required Set<String> initial,
+  String Function(String value)? labelOf,
 }) {
   final temp = initial.map(_norm).toSet();
   return showModalBottomSheet<Set<String>>(
@@ -1055,8 +1059,9 @@ Future<Set<String>?> _pickListSheet(
                       shrinkWrap: true,
                       itemCount: options.length,
                       itemBuilder: (_, i) {
-                        final label = options[i];
-                        final key = _norm(label);
+                        final value = options[i];
+                        final key = _norm(value);
+                        final label = labelOf == null ? value : labelOf(value);
                         final sel = temp.contains(key);
                         return CheckboxListTile(
                           value: sel,
@@ -1084,7 +1089,7 @@ Future<Set<String>?> _pickListSheet(
                     children: [
                       TextButton(
                         onPressed: () => Navigator.pop(ctx, null),
-                        child: const Text('Cancel'),
+                        child: Text(ctx.l10n.commonCancel),
                       ),
                       const SizedBox(width: 8),
                       ElevatedButton(
@@ -1095,7 +1100,7 @@ Future<Set<String>?> _pickListSheet(
                           }
                           Navigator.pop(ctx, out);
                         },
-                        child: const Text('Apply'),
+                        child: Text(ctx.l10n.commonApply),
                       ),
                     ],
                   )
@@ -1139,14 +1144,14 @@ class _SearchPill extends StatelessWidget {
             child: TextField(
               controller: controller,
               focusNode: focusNode,
-              decoration: const InputDecoration(
-                hintText: 'Search helpers…',
+              decoration: InputDecoration(
+                hintText: hint,
                 // The pill draws the background; a themed fill clipped it.
                 filled: false,
                 border: InputBorder.none,
                 isDense: true,
                 contentPadding:
-                    EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
               ),
               textInputAction: TextInputAction.search,
               onSubmitted: (_) {},
@@ -1200,7 +1205,7 @@ String _norm(String s) {
 
 class _EmptyState extends StatelessWidget {
   final String text;
-  const _EmptyState({this.text = 'No results.'});
+  const _EmptyState({required this.text});
   @override
   Widget build(BuildContext context) {
     return Padding(

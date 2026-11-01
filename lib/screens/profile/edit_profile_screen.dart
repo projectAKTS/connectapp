@@ -1,6 +1,11 @@
 import 'dart:io';
 
 import 'package:connect_app/models/help_topics.dart';
+import 'package:connect_app/l10n/l10n.dart';
+import 'package:connect_app/l10n/value_labels.dart';
+import 'package:connect_app/models/profile_languages.dart';
+import 'package:connect_app/utils/availability_time.dart';
+import 'package:connect_app/widgets/spoken_languages_field.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -39,7 +44,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   String _role = 'seeker';
   String _mode = 'chat';
   String? _country;
-  String? _language;
+
+  /// Languages the person speaks (ISO codes); not the app language.
+  List<String> _spoken = [];
   TimeOfDay? _startTime;
   TimeOfDay? _endTime;
   final Set<String> _selectedExpertise = {};
@@ -79,8 +86,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         TextEditingController(text: (widget.userData['bio'] ?? '').toString());
     _cityCtrl =
         TextEditingController(text: (widget.userData['city'] ?? '').toString());
+    // Suggest the device's offset when empty; the field stays editable.
+    final storedZone = (widget.userData['timeZone'] ?? '').toString().trim();
     _timeZoneCtrl = TextEditingController(
-      text: (widget.userData['timeZone'] ?? '').toString(),
+      text: storedZone.isNotEmpty
+          ? storedZone
+          : AvailabilityTime.deviceTimeZone(),
     );
     _interestTagsCtrl = TextEditingController(
       text: (widget.userData['interestTags'] is List)
@@ -99,7 +110,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _role = (widget.userData['role'] ?? 'seeker').toString();
     _mode = (widget.userData['mode'] ?? 'chat').toString();
     _country = _asNullableString(widget.userData['country']);
-    _language = _asNullableString(widget.userData['language']);
+    _spoken = ProfileLanguages.read(widget.userData);
     _profileImageUrl = _asNullableString(widget.userData['profilePicture']);
 
     _selectedExpertise
@@ -110,13 +121,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             : const <String>[],
       );
 
-    final availability = (widget.userData['availability'] ?? '').toString();
-    if (availability.contains('–')) {
-      final parts = availability.split('–');
-      if (parts.length == 2) {
-        _startTime = _parseTimeOfDay(parts[0].trim());
-        _endTime = _parseTimeOfDay(parts[1].trim());
-      }
+    final range =
+        AvailabilityTime.parse('${widget.userData['availability'] ?? ''}');
+    if (range != null) {
+      _startTime = range.$1;
+      _endTime = range.$2;
     }
   }
 
@@ -143,20 +152,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         .map((e) => e.trim())
         .where((e) => e.isNotEmpty)
         .toList();
-  }
-
-  TimeOfDay? _parseTimeOfDay(String time) {
-    try {
-      final parts = time.split(':');
-      int hour = int.parse(parts[0].replaceAll(RegExp(r'[^0-9]'), ''));
-      int minute = int.parse(parts[1].replaceAll(RegExp(r'[^0-9]'), ''));
-      final lower = time.toLowerCase();
-      if (lower.contains('pm') && hour < 12) hour += 12;
-      if (lower.contains('am') && hour == 12) hour = 0;
-      return TimeOfDay(hour: hour, minute: minute);
-    } catch (_) {
-      return null;
-    }
   }
 
   Future<void> _pickImage() async {
@@ -196,9 +191,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   Future<void> _saveProfile() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
-    if (_language == null || _language!.isEmpty) {
+    // Profiles from older builds may hold only 'Other', which has no code;
+    // they keep it until a language is picked.
+    if (_spoken.isEmpty &&
+        '${widget.userData['language'] ?? ''}'.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a language.')),
+        SnackBar(content: Text(context.l10n.spokenLanguagesRequired)),
       );
       return;
     }
@@ -209,7 +207,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     FocusScope.of(context).unfocus();
     final availabilityValue =
         (_isHelperRole && _startTime != null && _endTime != null)
-            ? '${_startTime!.format(context)}–${_endTime!.format(context)}'
+            ? AvailabilityTime.store(_startTime!, _endTime!)
             : '';
 
     setState(() => _saving = true);
@@ -226,7 +224,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         'city': _cityCtrl.text.trim(),
         'timeZone': _timeZoneCtrl.text.trim(),
         'country': _country ?? '',
-        'language': _language ?? '',
+        ...ProfileLanguages.fields(_spoken),
         'role': _role,
         'interestTags': _parseCsv(_interestTagsCtrl.text.trim()),
         'skills': _parseCsv(_skillsCtrl.text.trim()),
@@ -493,23 +491,20 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     dropdownColor: AppColors.card,
                     iconEnabledColor: AppColors.muted,
                     items: const ['Canada', 'USA', 'Other']
-                        .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                        .map((c) => DropdownMenuItem(
+                            value: c,
+                            child: Text(ValueLabels.country(context.l10n, c))))
                         .toList(),
                     onChanged: (v) => setState(() => _country = v),
                   ),
                   const SizedBox(height: 10),
-                  DropdownButtonFormField<String>(
-                    key: ValueKey('language_${_language ?? ''}'),
-                    initialValue: _language,
-                    decoration: _fieldDecoration(label: 'Language'),
-                    style: _inputTextStyle,
-                    isDense: true,
-                    dropdownColor: AppColors.card,
-                    iconEnabledColor: AppColors.muted,
-                    items: const ['English', 'French', 'Other']
-                        .map((l) => DropdownMenuItem(value: l, child: Text(l)))
-                        .toList(),
-                    onChanged: (v) => setState(() => _language = v),
+                  Text(context.l10n.spokenLanguagesLabel,
+                      style: const TextStyle(
+                          fontSize: 12.5, color: AppColors.muted)),
+                  const SizedBox(height: 6),
+                  SpokenLanguagesField(
+                    codes: _spoken,
+                    onChanged: (codes) => setState(() => _spoken = codes),
                   ),
                 ],
               ),

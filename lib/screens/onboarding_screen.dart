@@ -1,4 +1,9 @@
 // lib/screens/onboarding_screen.dart
+import 'package:connect_app/l10n/l10n.dart';
+import 'package:connect_app/l10n/value_labels.dart';
+import 'package:connect_app/models/profile_languages.dart';
+import 'package:connect_app/utils/availability_time.dart';
+import 'package:connect_app/widgets/spoken_languages_field.dart';
 import 'package:connect_app/models/help_topics.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -31,11 +36,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final _timeZoneCtrl = TextEditingController();
   String? _profilePhotoUrl;
 
-  // Country / Language (anchored dropdowns use controllers)
+  // Country (anchored dropdown uses a controller)
   final _countryCtrl = TextEditingController();
-  final _languageCtrl = TextEditingController();
   String? _country;
-  String? _language;
+
+  /// Languages the person speaks (ISO codes); not the app language.
+  List<String> _spoken = [];
 
   String _role = 'seeker'; // seeker | helper | both
 
@@ -110,7 +116,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _cityCtrl.dispose();
     _timeZoneCtrl.dispose();
     _countryCtrl.dispose();
-    _languageCtrl.dispose();
     super.dispose();
   }
 
@@ -138,15 +143,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           : null;
 
       _cityCtrl.text = d['city'] ?? '';
-      _timeZoneCtrl.text = d['timeZone'] ?? '';
+      // Suggest the device's offset; the field stays editable.
+      final storedZone = '${d['timeZone'] ?? ''}'.trim();
+      _timeZoneCtrl.text = storedZone.isNotEmpty
+          ? storedZone
+          : AvailabilityTime.deviceTimeZone();
 
       _country =
           (d['country']?.toString().isNotEmpty ?? false) ? d['country'] : null;
-      _language = (d['language']?.toString().isNotEmpty ?? false)
-          ? d['language']
-          : null;
-      _countryCtrl.text = _country ?? '';
-      _languageCtrl.text = _language ?? '';
+      _spoken = ProfileLanguages.read(d);
+      _countryCtrl.text =
+          _country == null ? '' : ValueLabels.country(context.l10n, _country!);
       _role = d['role'] ?? 'seeker';
 
       _selectedTopics
@@ -161,13 +168,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ? List<String>.from(d['expertiseTags'])
             : const []);
 
-      if (d['availability'] != null &&
-          d['availability'].toString().contains('–')) {
-        final parts = d['availability'].toString().split('–');
-        if (parts.length == 2) {
-          _startTime = _parseTimeOfDay(parts[0].trim());
-          _endTime = _parseTimeOfDay(parts[1].trim());
-        }
+      final range = AvailabilityTime.parse('${d['availability'] ?? ''}');
+      if (range != null) {
+        _startTime = range.$1;
+        _endTime = range.$2;
       }
 
       _mode = d['mode'] ?? 'chat';
@@ -186,12 +190,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       'city': _cityCtrl.text.trim(),
       'timeZone': _timeZoneCtrl.text.trim(),
       'country': _country ?? '',
-      'language': _language ?? '',
+      ...ProfileLanguages.fields(_spoken),
       'role': _role,
       'interestTags': _selectedTopics.toList(),
       'expertiseTags': _selectedExpertise.toList(),
       'availability': (_startTime != null && _endTime != null)
-          ? '${_startTime!.format(context)}–${_endTime!.format(context)}'
+          ? AvailabilityTime.store(_startTime!, _endTime!)
           : '',
       'mode': _mode,
       'profilePicture':
@@ -255,9 +259,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Future<void> _next() async {
     if (_index == 0) {
       if (!(_formKey.currentState?.validate() ?? false)) return;
-      if (_language == null || _language!.trim().isEmpty) {
+      if (_spoken.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please select a language.')),
+          SnackBar(content: Text(context.l10n.spokenLanguagesRequired)),
         );
         return;
       }
@@ -586,11 +590,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   value: _country,
                   hint: 'Select country',
                   options: const ['Canada', 'USA', 'Other'],
+                  labelOf: (v) => ValueLabels.country(context.l10n, v),
                   fill: AppColors.card,
                   onChanged: (v) {
                     setState(() {
                       _country = v;
-                      _countryCtrl.text = v ?? '';
+                      _countryCtrl.text =
+                          v == null ? '' : ValueLabels.country(context.l10n, v);
                     });
                   },
                 ),
@@ -598,24 +604,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
             const SizedBox(height: 12),
 
-            // Language (anchored dropdown) — full width
+            // Spoken languages — full width
             Align(
               alignment: Alignment.centerLeft,
               child: _LabeledField(
-                label: 'Language(s) spoken',
+                label: context.l10n.spokenLanguagesLabel,
                 compact: true,
-                child: _anchoredDropdown(
-                  controller: _languageCtrl,
-                  value: _language,
-                  hint: 'Select language',
-                  options: const ['English', 'French', 'Other'],
+                child: SpokenLanguagesField(
+                  codes: _spoken,
                   fill: AppColors.card,
-                  onChanged: (v) {
-                    setState(() {
-                      _language = v;
-                      _languageCtrl.text = v ?? '';
-                    });
-                  },
+                  onChanged: (codes) => setState(() => _spoken = codes),
                 ),
               ),
             ),
@@ -823,13 +821,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     String? value,
     String? hint,
     Color? fill,
+    String Function(String value)? labelOf,
   }) {
     return DropdownMenu<String>(
       controller: controller,
       initialSelection: value,
       hintText: hint,
       dropdownMenuEntries: options
-          .map((e) => DropdownMenuEntry<String>(value: e, label: e))
+          .map((e) => DropdownMenuEntry<String>(
+              value: e, label: labelOf == null ? e : labelOf(e)))
           .toList(),
       width: double.infinity, // <- match field width exactly
       menuHeight: 240,
@@ -913,20 +913,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       labelStyle:
           const TextStyle(fontWeight: FontWeight.w600, color: AppColors.text),
     );
-  }
-
-  TimeOfDay? _parseTimeOfDay(String time) {
-    try {
-      final parts = time.split(':');
-      int hour = int.parse(parts[0].replaceAll(RegExp(r'[^0-9]'), ''));
-      int minute = int.parse(parts[1].replaceAll(RegExp(r'[^0-9]'), ''));
-      final lower = time.toLowerCase();
-      if (lower.contains('pm') && hour < 12) hour += 12;
-      if (lower.contains('am') && hour == 12) hour = 0;
-      return TimeOfDay(hour: hour, minute: minute);
-    } catch (_) {
-      return null;
-    }
   }
 }
 

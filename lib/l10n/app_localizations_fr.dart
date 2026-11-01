@@ -284,4 +284,99 @@ class AppLocalizationsFr extends AppLocalizations {
   String blockDone(String name) {
     return '$name est bloqué(e).';
   }
+
+  @override
+  String get commonDone => 'Terminé';
+
+  @override
+  String get spokenLanguagesLabel => 'Langues que vous parlez';
+
+  @override
+  String get spokenLanguagesHint => 'Choisir des langues';
+
+  @override
+  String get spokenLanguagesNote =>
+      'Les gens peuvent trouver des aidants qui parlent leur langue. Ce choix est distinct de la langue de l\'application.';
+
+  @override
+  String get spokenLanguagesRequired =>
+      'Veuillez choisir au moins une langue que vous parlez.';
+
+  @override
+  String get commonApply => 'Appliquer';
+
+  @override
+  String get commonClear => 'Effacer';
+
+  @override
+  String get commonNoResults => 'Aucun résultat.';
+
+  @override
+  String get findHelperTitle => 'Trouver un aidant';
+
+  @override
+  String get findHelperResetFilters => 'Réinitialiser';
+
+  @override
+  String get findHelperSearchHint => 'Rechercher des aidants…';
+
+  @override
+  String get findHelperNoMatches => 'Aucun aidant ne correspond à vos filtres.';
+
+  @override
+  String get findHelperAvailable => 'Disponible';
+
+  @override
+  String get filterCategory => 'Catégorie';
+
+  @override
+  String filterCategoryCount(int count) {
+    return 'Catégorie ($count)';
+  }
+
+  @override
+  String get filterSelectCategories => 'Choisir des catégories';
+
+  @override
+  String get filterLanguage => 'Langue';
+
+  @override
+  String filterLanguageCount(int count) {
+    return 'Langue ($count)';
+  }
+
+  @override
+  String get filterSelectLanguages => 'Choisir des langues';
+
+  @override
+  String get filterVerified => 'Vérifié';
+
+  @override
+  String get filterPrice => 'Prix';
+
+  @override
+  String get filterPriceMin => 'Min';
+
+  @override
+  String get filterPriceMax => 'Max';
+
+  @override
+  String get sortRelevance => 'Pertinence';
+
+  @override
+  String get sortRating => 'Évaluation';
+
+  @override
+  String get sortPrice => 'Prix';
+
+  @override
+  String get sortPriceLowHigh => 'Prix (croissant)';
+
+  @override
+  String get sortNewest => 'Plus récents';
+
+  @override
+  String pricePerHour(String amount) {
+    return '$amount/h';
+  }
 }

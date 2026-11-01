@@ -110,5 +110,55 @@
         "type": "String"
       }
     }
+  },
+  "commonDone": "Done",
+  "spokenLanguagesLabel": "Languages you speak",
+  "spokenLanguagesHint": "Select languages",
+  "spokenLanguagesNote": "People can find helpers who speak their language. This is separate from the app's language.",
+  "spokenLanguagesRequired": "Please select at least one language you speak.",
+  "commonApply": "Apply",
+  "commonClear": "Clear",
+  "commonNoResults": "No results.",
+  "findHelperTitle": "Find a helper",
+  "findHelperResetFilters": "Reset filters",
+  "findHelperSearchHint": "Search helpers…",
+  "findHelperNoMatches": "No helpers match your filters.",
+  "findHelperAvailable": "Available",
+  "filterCategory": "Category",
+  "filterCategoryCount": "Category ({count})",
+  "@filterCategoryCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "filterSelectCategories": "Select categories",
+  "filterLanguage": "Language",
+  "filterLanguageCount": "Language ({count})",
+  "@filterLanguageCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "filterSelectLanguages": "Select languages",
+  "filterVerified": "Verified",
+  "filterPrice": "Price",
+  "filterPriceMin": "Min",
+  "filterPriceMax": "Max",
+  "sortRelevance": "Relevance",
+  "sortRating": "Rating",
+  "sortPrice": "Price",
+  "sortPriceLowHigh": "Price (low → high)",
+  "sortNewest": "Newest",
+  "pricePerHour": "{amount}/hr",
+  "@pricePerHour": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
   }
 }
