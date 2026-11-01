@@ -11,7 +11,8 @@ enum PaymentResult {
   success,
   needsSetup, // user has no stored card
   unauthenticated, // user token missing/stale
-  failed, // generic failure
+  failed, // definitive failure (declined, not allowed)
+  pending, // outcome unknown or still running: retry with the same operation
 }
 
 class PaymentChargeResult {
@@ -127,7 +128,8 @@ class PaymentService {
       return id?.isNotEmpty == true;
     } on FirebaseFunctionsException catch (e) {
       debugPrint(
-          '❌ [PaymentService] FirebaseFunctionsException: ${e.code} | ${e.message}');
+        '❌ [PaymentService] FirebaseFunctionsException: ${e.code} | ${e.message}',
+      );
       if (e.code == 'unauthenticated') return false;
       rethrow;
     } catch (e, st) {
@@ -148,22 +150,26 @@ class PaymentService {
       final resp = await callable.call();
       final raw = resp.data;
       debugPrint(
-          '🧾 [PaymentService] createSetupIntent raw type: ${raw.runtimeType}');
+        '🧾 [PaymentService] createSetupIntent raw type: ${raw.runtimeType}',
+      );
       if (raw is Map) {
         debugPrint(
-            '🧾 [PaymentService] createSetupIntent raw keys: ${raw.keys}');
+          '🧾 [PaymentService] createSetupIntent raw keys: ${raw.keys}',
+        );
       } else {
         debugPrint('🧾 [PaymentService] createSetupIntent raw: $raw');
       }
       if (raw is String) {
         final clientSecret = raw;
         debugPrint(
-            '🎫 [PaymentService] SetupIntent clientSecret: ${clientSecret.substring(0, 10)}...');
+          '🎫 [PaymentService] SetupIntent clientSecret: ${clientSecret.substring(0, 10)}...',
+        );
         return SetupIntentData(clientSecret: clientSecret);
       }
       if (raw is! Map) {
         debugPrint(
-            '❌ [PaymentService] createSetupIntent unexpected response type.');
+          '❌ [PaymentService] createSetupIntent unexpected response type.',
+        );
         return null;
       }
       final data = Map<String, dynamic>.from(raw);
@@ -172,20 +178,24 @@ class PaymentService {
       clientSecret ??= data['setupIntentClientSecret'] as String?;
       clientSecret ??= data['setup_intent_client_secret'] as String?;
       if (clientSecret == null && data['setupIntent'] is Map) {
-        final setupIntent =
-            Map<String, dynamic>.from(data['setupIntent'] as Map);
+        final setupIntent = Map<String, dynamic>.from(
+          data['setupIntent'] as Map,
+        );
         clientSecret = setupIntent['client_secret'] as String?;
       }
 
       final customerId =
           data['customerId'] as String? ?? data['customer'] as String?;
-      final ephemeralKey = data['ephemeralKeySecret'] as String? ??
+      final ephemeralKey =
+          data['ephemeralKeySecret'] as String? ??
           data['ephemeralKey'] as String?;
       debugPrint(
-          '🎫 [PaymentService] SetupIntent clientSecret: ${clientSecret?.substring(0, 10)}...');
+        '🎫 [PaymentService] SetupIntent clientSecret: ${clientSecret?.substring(0, 10)}...',
+      );
       debugPrint('👤 [PaymentService] customerId: ${customerId ?? 'null'}');
       debugPrint(
-          '🔐 [PaymentService] ephemeralKeySecret: ${ephemeralKey != null ? 'present' : 'null'}');
+        '🔐 [PaymentService] ephemeralKeySecret: ${ephemeralKey != null ? 'present' : 'null'}',
+      );
 
       if (clientSecret == null || clientSecret.isEmpty) return null;
       return SetupIntentData(
@@ -195,7 +205,8 @@ class PaymentService {
       );
     } on FirebaseFunctionsException catch (e) {
       debugPrint(
-          '❌ [PaymentService] createSetupIntent FirebaseError: ${e.code} | ${e.message}');
+        '❌ [PaymentService] createSetupIntent FirebaseError: ${e.code} | ${e.message}',
+      );
       if (e.code == 'unauthenticated') return null;
       rethrow;
     } catch (e, st) {
@@ -274,8 +285,10 @@ class PaymentService {
           .toList();
 
       final cached = PaymentMethodsData(
-        defaultPaymentMethodId: (data['paymentMethodsCacheDefaultId'] ??
-            data['defaultPaymentMethodId']) as String?,
+        defaultPaymentMethodId:
+            (data['paymentMethodsCacheDefaultId'] ??
+                    data['defaultPaymentMethodId'])
+                as String?,
         paymentMethods: methods,
       );
       _memoryCache = cached;
@@ -333,7 +346,11 @@ class PaymentService {
   /// Charges the user’s stored default payment method.
   /// Charges a consultation. The server prices it from [durationMinutes] and
   /// [callType]; [amount] is only read by servers older than that change.
+  ///
+  /// [operationId] identifies one booking attempt; pass the same id for
+  /// every retry of that attempt so the server charges at most once.
   Future<PaymentChargeResult> processPayment({
+    required String operationId,
     required double amount,
     int? durationMinutes,
     String? callType,
@@ -349,6 +366,7 @@ class PaymentService {
 
       debugPrint('📤 [PaymentService] Calling chargeStoredPaymentMethod...');
       final response = await callable.call({
+        'operationId': operationId,
         'amount': amount,
         'currency': 'cad',
         if (durationMinutes != null) 'durationMinutes': durationMinutes,
@@ -370,26 +388,42 @@ class PaymentService {
       }
 
       debugPrint(
-          '⚠️ [PaymentService] chargeStoredPaymentMethod returned success=false.');
+        '⚠️ [PaymentService] chargeStoredPaymentMethod returned success=false.',
+      );
       return const PaymentChargeResult(result: PaymentResult.failed);
     } on FirebaseFunctionsException catch (e) {
       debugPrint(
-          '❌ [PaymentService] FirebaseFunctionsException: ${e.code} | ${e.message}');
+        '❌ [PaymentService] FirebaseFunctionsException: ${e.code} | ${e.message}',
+      );
       switch (e.code) {
         case 'failed-precondition':
-          debugPrint('⚠️ [PaymentService] User needs to add a payment method.');
-          return const PaymentChargeResult(result: PaymentResult.needsSetup);
+          if ((e.message ?? '').contains('No stored payment method')) {
+            debugPrint(
+              '⚠️ [PaymentService] User needs to add a payment method.',
+            );
+            return const PaymentChargeResult(result: PaymentResult.needsSetup);
+          }
+          // Declined, expired attempt or outdated app: final for this
+          // operation.
+          return const PaymentChargeResult(result: PaymentResult.failed);
+        case 'aborted':
+        case 'unavailable':
+        case 'deadline-exceeded':
+        case 'internal':
+          return const PaymentChargeResult(result: PaymentResult.pending);
         case 'unauthenticated':
           debugPrint('🚫 [PaymentService] Unauthenticated — tokens invalid.');
           return const PaymentChargeResult(
-              result: PaymentResult.unauthenticated);
+            result: PaymentResult.unauthenticated,
+          );
         default:
           return const PaymentChargeResult(result: PaymentResult.failed);
       }
     } catch (e, st) {
+      // Network errors: the charge may or may not have happened.
       debugPrint('❌ [PaymentService] processPayment() Exception: $e');
       debugPrint('🪵 Stack trace:\n$st');
-      return const PaymentChargeResult(result: PaymentResult.failed);
+      return const PaymentChargeResult(result: PaymentResult.pending);
     }
   }
 
@@ -442,7 +476,8 @@ class PaymentService {
       debugPrint('🚀 [PaymentService] Checkout launched successfully.');
     } on FirebaseFunctionsException catch (e) {
       debugPrint(
-          '❌ [PaymentService] createCheckoutSession FirebaseError: ${e.code}');
+        '❌ [PaymentService] createCheckoutSession FirebaseError: ${e.code}',
+      );
       if (e.code == 'unauthenticated') {
         throw Exception('Please sign in again.');
       } else {

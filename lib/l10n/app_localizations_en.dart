@@ -1816,4 +1816,8 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get badgeCommunityMentor => 'Community Mentor';
+
+  @override
+  String get bookPaymentPending =>
+      'We couldn’t confirm the payment yet. Tap Book again in a moment; you won’t be charged twice.';
 }

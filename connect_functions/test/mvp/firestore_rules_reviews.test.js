@@ -126,3 +126,18 @@ test("helpers cannot set their own rating", async () => {
   await assertFails(updateDoc(doc(bob, "users/bob"), { ratingCount: 10 }));
   await assertSucceeds(updateDoc(doc(bob, "users/bob"), { fullName: "Bobby" }));
 });
+
+test("payment operations are server-only", async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "paymentOperations/op_1234567890abcdef"), {
+      uid: "alice",
+      status: "succeeded",
+    });
+  });
+  const alice = as("alice");
+  await assertFails(getDoc(doc(alice, "paymentOperations/op_1234567890abcdef")));
+  await assertFails(
+    setDoc(doc(alice, "paymentOperations/op_new_0000000000001"), { uid: "alice", status: "succeeded" }),
+  );
+  await assertFails(updateDoc(doc(alice, "paymentOperations/op_1234567890abcdef"), { status: "failed" }));
+});

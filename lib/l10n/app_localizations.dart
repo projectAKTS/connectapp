@@ -3421,6 +3421,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Community Mentor'**
   String get badgeCommunityMentor;
+
+  /// No description provided for @bookPaymentPending.
+  ///
+  /// In en, this message translates to:
+  /// **'We couldn’t confirm the payment yet. Tap Book again in a moment; you won’t be charged twice.'**
+  String get bookPaymentPending;
 }
 
 class _AppLocalizationsDelegate

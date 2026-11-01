@@ -920,33 +920,34 @@ exports.chargeStoredPaymentMethod = onCall(
       throw new HttpsError("invalid-argument", "You cannot book yourself");
     }
 
+    // One booking attempt = one operationId, reused by the app for every
+    // retry, so a retry can never charge twice. Builds without it must
+    // update before they can pay.
+    if (!data.operationId) {
+      throw new HttpsError("failed-precondition", "Please update the app to book a paid session");
+    }
+
     const doc = await db.collection("users").doc(uid).get();
     const u = doc.data() || {};
     if (!u.stripeCustomerId || !u.defaultPaymentMethodId)
       throw new HttpsError("failed-precondition", "No stored payment method");
 
     try {
-      const pi = await stripe.paymentIntents.create({
-        amount: Math.round(priced.amount * 100),
-        currency: "cad",
-        customer: u.stripeCustomerId,
-        payment_method: u.defaultPaymentMethodId,
-        off_session: true,
-        confirm: true,
-        metadata: {
-          kind: "consultation",
-          seekerUid: uid,
-          helperUid: helperId,
-          durationMinutes: `${priced.durationMinutes ?? ""}`,
-          callType: priced.callType || "",
-          pricingVersion: PRICING_VERSION,
-          legacyAmount: priced.legacy ? "true" : "false",
-        },
+      return await chargeOnce({
+        db,
+        stripe,
+        uid,
+        operationId: `${data.operationId}`,
+        helperId,
+        priced,
+        customer: u,
+        pricingVersion: PRICING_VERSION,
+        serverTimestamp: () => admin.firestore.FieldValue.serverTimestamp(),
       });
-      return { success: true, id: pi.id, amount: priced.amount };
     } catch (e) {
+      if (e instanceof ChargeError) throw new HttpsError(e.code, e.message);
       console.error("Charge error:", e);
-      throw new HttpsError("internal", e.message);
+      throw new HttpsError("internal", "Payment failed");
     }
   }
 );
@@ -1090,6 +1091,17 @@ exports.handleStripeWebhook = onRequest(
       return res.status(400).send(`Webhook Error: ${e.message}`);
     }
 
+    if (
+      event.type === "payment_intent.succeeded" ||
+      event.type === "payment_intent.payment_failed" ||
+      event.type === "payment_intent.canceled"
+    ) {
+      // Stored-card charges: reconcile the payment operation. Repeated or
+      // late events never move a success backwards.
+      await reconcilePaymentIntent(db, event.data.object, () =>
+        admin.firestore.FieldValue.serverTimestamp(),
+      );
+    }
     if (event.type === "payment_intent.succeeded") {
       const pi = event.data.object;
       const consultationId = pi.metadata?.consultationId;
@@ -1118,6 +1130,11 @@ const {
 } = require("./consultations/consultation_price");
 const { deleteUserData } = require("./account/delete_account");
 const { minutesUntil, pushText } = require("./i18n/push_text");
+const {
+  ChargeError,
+  chargeOnce,
+  reconcilePaymentIntent,
+} = require("./payments/charge_operation");
 const { addReviewToRating, validStars } = require("./reviews/review_aggregate");
 
 // A seeker's review of a finished consultation updates the helper's average

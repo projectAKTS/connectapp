@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:connect_app/services/app_telemetry.dart';
 import 'package:connect_app/config/mvp_features.dart';
 import 'package:connect_app/widgets/advice_notice.dart';
+import 'package:uuid/uuid.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -41,6 +42,9 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
   DateTime? _selectedDate;
   TimeOfDay? _selectedTime;
   bool _isProcessing = false;
+
+  /// The current booking attempt's payment id; see processPayment.
+  String? _paymentOperationId;
 
   static const _evergreen = Color(0xFF0F4C46);
 
@@ -82,10 +86,10 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
         .doc(uid)
         .snapshots()
         .listen((doc) {
-      if (!doc.exists) return;
-      final data = doc.data() as Map<String, dynamic>;
-      _applyUserBenefits(data);
-    });
+          if (!doc.exists) return;
+          final data = doc.data() as Map<String, dynamic>;
+          _applyUserBenefits(data);
+        });
   }
 
   DateTime? _tsToDate(dynamic v) {
@@ -191,12 +195,13 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
   Future<void> _bookConsultation() async {
     debugPrint('🟢 [Booking] Start booking flow for ${widget.targetUserName}');
     debugPrint(
-        '💰 Selected duration: $_selectedDuration min | Type: $_callType | Price: $_finalPrice');
+      '💰 Selected duration: $_selectedDuration min | Type: $_callType | Price: $_finalPrice',
+    );
 
     if (_scheduledAt == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.bookPickDateTime)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.bookPickDateTime)));
       return;
     }
 
@@ -205,9 +210,9 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
       try {
         debugPrint('🟡 [Booking] Waiting for user auth state...');
         user = await FirebaseAuth.instance.authStateChanges().firstWhere(
-              (u) => u != null,
-              orElse: () => null,
-            );
+          (u) => u != null,
+          orElse: () => null,
+        );
       } catch (e) {
         debugPrint('❌ [Booking] Auth state error: $e');
       }
@@ -216,9 +221,9 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
     if (user == null) {
       debugPrint('❌ [Booking] No authenticated user found.');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.bookSignIn)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.bookSignIn)));
       return;
     }
 
@@ -234,7 +239,8 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
       debugPrint('🔒 [Booking] Refreshing Firebase App Check token...');
       final appCheckToken = await FirebaseAppCheck.instance.getToken(true);
       debugPrint(
-          '🧾 [Booking] App Check token: ${appCheckToken?.substring(0, 12)}...');
+        '🧾 [Booking] App Check token: ${appCheckToken?.substring(0, 12)}...',
+      );
 
       debugPrint('💳 [Booking] Ensuring Stripe customer exists...');
       await _paymentService.ensureStripeCustomer();
@@ -242,8 +248,15 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
       var charge = const PaymentChargeResult(result: PaymentResult.failed);
       if (_finalPrice > 0) {
         debugPrint(
-            '🧾 [Booking] Starting payment flow. Amount: $_finalPrice CAD');
-        var charge = await _paymentService.processPayment(
+          '🧾 [Booking] Starting payment flow. Amount: $_finalPrice CAD',
+        );
+        // One id per booking attempt, kept until a definite outcome, so a
+        // retry or a second tap after a timeout cannot charge twice.
+        final operationId = _paymentOperationId ??= const Uuid().v4();
+        // Assigns the outer `charge` (it was shadowed before, so bookings
+        // never recorded their PaymentIntent and refunds could not run).
+        charge = await _paymentService.processPayment(
+          operationId: operationId,
           amount: _finalPrice,
           durationMinutes: _selectedDuration,
           callType: _callType,
@@ -253,10 +266,12 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
 
         if (charge.result == PaymentResult.unauthenticated) {
           debugPrint(
-              '🔁 [Booking] Retrying payment after refreshing tokens...');
+            '🔁 [Booking] Retrying payment after refreshing tokens...',
+          );
           await user.getIdToken(true);
           await FirebaseAppCheck.instance.getToken(true);
           charge = await _paymentService.processPayment(
+            operationId: operationId,
             amount: _finalPrice,
             durationMinutes: _selectedDuration,
             callType: _callType,
@@ -302,8 +317,19 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
             }
             return;
 
+          case PaymentResult.pending:
+            // Keep _paymentOperationId: the next tap checks this attempt.
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(context.l10n.bookPaymentPending)),
+              );
+              setState(() => _isProcessing = false);
+            }
+            return;
+
           case PaymentResult.failed:
             debugPrint('❌ [Booking] Payment failed at Stripe layer.');
+            _paymentOperationId = null;
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text(context.l10n.bookPaymentFailed)),
@@ -314,6 +340,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
 
           case PaymentResult.success:
             debugPrint('✅ [Booking] Payment succeeded!');
+            _paymentOperationId = null;
             break;
         }
       } else {
@@ -325,17 +352,17 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
         widget.targetUserId,
         _selectedDuration,
         scheduledAt: _scheduledAt!,
-        costOverride:
-            _finalPrice > 0 ? (charge.chargedAmount ?? _finalPrice) : 0,
+        costOverride: _finalPrice > 0
+            ? (charge.chargedAmount ?? _finalPrice)
+            : 0,
         paymentIntentId: _finalPrice > 0 ? charge.paymentIntentId : null,
         currency: 'cad',
       );
 
       if (_freeAudioEligible) {
-        await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
-          {'premiumFreeAudioUsedAt': FieldValue.serverTimestamp()},
-          SetOptions(merge: true),
-        );
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+          'premiumFreeAudioUsedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
       }
 
       await InteractionService.recordInteraction(widget.targetUserId);
@@ -344,9 +371,9 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
         'call_type': _callType,
         'minutes': _selectedDuration,
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.bookBooked)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.bookBooked)));
       debugPrint('✅ [Booking] Consultation booked successfully!');
       Navigator.pop(context);
     } catch (e, st) {
@@ -354,8 +381,9 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
       debugPrint('🪵 Stack trace:\n$st');
 
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(context.l10n.bookFailed)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.bookFailed)));
       }
     } finally {
       debugPrint('🏁 [Booking] Flow finished.');
@@ -366,8 +394,9 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
   @override
   Widget build(BuildContext context) {
     final dt = _scheduledAt;
-    final scheduledText =
-        dt == null ? context.l10n.commonNotSet : AppFormat.dayTime(context, dt);
+    final scheduledText = dt == null
+        ? context.l10n.commonNotSet
+        : AppFormat.dayTime(context, dt);
 
     return FullScreenBackGesture(
       child: Scaffold(
@@ -433,14 +462,18 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                             ),
                           ),
                           _pill(
-                              child: Text(context.l10n
-                                  .consultMinutes(_selectedDuration))),
+                            child: Text(
+                              context.l10n.consultMinutes(_selectedDuration),
+                            ),
+                          ),
                         ],
                       ),
                     ),
                     const SizedBox(height: 20),
-                    Text(context.l10n.bookSelectDuration,
-                        style: Theme.of(context).textTheme.titleMedium),
+                    Text(
+                      context.l10n.bookSelectDuration,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
@@ -473,8 +506,10 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                       }).toList(),
                     ),
                     const SizedBox(height: 20),
-                    Text(context.l10n.bookCallType,
-                        style: Theme.of(context).textTheme.titleMedium),
+                    Text(
+                      context.l10n.bookCallType,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                     const SizedBox(height: 8),
                     Row(
                       children: [
@@ -498,8 +533,10 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                       ],
                     ),
                     const SizedBox(height: 20),
-                    Text(context.l10n.bookPickATime,
-                        style: Theme.of(context).textTheme.titleMedium),
+                    Text(
+                      context.l10n.bookPickATime,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                     Row(
                       children: [
                         Expanded(
@@ -508,11 +545,16 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text(_selectedDate == null
-                                    ? context.l10n.bookPickDate
-                                    : AppFormat.date(context, _selectedDate!)),
-                                const Icon(Icons.calendar_today_outlined,
-                                    color: AppColors.muted, size: 18),
+                                Text(
+                                  _selectedDate == null
+                                      ? context.l10n.bookPickDate
+                                      : AppFormat.date(context, _selectedDate!),
+                                ),
+                                const Icon(
+                                  Icons.calendar_today_outlined,
+                                  color: AppColors.muted,
+                                  size: 18,
+                                ),
                               ],
                             ),
                           ),
@@ -524,11 +566,16 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text(_selectedTime == null
-                                    ? context.l10n.bookPickTime
-                                    : _selectedTime!.format(context)),
-                                const Icon(Icons.schedule,
-                                    color: AppColors.muted, size: 18),
+                                Text(
+                                  _selectedTime == null
+                                      ? context.l10n.bookPickTime
+                                      : _selectedTime!.format(context),
+                                ),
+                                const Icon(
+                                  Icons.schedule,
+                                  color: AppColors.muted,
+                                  size: 18,
+                                ),
                               ],
                             ),
                           ),
@@ -536,24 +583,30 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                       ],
                     ),
                     const SizedBox(height: 10),
-                    Text(context.l10n.bookScheduled(scheduledText),
-                        style: const TextStyle(color: AppColors.muted)),
+                    Text(
+                      context.l10n.bookScheduled(scheduledText),
+                      style: const TextStyle(color: AppColors.muted),
+                    ),
                     const SizedBox(height: 20),
                     _card(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(context.l10n.bookSummary,
-                              style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.text)),
+                          Text(
+                            context.l10n.bookSummary,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.text,
+                            ),
+                          ),
                           const SizedBox(height: 6),
                           Text(
                             context.l10n.bookSummaryLine(
-                                _callType == 'video'
-                                    ? context.l10n.bookVideo
-                                    : context.l10n.bookAudio,
-                                _selectedDuration),
+                              _callType == 'video'
+                                  ? context.l10n.bookVideo
+                                  : context.l10n.bookAudio,
+                              _selectedDuration,
+                            ),
                             style: const TextStyle(color: AppColors.muted),
                           ),
                           const SizedBox(height: 6),
@@ -582,10 +635,14 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                               context.l10n.bookPremiumFree,
                               style: TextStyle(color: AppColors.primary),
                             ),
-                          Text(context.l10n.bookTotal(_priceLabel),
-                              style: const TextStyle(color: AppColors.text)),
-                          Text(_payoutLabel,
-                              style: const TextStyle(color: AppColors.muted)),
+                          Text(
+                            context.l10n.bookTotal(_priceLabel),
+                            style: const TextStyle(color: AppColors.text),
+                          ),
+                          Text(
+                            _payoutLabel,
+                            style: const TextStyle(color: AppColors.muted),
+                          ),
                         ],
                       ),
                     ),
@@ -626,14 +683,14 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
   }
 
   Widget _card({required Widget child}) => Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.card,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: child,
-      );
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: AppColors.card,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: AppColors.border),
+    ),
+    child: child,
+  );
 
   Widget _pill({required Widget child, VoidCallback? onTap}) {
     final c = Container(
@@ -647,7 +704,10 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
     );
     if (onTap == null) return c;
     return InkWell(
-        onTap: onTap, borderRadius: BorderRadius.circular(14), child: c);
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: c,
+    );
   }
 
   Widget _choicePill({
@@ -674,8 +734,10 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
               Icon(icon, size: 18, color: fg),
               const SizedBox(width: 6),
             ],
-            Text(label,
-                style: TextStyle(fontWeight: FontWeight.w600, color: fg)),
+            Text(
+              label,
+              style: TextStyle(fontWeight: FontWeight.w600, color: fg),
+            ),
           ],
         ),
       ),

@@ -862,5 +862,6 @@
   "badgeExpertHelper": "Expert Helper",
   "badgeSkilledHelper": "Skilled Helper",
   "badgeBeginnerHelper": "Beginner Helper",
-  "badgeCommunityMentor": "Community Mentor"
+  "badgeCommunityMentor": "Community Mentor",
+  "bookPaymentPending": "We couldn’t confirm the payment yet. Tap Book again in a moment; you won’t be charged twice."
 }

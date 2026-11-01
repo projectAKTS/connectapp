@@ -265,6 +265,12 @@ service cloud.firestore {
     // Helperly Call System V2 private operational data. These documents
     // contain lock claims, fencing tokens, commands, idempotency records,
     // dispatch state, execution state, and diagnostics.
+    // Payment attempts (one per booking operation). Written and read only
+    // by Cloud Functions; clients never see or change them.
+    match /paymentOperations/{operationId} {
+      allow read, write: if false;
+    }
+
     match /callOps/{callId} {
       allow read, write: if false;
       match /{document=**} {

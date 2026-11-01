@@ -553,5 +553,6 @@
   "badgeExpertHelper": "Personne-ressource experte",
   "badgeSkilledHelper": "Personne-ressource aguerrie",
   "badgeBeginnerHelper": "Personne-ressource débutante",
-  "badgeCommunityMentor": "Mentor de la communauté"
+  "badgeCommunityMentor": "Mentor de la communauté",
+  "bookPaymentPending": "Nous n'avons pas encore pu confirmer le paiement. Touchez Réserver de nouveau dans un instant; vous ne serez pas débité deux fois."
 }

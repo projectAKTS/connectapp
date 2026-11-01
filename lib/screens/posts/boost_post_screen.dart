@@ -1,3 +1,4 @@
+import 'package:uuid/uuid.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/services/payment_service.dart';
@@ -33,7 +34,9 @@ class _BoostPostScreenState extends State<BoostPostScreen> {
 
     try {
       // 💳 Process payment via stored card
+      // Unreachable screen (not in the MVP); kept compiling.
       final paymentCharge = await _paymentService.processPayment(
+        operationId: const Uuid().v4(),
         amount: _getBoostPrice(selectedBoostHours),
       );
 
@@ -78,6 +81,7 @@ class _BoostPostScreenState extends State<BoostPostScreen> {
           break;
 
         case PaymentResult.failed:
+        case PaymentResult.pending:
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
                 content: Text(

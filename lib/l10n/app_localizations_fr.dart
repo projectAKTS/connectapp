@@ -1858,4 +1858,8 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get badgeCommunityMentor => 'Mentor de la communauté';
+
+  @override
+  String get bookPaymentPending =>
+      'Nous n\'avons pas encore pu confirmer le paiement. Touchez Réserver de nouveau dans un instant; vous ne serez pas débité deux fois.';
 }
