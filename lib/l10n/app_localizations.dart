@@ -3319,6 +3319,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Incoming calls'**
   String get callChannelName;
+
+  /// No description provided for @settingsCrashReports.
+  ///
+  /// In en, this message translates to:
+  /// **'Send crash reports'**
+  String get settingsCrashReports;
+
+  /// No description provided for @settingsCrashReportsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Technical details when the app crashes (device model, app version, error), not linked to your account. Off unless you turn it on.'**
+  String get settingsCrashReportsSubtitle;
 }
 
 class _AppLocalizationsDelegate

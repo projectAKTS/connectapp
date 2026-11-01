@@ -36,6 +36,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _usageStats = AppTelemetry.usageStatsEnabled;
+  bool _crashReports = AppTelemetry.crashReportsEnabled;
 
   void _open(BuildContext context, String title, String markdown) {
     // The legal texts are English until the French versions are reviewed
@@ -169,6 +170,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: (v) {
               setState(() => _usageStats = v);
               AppTelemetry.setUsageStatsEnabled(v);
+            },
+          ),
+          SwitchListTile(
+            key: const Key('settings_crash_reports'),
+            secondary:
+                const Icon(Icons.bug_report_outlined, color: AppColors.text),
+            title: Text(l10n.settingsCrashReports),
+            subtitle: Text(l10n.settingsCrashReportsSubtitle),
+            value: _crashReports,
+            onChanged: (v) {
+              setState(() => _crashReports = v);
+              AppTelemetry.setCrashReportsEnabled(v);
             },
           ),
           section(l10n.settingsSectionHelp),

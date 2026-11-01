@@ -11,9 +11,11 @@ import 'package:flutter/widgets.dart';
 /// Crash reporting and product analytics for the MVP: where people get stuck
 /// and what crashes. Events carry no personal data (no names, emails, text).
 ///
-/// Usage statistics (Analytics) are off until the user turns them on in
-/// Settings, and are not linked to the account. Native collection is off in
-/// Info.plist / AndroidManifest too, so nothing is sent before this runs.
+/// Both are off until the user turns them on in Settings, and neither is
+/// linked to the account. Native collection is off in Info.plist /
+/// AndroidManifest too, so nothing is sent before this runs; the SDKs keep
+/// the user's later choice across restarts. While crash reports are off,
+/// reports the SDK cached on the device are deleted, never sent.
 class AppTelemetry {
   AppTelemetry._();
 
@@ -24,6 +26,27 @@ class AppTelemetry {
 
   static bool get usageStatsEnabled =>
       AppPrefs.getBool(usageStatsPrefKey) ?? false;
+
+  /// [AppPrefs] key for the user's crash-report choice.
+  static const String crashReportsPrefKey = 'crashReports';
+
+  static bool get crashReportsEnabled =>
+      AppPrefs.getBool(crashReportsPrefKey) ?? false;
+
+  /// Saves the user's crash-report choice and applies it.
+  static Future<void> setCrashReportsEnabled(bool enabled) async {
+    await AppPrefs.set(crashReportsPrefKey, enabled);
+    await _applyCrashReports();
+  }
+
+  static Future<void> _applyCrashReports() async {
+    final on = crashReportsEnabled && !kDebugMode;
+    try {
+      final crashlytics = FirebaseCrashlytics.instance;
+      await crashlytics.setCrashlyticsCollectionEnabled(on);
+      if (!on) await crashlytics.deleteUnsentReports();
+    } catch (_) {}
+  }
 
   /// Saves the user's choice and applies it.
   static Future<void> setUsageStatsEnabled(bool enabled) async {
@@ -39,17 +62,22 @@ class AppTelemetry {
     if (_started) return;
     _started = true;
     try {
-      await FirebaseCrashlytics.instance
-          .setCrashlyticsCollectionEnabled(!kDebugMode);
+      await _applyCrashReports();
+      // Errors are only handed to Crashlytics while the user allows it, so
+      // nothing is even cached on the device otherwise.
       final previousFlutterOnError = FlutterError.onError;
       FlutterError.onError = (details) {
         previousFlutterOnError?.call(details);
-        unawaited(
-            FirebaseCrashlytics.instance.recordFlutterFatalError(details));
+        if (crashReportsEnabled && !kDebugMode) {
+          unawaited(
+              FirebaseCrashlytics.instance.recordFlutterFatalError(details));
+        }
       };
       PlatformDispatcher.instance.onError = (error, stack) {
-        unawaited(FirebaseCrashlytics.instance
-            .recordError(error, stack, fatal: true));
+        if (crashReportsEnabled && !kDebugMode) {
+          unawaited(FirebaseCrashlytics.instance
+              .recordError(error, stack, fatal: true));
+        }
         return true;
       };
       await FirebaseAnalytics.instance
@@ -62,9 +90,9 @@ class AppTelemetry {
 
   static Future<void> setUser(String? uid) async {
     try {
-      await FirebaseCrashlytics.instance.setUserIdentifier(uid ?? '');
-      // Usage statistics stay unlinked from the account; clears an id set
-      // by older builds.
+      // Neither crash reports nor usage statistics are linked to the
+      // account; this clears ids set by older builds.
+      await FirebaseCrashlytics.instance.setUserIdentifier('');
       await FirebaseAnalytics.instance.setUserId(id: null);
     } catch (_) {}
   }

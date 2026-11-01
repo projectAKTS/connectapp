@@ -845,5 +845,7 @@
   },
   "consultWaitingOther": "Waiting for the other participant…",
   "callCaller": "Caller",
-  "callChannelName": "Incoming calls"
+  "callChannelName": "Incoming calls",
+  "settingsCrashReports": "Send crash reports",
+  "settingsCrashReportsSubtitle": "Technical details when the app crashes (device model, app version, error), not linked to your account. Off unless you turn it on."
 }

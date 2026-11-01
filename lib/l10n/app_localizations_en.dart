@@ -1764,4 +1764,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get callChannelName => 'Incoming calls';
+
+  @override
+  String get settingsCrashReports => 'Send crash reports';
+
+  @override
+  String get settingsCrashReportsSubtitle =>
+      'Technical details when the app crashes (device model, app version, error), not linked to your account. Off unless you turn it on.';
 }

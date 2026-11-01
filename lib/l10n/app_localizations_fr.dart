@@ -275,7 +275,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get blockBody =>
-      'Vous ne verrez plus ses publications ni ses messages, et cette personne n\'apparaîtra plus dans votre liste d\'aidants. Vous pouvez la débloquer depuis son profil.';
+      'Vous ne verrez plus ses publications ni ses messages, et cette personne n\'apparaîtra plus dans vos résultats de recherche d\'aide. Vous pouvez la débloquer depuis son profil.';
 
   @override
   String get blockAction => 'Bloquer';
@@ -296,7 +296,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get spokenLanguagesNote =>
-      'Les gens peuvent trouver des aidants qui parlent leur langue. Ce choix est distinct de la langue de l\'application.';
+      'Chacun peut ainsi trouver quelqu\'un qui parle sa langue. Ce choix est distinct de la langue de l\'application.';
 
   @override
   String get spokenLanguagesRequired =>
@@ -312,16 +312,17 @@ class AppLocalizationsFr extends AppLocalizations {
   String get commonNoResults => 'Aucun résultat.';
 
   @override
-  String get findHelperTitle => 'Trouver un aidant';
+  String get findHelperTitle => 'Trouver de l\'aide';
 
   @override
   String get findHelperResetFilters => 'Réinitialiser';
 
   @override
-  String get findHelperSearchHint => 'Rechercher des aidants…';
+  String get findHelperSearchHint => 'Rechercher une personne-ressource…';
 
   @override
-  String get findHelperNoMatches => 'Aucun aidant ne correspond à vos filtres.';
+  String get findHelperNoMatches =>
+      'Aucune personne-ressource ne correspond à vos filtres.';
 
   @override
   String get findHelperAvailable => 'Disponible';
@@ -394,7 +395,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get adviceNotice =>
-      'Les aidants partagent leur expérience personnelle. Il ne s\'agit pas de conseils juridiques, d\'immigration ou médicaux.';
+      'Les membres partagent leur expérience personnelle. Il ne s\'agit pas de conseils juridiques, d\'immigration ou médicaux.';
 
   @override
   String get authEmail => 'Courriel';
@@ -651,13 +652,13 @@ class AppLocalizationsFr extends AppLocalizations {
   String get roleSeeker => 'Je cherche de l\'aide';
 
   @override
-  String get roleHelper => 'Je veux aider';
+  String get roleHelper => 'Je veux partager mon expérience';
 
   @override
   String get roleBoth => 'Les deux';
 
   @override
-  String get onboardingHelperTitle => 'Profil d\'aidant';
+  String get onboardingHelperTitle => 'Partager mon expérience';
 
   @override
   String get onboardingHelperSubtitle =>
@@ -1041,7 +1042,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get editProfileRoleGetHelp => 'Recevoir de l\'aide';
 
   @override
-  String get editProfileRoleGiveHelp => 'Offrir de l\'aide';
+  String get editProfileRoleGiveHelp => 'Partager mon expérience';
 
   @override
   String get editProfileRoleBoth => 'Les deux';
@@ -1063,7 +1064,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get editProfileExperience => 'Expérience';
 
   @override
-  String get editProfileHelperProfile => 'Profil d\'aidant';
+  String get editProfileHelperProfile => 'Partager mon expérience';
 
   @override
   String get editProfileModeChat => 'Clavardage';
@@ -1188,7 +1189,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get searchNoResults => 'Aucun résultat. Essayez un autre mot-clé.';
 
   @override
-  String get searchHelperBadge => 'Aidant';
+  String get searchHelperBadge => 'Personne-ressource';
 
   @override
   String get searchViewFullPost => 'Voir la publication';
@@ -1543,7 +1544,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String bookPayout(String amount) {
-    return '$amount pour l\'aidant';
+    return '$amount pour la personne-ressource';
   }
 
   @override
@@ -1805,4 +1806,11 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get callChannelName => 'Appels entrants';
+
+  @override
+  String get settingsCrashReports => 'Envoyer les rapports de plantage';
+
+  @override
+  String get settingsCrashReportsSubtitle =>
+      'Détails techniques en cas de plantage (modèle d\'appareil, version de l\'application, erreur), non associés à votre compte. Désactivé sauf si vous l\'activez.';
 }
