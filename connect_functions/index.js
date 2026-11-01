@@ -684,6 +684,12 @@ exports.scheduledConsultationReminder = onSchedule(
 
     const sends = [];
     for (const doc of snap.docs) {
+      // Consecutive runs overlap at the window edge, and runs can repeat:
+      // each consultation is reminded once.
+      const claimed = await claimOnce(db, doc.ref, "reminderSentAt", () =>
+        admin.firestore.FieldValue.serverTimestamp(),
+      );
+      if (!claimed) continue;
       const data = doc.data();
       const participants = Array.isArray(data.participants)
         ? data.participants
@@ -1130,6 +1136,7 @@ const {
 } = require("./consultations/consultation_price");
 const { deleteUserData } = require("./account/delete_account");
 const { minutesUntil, pushText } = require("./i18n/push_text");
+const { claimOnce } = require("./notifications/claim_once");
 const {
   ChargeError,
   chargeOnce,
@@ -1545,6 +1552,15 @@ exports.onChatMessageCreated = onDocumentCreated(
     const chatId = event.params.chatId;
     const authorId = m.authorId;
     if (!chatId || !authorId) return;
+    // Events can be delivered more than once: only the first run pushes
+    // and counts unread.
+    const claimed = await claimOnce(db, event.data.ref, "notifiedAt", () =>
+      admin.firestore.FieldValue.serverTimestamp(),
+    );
+    if (!claimed) {
+      console.log("onChatMessageCreated duplicate delivery skipped", { chatId });
+      return;
+    }
     const chat = (await db.doc(`chats/${chatId}`).get()).data() || {};
     let users = [];
     if (Array.isArray(chat.users) && chat.users.length) users = chat.users;

@@ -118,3 +118,17 @@ test("profiles stay readable to signed-in users", async () => {
   const snap = await assertSucceeds(getDoc(doc(as("mallory"), "users/alice")));
   assert.equal(snap.data().fullName, "Alice");
 });
+
+test("senders cannot pre-set the server's notification marker", async () => {
+  const alice = as("alice");
+  await assertSucceeds(
+    addDoc(collection(alice, "chats/alice_bob/messages"), { authorId: "alice", text: "hi" }),
+  );
+  await assertFails(
+    addDoc(collection(alice, "chats/alice_bob/messages"), {
+      authorId: "alice",
+      text: "hi",
+      notifiedAt: new Date(),
+    }),
+  );
+});

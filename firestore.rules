@@ -345,6 +345,8 @@ service cloud.firestore {
 
         allow create: if isSignedIn()
           && request.resource.data.authorId == request.auth.uid
+          // Set by the server when it notifies; a client must not pre-set it.
+          && !request.resource.data.keys().hasAny(['notifiedAt'])
           && notBlockedInChat(get(/databases/$(database)/documents/chats/$(chatId)).data)
           && (
             (get(/databases/$(database)/documents/chats/$(chatId)).data.keys().hasAny(['participants']) &&
