@@ -1,0 +1,4 @@
+# Test tags (see docs/TESTING.md).
+tags:
+  # Needs --dart-define=HELPERLY_TEST_MODE=true; run separately.
+  test-mode: {}
