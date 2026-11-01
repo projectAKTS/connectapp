@@ -7,7 +7,7 @@
   "starting_sha": "de0e1fb",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "c02bd97",
+  "code_commit_sha": "5184fa6",
   "ending_sha": "SELF",
   "changed_files": [
     "pubspec.yaml",
@@ -31,13 +31,15 @@
     "docs/agent-loop/STATE.json"
   ],
   "validation": {
-    "flutter_full": "2499 pass, 16 known failures (14 working-tree guards, 2 test-mode)",
+    "flutter_full": "2509 pass, 16 known failures (proved against clean worktrees at 5cc7d4e and 47b8a8e)",
     "flutter_analyze_lib": "no issues",
     "test_i18n": "41/41",
     "node": "push_text 5/5, suites 47/47",
     "emulator_rules": "call_v2+firestore 265/265, storage 5/5",
     "builds": "android debug apk ok; ios --no-codesign ok with fr.lproj",
-    "emulator_a": "FR switch, restart persistence, device fr-CA -> FR, tr-TR -> EN fallback, onboarding gate, Find a helper parity"
+    "emulator_a": "FR switch, restart persistence, device fr-CA -> FR, tr-TR -> EN fallback, onboarding gate, Find a helper parity",
+    "crashlytics_android": "SDK pref collection_enabled=false",
+    "ios_plist": "crashlytics+analytics flags false in built app"
   },
   "safety": {
     "deployed": false,
@@ -54,7 +56,7 @@
   "review": {
     "decision": "pending",
     "reviewer": "founder",
-    "notes": "I18N-1 complete; decisions listed in HANDOFF."
+    "notes": "I18N-1 plus follow-up round; nothing deployed or published."
   },
   "implementation_shas": [
     "46909eb",
@@ -72,6 +74,10 @@
     "5c29096",
     "7696d7e",
     "8efada3",
-    "c02bd97"
+    "c02bd97",
+    "0d83b6e",
+    "0fce9b9",
+    "404153b",
+    "5184fa6"
   ]
 }

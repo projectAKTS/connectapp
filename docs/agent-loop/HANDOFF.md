@@ -1,4 +1,4 @@
-# English/French Foundation Handoff (I18N-1)
+# English/French Foundation Handoff (I18N-1, with the founder's follow-up)
 
 STATUS: `ready_for_review` (reviewer: the founder; implemented by Claude)
 
@@ -103,3 +103,82 @@ ENDING_SHA: `SELF`
    Law 25 person-in-charge line.
 4. **Deploy:** `onChatMessageCreated` and `scheduledConsultationReminder`
    are added to the batch in `docs/DEPLOY_MVP.md`.
+
+---
+
+## Follow-Up Round (Founder Decisions, 2026-10-31)
+
+| Item | SHA | Result |
+|---|---|---|
+| Crashlytics privacy-first | `0d83b6e` | Opt-in; native flags off; no user id; no keys or logs; unsent reports deleted while off; the choice persists |
+| French terminology | `0fce9b9` | "personne-ressource" / "Trouver de l'aide" / "Partager mon expérience" / "les membres"; `docs/i18n/FR_GLOSSARY.md` |
+| Search and badges | `404153b` | Cross-language topic search; accented display names; translated badges |
+| Privacy drafts (EN/FR), deploy review, 18+ plan | `5184fa6` | `docs/legal-drafts/`, `docs/DEPLOY_FUNCTIONS_REVIEW.md`, `docs/AGE_18_PLAN.md` |
+
+### Verification
+
+- **Flutter:** full suite 2509 passed, 16 failed (the same 16, see below);
+  `flutter analyze lib` clean.
+- **Node:** 47/47.
+- **Android emulator (debug build):** the Crashlytics SDK keeps
+  `firebase_crashlytics_collection_enabled=false` in its preferences
+  after start.
+- **iOS build:** `FirebaseCrashlyticsCollectionEnabled` and
+  `FIREBASE_ANALYTICS_COLLECTION_ENABLED` are both false in the built
+  `Info.plist`.
+- **Not verified:** the "on" state needs a release build, which forces
+  collection off in debug. That means a release install, which needs a
+  reinstall and test login. Not done on an iOS device either.
+
+### The 16 Failing Flutter Tests
+
+- **14 working-tree guards:** the "only allowed files are changed in the
+  working tree" test in each of these
+  `test/call_v2/integration/*_test.dart` files (phases 7AW to 7BJ):
+  - `first_actual_app_wiring_touchpoint` (+ hardening audit);
+  - `disabled_startup_execution_boundary` (+ audit);
+  - `disabled_runtime_preflight_boundary` (+ audit);
+  - `disabled_runtime_construction_gate` (+ audit);
+  - `disabled_runtime_construction_plan_boundary` (+ audit);
+  - `disabled_runtime_construction_scaffold` (+ audit);
+  - `disabled_runtime_construction_planner_interface` (+ audit).
+  
+  Cause: they assert that `git diff --name-only HEAD` (except
+  `pubspec.lock`) lists only their phase files. The local
+  `ios/Podfile.lock` is modified and kept uncommitted by repo rule.
+  Evidence: in clean worktrees of both HEAD `5cc7d4e` and the pre-i18n
+  baseline `47b8a8e`, all 14 pass. The pre-i18n full run (MVP-5) had the
+  same 16 failures. Production impact: none; they are source-history
+  guards.
+- **2 in `test/call_message_stability_test.dart`:**
+  - "outgoing invite creation does not depend on caller profile read"
+  - "50 stability cycles stay flat and idle"
+  
+  Cause: without `--dart-define=HELPERLY_TEST_MODE=true` they throw
+  "startOutgoingCallForTest is test-mode only". With it, the first passes
+  and the second expects the invite status `connected` after
+  `reportRemoteJoined`, but gets `accepted`. Identical at `47b8a8e` and
+  `5cc7d4e`; that test was last changed on 2026-09-13.
+  
+  Production impact: none found. It is a harness expectation, and
+  physical calls were verified in October with the current behaviour.
+  It needs a call-flow decision (update the test or the status write) in
+  a separate call task. The call code is not touched here.
+
+**Plan:** run the 14 guards only on a clean tree (CI or a worktree), or
+exclude them by tag in the default run. Move the 2 stability tests into
+`integration_test` runs that pass `HELPERLY_TEST_MODE`, then fix the
+`connected` expectation in a call-flow task.
+
+### Still Open
+
+- **Password reset email language:** the code sets `setLanguageCode`.
+  Verifying it means sending a real reset email to a test account
+  (founder approval needed). Also check in the Firebase console that the
+  email templates are not customized in English only.
+- **iOS device check:** French UI, French permission prompts, iOS
+  per-app language, crash-report toggle. Needs the iPhone on cable and a
+  dev build.
+- **Implemented after review:** the 18+ gate (plan only), the call-record
+  retention TTL, the Stripe idempotency key, and a reminder dedupe
+  marker.
