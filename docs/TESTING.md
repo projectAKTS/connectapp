@@ -39,10 +39,24 @@ flat and idle".
   `accepted`.
 - Identical before and after the i18n work (`47b8a8e`, `5cc7d4e`). The
   test was last changed on 2026-09-13.
-- Production impact: none found. Physical calls were verified in
-  October 2026 with the current status flow.
-- Next step: in a call-flow task, decide whether the test or the status
-  write is stale. The call code is not changed outside a call task.
+- **Root cause (2026-11-01): an outdated test helper, not a race and not
+  a state-machine defect.**
+  - The real outgoing path, `startOutgoingCall`
+    (`call_session_manager.dart` around line 1820), registers the invite
+    with the lifecycle arbiter (`outgoingInviteCreated`, which sets
+    `outgoingRinging`).
+  - The test-mode helper `startOutgoingCallForTest` (line 1875) predates
+    the arbiter and never registers.
+  - So in the test the arbiter is not in `outgoingRinging` / `joining`,
+    and `markConnected` refuses the transition. The run's diagnostics show
+    `lifecycleRegressionSuppressedCount: 2`. `reportRemoteJoined` then
+    returns before writing `connected`, and the invite stays `accepted`.
+- **Production impact:** none. Real calls go through `startOutgoingCall`,
+  and physical calls reached `connected` in October 2026. Billing does not
+  read invite status (and paid sessions are off for the beta).
+- **Fix (separate call task):** make `startOutgoingCallForTest` register
+  with the arbiter like the real path. Test-mode code, but in the call
+  manager, so it gets its own task and review.
 
 ## CI Toolchain
 
