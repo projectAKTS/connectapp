@@ -182,3 +182,41 @@ exclude them by tag in the default run. Move the 2 stability tests into
 - **Implemented after review:** the 18+ gate (plan only), the call-record
   retention TTL, the Stripe idempotency key, and a reminder dedupe
   marker.
+
+---
+
+## Stabilization Round (2026-11-01)
+
+| Item | SHA |
+|---|---|
+| Stripe: one charge per booking attempt; fixed the shadowed `charge` (refunds had no `paymentIntentId`) | `2ceb2ee` |
+| Notifications: one chat push and one reminder per event | `9378e43` |
+| 18+ self-declaration and the one-time separate privacy choice | `bf318dc` |
+| CI: pinned Flutter, full suite on a clean checkout, test-mode tag, guard script | `bdfae39` |
+| Retention classification; privacy drafts updated | `c4bf0c7` |
+| Release checklist (16 functions) | `ec3d51c` |
+
+### Validation
+
+- **Node:** 60/60 (payments 9, claim 4).
+- **Emulator rules:** 268/268.
+- **Flutter:**
+  - `test/mvp` + `test/i18n` + startup wiring: 79/79;
+  - analyze clean;
+  - clean-tree guards: 221/221 via `tool/run_clean_tree_guards.sh`.
+- **Emulator A:** the existing account sees the one-time 18+ screen. Not
+  confirmed, to avoid a production write.
+- **CI `App Flutter Tests` run 41278268754** (clean checkout, Flutter
+  3.35.4):
+  - full suite: 2529 passed, 0 failed, guards included;
+  - test-mode step: 1 passed, 1 failed (the tracked `connected`
+    expectation), visible as an error annotation.
+
+### Blocked
+
+- **iPhone checks:** a paired iPhone is visible, but the checks need the
+  founder to operate it, and installing a dev build replaces TestFlight.
+- **Password reset email:** both test accounts use Gmail inboxes that are
+  not the founder's, so they cannot be read and might be real people. A
+  founder-controlled test address is needed (for example a `+alias` of
+  the founder's Gmail).

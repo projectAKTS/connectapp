@@ -1,13 +1,13 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "i18n1_en_fr_foundation",
+  "phase": "mvp7_stabilization",
   "status": "ready_for_review",
   "accepted_checkpoint_sha": "de0e1fb",
   "starting_sha": "de0e1fb",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "5184fa6",
+  "code_commit_sha": "ec3d51c",
   "ending_sha": "SELF",
   "changed_files": [
     "pubspec.yaml",
@@ -31,53 +31,38 @@
     "docs/agent-loop/STATE.json"
   ],
   "validation": {
-    "flutter_full": "2509 pass, 16 known failures (proved against clean worktrees at 5cc7d4e and 47b8a8e)",
-    "flutter_analyze_lib": "no issues",
-    "test_i18n": "41/41",
-    "node": "push_text 5/5, suites 47/47",
-    "emulator_rules": "call_v2+firestore 265/265, storage 5/5",
-    "builds": "android debug apk ok; ios --no-codesign ok with fr.lproj",
-    "emulator_a": "FR switch, restart persistence, device fr-CA -> FR, tr-TR -> EN fallback, onboarding gate, Find a helper parity",
-    "crashlytics_android": "SDK pref collection_enabled=false",
-    "ios_plist": "crashlytics+analytics flags false in built app"
+    "node": "60/60",
+    "rules_emulator": "268/268",
+    "flutter_targeted": "79/79",
+    "ci_full_clean_checkout": "2529 pass, 0 fail (run 41278268754)",
+    "ci_test_mode": "1 pass, 1 known fail (tracked)",
+    "guards_local_clean_worktree": "221/221",
+    "emulator_a": "18+ gate shown for existing account (not confirmed: no prod write)"
   },
   "safety": {
     "deployed": false,
     "deploy_pending": "docs/DEPLOY_MVP.md (user batch; adds onChatMessageCreated, scheduledConsultationReminder)",
     "testflight_built": false,
-    "production_services_contacted": true,
+    "production_services_contacted": false,
     "firebase_changes": false,
     "backend_changes": true,
     "production_code_changes": true,
     "test_changes": true,
     "physical_calls_approved": true,
-    "legal_texts_changed": false
+    "legal_texts_changed": false,
+    "real_payments": false
   },
   "review": {
     "decision": "pending",
     "reviewer": "founder",
-    "notes": "I18N-1 plus follow-up round; nothing deployed or published."
+    "notes": "Stabilization round; deploy not approved."
   },
   "implementation_shas": [
-    "46909eb",
-    "946f422",
-    "1240ec1",
-    "6ea61ba",
-    "a37e603",
-    "f79f03f",
-    "ccd03fc",
-    "143217d",
-    "d7cb4f4",
-    "d9e195d",
-    "079204a",
-    "2ddc3b4",
-    "5c29096",
-    "7696d7e",
-    "8efada3",
-    "c02bd97",
-    "0d83b6e",
-    "0fce9b9",
-    "404153b",
-    "5184fa6"
+    "2ceb2ee",
+    "9378e43",
+    "bf318dc",
+    "bdfae39",
+    "c4bf0c7",
+    "ec3d51c"
   ]
 }
