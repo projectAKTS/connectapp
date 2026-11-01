@@ -6,7 +6,7 @@
 - **Moins de 20 ans :** Jeunesse, J'écoute, appelez le **1-800-668-6868** ou
   textez **686868**.
 
-Helperly est une communauté d'entraide. Les aidants partagent leur propre
+Helperly est une communauté d'entraide. Les membres partagent leur propre
 expérience. Ce ne sont pas des avocats, des consultants en immigration
 autorisés, des médecins ni des thérapeutes, et rien sur Helperly ne constitue
 un conseil juridique, d'immigration, médical ou financier.

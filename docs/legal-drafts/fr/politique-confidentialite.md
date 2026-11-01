@@ -17,7 +17,7 @@ secteur privé du Québec (Loi 25). [À CONFIRMER : mention de la Loi 25]
 - **Contenu :** publications, commentaires, messages et pièces jointes que
   vous partagez.
 - **Avis :** étoiles et commentaires que vous donnez après une séance
-  réservée. Ils apparaissent sur le profil de l'aidant sans votre nom.
+  réservée. Ils apparaissent sur le profil de la personne-ressource sans votre nom.
 - **Appels :** qui a appelé qui, quand et pendant combien de temps. Nous
   n'enregistrons pas l'audio ni la vidéo des appels.
 - **Paiements :** traités par Stripe. Nous conservons une référence de
@@ -57,7 +57,7 @@ personnels, immédiatement ou au plus tard dans les 30 jours, sauf les
 documents que la loi nous oblige à conserver (par exemple, les dossiers de
 paiement). Les messages déjà envoyés restent dans la conversation de l'autre
 personne. Les commentaires d'avis que vous avez écrits sont supprimés; leurs
-étoiles restent dans la moyenne de l'aidant, sans votre nom.
+étoiles restent dans la moyenne de la personne-ressource, sans votre nom.
 
 ### Vos choix et vos droits
 Vous pouvez consulter et modifier votre profil, gérer les notifications et

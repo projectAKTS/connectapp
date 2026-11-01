@@ -23,9 +23,9 @@ French ones after review.
   3. **Data outside Québec:** Law 25 frames transfers outside Québec. A
      privacy impact assessment is required before them.
   4. **Minimum age:** the English Terms say 18. Keep 18, or allow 14+?
-- **Terminology:** "aidant" is used for "helper". In Québec, "proche
-  aidant" also means a family caregiver. The reviewer may prefer another
-  word, such as "mentor" or "accompagnateur".
+- **Terminology:** "helper" is translated by context, never as "aidant"
+  (in Québec that word means a family caregiver). See
+  `docs/i18n/FR_GLOSSARY.md`.
 - **Files:**
   - `securite.md`
   - `regles-communaute.md`

@@ -12,8 +12,8 @@ valide. [À CONFIRMER : âge minimum]
 ### 2. Ce qu'est Helperly
 Helperly met en relation des personnes qui cherchent de l'aide avec des
 personnes qui partagent leur expérience vécue (par exemple, s'installer au
-Canada, trouver un logement ou un emploi). Les aidants sont des membres
-indépendants de la communauté, et non des employés ni des mandataires de
+Canada, trouver un logement ou un emploi). Les personnes-ressources sont des
+membres indépendants de la communauté, et non des employés ni des mandataires de
 Helperly. **Les contenus et les conversations sur Helperly ne constituent
 pas des conseils juridiques, d'immigration, médicaux, financiers ou autres
 conseils professionnels.** Pour une demande d'immigration, consultez un
@@ -31,9 +31,9 @@ service. Ne publiez rien que vous n'avez pas le droit de partager ou qui
 enfreint les Règles de la communauté.
 
 ### 5. Séances payantes
-Certains aidants offrent des séances audio ou vidéo payantes. Les prix sont
+Certaines personnes-ressources offrent des séances audio ou vidéo payantes. Les prix sont
 affichés avant la réservation. Les paiements sont traités par Stripe;
-Helperly conserve des frais de plateforme et verse le reste à l'aidant. Les
+Helperly conserve des frais de plateforme et verse le reste à la personne-ressource. Les
 annulations et les remboursements suivent la politique affichée au moment de
 la réservation.
 
