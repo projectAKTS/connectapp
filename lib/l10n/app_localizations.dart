@@ -2239,6 +2239,330 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'View full post'**
   String get searchViewFullPost;
+
+  /// No description provided for @createTemplates.
+  ///
+  /// In en, this message translates to:
+  /// **'Templates'**
+  String get createTemplates;
+
+  /// No description provided for @createSetQuick.
+  ///
+  /// In en, this message translates to:
+  /// **'Set Quick'**
+  String get createSetQuick;
+
+  /// No description provided for @createTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Create a post'**
+  String get createTitle;
+
+  /// No description provided for @createPosting.
+  ///
+  /// In en, this message translates to:
+  /// **'Posting...'**
+  String get createPosting;
+
+  /// No description provided for @createRemoveAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove all'**
+  String get createRemoveAll;
+
+  /// No description provided for @createAddFromLibrary.
+  ///
+  /// In en, this message translates to:
+  /// **'Add from library'**
+  String get createAddFromLibrary;
+
+  /// No description provided for @createUseCamera.
+  ///
+  /// In en, this message translates to:
+  /// **'Use camera'**
+  String get createUseCamera;
+
+  /// No description provided for @createNoMedia.
+  ///
+  /// In en, this message translates to:
+  /// **'No media added yet.'**
+  String get createNoMedia;
+
+  /// No description provided for @createTagHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a tag (e.g. career)'**
+  String get createTagHint;
+
+  /// No description provided for @createQuickHint.
+  ///
+  /// In en, this message translates to:
+  /// **'What do you want to talk about?'**
+  String get createQuickHint;
+
+  /// No description provided for @createQuickPost.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick post'**
+  String get createQuickPost;
+
+  /// No description provided for @createTemplate.
+  ///
+  /// In en, this message translates to:
+  /// **'Template'**
+  String get createTemplate;
+
+  /// No description provided for @createMedia.
+  ///
+  /// In en, this message translates to:
+  /// **'Media'**
+  String get createMedia;
+
+  /// No description provided for @createMediaCount.
+  ///
+  /// In en, this message translates to:
+  /// **'Media ({count})'**
+  String createMediaCount(int count);
+
+  /// No description provided for @createTags.
+  ///
+  /// In en, this message translates to:
+  /// **'Tags'**
+  String get createTags;
+
+  /// No description provided for @createTagsCount.
+  ///
+  /// In en, this message translates to:
+  /// **'Tags ({count})'**
+  String createTagsCount(int count);
+
+  /// No description provided for @createAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'Add'**
+  String get createAdd;
+
+  /// No description provided for @createLoginToPost.
+  ///
+  /// In en, this message translates to:
+  /// **'Please log in to post'**
+  String get createLoginToPost;
+
+  /// No description provided for @createPosted.
+  ///
+  /// In en, this message translates to:
+  /// **'Posted ✅'**
+  String get createPosted;
+
+  /// No description provided for @createPostFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not post. Please try again.'**
+  String get createPostFailed;
+
+  /// No description provided for @tplExperienceQ1.
+  ///
+  /// In en, this message translates to:
+  /// **'What happened?'**
+  String get tplExperienceQ1;
+
+  /// No description provided for @tplExperienceQ2.
+  ///
+  /// In en, this message translates to:
+  /// **'What did you learn?'**
+  String get tplExperienceQ2;
+
+  /// No description provided for @tplExperienceQ3.
+  ///
+  /// In en, this message translates to:
+  /// **'What advice would you give others?'**
+  String get tplExperienceQ3;
+
+  /// No description provided for @tplAdviceQ1.
+  ///
+  /// In en, this message translates to:
+  /// **'What’s your challenge or question?'**
+  String get tplAdviceQ1;
+
+  /// No description provided for @tplAdviceQ2.
+  ///
+  /// In en, this message translates to:
+  /// **'What have you tried so far?'**
+  String get tplAdviceQ2;
+
+  /// No description provided for @tplAdviceQ3.
+  ///
+  /// In en, this message translates to:
+  /// **'What kind of advice do you need?'**
+  String get tplAdviceQ3;
+
+  /// No description provided for @tplHowToQ1.
+  ///
+  /// In en, this message translates to:
+  /// **'What are you explaining?'**
+  String get tplHowToQ1;
+
+  /// No description provided for @tplHowToQ2.
+  ///
+  /// In en, this message translates to:
+  /// **'List the steps clearly'**
+  String get tplHowToQ2;
+
+  /// No description provided for @tplHowToQ3.
+  ///
+  /// In en, this message translates to:
+  /// **'What’s the key takeaway?'**
+  String get tplHowToQ3;
+
+  /// No description provided for @tplLessonsQ1.
+  ///
+  /// In en, this message translates to:
+  /// **'Topic of your lesson'**
+  String get tplLessonsQ1;
+
+  /// No description provided for @tplLessonsQ2.
+  ///
+  /// In en, this message translates to:
+  /// **'List 3–10 lessons or takeaways'**
+  String get tplLessonsQ2;
+
+  /// No description provided for @tplLessonsQ3.
+  ///
+  /// In en, this message translates to:
+  /// **'One key message for others'**
+  String get tplLessonsQ3;
+
+  /// No description provided for @tplQuickDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Write freely in one field.'**
+  String get tplQuickDesc;
+
+  /// No description provided for @tplExperienceDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Share a story + what you learned.'**
+  String get tplExperienceDesc;
+
+  /// No description provided for @tplAdviceDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask a question and add context.'**
+  String get tplAdviceDesc;
+
+  /// No description provided for @tplHowToDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Explain steps so others can follow.'**
+  String get tplHowToDesc;
+
+  /// No description provided for @tplLessonsDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Summarize takeaways from a topic.'**
+  String get tplLessonsDesc;
+
+  /// No description provided for @postDetailTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Post'**
+  String get postDetailTitle;
+
+  /// No description provided for @postNotFound.
+  ///
+  /// In en, this message translates to:
+  /// **'Post not found.'**
+  String get postNotFound;
+
+  /// No description provided for @postUnknownDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown date'**
+  String get postUnknownDate;
+
+  /// No description provided for @postPostedOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Posted on {date}'**
+  String postPostedOn(String date);
+
+  /// No description provided for @commentHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Write a comment...'**
+  String get commentHint;
+
+  /// No description provided for @commentNone.
+  ///
+  /// In en, this message translates to:
+  /// **'No comments yet.'**
+  String get commentNone;
+
+  /// No description provided for @commentJustNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Just now'**
+  String get commentJustNow;
+
+  /// No description provided for @commentNoContent.
+  ///
+  /// In en, this message translates to:
+  /// **'No content'**
+  String get commentNoContent;
+
+  /// No description provided for @commentFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not post your comment. Please try again.'**
+  String get commentFailed;
+
+  /// No description provided for @postProTip.
+  ///
+  /// In en, this message translates to:
+  /// **'💡 Pro Tip'**
+  String get postProTip;
+
+  /// No description provided for @postAddComment.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a comment...'**
+  String get postAddComment;
+
+  /// No description provided for @postLikes.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 like} other{{count} likes}}'**
+  String postLikes(int count);
+
+  /// No description provided for @editPostTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit Post'**
+  String get editPostTitle;
+
+  /// No description provided for @editPostContent.
+  ///
+  /// In en, this message translates to:
+  /// **'Post Content'**
+  String get editPostContent;
+
+  /// No description provided for @editPostUpdate.
+  ///
+  /// In en, this message translates to:
+  /// **'Update Post'**
+  String get editPostUpdate;
+
+  /// No description provided for @editPostUpdated.
+  ///
+  /// In en, this message translates to:
+  /// **'Post updated successfully!'**
+  String get editPostUpdated;
+
+  /// No description provided for @editPostFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not update the post. Please try again.'**
+  String get editPostFailed;
 }
 
 class _AppLocalizationsDelegate

@@ -1,3 +1,4 @@
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/l10n/formatters.dart';
 import 'package:connect_app/services/content_filter.dart';
 import 'package:flutter/material.dart';
@@ -103,7 +104,7 @@ class _PostScreenState extends State<PostScreen> {
                   color: Colors.orange.shade100,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Text('💡 Pro Tip',
+                child: Text(context.l10n.postProTip,
                     style: TextStyle(color: Colors.orange)),
               ),
             const SizedBox(height: 8),
@@ -138,7 +139,8 @@ class _PostScreenState extends State<PostScreen> {
                       color: isLiked ? Colors.red : Colors.grey),
                   onPressed: _toggleLike,
                 ),
-                Text('$likesCount likes', style: const TextStyle(fontSize: 16)),
+                Text(context.l10n.postLikes(likesCount),
+                    style: const TextStyle(fontSize: 16)),
               ],
             ),
 
@@ -201,7 +203,7 @@ class _PostScreenState extends State<PostScreen> {
                   child: TextField(
                     controller: _commentController,
                     decoration:
-                        const InputDecoration(hintText: 'Add a comment...'),
+                        InputDecoration(hintText: context.l10n.postAddComment),
                   ),
                 ),
                 IconButton(

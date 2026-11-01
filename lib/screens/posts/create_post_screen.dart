@@ -1,4 +1,5 @@
 // lib/screens/posts/create_post_screen.dart
+import 'package:connect_app/l10n/l10n.dart';
 import 'dart:io';
 
 import 'package:connect_app/services/content_filter.dart';
@@ -52,36 +53,61 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   String? _selectedTemplate; // null => Quick
 
-  final Map<String, Map<String, String>> templates = const {
-    'Experience': {
-      'q1': 'What happened?',
-      'q2': 'What did you learn?',
-      'q3': 'What advice would you give others?',
-    },
-    'Advice Request': {
-      'q1': 'What’s your challenge or question?',
-      'q2': 'What have you tried so far?',
-      'q3': 'What kind of advice do you need?',
-    },
-    'How-To Guide': {
-      'q1': 'What are you explaining?',
-      'q2': 'List the steps clearly',
-      'q3': 'What’s the key takeaway?',
-    },
-    'Lessons Learned': {
-      'q1': 'Topic of your lesson',
-      'q2': 'List 3–10 lessons or takeaways',
-      'q3': 'One key message for others',
-    },
-  };
+  // Keys are the stored post types; prompts and descriptions follow the
+  // app language (the prompts become part of the author's post).
+  Map<String, Map<String, String>> get templates {
+    final l = context.l10n;
+    return {
+      'Experience': {
+        'q1': l.tplExperienceQ1,
+        'q2': l.tplExperienceQ2,
+        'q3': l.tplExperienceQ3,
+      },
+      'Advice Request': {
+        'q1': l.tplAdviceQ1,
+        'q2': l.tplAdviceQ2,
+        'q3': l.tplAdviceQ3,
+      },
+      'How-To Guide': {
+        'q1': l.tplHowToQ1,
+        'q2': l.tplHowToQ2,
+        'q3': l.tplHowToQ3,
+      },
+      'Lessons Learned': {
+        'q1': l.tplLessonsQ1,
+        'q2': l.tplLessonsQ2,
+        'q3': l.tplLessonsQ3,
+      },
+    };
+  }
 
-  final Map<String, String> templateDescriptions = const {
-    'Quick post': 'Write freely in one field.',
-    'Experience': 'Share a story + what you learned.',
-    'Advice Request': 'Ask a question and add context.',
-    'How-To Guide': 'Explain steps so others can follow.',
-    'Lessons Learned': 'Summarize takeaways from a topic.',
-  };
+  Map<String, String> get templateDescriptions {
+    final l = context.l10n;
+    return {
+      'Quick post': l.tplQuickDesc,
+      'Experience': l.tplExperienceDesc,
+      'Advice Request': l.tplAdviceDesc,
+      'How-To Guide': l.tplHowToDesc,
+      'Lessons Learned': l.tplLessonsDesc,
+    };
+  }
+
+  String _templateLabel(String? key) {
+    final l = context.l10n;
+    switch (key) {
+      case null:
+        return l.createQuickPost;
+      case 'Experience':
+        return l.postFilterExperience;
+      case 'Advice Request':
+        return l.postFilterAdvice;
+      case 'How-To Guide':
+        return l.postFilterHowTo;
+      case 'Lessons Learned':
+        return l.postFilterLessons;
+    }
+    return key;
+  }
 
   final List<String> selectedTags = [];
   final TextEditingController _tagController = TextEditingController();
@@ -459,8 +485,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 const SizedBox(height: 12),
                 Row(
                   children: [
-                    const Text(
-                      'Templates',
+                    Text(
+                      context.l10n.createTemplates,
                       style: TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.w700,
@@ -478,8 +504,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         backgroundColor: Colors.transparent,
                         padding: EdgeInsets.zero,
                       ),
-                      child: const Text(
-                        'Set Quick',
+                      child: Text(
+                        context.l10n.createSetQuick,
                         style: TextStyle(
                           color: AppColors.muted,
                           fontWeight: FontWeight.w600,
@@ -490,7 +516,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 ),
                 const SizedBox(height: 10),
                 _TemplateRowPro(
-                  title: 'Quick post',
+                  title: context.l10n.createQuickPost,
                   subtitle: templateDescriptions['Quick post']!,
                   selected: _selectedTemplate == null,
                   icon: Icons.flash_on_rounded,
@@ -504,7 +530,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 const SizedBox(height: 10),
                 ...templates.keys.map((k) {
                   return _TemplateRowPro(
-                    title: k,
+                    title: _templateLabel(k),
                     subtitle: templateDescriptions[k] ?? '',
                     selected: _selectedTemplate == k,
                     icon: Icons.view_list_outlined,
@@ -540,7 +566,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please log in to post')),
+        SnackBar(content: Text(context.l10n.createLoginToPost)),
       );
       return;
     }
@@ -599,7 +625,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         _resetComposer();
 
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Posting media in background…')),
+          SnackBar(content: Text(context.l10n.homePostingInBackground)),
         );
 
         Future.delayed(const Duration(milliseconds: 150), () {
@@ -630,7 +656,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _resetComposer();
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Posted ✅')),
+        SnackBar(content: Text(context.l10n.createPosted)),
       );
       AppTelemetry.event('post_created');
 
@@ -640,7 +666,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to post: $e')),
+        SnackBar(content: Text(context.l10n.createPostFailed)),
       );
     } finally {
       if (mounted) setState(() => _isPosting = false);
@@ -753,15 +779,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             title: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text(
-                  'Create a post',
+                Text(
+                  context.l10n.createTitle,
                   style: TextStyle(
                     color: AppColors.text,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
                 Text(
-                  _selectedTemplate ?? 'Quick post',
+                  _templateLabel(_selectedTemplate),
                   style: const TextStyle(
                     color: AppColors.muted,
                     fontSize: 12,
@@ -793,7 +819,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           child: CircularProgressIndicator(
                               strokeWidth: 2, color: Colors.white),
                         )
-                      : const Text('Post',
+                      : Text(context.l10n.tabPost,
                           style: TextStyle(fontWeight: FontWeight.w700)),
                 ),
               ),
@@ -810,13 +836,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       child: Row(
                         children: [
                           _ModeChip(
-                            label: 'Quick',
+                            label: context.l10n.postFilterQuick,
                             selected: _selectedTemplate == null,
                             onTap: _setQuickPost,
                           ),
                           const SizedBox(width: 8),
                           _ModeChip(
-                            label: 'Template',
+                            label: context.l10n.createTemplate,
                             selected: _selectedTemplate != null,
                             onTap: _openTemplateSheet,
                           ),
@@ -865,8 +891,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                               child: _PillButton(
                                 label: (_imageFiles.isNotEmpty ||
                                         _videoFile != null)
-                                    ? 'Media (${_imageFiles.length + (_videoFile != null ? 1 : 0)})'
-                                    : 'Media',
+                                    ? context.l10n.createMediaCount(
+                                        _imageFiles.length +
+                                            (_videoFile != null ? 1 : 0))
+                                    : context.l10n.createMedia,
                                 icon: Icons.photo_library_outlined,
                                 onTap: _openMediaSheet,
                                 selected: _hasMedia,
@@ -876,8 +904,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                             Expanded(
                               child: _PillButton(
                                 label: selectedTags.isNotEmpty
-                                    ? 'Tags (${selectedTags.length})'
-                                    : 'Tags',
+                                    ? context.l10n
+                                        .createTagsCount(selectedTags.length)
+                                    : context.l10n.createTags,
                                 icon: Icons.tag_outlined,
                                 onTap: _openTagsSheet,
                                 selected: selectedTags.isNotEmpty,
@@ -897,7 +926,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     child: Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
-                        children: const [
+                        children: [
                           SizedBox(
                             width: 28,
                             height: 28,
@@ -905,7 +934,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           ),
                           SizedBox(height: 12),
                           Text(
-                            'Posting...',
+                            context.l10n.createPosting,
                             style: TextStyle(
                               fontWeight: FontWeight.w700,
                               color: AppColors.text,
@@ -975,8 +1004,8 @@ class _MediaPanel extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Text(
-                'Media',
+              Text(
+                context.l10n.createMedia,
                 style: TextStyle(
                   color: AppColors.text,
                   fontWeight: FontWeight.w900,
@@ -988,10 +1017,10 @@ class _MediaPanel extends StatelessWidget {
               InkWell(
                 borderRadius: BorderRadius.circular(10),
                 onTap: onRemoveAll,
-                child: const Padding(
+                child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                   child: Text(
-                    'Remove all',
+                    context.l10n.createRemoveAll,
                     style: TextStyle(
                       color: AppColors.muted,
                       fontWeight: FontWeight.w800,
@@ -1009,8 +1038,8 @@ class _MediaPanel extends StatelessWidget {
                 child: _SheetAction(
                   icon: Icons.photo_library_outlined,
                   label: hasPhotos || hasVideo
-                      ? 'Choose from library'
-                      : 'Add from library',
+                      ? context.l10n.commonChooseFromLibrary
+                      : context.l10n.createAddFromLibrary,
                   onTap: () => _chooseMediaType(
                     context,
                     onPhoto: hasPhotos ? onAddMorePhotos : onAddPhotos,
@@ -1022,7 +1051,7 @@ class _MediaPanel extends StatelessWidget {
               Expanded(
                 child: _SheetAction(
                   icon: Icons.photo_camera_outlined,
-                  label: 'Use camera',
+                  label: context.l10n.createUseCamera,
                   onTap: () => _chooseMediaType(
                     context,
                     onPhoto: hasPhotos ? onTakeMorePhotos : onTakePhoto,
@@ -1048,10 +1077,10 @@ class _MediaPanel extends StatelessWidget {
             ),
           ],
           if (!hasPhotos && !hasVideo)
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(top: 6),
               child: Text(
-                'No media added yet.',
+                context.l10n.createNoMedia,
                 style: TextStyle(
                     color: AppColors.muted, fontWeight: FontWeight.w600),
               ),
@@ -1221,7 +1250,7 @@ void _chooseMediaType(
               ),
               ListTile(
                 leading: const Icon(Icons.image_outlined),
-                title: const Text('Photo'),
+                title: Text(context.l10n.messagePhoto),
                 onTap: () {
                   Navigator.pop(ctx);
                   onPhoto();
@@ -1229,7 +1258,7 @@ void _chooseMediaType(
               ),
               ListTile(
                 leading: const Icon(Icons.videocam_outlined),
-                title: const Text('Video'),
+                title: Text(context.l10n.messageVideo),
                 onTap: () {
                   Navigator.pop(ctx);
                   onVideo();
@@ -1371,8 +1400,8 @@ class _InlineTagsComposer extends StatelessWidget {
       children: [
         Row(
           children: [
-            const Text(
-              'Tags',
+            Text(
+              context.l10n.createTags,
               style: TextStyle(
                 color: AppColors.text,
                 fontWeight: FontWeight.w800,
@@ -1385,10 +1414,10 @@ class _InlineTagsComposer extends StatelessWidget {
               InkWell(
                 borderRadius: BorderRadius.circular(10),
                 onTap: onClear,
-                child: const Padding(
+                child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                   child: Text(
-                    'Clear',
+                    context.l10n.commonClear,
                     style: TextStyle(
                       color: AppColors.muted,
                       fontWeight: FontWeight.w800,
@@ -1413,7 +1442,7 @@ class _InlineTagsComposer extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                 ),
                 decoration: InputDecoration(
-                  hintText: 'Add a tag (e.g. career)',
+                  hintText: context.l10n.createTagHint,
                   hintStyle: const TextStyle(
                       color: AppColors.muted, fontWeight: FontWeight.w600),
                   filled: true,
@@ -1453,7 +1482,7 @@ class _InlineTagsComposer extends StatelessWidget {
                   ),
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                 ),
-                child: const Text('Add',
+                child: Text(context.l10n.createAdd,
                     style: TextStyle(fontWeight: FontWeight.w900)),
               ),
             ),
@@ -1524,8 +1553,8 @@ class _QuickEditor extends StatelessWidget {
         color: AppColors.text,
         fontWeight: FontWeight.w500,
       ),
-      decoration: const InputDecoration(
-        hintText: 'What do you want to talk about?',
+      decoration: InputDecoration(
+        hintText: context.l10n.createQuickHint,
         hintStyle: TextStyle(
           color: Color(0xFF9C9A96),
           fontWeight: FontWeight.w500,

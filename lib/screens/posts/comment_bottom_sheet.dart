@@ -1,3 +1,4 @@
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/l10n/formatters.dart';
 import 'package:connect_app/services/content_filter.dart';
 import 'package:flutter/material.dart';
@@ -79,7 +80,7 @@ class _CommentBottomSheetState extends State<CommentBottomSheet> {
       });
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error posting comment: $e')),
+        SnackBar(content: Text(context.l10n.commentFailed)),
       );
     } finally {
       setState(() {
@@ -107,8 +108,8 @@ class _CommentBottomSheetState extends State<CommentBottomSheet> {
                 Expanded(
                   child: TextField(
                     controller: _commentController,
-                    decoration: const InputDecoration(
-                      hintText: 'Write a comment...',
+                    decoration: InputDecoration(
+                      hintText: context.l10n.commentHint,
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -136,7 +137,7 @@ class _CommentBottomSheetState extends State<CommentBottomSheet> {
                 }
 
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return const Center(child: Text('No comments yet.'));
+                  return Center(child: Text(context.l10n.commentNone));
                 }
 
                 final comments = snapshot.data!.docs;
@@ -148,7 +149,8 @@ class _CommentBottomSheetState extends State<CommentBottomSheet> {
                     var commentData =
                         comments[index].data() as Map<String, dynamic>;
 
-                    String commentText = commentData['text'] ?? 'No content';
+                    String commentText =
+                        commentData['text'] ?? context.l10n.commentNoContent;
                     String userName = commentData['userName'] ?? 'Anonymous';
 
                     // ⭐ Robust Timestamp Fix
@@ -156,7 +158,7 @@ class _CommentBottomSheetState extends State<CommentBottomSheet> {
                         parseFirestoreTimestamp(commentData['timestamp']);
                     String formattedTime = dt != null
                         ? AppFormat.dateTime(context, dt)
-                        : 'Just now';
+                        : context.l10n.commentJustNow;
 
                     return ListTile(
                       leading: const CircleAvatar(child: Icon(Icons.person)),

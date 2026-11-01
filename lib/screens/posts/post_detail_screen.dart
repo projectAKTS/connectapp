@@ -1,3 +1,4 @@
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/l10n/formatters.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -119,7 +120,7 @@ class PostDetailScreen extends StatelessWidget {
         appBar: AppBar(
           backgroundColor: AppColors.canvas,
           elevation: 0,
-          title: const Text('Post Detail'),
+          title: Text(context.l10n.postDetailTitle),
         ),
         body: StreamBuilder<DocumentSnapshot>(
           stream: FirebaseFirestore.instance
@@ -131,16 +132,17 @@ class PostDetailScreen extends StatelessWidget {
               return const Center(child: CircularProgressIndicator());
             }
             if (!snapshot.hasData || !snapshot.data!.exists) {
-              return const Center(child: Text('Post not found.'));
+              return Center(child: Text(context.l10n.postNotFound));
             }
 
             final data = snapshot.data!.data() as Map<String, dynamic>;
             final dt = parseFirestoreTimestamp(data['timestamp']);
-            final date =
-                dt != null ? AppFormat.dateTime(context, dt) : 'Unknown date';
+            final date = dt != null
+                ? AppFormat.dateTime(context, dt)
+                : context.l10n.postUnknownDate;
             final content = (data['content'] ?? '').toString();
             final (maybeBadge, body) = _extractBadgeAndBody(content);
-            final badge = maybeBadge ?? 'Quick Post';
+            final badge = maybeBadge ?? context.l10n.postTypeQuick;
 
             final base = const TextStyle(
                 fontSize: 16, height: 1.4, color: AppColors.text);
@@ -211,7 +213,7 @@ class PostDetailScreen extends StatelessWidget {
                           right: 16,
                           bottom: 16,
                           child: Text(
-                            'Posted on $date',
+                            context.l10n.postPostedOn(date),
                             style: const TextStyle(color: AppColors.muted),
                           ),
                         ),

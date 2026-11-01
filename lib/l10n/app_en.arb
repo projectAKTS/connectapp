@@ -523,5 +523,87 @@
   "searchAll": "All",
   "searchNoResults": "No results. Try another keyword.",
   "searchHelperBadge": "Helper",
-  "searchViewFullPost": "View full post"
+  "searchViewFullPost": "View full post",
+  "createTemplates": "Templates",
+  "createSetQuick": "Set Quick",
+  "createTitle": "Create a post",
+  "createPosting": "Posting...",
+  "createRemoveAll": "Remove all",
+  "createAddFromLibrary": "Add from library",
+  "createUseCamera": "Use camera",
+  "createNoMedia": "No media added yet.",
+  "createTagHint": "Add a tag (e.g. career)",
+  "createQuickHint": "What do you want to talk about?",
+  "createQuickPost": "Quick post",
+  "createTemplate": "Template",
+  "createMedia": "Media",
+  "createMediaCount": "Media ({count})",
+  "@createMediaCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "createTags": "Tags",
+  "createTagsCount": "Tags ({count})",
+  "@createTagsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "createAdd": "Add",
+  "createLoginToPost": "Please log in to post",
+  "createPosted": "Posted ✅",
+  "createPostFailed": "Could not post. Please try again.",
+  "tplExperienceQ1": "What happened?",
+  "tplExperienceQ2": "What did you learn?",
+  "tplExperienceQ3": "What advice would you give others?",
+  "tplAdviceQ1": "What’s your challenge or question?",
+  "tplAdviceQ2": "What have you tried so far?",
+  "tplAdviceQ3": "What kind of advice do you need?",
+  "tplHowToQ1": "What are you explaining?",
+  "tplHowToQ2": "List the steps clearly",
+  "tplHowToQ3": "What’s the key takeaway?",
+  "tplLessonsQ1": "Topic of your lesson",
+  "tplLessonsQ2": "List 3–10 lessons or takeaways",
+  "tplLessonsQ3": "One key message for others",
+  "tplQuickDesc": "Write freely in one field.",
+  "tplExperienceDesc": "Share a story + what you learned.",
+  "tplAdviceDesc": "Ask a question and add context.",
+  "tplHowToDesc": "Explain steps so others can follow.",
+  "tplLessonsDesc": "Summarize takeaways from a topic.",
+  "postDetailTitle": "Post",
+  "postNotFound": "Post not found.",
+  "postUnknownDate": "Unknown date",
+  "postPostedOn": "Posted on {date}",
+  "@postPostedOn": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "commentHint": "Write a comment...",
+  "commentNone": "No comments yet.",
+  "commentJustNow": "Just now",
+  "commentNoContent": "No content",
+  "commentFailed": "Could not post your comment. Please try again.",
+  "postProTip": "💡 Pro Tip",
+  "postAddComment": "Add a comment...",
+  "postLikes": "{count, plural, =1{1 like} other{{count} likes}}",
+  "@postLikes": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "editPostTitle": "Edit Post",
+  "editPostContent": "Post Content",
+  "editPostUpdate": "Update Post",
+  "editPostUpdated": "Post updated successfully!",
+  "editPostFailed": "Could not update the post. Please try again."
 }

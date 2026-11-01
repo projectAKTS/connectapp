@@ -1,4 +1,5 @@
 // lib/screens/posts/edit_post_screen.dart
+import 'package:connect_app/l10n/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -33,12 +34,12 @@ class _EditPostScreenState extends State<EditPostScreen> {
         'timestamp': FieldValue.serverTimestamp(),
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Post updated successfully!')),
+        SnackBar(content: Text(context.l10n.editPostUpdated)),
       );
       Navigator.pop(context);
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update post: $e')),
+        SnackBar(content: Text(context.l10n.editPostFailed)),
       );
     }
   }
@@ -50,7 +51,7 @@ class _EditPostScreenState extends State<EditPostScreen> {
     final String postId = args?['postId'] ?? '';
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Edit Post')),
+      appBar: AppBar(title: Text(context.l10n.editPostTitle)),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -58,15 +59,15 @@ class _EditPostScreenState extends State<EditPostScreen> {
             TextField(
               controller: _contentController,
               maxLines: 4,
-              decoration: const InputDecoration(
-                labelText: 'Post Content',
+              decoration: InputDecoration(
+                labelText: context.l10n.editPostContent,
                 border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: () => _updatePost(postId),
-              child: const Text('Update Post'),
+              child: Text(context.l10n.editPostUpdate),
             ),
           ],
         ),

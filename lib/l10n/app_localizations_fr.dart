@@ -1192,4 +1192,185 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get searchViewFullPost => 'Voir la publication';
+
+  @override
+  String get createTemplates => 'Modèles';
+
+  @override
+  String get createSetQuick => 'Rapide';
+
+  @override
+  String get createTitle => 'Créer une publication';
+
+  @override
+  String get createPosting => 'Publication…';
+
+  @override
+  String get createRemoveAll => 'Tout retirer';
+
+  @override
+  String get createAddFromLibrary => 'Ajouter depuis la galerie';
+
+  @override
+  String get createUseCamera => 'Utiliser l\'appareil photo';
+
+  @override
+  String get createNoMedia => 'Aucun média ajouté.';
+
+  @override
+  String get createTagHint => 'Ajouter une étiquette (p. ex. emploi)';
+
+  @override
+  String get createQuickHint => 'De quoi voulez-vous parler?';
+
+  @override
+  String get createQuickPost => 'Publication rapide';
+
+  @override
+  String get createTemplate => 'Modèle';
+
+  @override
+  String get createMedia => 'Médias';
+
+  @override
+  String createMediaCount(int count) {
+    return 'Médias ($count)';
+  }
+
+  @override
+  String get createTags => 'Étiquettes';
+
+  @override
+  String createTagsCount(int count) {
+    return 'Étiquettes ($count)';
+  }
+
+  @override
+  String get createAdd => 'Ajouter';
+
+  @override
+  String get createLoginToPost => 'Connectez-vous pour publier';
+
+  @override
+  String get createPosted => 'Publié ✅';
+
+  @override
+  String get createPostFailed => 'Publication impossible. Veuillez réessayer.';
+
+  @override
+  String get tplExperienceQ1 => 'Que s\'est-il passé?';
+
+  @override
+  String get tplExperienceQ2 => 'Qu\'avez-vous appris?';
+
+  @override
+  String get tplExperienceQ3 => 'Quel conseil donneriez-vous aux autres?';
+
+  @override
+  String get tplAdviceQ1 => 'Quel est votre défi ou votre question?';
+
+  @override
+  String get tplAdviceQ2 => 'Qu\'avez-vous essayé jusqu\'ici?';
+
+  @override
+  String get tplAdviceQ3 => 'De quel genre de conseil avez-vous besoin?';
+
+  @override
+  String get tplHowToQ1 => 'Qu\'expliquez-vous?';
+
+  @override
+  String get tplHowToQ2 => 'Énumérez les étapes clairement';
+
+  @override
+  String get tplHowToQ3 => 'Quel est le point clé à retenir?';
+
+  @override
+  String get tplLessonsQ1 => 'Sujet de votre leçon';
+
+  @override
+  String get tplLessonsQ2 => 'Énumérez de 3 à 10 leçons ou constats';
+
+  @override
+  String get tplLessonsQ3 => 'Un message clé pour les autres';
+
+  @override
+  String get tplQuickDesc => 'Écrivez librement dans un seul champ.';
+
+  @override
+  String get tplExperienceDesc =>
+      'Racontez une histoire et ce que vous en avez appris.';
+
+  @override
+  String get tplAdviceDesc => 'Posez une question et donnez du contexte.';
+
+  @override
+  String get tplHowToDesc =>
+      'Expliquez les étapes pour que d\'autres puissent suivre.';
+
+  @override
+  String get tplLessonsDesc => 'Résumez ce que vous retenez d\'un sujet.';
+
+  @override
+  String get postDetailTitle => 'Publication';
+
+  @override
+  String get postNotFound => 'Publication introuvable.';
+
+  @override
+  String get postUnknownDate => 'Date inconnue';
+
+  @override
+  String postPostedOn(String date) {
+    return 'Publié le $date';
+  }
+
+  @override
+  String get commentHint => 'Écrire un commentaire…';
+
+  @override
+  String get commentNone => 'Aucun commentaire pour l\'instant.';
+
+  @override
+  String get commentJustNow => 'À l\'instant';
+
+  @override
+  String get commentNoContent => 'Aucun contenu';
+
+  @override
+  String get commentFailed =>
+      'Impossible de publier votre commentaire. Veuillez réessayer.';
+
+  @override
+  String get postProTip => '💡 Astuce';
+
+  @override
+  String get postAddComment => 'Ajouter un commentaire…';
+
+  @override
+  String postLikes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count j\'aime',
+      one: '1 j\'aime',
+      zero: '0 j\'aime',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get editPostTitle => 'Modifier la publication';
+
+  @override
+  String get editPostContent => 'Contenu';
+
+  @override
+  String get editPostUpdate => 'Mettre à jour';
+
+  @override
+  String get editPostUpdated => 'Publication mise à jour!';
+
+  @override
+  String get editPostFailed =>
+      'Impossible de mettre à jour la publication. Veuillez réessayer.';
 }

@@ -1165,4 +1165,180 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get searchViewFullPost => 'View full post';
+
+  @override
+  String get createTemplates => 'Templates';
+
+  @override
+  String get createSetQuick => 'Set Quick';
+
+  @override
+  String get createTitle => 'Create a post';
+
+  @override
+  String get createPosting => 'Posting...';
+
+  @override
+  String get createRemoveAll => 'Remove all';
+
+  @override
+  String get createAddFromLibrary => 'Add from library';
+
+  @override
+  String get createUseCamera => 'Use camera';
+
+  @override
+  String get createNoMedia => 'No media added yet.';
+
+  @override
+  String get createTagHint => 'Add a tag (e.g. career)';
+
+  @override
+  String get createQuickHint => 'What do you want to talk about?';
+
+  @override
+  String get createQuickPost => 'Quick post';
+
+  @override
+  String get createTemplate => 'Template';
+
+  @override
+  String get createMedia => 'Media';
+
+  @override
+  String createMediaCount(int count) {
+    return 'Media ($count)';
+  }
+
+  @override
+  String get createTags => 'Tags';
+
+  @override
+  String createTagsCount(int count) {
+    return 'Tags ($count)';
+  }
+
+  @override
+  String get createAdd => 'Add';
+
+  @override
+  String get createLoginToPost => 'Please log in to post';
+
+  @override
+  String get createPosted => 'Posted ✅';
+
+  @override
+  String get createPostFailed => 'Could not post. Please try again.';
+
+  @override
+  String get tplExperienceQ1 => 'What happened?';
+
+  @override
+  String get tplExperienceQ2 => 'What did you learn?';
+
+  @override
+  String get tplExperienceQ3 => 'What advice would you give others?';
+
+  @override
+  String get tplAdviceQ1 => 'What’s your challenge or question?';
+
+  @override
+  String get tplAdviceQ2 => 'What have you tried so far?';
+
+  @override
+  String get tplAdviceQ3 => 'What kind of advice do you need?';
+
+  @override
+  String get tplHowToQ1 => 'What are you explaining?';
+
+  @override
+  String get tplHowToQ2 => 'List the steps clearly';
+
+  @override
+  String get tplHowToQ3 => 'What’s the key takeaway?';
+
+  @override
+  String get tplLessonsQ1 => 'Topic of your lesson';
+
+  @override
+  String get tplLessonsQ2 => 'List 3–10 lessons or takeaways';
+
+  @override
+  String get tplLessonsQ3 => 'One key message for others';
+
+  @override
+  String get tplQuickDesc => 'Write freely in one field.';
+
+  @override
+  String get tplExperienceDesc => 'Share a story + what you learned.';
+
+  @override
+  String get tplAdviceDesc => 'Ask a question and add context.';
+
+  @override
+  String get tplHowToDesc => 'Explain steps so others can follow.';
+
+  @override
+  String get tplLessonsDesc => 'Summarize takeaways from a topic.';
+
+  @override
+  String get postDetailTitle => 'Post';
+
+  @override
+  String get postNotFound => 'Post not found.';
+
+  @override
+  String get postUnknownDate => 'Unknown date';
+
+  @override
+  String postPostedOn(String date) {
+    return 'Posted on $date';
+  }
+
+  @override
+  String get commentHint => 'Write a comment...';
+
+  @override
+  String get commentNone => 'No comments yet.';
+
+  @override
+  String get commentJustNow => 'Just now';
+
+  @override
+  String get commentNoContent => 'No content';
+
+  @override
+  String get commentFailed => 'Could not post your comment. Please try again.';
+
+  @override
+  String get postProTip => '💡 Pro Tip';
+
+  @override
+  String get postAddComment => 'Add a comment...';
+
+  @override
+  String postLikes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count likes',
+      one: '1 like',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get editPostTitle => 'Edit Post';
+
+  @override
+  String get editPostContent => 'Post Content';
+
+  @override
+  String get editPostUpdate => 'Update Post';
+
+  @override
+  String get editPostUpdated => 'Post updated successfully!';
+
+  @override
+  String get editPostFailed => 'Could not update the post. Please try again.';
 }
