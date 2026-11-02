@@ -1,48 +1,43 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "mvp11_staging_deployed",
+  "phase": "mvp12_staging_verified",
   "status": "ready_for_review",
   "accepted_checkpoint_sha": "de0e1fb",
   "starting_sha": "de0e1fb",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "9329799",
+  "code_commit_sha": "3a3d48b",
   "ending_sha": "SELF",
   "changed_files": [
-    "pubspec.yaml",
-    "l10n.yaml",
-    "lib/l10n/**",
-    "lib/main.dart",
-    "lib/services/{app_prefs,locale_controller,app_telemetry,safety_service,review_service,firebase_auth_service,android_incoming_call,call_session_manager}.dart",
-    "lib/models/profile_languages.dart",
-    "lib/utils/availability_time.dart",
-    "lib/widgets/{language_picker,spoken_languages_field,main_scaffold,advice_notice}.dart",
-    "lib/screens/** (reachable screens)",
-    "ios/Runner/{Info.plist,en.lproj,fr.lproj}",
-    "ios/Runner.xcodeproj/project.pbxproj",
-    "android/app/src/main/{AndroidManifest.xml,res/xml/locales_config.xml}",
-    "connect_functions/{index.js,i18n/push_text.js}",
-    "connect_functions/test/i18n/push_text.test.js",
-    "test/i18n/**",
-    "docs/DEPLOY_MVP.md",
-    "docs/legal-drafts/fr/**",
+    "firestore.indexes.json",
+    "firestore.rules",
+    "connect_functions/test/mvp/firestore_rules_mvp.test.js",
+    "tool/staging_smoke.mjs",
+    "tool/build_staging.sh",
+    "lib/screens/settings/settings_screen.dart",
+    "lib/l10n/{app_en,app_fr}.arb and generated app_localizations*.dart",
+    "docs/STAGING_PLAN.md",
+    "docs/BETA_MANUAL_TESTS.md",
     "docs/agent-loop/HANDOFF.md",
     "docs/agent-loop/STATE.json"
   ],
   "validation": {
-    "flutter_targeted": "79/79",
+    "staging_smoke": "21/21",
+    "emulator_ui": "chat, lists, audio call, video call, account deletion: PASS after fixes",
+    "rules": "31/31 Firestore (serial) + 5/5 Storage",
     "node": "63/63",
-    "rules": "275/275",
-    "deletion_e2e": "3/3",
-    "staging_apk": "staging-only native config"
+    "flutter_targeted": "73/73 (test/i18n, test/mvp)",
+    "flutter_analyze": "no issues",
+    "staging_apk": "staging-only native config",
+    "staging_ios": "release, aps-environment development, staging-only config; not installed"
   },
   "safety": {
     "deployed": false,
     "deploy_pending": "docs/DEPLOY_MVP.md (user batch; adds onChatMessageCreated, scheduledConsultationReminder)",
     "testflight_built": false,
     "production_services_contacted": false,
-    "firebase_changes": false,
+    "firebase_changes": "staging only",
     "backend_changes": true,
     "production_code_changes": true,
     "test_changes": true,
@@ -51,16 +46,20 @@
     "real_payments": false,
     "staging_deployed": true,
     "dev_project_changes": "Android app registered; .env flag added",
-    "staging_functions": "20/21 (onAuthUserCreated blocked: Auth not enabled)",
-    "callV2RtcToken_staging": "deleted"
+    "staging_functions": "21/21",
+    "callV2RtcToken_staging": "deleted",
+    "staging_rules_redeployed": "57cdced",
+    "iphone_installed": false
   },
   "review": {
     "decision": "pending",
     "reviewer": "founder",
-    "notes": "Enable Auth in staging, then smoke tests."
+    "notes": "Rules and deletion fixes need the next approved production deploy. iPhone testing next."
   },
   "implementation_shas": [
-    "c5e62c6",
-    "9329799"
+    "e82956c",
+    "57cdced",
+    "6df4143",
+    "3a3d48b"
   ]
 }
