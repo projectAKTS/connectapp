@@ -209,7 +209,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsDeleteBody.
   ///
   /// In en, this message translates to:
-  /// **'Your profile, posts and messages will be deleted and you will be signed out. This can\'t be undone.'**
+  /// **'Your profile and posts will be deleted and you will be signed out. Messages you sent stay visible to the people you sent them to. This can\'t be undone.'**
   String get settingsDeleteBody;
 
   /// No description provided for @settingsDeleteFailed.

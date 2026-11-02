@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:connect_app/services/app_telemetry.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
@@ -18,11 +20,8 @@ import 'package:flutter/material.dart';
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
-  static Future<void> signOut(BuildContext context,
-      {bool pushAlreadyReleased = false}) async {
-    if (!pushAlreadyReleased) {
-      await NotificationService.prepareCurrentUserForSignOut();
-    }
+  static Future<void> signOut(BuildContext context) async {
+    await NotificationService.prepareCurrentUserForSignOut();
     SafetyService.instance.stop();
     await FirebaseAuth.instance.signOut();
     if (!context.mounted) return;
@@ -72,6 +71,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (ok != true || !context.mounted) return;
     final uid = HelperlyTestRuntime.currentUid ?? '';
     if (uid.isEmpty) return;
+    // Deleting the profile doc makes the root gate replace this screen
+    // (with onboarding) before the call returns, so finish with the root
+    // navigator instead of this context.
+    final rootNavigator = Navigator.of(context, rootNavigator: true);
     // Release push bindings first: afterwards they would write a push
     // installation back under the deleted account.
     await NotificationService.prepareCurrentUserForSignOut();
@@ -103,9 +106,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return;
       }
     }
-    if (!context.mounted) return;
+    // Sign out first: a still signed-in deleted account would otherwise sit
+    // in onboarding and could recreate its profile doc.
+    SafetyService.instance.stop();
+    await FirebaseAuth.instance.signOut();
+    if (!rootNavigator.mounted) return;
+    unawaited(
+        rootNavigator.pushNamedAndRemoveUntil('/login', (route) => false));
     await showDialog<void>(
-      context: context,
+      context: rootNavigator.context,
       builder: (ctx) => AlertDialog(
         title: Text(deletedNow
             ? l10n.settingsDeletedTitle
@@ -121,9 +130,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
-    if (context.mounted) {
-      await SettingsScreen.signOut(context, pushAlreadyReleased: true);
-    }
   }
 
   @override

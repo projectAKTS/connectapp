@@ -18,7 +18,7 @@
   "settingsLogOut": "Se déconnecter",
   "settingsDeleteAccount": "Supprimer le compte",
   "settingsDeleteTitle": "Supprimer votre compte?",
-  "settingsDeleteBody": "Votre profil, vos publications et vos messages seront supprimés et vous serez déconnecté. Cette action est irréversible.",
+  "settingsDeleteBody": "Votre profil et vos publications seront supprimés et vous serez déconnecté. Les messages que vous avez envoyés restent visibles pour leurs destinataires. Cette action est irréversible.",
   "settingsDeleteFailed": "Impossible de supprimer votre compte. Veuillez réessayer.",
   "settingsDeletedTitle": "Compte supprimé",
   "settingsDeletedBody": "Votre compte et vos données personnelles ont été supprimés.",

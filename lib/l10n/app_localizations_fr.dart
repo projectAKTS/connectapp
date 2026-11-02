@@ -64,7 +64,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get settingsDeleteBody =>
-      'Votre profil, vos publications et vos messages seront supprimés et vous serez déconnecté. Cette action est irréversible.';
+      'Votre profil et vos publications seront supprimés et vous serez déconnecté. Les messages que vous avez envoyés restent visibles pour leurs destinataires. Cette action est irréversible.';
 
   @override
   String get settingsDeleteFailed =>
