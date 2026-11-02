@@ -254,6 +254,9 @@ class NotificationService with WidgetsBindingObserver {
   final List<_RecentAcceptedCallkitCall> _recentAcceptedCallkitCalls =
       <_RecentAcceptedCallkitCall>[];
   final Map<String, DateTime> _chatLastNotifiedAt = <String, DateTime>{};
+  // Set once this installation's FCM token is saved. Pushes then show chat
+  // messages, so the Firestore fallback below stays silent (no duplicates).
+  bool _fcmTokenSavedForSession = false;
   bool _appleTokensRegisteredForSession = false;
   bool _apnsRetryScheduled = false;
   Timer? _appleTokenRetryTimer;
@@ -1257,6 +1260,7 @@ class NotificationService with WidgetsBindingObserver {
     _recentAcceptedCallkitCalls.clear();
     _pendingAcceptedCallkitRecoveryPayload = null;
     _chatLastNotifiedAt.clear();
+    _fcmTokenSavedForSession = false;
     _appleTokensRegisteredForSession = false;
     _apnsRetryScheduled = false;
     _appleTokenRetryTimer?.cancel();
@@ -1368,6 +1372,7 @@ class NotificationService with WidgetsBindingObserver {
     _recentCallkitTerminalEvents.clear();
     _recentAcceptedCallkitCalls.clear();
     _chatLastNotifiedAt.clear();
+    _fcmTokenSavedForSession = false;
     _appleTokensRegisteredForSession = false;
     _apnsRetryScheduled = false;
     _appleTokenRetryTimer?.cancel();
@@ -1725,7 +1730,10 @@ class NotificationService with WidgetsBindingObserver {
         return;
       }
 
-      Future<void> process(QuerySnapshot<Map<String, dynamic>> snap) async {
+      Future<void> process(
+        QuerySnapshot<Map<String, dynamic>> snap, {
+        required bool initial,
+      }) async {
         final appActive = await _isAppActuallyForeground();
         for (final change in snap.docChanges) {
           if (change.type != DocumentChangeType.added &&
@@ -1739,6 +1747,9 @@ class NotificationService with WidgetsBindingObserver {
           final last = _chatLastNotifiedAt[change.doc.id];
           if (last != null && !updated.isAfter(last)) continue;
           _chatLastNotifiedAt[change.doc.id] = updated;
+          // The first snapshot lists existing chats: nothing new to notify.
+          if (initial) continue;
+          if (_fcmTokenSavedForSession) continue;
 
           final author = (data['lastMessageAuthorId'] ?? '').toString();
           if (author.isEmpty || author == uid) continue;
@@ -1786,16 +1797,26 @@ class NotificationService with WidgetsBindingObserver {
         }
       }
 
+      var participantsPrimed = false;
       _chatSubParticipants = FirebaseFirestore.instance
           .collection('chats')
           .where('participants', arrayContains: uid)
           .snapshots()
-          .listen((snap) => process(snap), onError: (_) {});
+          .listen((snap) {
+        final initial = !participantsPrimed;
+        participantsPrimed = true;
+        process(snap, initial: initial);
+      }, onError: (_) {});
+      var usersPrimed = false;
       _chatSubUsers = FirebaseFirestore.instance
           .collection('chats')
           .where('users', arrayContains: uid)
           .snapshots()
-          .listen((snap) => process(snap), onError: (_) {});
+          .listen((snap) {
+        final initial = !usersPrimed;
+        usersPrimed = true;
+        process(snap, initial: initial);
+      }, onError: (_) {});
       await _diagResourceCounts('chat_listener_bound');
     } finally {
       _chatListenerBindingInFlight = false;
@@ -2166,6 +2187,7 @@ class NotificationService with WidgetsBindingObserver {
       );
 
       debugPrint('✅ FCM token saved for current installation');
+      _fcmTokenSavedForSession = true;
       await _diagPush('fcm_token_saved');
     } on FirebaseException catch (e) {
       if (e.code == 'permission-denied') {
