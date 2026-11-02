@@ -2832,8 +2832,9 @@ class NotificationService with WidgetsBindingObserver {
           (data['otherUserId'] ?? data['authorId'] ?? '').toString();
       final chatId = (data['chatId'] ?? '').toString();
 
-      // If already inside this chat, don't show a banner
-      if (CurrentChat.otherUserId == otherUserId) return;
+      // If already inside this chat, don't show a banner. A tap still opens
+      // the chat: it may be open but covered by another screen.
+      if (showLocal && CurrentChat.otherUserId == otherUserId) return;
 
       if (showLocal && _localInitialized) {
         await _diagPush('chat_local_notification_show', meta: {

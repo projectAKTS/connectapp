@@ -4,10 +4,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_core_platform_interface/test.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:connect_app/services/call_session_manager.dart';
+import 'package:connect_app/services/current_chat.dart';
 import 'package:connect_app/services/helperly_test_runtime.dart';
 import 'package:connect_app/services/notification_service.dart';
 
@@ -196,6 +198,38 @@ void main() {
 
       expect(find.text('chat:$callerUid:$expectedChatId'), findsOneWidget);
       expect(find.text('chat:old_user:old_chat'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'chat tap opens the chat even when it is open under another screen',
+    (tester) async {
+      final chatId = ([callerUid, calleeUid]..sort()).join('_');
+      await tester.pumpWidget(buildHarness());
+      // The chat with the caller is open, then covered (profile, call).
+      CurrentChat.otherUserId = callerUid;
+      navigatorKey.currentState!.push(MaterialPageRoute<void>(
+        builder: (_) => const Scaffold(body: Text('profile')),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('profile'), findsOneWidget);
+
+      unawaited(notificationService.debugHandleRemoteMessageForTest(
+        RemoteMessage(data: <String, dynamic>{
+          'type': 'chat_message',
+          'chatId': chatId,
+          'authorId': callerUid,
+          'otherUserId': callerUid,
+        }),
+      ));
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+
+      expect(find.text('chat:$callerUid:$chatId'), findsOneWidget);
+      expect(find.text('profile'), findsNothing);
+      CurrentChat.otherUserId = null;
     },
   );
 }

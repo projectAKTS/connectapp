@@ -2,11 +2,13 @@
 # Builds the app against the STAGING Firebase project (helperly-call-v2-dev).
 #   tool/build_staging.sh android        -> debug APK
 #   tool/build_staging.sh ios            -> release iOS build for a cable install
+#   Extra flutter build arguments may follow, e.g. --dart-define=ENABLE_RUNTIME_DIAG=true
 # Staging configs live in config/staging/ (git-ignored). The production
 # native configs are restored on exit, even on failure.
 set -euo pipefail
 ROOT=$(git rev-parse --show-toplevel); cd "$ROOT"
 PLATFORM=${1:-android}
+shift || true
 STAGING_PROJECT=helperly-call-v2-dev
 PROD_PROJECT=connectapp-278b4
 CFG=config/staging
@@ -36,7 +38,7 @@ trap restore EXIT
 cp "$CFG/google-services.json" android/app/google-services.json
 cp "$CFG/GoogleService-Info.plist" ios/Runner/GoogleService-Info.plist
 
-DEFINES=(--dart-define-from-file="$CFG/firebase.env.json")
+DEFINES=(--dart-define-from-file="$CFG/firebase.env.json" "$@")
 if [ "$PLATFORM" = android ]; then
   flutter build apk --debug "${DEFINES[@]}"
   APK=build/app/outputs/flutter-apk/app-debug.apk
