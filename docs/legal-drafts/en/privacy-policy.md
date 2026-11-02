@@ -78,7 +78,10 @@ law. Before such transfers we assess the privacy protection they provide.
 - **Kept after deletion:**
   - Messages you sent remain in the recipients' conversations.
   - Review stars remain in a helper's average without your name; review
-    comments are removed.
+    comments are removed. Reviews about you as a helper are deleted.
+  - Your comments on other people's posts are deleted (or emptied, if
+    others replied under them), and your name is removed from call
+    records.
   - Booking and payment records are kept as long as the law requires.
   - Reports are kept for safety reasons.
   - Call records are kept for [VERIFY / DECIDE: retention period for

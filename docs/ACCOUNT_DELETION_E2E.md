@@ -16,30 +16,33 @@ enabled, because `firebase.json` has no Auth emulator entry. Result:
 | A's posts (`userID` and legacy `userId`) and every comment on them, including B's | Deleted | Yes (the post is gone) |
 | `followers/A` and its subcollection | Deleted | Yes |
 | Storage `users/A/`, `post_images/A/`, `post_videos/A/`, `post_video_thumbs/A/` | Deleted | Yes |
-| Review A wrote | Text emptied, stars kept, `reviewerDeleted: true` | Yes (documented) |
+| Review A wrote | Text and reviewer id removed, stars kept for the helper's average | Yes |
 | Chat and messages between A and B (both directions), chat media | Kept | Yes, documented: stays with the other person |
 | `callInvites` | Kept | Documented; retention proposal pending |
 | Reports | Kept | Documented (safety) |
 | Consultations, `paymentOperations` | Kept | Documented (financial records) |
-| **A's comment on B's post** | **Kept, with A's display name** | **Gap** |
-| **Reviews about A (A as helper)** | **Kept** | **Gap** (proposal: follow the helper's account) |
+| A's comments on others' posts | Deleted; when someone replied under one, it becomes an empty anonymous placeholder so their replies survive | Yes (fixed) |
+| A's replies | Deleted | Yes (fixed) |
+| Reviews about A (A as helper) | Deleted: their only purpose was A's profile; no legal need to keep them | Yes (fixed) |
+| A's name on call records | Removed (`fromName` / `toName`); the records follow the retention policy | Yes (fixed) |
+| A in other people's followers/following and post likes | Removed | Yes (fixed) |
+| Connections with A (all three schemas) | Deleted | Yes (fixed) |
 | Everything of B (Auth, profile, subcollections, posts, Storage) | Untouched | Yes |
 | Running deletion again | Harmless | Yes |
 
-## Gaps And Proposed Fixes (Not Implemented)
+## Gaps Closed (2026-11-01)
 
-1. **A's comments on other people's posts remain, with `userName`.**
-   - Fix: also delete `collectionGroup('comments')` and `replies` where
-     `userID == A`.
-   - This needs a collection-group index exemption on `userID` (a deploy
-     step), plus a test.
-   - Size: small. Recommended before public launch; acceptable for a small
-     beta if disclosed.
-2. **Reviews about a deleted helper remain.** Fix: delete
-   `reviews where helperUid == A` (a single-field query, no new index).
-   Small.
-3. Not in the code path: likes and "helpful" marks A gave (`likedBy`
-   arrays, `helpfuls`). Low sensitivity; it can join fix 1.
+`scrubReferences` in `account/delete_account.js` handles everything marked
+"fixed" above. It is safe to rerun.
+- **Failures:** if a cleanup step fails (for example the collection-group
+  index is missing), the account deletion still completes; the error is
+  logged as `account_delete_scrub_failed`.
+- **Index:** the comment and reply queries need the collection-group index
+  overrides in `firestore.indexes.json`. Deploy them **before** the
+  functions.
+- **Tests:** `delete_account_e2e.test.js` covers three users (A deleted, B
+  and C bystanders) and every row above. `delete_account.test.js` covers
+  the failure-tolerance path.
 
 ## Store Requirements
 

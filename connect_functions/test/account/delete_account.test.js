@@ -87,3 +87,25 @@ test("a missing uid is rejected before anything is deleted", async () => {
   await assert.rejects(deleteUserData({ ...f, uid: " " }));
   assert.deepEqual(f.calls.recursive, []);
 });
+
+test("a failed reference cleanup (e.g. a missing index) never blocks deletion", async () => {
+  const f = fakes();
+  f.db.collectionGroup = () => ({
+    where: () => ({
+      get: async () => {
+        throw new Error("FAILED_PRECONDITION: index required");
+      },
+    }),
+  });
+  const logged = [];
+  const summary = await deleteUserData({
+    ...f,
+    uid: "u1",
+    FieldValue: { delete: () => null, arrayRemove: () => null },
+    log: (stage, meta) => logged.push([stage, meta]),
+  });
+  assert.ok(summary.references.error.includes("index required"));
+  assert.ok(logged.some(([stage]) => stage === "account_delete_scrub_failed"));
+  assert.ok(f.calls.recursive.includes("users/u1"), "the account is still deleted");
+  assert.deepEqual(f.calls.authDeleted, ["u1"]);
+});

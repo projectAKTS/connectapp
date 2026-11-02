@@ -90,7 +90,11 @@ facteurs relatifs à la vie privée exigée par la Loi 25]
 - **Conservé après la suppression :**
   - Les messages envoyés restent dans les conversations des destinataires.
   - Les étoiles des avis restent dans la moyenne de la personne-ressource,
-    sans votre nom; les commentaires d'avis sont supprimés.
+    sans votre nom; les commentaires d'avis sont supprimés. Les avis vous
+    concernant en tant que personne-ressource sont supprimés.
+  - Vos commentaires sur les publications des autres sont supprimés (ou
+    vidés si d'autres y ont répondu), et votre nom est retiré des registres
+    d'appels.
   - Les dossiers de réservation et de paiement sont conservés selon les
     exigences légales.
   - Les signalements sont conservés pour des raisons de sécurité.

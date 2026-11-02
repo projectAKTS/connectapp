@@ -974,6 +974,7 @@ exports.deleteAccount = onCall(
       db,
       bucket: admin.storage().bucket(),
       auth: admin.auth(),
+      FieldValue: admin.firestore.FieldValue,
       uid: request.auth.uid,
       log: (stage, meta) => console.log(stage, meta),
     });
@@ -995,6 +996,7 @@ exports.processAccountDeletionRequests = onSchedule(
           db,
           bucket: admin.storage().bucket(),
           auth: admin.auth(),
+          FieldValue: admin.firestore.FieldValue,
           uid: doc.id,
           log: (stage, meta) => console.log(stage, meta),
         });
