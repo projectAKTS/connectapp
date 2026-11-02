@@ -347,13 +347,24 @@ service cloud.firestore {
           request.resource.data.users.hasAny([request.auth.uid]))
       );
 
-      allow read: if isSignedIn() && (
-        (resource.data.keys().hasAny(['participants']) &&
+      // A chat that does not exist yet may be read (as "missing") by a
+      // person whose uid is in its id ("uidA_uidB"), so opening a first
+      // conversation can check for it before creating it. Only for get:
+      // list queries must stay provable from their array-contains filter.
+      allow get: if isSignedIn() && (
+        (resource == null && chatId.split('_').hasAny([request.auth.uid])) ||
+        (resource != null && resource.data.keys().hasAny(['participants']) &&
           resource.data.participants is list &&
           resource.data.participants.hasAny([request.auth.uid])) ||
-        (resource.data.keys().hasAny(['users']) &&
+        (resource != null && resource.data.keys().hasAny(['users']) &&
           resource.data.users is list &&
           resource.data.users.hasAny([request.auth.uid]))
+      );
+
+      // Written so an array-contains filter on either field proves it.
+      allow list: if isSignedIn() && (
+        resource.data.participants.hasAny([request.auth.uid]) ||
+        resource.data.users.hasAny([request.auth.uid])
       );
 
       // Allow migration updates for legacy chat docs by checking either
@@ -418,7 +429,14 @@ service cloud.firestore {
     match /connections/{connectionId} {
       allow create: if isConnectionParticipant(request.resource.data)
         && callerAgeAllowed();
-      allow read: if isConnectionParticipant(resource.data);
+      allow get: if isConnectionParticipant(resource.data);
+      // Written so the app's filters (users array-contains, userId ==,
+      // connectedUserId ==) prove it.
+      allow list: if isSignedIn() && (
+        resource.data.users.hasAny([request.auth.uid]) ||
+        resource.data.userId == request.auth.uid ||
+        resource.data.connectedUserId == request.auth.uid
+      );
       // Allow legacy connection docs to be migrated by accepting updates
       // when the user is participant in either current OR incoming data.
       allow update: if isConnectionParticipant(resource.data)
@@ -429,8 +447,9 @@ service cloud.firestore {
     // ✅ Consultations
     // Consultations: only the two participants; the payer creates it.
     match /consultations/{consultationId} {
+      // No `is list` check: a list query cannot prove it, and hasAny on a
+      // non-list is an error, which denies anyway.
       allow read: if isSignedIn()
-        && resource.data.participants is list
         && resource.data.participants.hasAny([request.auth.uid]);
       allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid

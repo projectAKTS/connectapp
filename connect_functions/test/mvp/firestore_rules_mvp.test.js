@@ -142,3 +142,36 @@ test("a self-declared minor stays restricted until an operator reviews it", asyn
   const bob = as("bob");
   await assertSucceeds(updateDoc(doc(bob, "users/bob"), { ageDeclaration: "adult" }));
 });
+
+test("a first conversation can check for its chat before creating it", async () => {
+  const alice = as("alice");
+  // Missing chat with alice in the id: readable (as missing).
+  const snap = await assertSucceeds(getDoc(doc(alice, "chats/alice_zed")));
+  assert.equal(snap.exists(), false);
+  // Missing chat without alice: denied.
+  await assertFails(getDoc(doc(alice, "chats/bob_zed")));
+  // Existing chat of other people: still denied.
+  await assertFails(getDoc(doc(as("mallory"), "chats/alice_bob")));
+  // Then alice creates it.
+  await assertSucceeds(setDoc(doc(alice, "chats/alice_zed"), { users: ["alice", "zed"], participants: ["alice", "zed"] }));
+});
+
+test("conversation lists still work (array-contains queries)", async () => {
+  const { query, where, getDocs } = require("firebase/firestore");
+  const alice = as("alice");
+  const byParticipants = await assertSucceeds(
+    getDocs(query(collection(alice, "chats"), where("participants", "array-contains", "alice"))),
+  );
+  assert.ok(byParticipants.size >= 1);
+  await assertSucceeds(getDocs(query(collection(alice, "chats"), where("users", "array-contains", "alice"))));
+  await assertSucceeds(
+    getDocs(query(collection(alice, "consultations"), where("participants", "array-contains", "alice"))),
+  );
+  await assertSucceeds(getDocs(query(collection(alice, "connections"), where("users", "array-contains", "alice"))));
+  await assertSucceeds(getDocs(query(collection(alice, "connections"), where("userId", "==", "alice"))));
+  await assertSucceeds(getDocs(query(collection(alice, "connections"), where("connectedUserId", "==", "alice"))));
+  // Unfiltered lists stay denied.
+  await assertFails(getDocs(collection(alice, "chats")));
+  await assertFails(getDocs(collection(alice, "consultations")));
+  await assertFails(getDocs(collection(alice, "connections")));
+});
