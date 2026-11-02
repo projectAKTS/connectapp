@@ -1,7 +1,9 @@
-# Staging Plan: Approval Package (deploy NOT executed)
+# Staging Plan (Deployed 2026-11-01)
 
-Updated 2026-11-01. Everything below was checked read-only or prepared
-locally. Nothing has been deployed.
+**Status:** deployed to `helperly-call-v2-dev` only, with the founder's
+approval. Production was not touched. The sections below are the
+approval package as it was reviewed; the results are in
+`docs/agent-loop/HANDOFF.md`.
 
 ## 1. Project
 

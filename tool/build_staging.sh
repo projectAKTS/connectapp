@@ -1,7 +1,7 @@
 #!/bin/bash
 # Builds the app against the STAGING Firebase project (helperly-call-v2-dev).
 #   tool/build_staging.sh android        -> debug APK
-#   tool/build_staging.sh ios            -> debug iOS build (needs signing for a device)
+#   tool/build_staging.sh ios            -> release iOS build for a cable install
 # Staging configs live in config/staging/ (git-ignored). The production
 # native configs are restored on exit, even on failure.
 set -euo pipefail
@@ -47,5 +47,13 @@ if [ "$PLATFORM" = android ]; then
     echo "APK native config is not staging-only: $RES" >&2; exit 1
   fi
 else
-  flutter build ios --debug "${DEFINES[@]}"
+  # Release: a debug build does not start from the home screen and gets no
+  # VoIP pushes while killed. Development APNs suits a cable install.
+  FLUTTER_XCODE_APS_ENVIRONMENT=development flutter build ios --release "${DEFINES[@]}"
+  PID=$(/usr/libexec/PlistBuddy -c 'Print :PROJECT_ID' build/ios/iphoneos/Runner.app/GoogleService-Info.plist)
+  if [ "$PID" = "$STAGING_PROJECT" ]; then
+    echo "iOS app config: $STAGING_PROJECT only"
+  else
+    echo "iOS app config is not staging-only: $PID" >&2; exit 1
+  fi
 fi

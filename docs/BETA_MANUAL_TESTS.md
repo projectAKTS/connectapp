@@ -2,10 +2,13 @@
 
 Prerequisites:
 - staging deployed (`docs/STAGING_PLAN.md`);
-- the staging build installed: Android `tool/build_staging.sh android`;
-  iPhone `tool/build_staging.sh ios`, then install with Xcode or
-  devicectl. This replaces the installed app; reinstall the normal build
-  afterwards.
+- the staging build installed:
+  - Android: `tool/build_staging.sh android`, then `adb install -r`;
+  - iPhone (cable, unlocked): `tool/build_staging.sh ios`, then
+    `xcrun devicectl device install app --device <id> build/ios/iphoneos/Runner.app`.
+    It is a release build with development APNs.
+  - Both replace the installed app (same bundle id); reinstall the normal
+    build (TestFlight) afterwards.
 
 Accounts: three new accounts with your Gmail `+aliases` (`+hb-a`, `+hb-b`,
 `+hb-c`). Staging has no real users.
