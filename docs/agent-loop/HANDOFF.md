@@ -125,10 +125,16 @@ fix. It covers:
    gcloud secrets versions disable 1 --secret=AGORA_APP_ID --project helperly-call-v2-dev
    gcloud secrets versions disable 1 --secret=AGORA_APP_CERTIFICATE --project helperly-call-v2-dev
    ```
-2. **For iPhone push alerts** (chat notifications): Firebase console >
-   `helperly-call-v2-dev` > Project settings > Cloud Messaging > Apple app
-   `com.yakup.helperly` > upload the APNs auth key, if none is listed.
-   VoIP calls use the function's own APNs key and do not need this.
+2. **APNs on staging:**
+   - The four staging `APNS_*` secrets were placeholders, so iPhone VoIP
+     calls could not have rung on staging.
+   - The founder copied production's Apple key into the staging secrets.
+     The key belongs to the Apple account and is the same bundle;
+     production was unchanged.
+   - Claude redeployed `onCallInviteCreated`, `onCallInviteUpdated` and
+     `onChatMessageCreated` to staging.
+   - **Remaining:** upload the same `.p8` in Firebase console > Project
+     settings > Cloud Messaging > Apple app, for chat alerts.
 
 ## Next Steps: Physical iPhone
 
