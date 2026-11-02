@@ -114,8 +114,9 @@ EOF
   - 1,787 documents, export `SUCCESSFUL`.
 - [x] **1. Functions (founder ran the command):** 20 functions.
   - `deleteAccount` and `onReviewCreated` are new.
-  - `processAccountDeletionRequests` is held until the founder reviews
-    the list of pending deletions.
+  - `processAccountDeletionRequests` was deployed afterwards by Claude:
+    the founder confirmed every production account is a test account.
+    Production now has 21 functions.
   - Verified:
     - `PAID_SESSIONS_ENABLED=false` on the three gated functions;
     - the APNs functions use secret `APNS_VOIP_KEY_P8` version 7, the
@@ -124,9 +125,18 @@ EOF
 - [x] **2. Indexes:** deployed by Claude with the production-safe file.
   - Verified: the 6 composite indexes are kept, the 4 comment/reply
     overrides were added, no TTL.
-- [ ] **1b. Production console APNs key upload** (founder, browser only).
+- [x] **1b. Production console APNs key upload** (founder).
 - [x] **3. iOS build** 1.0.2 (202611021334) uploaded to App Store Connect.
   - [ ] Android internal-testing build.
-  - [ ] Testers update.
-- [ ] **4. Rules and hosting:** after testers update.
+  - [x] Testers update: the founder is the only tester and updated the iPhone.
+- [x] **4. Rules:** `firestore:rules,storage` deployed by Claude.
+  - The live rulesets are identical to the local files.
+  - The indexes are unchanged: 6 composite, no TTL.
+- [ ] **Hosting: held, not deployed.**
+  - Production hosting serves only the default Firebase page.
+  - Deploying would publish the Terms, the privacy policy and the
+    delete-account page for the first time, against the instruction
+    "do not publish legal documents".
+  - Those pages also use the placeholder `support@helperly.app`.
+  - Needs a real support address and the founder's decision.
 - [ ] **5. Revoke `AJDC73P524`:** 24 hours after step 4.
