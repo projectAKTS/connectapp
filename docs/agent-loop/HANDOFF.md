@@ -265,3 +265,32 @@ exclude them by tag in the default run. Move the 2 stability tests into
 - **Deletion:** unit 6/6; end-to-end with three users passes.
 - **Payments:** the paid-session switch test still passes (charges,
   Checkout and payouts are off on the server).
+
+---
+
+## Staging Preparation Round (2026-11-01)
+
+| Item | SHA |
+|---|---|
+| Unfinished deletions get a durable `accountDeletions/{uid}` record, are retried daily, and are never claimed complete | `c5e62c6` |
+| Staging builds isolated (configs git-ignored, fail-closed startup check); guarded deploy script; approval package | `9329799` |
+
+### Done On The Dev Project (Approved)
+
+- Registered the Android app `com.yakup.helperly`.
+- Added `PAID_SESSIONS_ENABLED=false` to the git-ignored staging env.
+
+### Blocking The First Staging Deploy (Founder Actions)
+
+- **Agora:** staging `AGORA_APP_ID` is the production Agora app. Replace
+  both Agora secrets with a test project.
+- **Storage:** the staging bucket does not exist (Storage > Get started).
+
+### Validation
+
+- **Flutter:** targeted 79/79; analyze clean.
+- **Node:** 63/63.
+- **Rules:** 275/275.
+- **Deletion end-to-end:** 3/3.
+- **Staging APK:** native config is staging-only; production configs
+  restored.

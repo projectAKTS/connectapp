@@ -1,13 +1,13 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "mvp9_final_blockers",
+  "phase": "mvp10_staging_prep",
   "status": "ready_for_review",
   "accepted_checkpoint_sha": "de0e1fb",
   "starting_sha": "de0e1fb",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "5aa3961",
+  "code_commit_sha": "9329799",
   "ending_sha": "SELF",
   "changed_files": [
     "pubspec.yaml",
@@ -31,10 +31,11 @@
     "docs/agent-loop/STATE.json"
   ],
   "validation": {
-    "rules_emulator": "275/275",
-    "deletion_unit": "6/6",
-    "deletion_e2e": "pass (3 users)",
-    "payments_switch": "pass"
+    "flutter_targeted": "79/79",
+    "node": "63/63",
+    "rules": "275/275",
+    "deletion_e2e": "3/3",
+    "staging_apk": "staging-only native config"
   },
   "safety": {
     "deployed": false,
@@ -47,15 +48,17 @@
     "test_changes": true,
     "physical_calls_approved": true,
     "legal_texts_changed": false,
-    "real_payments": false
+    "real_payments": false,
+    "staging_deployed": false,
+    "dev_project_changes": "Android app registered; .env flag added"
   },
   "review": {
     "decision": "pending",
     "reviewer": "founder",
-    "notes": "Final blockers closed in code; staging awaits approval."
+    "notes": "Staging deploy awaits Agora test project, Storage bucket and approval."
   },
   "implementation_shas": [
-    "e44812f",
-    "34b3544"
+    "c5e62c6",
+    "9329799"
   ]
 }
