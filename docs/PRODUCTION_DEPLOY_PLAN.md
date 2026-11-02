@@ -106,3 +106,27 @@ firebase deploy --only firestore:rules,storage,hosting --project connectapp-278b
 - Paid sessions.
 - Publishing the legal texts.
 EOF
+
+## Progress (2026-11-02)
+
+- [x] **0. Backup:** `gs://connectapp-278b4-backups/2026-11-02-pre-mvp-deploy/`
+  - private bucket, location US;
+  - 1,787 documents, export `SUCCESSFUL`.
+- [x] **1. Functions (founder ran the command):** 20 functions.
+  - `deleteAccount` and `onReviewCreated` are new.
+  - `processAccountDeletionRequests` is held until the founder reviews
+    the list of pending deletions.
+  - Verified:
+    - `PAID_SESSIONS_ENABLED=false` on the three gated functions;
+    - the APNs functions use secret `APNS_VOIP_KEY_P8` version 7, the
+      new key `A55R9GWWX2`;
+    - no errors in the logs since the deploy.
+- [x] **2. Indexes:** deployed by Claude with the production-safe file.
+  - Verified: the 6 composite indexes are kept, the 4 comment/reply
+    overrides were added, no TTL.
+- [ ] **1b. Production console APNs key upload** (founder, browser only).
+- [x] **3. iOS build** 1.0.2 (202611021334) uploaded to App Store Connect.
+  - [ ] Android internal-testing build.
+  - [ ] Testers update.
+- [ ] **4. Rules and hosting:** after testers update.
+- [ ] **5. Revoke `AJDC73P524`:** 24 hours after step 4.
