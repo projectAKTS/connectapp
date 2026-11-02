@@ -81,24 +81,18 @@ service cloud.firestore {
     }
 
     // ---- 18+ policy (server-side; see lib/models/age_policy.dart) ----
-    // Accounts created before the policy keep working until they confirm
-    // in a new build; accounts created after it must have declared 'adult'
-    // (old builds cannot, so they cannot bypass it). Declared minors are
-    // restricted. Set agePolicyStart() to the rules deploy date.
-    function agePolicyStart() {
-      return timestamp.date(2026, 11, 1);
-    }
-
+    // Everyone, including accounts created before the policy, must have
+    // declared 'adult' before posting, commenting, messaging, calling,
+    // connecting, booking or reviewing. Accounts without a declaration are
+    // not locked out: they can sign in, edit their profile, declare (new
+    // app builds) and delete the account. Old builds cannot declare, so
+    // they cannot bypass it. Declared minors stay restricted.
     function ageAllowedFor(userData) {
-      let declaration = userData.get('ageDeclaration', '');
-      let createdAt = userData.get('createdAt', null);
-      return declaration == 'adult'
-        || (declaration == ''
-          && (createdAt == null || createdAt < agePolicyStart()));
+      return userData.get('ageDeclaration', '') == 'adult';
     }
 
-    // A missing user doc counts as legacy: onAuthUserCreated creates it
-    // (with createdAt) at sign-up, so this only avoids locking anyone out.
+    // A user doc always exists (onAuthUserCreated creates it at sign-up and
+    // users cannot delete it); a missing one is only a sign-up race.
     function callerAgeAllowed() {
       let path = /databases/$(database)/documents/users/$(request.auth.uid);
       return !exists(path) || ageAllowedFor(get(path).data);
@@ -165,26 +159,16 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null && request.auth.uid == userId
-        && !request.resource.data.keys().hasAny(protectedUserFields())
-        && request.resource.data.get('createdAt', request.time) == request.time;
+        && !request.resource.data.keys().hasAny(protectedUserFields());
       allow update: if request.auth != null
         && request.auth.uid == userId
         && !request.resource.data.diff(resource.data).affectedKeys()
           .hasAny(protectedUserFields())
-        && keepsMinorRestriction()
-        && keepsCreatedAt();
+        && keepsMinorRestriction();
       allow delete: if false;
 
       // 18+ policy: a self-declared minor stays restricted. Only an
       // operator (console / Admin SDK) can lift it after review.
-      // createdAt decides who is covered by the 18+ policy: it can only be
-      // set to "now" (never backdated) and never removed.
-      function keepsCreatedAt() {
-        return !request.resource.data.diff(resource.data).affectedKeys()
-            .hasAny(['createdAt'])
-          || request.resource.data.get('createdAt', null) == request.time;
-      }
-
       function keepsMinorRestriction() {
         return resource.data.get('ageDeclaration', '') != 'minor'
           || request.resource.data.get('ageDeclaration', '') == 'minor';

@@ -37,9 +37,9 @@ beforeEach(async () => {
   await testEnv.clearFirestore();
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
-    await setDoc(doc(db, "users/alice"), { fullName: "Alice", stripeCustomerId: "cus_1" });
-    await setDoc(doc(db, "users/bob"), { fullName: "Bob", blockedUids: ["mallory"] });
-    await setDoc(doc(db, "users/mallory"), { fullName: "Mallory" });
+    await setDoc(doc(db, "users/alice"), { fullName: "Alice", stripeCustomerId: "cus_1", ageDeclaration: "adult" });
+    await setDoc(doc(db, "users/bob"), { fullName: "Bob", blockedUids: ["mallory"], ageDeclaration: "adult" });
+    await setDoc(doc(db, "users/mallory"), { fullName: "Mallory", ageDeclaration: "adult" });
     await setDoc(doc(db, "chats/alice_bob"), { participants: ["alice", "bob"] });
     await setDoc(doc(db, "chats/bob_mallory"), { participants: ["bob", "mallory"] });
     await setDoc(doc(db, "consultations/c1"), {

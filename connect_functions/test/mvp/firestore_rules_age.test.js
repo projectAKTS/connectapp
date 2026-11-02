@@ -1,8 +1,9 @@
 "use strict";
 
-// 18+ policy enforced by rules: legacy accounts keep working, new accounts
-// need a declaration (old builds can't bypass), declared minors are
-// restricted both ways, and createdAt can't be backdated.
+// 18+ policy enforced by rules: every account, old or new, needs an adult
+// declaration (old builds can't write one, so they can't bypass it), but
+// undeclared accounts are not locked out of their profile; declared
+// minors are restricted both ways.
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -16,9 +17,7 @@ const {
   Timestamp,
   addDoc,
   collection,
-  deleteField,
   doc,
-  serverTimestamp,
   setDoc,
   updateDoc,
 } = require("firebase/firestore");
@@ -76,14 +75,23 @@ function actions(uid) {
   };
 }
 
-test("accounts from before the policy keep working without a declaration", async () => {
+test("accounts from before the policy must declare too", async () => {
   for (const uid of ["legacy", "ancient"]) {
     const a = actions(uid);
-    await assertSucceeds(a.post());
-    await assertSucceeds(a.comment());
-    await assertSucceeds(a.message());
-    await assertSucceeds(a.call());
+    await assertFails(a.post());
+    await assertFails(a.comment());
+    await assertFails(a.message());
+    await assertFails(a.call());
   }
+});
+
+test("an existing account declares in a new build, then everything works", async () => {
+  await assertSucceeds(updateDoc(doc(as("legacy"), "users/legacy"), { ageDeclaration: "adult" }));
+  const a = actions("legacy");
+  await assertSucceeds(a.post());
+  await assertSucceeds(a.comment());
+  await assertSucceeds(a.message());
+  await assertSucceeds(a.call());
 });
 
 test("new accounts without a declaration (old builds) are blocked", async () => {
@@ -119,12 +127,7 @@ test("restricted and new accounts can still declare, edit and leave", async () =
   await assertSucceeds(updateDoc(doc(as("minor"), "users/minor"), { bio: "still mine" }));
 });
 
-test("createdAt cannot be backdated or removed, only refreshed to now", async () => {
-  const db = as("newbie");
-  await assertFails(updateDoc(doc(db, "users/newbie"), { createdAt: OLD }));
-  await assertFails(updateDoc(doc(db, "users/newbie"), { createdAt: deleteField() }));
-  await assertSucceeds(updateDoc(doc(db, "users/newbie"), { createdAt: serverTimestamp() }));
-  const fresh = as("fresh");
-  await assertFails(setDoc(doc(fresh, "users/fresh"), { fullName: "f", createdAt: OLD }));
-  await assertSucceeds(setDoc(doc(fresh, "users/fresh"), { fullName: "f", createdAt: serverTimestamp() }));
+test("undeclared accounts can still use their profile (no lock-out)", async () => {
+  await assertSucceeds(updateDoc(doc(as("ancient"), "users/ancient"), { bio: "hello" }));
+  await assertSucceeds(updateDoc(doc(as("newbie"), "users/newbie"), { fullName: "New" }));
 });
