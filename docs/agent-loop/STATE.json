@@ -55,7 +55,7 @@
     "staging_rules_redeployed": "57cdced",
     "iphone_installed": "staging build (reinstall TestFlight after)",
     "staging_apns": "production Apple key copied by founder",
-    "apns_key_rotation_recommended": true
+    "apns_key_rotation": "new key A55R9GWWX2 in both Secret Managers; staging live; production pending deploy; revoke AJDC73P524 after"
   },
   "review": {
     "decision": "pending",

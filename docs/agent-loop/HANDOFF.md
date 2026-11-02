@@ -212,3 +212,32 @@ launch:
 2. Set it in the production and staging `APNS_*` secrets and in both
    Firebase consoles.
 3. Revoke the old key.
+
+## APNs Key Rotation (2026-11-02, in progress)
+
+- **New key:** `A55R9GWWX2`, Sandbox & Production, created by the founder.
+  - A first key, `T6YPJ6FCWH`, was Sandbox-only: Apple answered
+    `BadEnvironmentKeyInToken` for production. It was replaced.
+- **Verified against Apple:** with a dummy token, both environments answer
+  `BadDeviceToken`, which means the key is accepted. The check was run on
+  the downloaded file and on the stored secrets of both projects.
+- **Secret Manager:** the founder added the new `APNS_KEY_ID` and
+  `APNS_VOIP_KEY_P8` versions:
+  - staging: version 3;
+  - production: version 7.
+- **Staging:**
+  - `onCallInviteCreated`, `onCallInviteUpdated` and `onChatMessageCreated`
+    redeployed; they use version 3;
+  - the founder replaced the key in the staging console (development and
+    production);
+  - not yet exercised on a device.
+- **Production:**
+  - functions still use version 6, the old key, which still works;
+  - the console still has the old key.
+- **Remaining, with the approved production deploy:**
+  1. Redeploy the three functions.
+  2. Upload `A55R9GWWX2` in the production console.
+  3. Test a call and a chat push on TestFlight.
+  4. Only then revoke `AJDC73P524` in Apple Developer.
+- **Key file:** the founder keeps the `.p8` in a safe place until step 2,
+  then deletes it.
