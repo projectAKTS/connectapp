@@ -1,7 +1,7 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "mvp10_staging_prep",
+  "phase": "mvp11_staging_deployed",
   "status": "ready_for_review",
   "accepted_checkpoint_sha": "de0e1fb",
   "starting_sha": "de0e1fb",
@@ -49,13 +49,15 @@
     "physical_calls_approved": true,
     "legal_texts_changed": false,
     "real_payments": false,
-    "staging_deployed": false,
-    "dev_project_changes": "Android app registered; .env flag added"
+    "staging_deployed": true,
+    "dev_project_changes": "Android app registered; .env flag added",
+    "staging_functions": "20/21 (onAuthUserCreated blocked: Auth not enabled)",
+    "callV2RtcToken_staging": "deleted"
   },
   "review": {
     "decision": "pending",
     "reviewer": "founder",
-    "notes": "Staging deploy awaits Agora test project, Storage bucket and approval."
+    "notes": "Enable Auth in staging, then smoke tests."
   },
   "implementation_shas": [
     "c5e62c6",

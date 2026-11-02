@@ -294,3 +294,29 @@ exclude them by tag in the default run. Move the 2 stability tests into
 - **Deletion end-to-end:** 3/3.
 - **Staging APK:** native config is staging-only; production configs
   restored.
+
+---
+
+## Staging Deployment (2026-11-01, approved, helperly-call-v2-dev only)
+
+- **Exposure resolved:** `callV2RtcToken` (pinned to production Agora
+  credentials, version 1) deleted from staging after checking that
+  nothing uses it (Call V2 real flow off by default; no CI or script
+  depends on it). Disabling the old secret versions was refused by the
+  permission classifier; this is left to the founder.
+- **Deployed:**
+  - Firestore indexes, rules, Storage rules, hosting;
+  - 20 of 21 functions. The four Firestore triggers needed a retry
+    because Eventarc was being set up for the first time.
+- **Fix:** `firestore.indexes.json` TTL overrides needed an explicit
+  `indexes` list for this CLI. The automatic defaults were added, so
+  index behaviour is unchanged.
+- **Verified:**
+  - `getAgoraRtcToken` uses Agora secret version 2 (the test project);
+  - `PAID_SESSIONS_ENABLED=false` in deployed env;
+  - anonymous Firestore and Storage access are denied;
+  - hosting returns 200;
+  - the staging APK's native config is staging only.
+- **Blocked:** `onAuthUserCreated` and all sign-in smoke tests, because
+  "Firebase Auth is not enabled in the project". The founder must enable
+  Authentication (Email/Password) in the staging console.
