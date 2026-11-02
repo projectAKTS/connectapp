@@ -1,26 +1,28 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "mvp12_staging_verified",
+  "phase": "mvp13_iphone_staging_verified",
   "status": "ready_for_review",
   "accepted_checkpoint_sha": "de0e1fb",
   "starting_sha": "de0e1fb",
   "task_file": "docs/agent-loop/NEXT_TASK.md",
   "handoff_file": "docs/agent-loop/HANDOFF.md",
-  "code_commit_sha": "3a3d48b",
+  "code_commit_sha": "9a3aa60",
   "ending_sha": "SELF",
   "changed_files": [
+    "connect_functions/test/mvp/firestore_rules_mvp.test.js",
+    "docs/BETA_MANUAL_TESTS.md",
+    "docs/STAGING_PLAN.md",
+    "docs/agent-loop/HANDOFF.md",
+    "docs/agent-loop/STATE.json",
     "firestore.indexes.json",
     "firestore.rules",
-    "connect_functions/test/mvp/firestore_rules_mvp.test.js",
-    "tool/staging_smoke.mjs",
-    "tool/build_staging.sh",
-    "lib/screens/settings/settings_screen.dart",
     "lib/l10n/{app_en,app_fr}.arb and generated app_localizations*.dart",
-    "docs/STAGING_PLAN.md",
-    "docs/BETA_MANUAL_TESTS.md",
-    "docs/agent-loop/HANDOFF.md",
-    "docs/agent-loop/STATE.json"
+    "lib/screens/settings/settings_screen.dart",
+    "lib/services/notification_service.dart",
+    "test/notification_foreground_recovery_test.dart",
+    "tool/build_staging.sh",
+    "tool/staging_smoke.mjs"
   ],
   "validation": {
     "staging_smoke": "21/21",
@@ -30,7 +32,9 @@
     "flutter_targeted": "73/73 (test/i18n, test/mvp)",
     "flutter_analyze": "no issues",
     "staging_apk": "staging-only native config",
-    "staging_ios": "release, aps-environment development, staging-only config; not installed"
+    "staging_ios": "release, aps-environment development, staging-only config; not installed",
+    "flutter_full": "2516 passed, 16 known failures",
+    "iphone_staging": "calls (open/locked/killed), video, chat push, tap-to-open, single banner: PASS"
   },
   "safety": {
     "deployed": false,
@@ -49,17 +53,21 @@
     "staging_functions": "21/21",
     "callV2RtcToken_staging": "deleted",
     "staging_rules_redeployed": "57cdced",
-    "iphone_installed": false
+    "iphone_installed": "staging build (reinstall TestFlight after)",
+    "staging_apns": "production Apple key copied by founder",
+    "apns_key_rotation_recommended": true
   },
   "review": {
     "decision": "pending",
     "reviewer": "founder",
-    "notes": "Rules and deletion fixes need the next approved production deploy. iPhone testing next."
+    "notes": "Fixes 57cdced, 6df4143, 1b51316, 9a3aa60 need the next approved production deploy/app build. Rotate APNs key before launch."
   },
   "implementation_shas": [
     "e82956c",
     "57cdced",
     "6df4143",
-    "3a3d48b"
+    "3a3d48b",
+    "1b51316",
+    "9a3aa60"
   ]
 }

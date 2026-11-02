@@ -155,3 +155,60 @@ fix. It covers:
    - **If calls arrive only as an ordinary notification:** delete the
      app and reinstall it. iOS stops delivering VoIP pushes after crashes.
 6. Afterwards, reinstall the production app from TestFlight.
+
+## iPhone Round (2026-11-02, staging build on the founder's iPhone 16 Pro Max)
+
+Founder on the iPhone (`yakupusamea+hb-a@gmail.com`); Amira on emulator A.
+
+| Check | Result |
+|---|---|
+| Sign in with email/password; discovery (Amira finds the iPhone helper: Housing search, FR/EN) | PASS |
+| Push registration (FCM, APNs, VoIP tokens) | PASS |
+| Audio call, app open | PASS. Connected; audio both ways; ended from the iPhone, Amira's side closed. iOS shows the call as a top banner while the phone is in use (standard CallKit, as in WhatsApp) |
+| Audio call, phone locked | PASS. CallKit screen (name, slide to answer) |
+| Audio call, app killed and phone locked | PASS. CallKit; answered in 10 s |
+| Video call | PASS. Video both ways; ended from Amira, the iPhone closed |
+| Chat notification, phone locked | PASS |
+| Tap a chat notification (app in background, or killed) | PASS after fix `1b51316` |
+| Notifications per message, app open | PASS after fix `9a3aa60`: 1 banner (was 3 on iPhone, 2 on Android) |
+| Sign in with Apple | Not available on staging (only email/password is enabled). Production not checked |
+
+**Fixes:**
+- `1b51316`: tapping a chat notification did nothing when that chat was
+  still open under another screen (for example after a call).
+  - Reproduced on Android.
+  - A test now covers it; it fails without the fix.
+- `9a3aa60`: the Firestore chat listener added its own "New Message"
+  banners next to the push, and announced old chats on every app start.
+  - It is now silent once the FCM token is saved.
+  - Its first snapshot no longer notifies.
+
+**Staging APNs:**
+- The `APNS_*` secrets were placeholders. The founder copied production's
+  Apple key; the key is account-level and the bundle is the same.
+- The `.p8` was uploaded in the console for development and production.
+
+**Tooling:**
+- `tool/build_staging.sh` passes extra build arguments through.
+- `--dart-define=ENABLE_RUNTIME_DIAG=true` writes push stages to the user
+  document, which can be polled.
+- Use it only for a short diagnosis: on iOS it caused a write loop of
+  about one write per second on the user document. The normal build was
+  measured at 1 write per minute.
+- `flutter run` / `attach` to the iPhone did not keep a log connection
+  (local Flutter 3.32.1, iOS 26).
+
+**Automated:**
+- full Flutter suite: 2516 passed, 16 failed (the 16 known failures);
+- `flutter analyze`: clean.
+
+**The founder's iPhone has the staging build.** Reinstall the production
+app from TestFlight when testing is done.
+
+**Security follow-up:** the APNs private key was shown in an editor
+selection that was sent in this session. Rotate it before the public
+launch:
+1. Create a new APNs key in Apple Developer.
+2. Set it in the production and staging `APNS_*` secrets and in both
+   Firebase consoles.
+3. Revoke the old key.
