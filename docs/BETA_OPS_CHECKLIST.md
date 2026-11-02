@@ -19,8 +19,8 @@ the Charter of the French Language or Law 25.
 |---|---|---|---|
 | 5 | A lawyer reviews the Terms and privacy policy, EN/FR drafts in `docs/legal-drafts/` | R (strongly) | ☐ |
 | 6 | Publish Terms and privacy policy in **French and English**; French first for Québec users | L (Charter s.55 for the Terms; Law 25 transparency) | ☐ |
-| 7 | Privacy impact assessment for transfers outside Québec (Firebase, Agora, Stripe); a short written document is enough | L (Law 25) | ☐ |
-| 8 | One-page confidentiality incident register | L (Law 25) | ☐ |
+| 7 | Privacy impact assessment for transfers outside Québec (Firebase, Agora, Stripe): draft in `docs/legal-drafts/EFVP_PIA_DRAFT.md`; review and sign | L (Law 25) | ☐ |
+| 8 | Confidentiality incident register: `docs/legal-drafts/INCIDENT_REGISTER.md` (first entry: the APNs key) | L (Law 25) | ☐ |
 
 ## Beta Communication (EN/FR)
 
