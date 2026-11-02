@@ -46,6 +46,7 @@ import 'widgets/full_screen_back_gesture.dart';
 import 'services/android_incoming_call.dart';
 import 'services/push_installation_id.dart';
 import 'services/firebase_options.dart';
+import 'services/firebase_options_staging.dart';
 import 'services/firestore_read_helper.dart';
 import 'services/notification_service.dart';
 import 'services/subscription_service.dart';
@@ -114,6 +115,7 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  StagingFirebaseOptions.assertIsolated(Firebase.app().options.projectId);
   await prefsLoading;
   LocaleController.instance.loadSaved();
   await AppFormat.init();

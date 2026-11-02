@@ -1,39 +1,39 @@
-# Manual Pre-Beta Tests (Founder On Device, Claude Guiding)
+# Manual Tests On Staging (Founder Operates, Claude Guides)
 
-Mark each item **PASS / FAIL / BLOCKED**, with a note. A missing device or
-account is **BLOCKED**, not PASS.
+Prerequisites:
+- staging deployed (`docs/STAGING_PLAN.md`);
+- the staging build installed: Android `tool/build_staging.sh android`;
+  iPhone `tool/build_staging.sh ios`, then install with Xcode or
+  devicectl. This replaces the installed app; reinstall the normal build
+  afterwards.
 
-## Setup
+Accounts: three new accounts with your Gmail `+aliases` (`+hb-a`, `+hb-b`,
+`+hb-c`). Staging has no real users.
 
-- **iPhone:** connected by cable, unlocked, with a **development build**
-  of the current `call-v2`. Installing it replaces the TestFlight app; the
-  account data is in the cloud and is unaffected.
-- **Second device for calls:** the Android emulator A or a second phone,
-  signed in with the other test account.
-- **Password-reset address:** a founder-controlled test email (for example
-  `yourgmail+helperly-en@gmail.com` and `+helperly-fr`). Create these test
-  accounts first. Never use real users' addresses.
+Mark each check **PASS / FAIL / BLOCKED**, with a note.
 
-## Checks
-
-| # | Check | Steps | Expected |
+| # | Area | Steps | Expected |
 |---|---|---|---|
-| 1 | French UI | iOS Settings > Helperly > Language > Français (or the in-app Settings) | All screens are in French; "Trouver de l'aide", "personne-ressource" |
-| 2 | Language persistence | Kill and reopen the app | Same language |
-| 3 | Fallback | iOS language Türkçe, in-app "Device language" | English |
-| 4 | Permission prompts | First call or photo with iOS in French | Camera and microphone prompts in French |
-| 5 | New sign-up | Sign up with `+helperly-en` | Onboarding requires the 18+ box; the privacy sheet appears once with two separate switches, both off |
-| 6 | Existing account | Sign in to an older test account | The one-time "Helperly is for adults" screen; confirm adult; Home loads |
-| 7 | Crash reports opt-in | Settings: crash reports on; kill and reopen | The setting stays on. (Do not force a crash in production.) |
-| 8 | Password reset (EN) | App language English > Forgot password > `+helperly-en` | The email arrives in English |
-| 9 | Password reset (FR) | App language Français > Forgot password > `+helperly-fr` | The email arrives in French (needs the Firebase console template language left at default) |
-| 10 | Find a helper | Topic "Logement" | Helpers with housing experience are listed |
-| 11 | Message | Send a message to the other test account | It arrives; one notification |
-| 12 | Audio call, locked screen | Call the iPhone while locked | CallKit rings; answer connects; audio both ways |
-| 13 | Video call | Call from the iPhone | Connects; hang-up works on both sides |
-| 14 | Report and block | Report a post, block a user | Confirmation shown; the blocked user's posts are hidden |
-| 15 | Paid booking hidden | Open a helper's menu | No "Book a call" or "Billing" |
-| 16 | Delete account | Create a throwaway account > Settings > Delete account | Signed out; signing in again fails |
+| 1 | Sign-up | Phone 1: sign up `+hb-a` | Onboarding; the 18+ box is required |
+| 2 | Language | Settings > Language > Français; kill and reopen; back to Device language | Screens in French and stay French after restart; then back to English |
+| 3 | 18+ | During onboarding try Continue without the box; then tick it | Blocked with a message; then continues |
+| 4 | Privacy choice | After onboarding | One sheet, two switches, both off; Done; it never appears again |
+| 5 | Profile | Edit profile: expertise "Housing search", languages FR/EN, city | Saved; visible on the profile |
+| 6 | Discovery | Phone 2: sign up `+hb-b` as a seeker > Find a helper > topic "Logement" | `+hb-a` is listed with French labels |
+| 7 | Chat | B messages A; A replies | Both arrive; one notification each |
+| 8 | Audio call | B calls A with A's phone locked | Rings (CallKit on iPhone); answer; audio both ways; hang up |
+| 9 | Video call | A calls B | Video both ways; hang up |
+| 10 | Report and block | B reports A's post, then blocks A | Confirmations; A's posts are hidden; A can no longer call or message B |
+| 11 | No payments | Open A's menu and B's Profile | No "Book a call" or "Billing". (The server also refuses charges.) |
+| 12 | Login | Log out, log in again as A | Works; same language |
+| 13 | Password reset (EN) | App in English > Forgot password > `+hb-c` | The email arrives in English |
+| 14 | Password reset (FR) | App in French > Forgot password > `+hb-c` | The email arrives in French |
+| 15 | Account deletion | Phone 2 (B) > Settings > Delete account | "Account deleted"; signed out; login as B fails; A's chat shows B as "User" |
+| 16 | Restricted account | Sign up `+hb-c` and choose "I'm under 18" on the existing-account screen if shown (or set it via the console in staging) | Paused screen; only delete and sign out work |
 
-Items 5, 6, 11, 14 and 16 need the new rules and functions deployed (in
-staging first). Before deploy, record them as BLOCKED.
+Automated checks run before this (2026-11-01):
+- Flutter targeted suites and analyze;
+- Node 63/63;
+- rules 275/275;
+- deletion end-to-end 3/3;
+- CI full suite on a clean checkout.

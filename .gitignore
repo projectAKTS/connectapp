@@ -44,3 +44,6 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 secrets/
+
+# Staging Firebase client configs (kept out of git)
+/config/staging/
