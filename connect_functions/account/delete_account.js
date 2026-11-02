@@ -138,9 +138,23 @@ async function scrubReferencesSafely(args) {
   }
 }
 
+/** Durable record of unfinished deletions (server-only collection). */
+const DELETIONS = "accountDeletions";
+
 async function deleteUserData({ db, bucket, auth, uid, FieldValue, log = () => {} }) {
   const userId = `${uid || ""}`.trim();
   if (!userId) throw new Error("uid required");
+  // Recorded before anything is deleted, removed only when every step
+  // succeeded. If a step throws or cleanup fails, the record stays so the
+  // daily job retries (every step is safe to repeat) or an operator acts.
+  const record = FieldValue ? db.collection(DELETIONS).doc(userId) : null;
+  if (record) {
+    await record.set({
+      status: "in_progress",
+      attempts: FieldValue.increment(1),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  }
   const summary = {
     uid: userId,
     posts: 0,
@@ -164,7 +178,9 @@ async function deleteUserData({ db, bucket, auth, uid, FieldValue, log = () => {
   if (FieldValue) {
     // Full reference cleanup (production path).
     summary.references = await scrubReferencesSafely({ db, FieldValue, uid: userId });
-    if (summary.references.error) log("account_delete_scrub_failed", summary.references);
+    if (summary.references.error) {
+      log("account_delete_scrub_failed", { uid: userId, ...summary.references });
+    }
     summary.reviews = summary.references.reviewsBy || 0;
   } else {
     // Minimal path for callers without the Admin FieldValue (unit tests).
@@ -190,8 +206,45 @@ async function deleteUserData({ db, bucket, auth, uid, FieldValue, log = () => {
     // Already gone is fine; anything else is reported but the data is gone.
     if (error?.code !== "auth/user-not-found") throw error;
   }
+  summary.complete = !summary.references?.error;
+  if (record) {
+    if (summary.complete) {
+      await record.delete();
+    } else {
+      await record.set({
+        status: "cleanup_pending",
+        lastError: summary.references.error,
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+  }
   log("account_deleted", summary);
   return summary;
 }
 
-module.exports = { deleteUserData, scrubReferences, STORAGE_PREFIXES };
+/**
+ * Re-runs deletions that did not finish (records left in accountDeletions).
+ * Called by the daily job; idempotent.
+ */
+async function retryUnfinishedDeletions({ db, bucket, auth, FieldValue, log = () => {}, limit = 100 }) {
+  const pending = await db.collection(DELETIONS).limit(limit).get();
+  const results = [];
+  for (const doc of pending.docs) {
+    try {
+      const summary = await deleteUserData({ db, bucket, auth, FieldValue, uid: doc.id, log });
+      results.push({ uid: doc.id, complete: summary.complete });
+    } catch (error) {
+      log("account_deletion_retry_failed", { uid: doc.id, error: `${error}` });
+      results.push({ uid: doc.id, complete: false });
+    }
+  }
+  return results;
+}
+
+module.exports = {
+  DELETIONS,
+  deleteUserData,
+  retryUnfinishedDeletions,
+  scrubReferences,
+  STORAGE_PREFIXES,
+};

@@ -77,12 +77,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await NotificationService.prepareCurrentUserForSignOut();
     var deletedNow = false;
     try {
-      await FirebaseFunctions.instanceFor(region: 'us-central1')
+      final result = await FirebaseFunctions.instanceFor(region: 'us-central1')
           .httpsCallable('deleteAccount',
               options:
                   HttpsCallableOptions(timeout: const Duration(seconds: 60)))
-          .call<void>();
-      deletedNow = true;
+          .call<Object?>();
+      // complete=false: the account is gone but some cleanup is retried
+      // later, so the message says "within 30 days" rather than "deleted".
+      final data = result.data;
+      deletedNow = !(data is Map && data['complete'] == false);
       AppTelemetry.event('account_deleted');
     } catch (_) {
       // Server deletion unavailable: record the request, processed daily.

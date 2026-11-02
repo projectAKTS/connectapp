@@ -31,6 +31,10 @@ before(async () => {
 });
 
 async function seed() {
+  for (const c of ["users", "posts", "chats", "callInvites", "reviews", "connections",
+    "reports", "consultations", "paymentOperations", "followers", "accountDeletions"]) {
+    await db.recursiveDelete(db.collection(c));
+  }
   for (const uid of ["userA", "userB", "userC"]) {
     await auth.createUser({ uid, email: `${uid}@example.test`, password: "test-only-123" }).catch(() => {});
     await db.doc(`users/${uid}`).set({ fullName: uid, ageDeclaration: "adult" });
@@ -160,4 +164,46 @@ test("deleting user A removes A's data, keeps documented records, never touches 
   const again = await deleteUserData({ db, bucket, auth, uid: "userA", FieldValue: admin.firestore.FieldValue });
   assert.equal(again.posts, 0);
   await auth.getUser("userB");
+});
+
+test("a failed cleanup leaves a durable record; the retry finishes it", { skip: !emulated }, async () => {
+  await seed();
+  const { deleteUserData, retryUnfinishedDeletions } = require("../../account/delete_account");
+  const FieldValue = admin.firestore.FieldValue;
+  // Simulate a missing collection-group index on the first run.
+  const brokenDb = new Proxy(db, {
+    get(target, prop) {
+      if (prop === "collectionGroup") {
+        return () => ({ where: () => ({ get: async () => { throw new Error("FAILED_PRECONDITION: index"); } }) });
+      }
+      const v = target[prop];
+      return typeof v === "function" ? v.bind(target) : v;
+    },
+  });
+  const first = await deleteUserData({ db: brokenDb, bucket, auth, uid: "userA", FieldValue });
+  assert.equal(first.complete, false, "not claimed complete");
+  const rec = (await db.doc("accountDeletions/userA").get()).data();
+  assert.equal(rec.status, "cleanup_pending");
+  assert.match(rec.lastError, /index/);
+  assert.equal(await exists("users/userA"), false, "account itself is gone");
+  assert.equal(await exists("posts/postB/comments/c_byA"), true, "cleanup still to do");
+
+  const results = await retryUnfinishedDeletions({ db, bucket, auth, FieldValue });
+  assert.deepEqual(results, [{ uid: "userA", complete: true }]);
+  assert.equal(await exists("accountDeletions/userA"), false, "record cleared when done");
+  assert.equal(await exists("posts/postB/comments/c_byA"), false);
+  assert.equal(await exists("reviews/consultBA"), false);
+  assert.equal(await exists("users/userB"), true);
+  assert.equal((await db.doc("posts/postB/comments/c_byC").get()).data().content, "C on B");
+
+  // Nothing left to retry; running again is harmless.
+  assert.deepEqual(await retryUnfinishedDeletions({ db, bucket, auth, FieldValue }), []);
+});
+
+test("a successful deletion leaves no deletion record", { skip: !emulated }, async () => {
+  await seed();
+  const { deleteUserData } = require("../../account/delete_account");
+  const res = await deleteUserData({ db, bucket, auth, uid: "userA", FieldValue: admin.firestore.FieldValue });
+  assert.equal(res.complete, true);
+  assert.equal(await exists("accountDeletions/userA"), false);
 });

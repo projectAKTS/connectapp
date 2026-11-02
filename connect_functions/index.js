@@ -978,7 +978,9 @@ exports.deleteAccount = onCall(
       uid: request.auth.uid,
       log: (stage, meta) => console.log(stage, meta),
     });
-    return { success: true, posts: summary.posts };
+    // complete=false: the account is gone but some cleanup is still
+    // pending (retried daily); the app must not say "fully deleted".
+    return { success: true, complete: summary.complete, posts: summary.posts };
   }
 );
 
@@ -1004,6 +1006,14 @@ exports.processAccountDeletionRequests = onSchedule(
         console.error("account_deletion_failed", { uid: doc.id, error: `${error}` });
       }
     }
+    // Deletions that started but did not finish (durable records).
+    await retryUnfinishedDeletions({
+      db,
+      bucket: admin.storage().bucket(),
+      auth: admin.auth(),
+      FieldValue: admin.firestore.FieldValue,
+      log: (stage, meta) => console.log(stage, meta),
+    });
   }
 );
 
@@ -1144,7 +1154,10 @@ const {
   PRICING_VERSION,
   resolveChargeAmount,
 } = require("./consultations/consultation_price");
-const { deleteUserData } = require("./account/delete_account");
+const {
+  deleteUserData,
+  retryUnfinishedDeletions,
+} = require("./account/delete_account");
 const { minutesUntil, pushText } = require("./i18n/push_text");
 const { claimOnce } = require("./notifications/claim_once");
 const { assertPaidSessionsEnabled } = require("./payments/paid_sessions");

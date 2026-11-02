@@ -316,6 +316,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Unfinished account deletions (retried by the daily job). Server only.
+    match /accountDeletions/{uid} {
+      allow read, write: if false;
+    }
+
     match /callOps/{callId} {
       allow read, write: if false;
       match /{document=**} {

@@ -6,10 +6,12 @@ const { test } = require("node:test");
 const { deleteUserData } = require("../../account/delete_account");
 
 function fakes({ posts = [], reviews = [], authError = null } = {}) {
-  const calls = { recursive: [], prefixes: [], authDeleted: [], updated: [] };
+  const calls = { recursive: [], prefixes: [], authDeleted: [], updated: [], set: [], deleted: [] };
   const ref = (p) => ({
     path: p,
     update: async (data) => calls.updated.push({ path: p, data }),
+    set: async (data) => calls.set.push({ path: p, data }),
+    delete: async () => calls.deleted.push(p),
   });
   const rows = { posts, reviews };
   const db = {
@@ -101,11 +103,20 @@ test("a failed reference cleanup (e.g. a missing index) never blocks deletion", 
   const summary = await deleteUserData({
     ...f,
     uid: "u1",
-    FieldValue: { delete: () => null, arrayRemove: () => null },
+    FieldValue: {
+      delete: () => null,
+      arrayRemove: () => null,
+      increment: () => 1,
+      serverTimestamp: () => "TS",
+    },
     log: (stage, meta) => logged.push([stage, meta]),
   });
   assert.ok(summary.references.error.includes("index required"));
   assert.ok(logged.some(([stage]) => stage === "account_delete_scrub_failed"));
   assert.ok(f.calls.recursive.includes("users/u1"), "the account is still deleted");
   assert.deepEqual(f.calls.authDeleted, ["u1"]);
+  assert.equal(summary.complete, false, "never claimed complete");
+  const last = f.calls.set.filter((c) => c.path === "accountDeletions/u1").pop();
+  assert.equal(last.data.status, "cleanup_pending", "durable record kept for retry");
+  assert.equal(f.calls.deleted.includes("accountDeletions/u1"), false);
 });
