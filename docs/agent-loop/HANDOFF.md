@@ -42,15 +42,16 @@ handoffs are in git history (`git log -- docs/agent-loop/HANDOFF.md`).
    reading a chat that does not exist yet.
    - **Fix:** a person whose uid is in the chat id may read the missing
      chat (single-document read only).
-2. **Conversation, connection and consultation lists were denied**
-   ("No conversations yet" while a chat existed).
-   - **Cause:** the list rules used `keys()` / `is list` checks that a
-     query filter cannot prove. This is also true of the rules committed
-     before this round.
-   - **Not checked:** whether production's live rules have the same
-     problem. Production was not read.
-   - **Fix:** separate `list` rules written so the app's filters prove
-     them. An unfiltered list is still denied (tested).
+2. **Conversation lists were denied on staging** ("No conversations yet"
+   while a chat existed).
+   - **Cause:** Claude's first first-chat fix (a `resource == null`
+     branch in the same `read` rule).
+   - **Production:** the live rules (`f271b20`) use the earlier
+     `keys()`-based rule and lists work there. Only the emulator rejects
+     that form.
+   - **Fix:** separate `get` and `list` rules, written so the app's
+     filters prove them, which works on both. An unfiltered list is still
+     denied (tested).
 3. **After "Delete account", the deleted user stayed signed in**, on the
    onboarding screen.
    - **Cause:** the server removes the profile, so the root screen swaps

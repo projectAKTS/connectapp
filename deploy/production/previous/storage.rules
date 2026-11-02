@@ -1,0 +1,87 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // --- helpers ---
+    function signedIn() { return request.auth != null; }
+    function isImage()  { return request.resource.contentType.matches('image/.*'); }
+    function isVideo()  { return request.resource.contentType.matches('video/.*'); }
+    function under10MB()  { return request.resource.size < 10 * 1024 * 1024; }
+    function under200MB() { return request.resource.size < 200 * 1024 * 1024; }
+
+    // Is the caller a participant of chats/{chatId}? (supports users or participants)
+    function isChatParticipant(chatId) {
+      return signedIn()
+        && firestore.exists(/databases/(default)/documents/chats/$(chatId))
+        && (
+             (
+               firestore.get(/databases/(default)/documents/chats/$(chatId))
+                 .data.keys().hasAny(['users']) &&
+               firestore.get(/databases/(default)/documents/chats/$(chatId))
+                 .data.users.hasAny([request.auth.uid])
+             )
+          || (
+               firestore.get(/databases/(default)/documents/chats/$(chatId))
+                 .data.keys().hasAny(['participants']) &&
+               firestore.get(/databases/(default)/documents/chats/$(chatId))
+                 .data.participants.hasAny([request.auth.uid])
+             )
+        );
+    }
+
+    // ============= PROFILE PHOTOS ======================
+    // Store at: /users/{uid}/...
+    match /users/{uid}/{allPaths=**} {
+      allow read: if true; // or signedIn() if you want private avatars
+      allow write: if signedIn()
+                   && request.auth.uid == uid
+                   && isImage()
+                   && under10MB();
+    }
+
+    // ============= CHAT MEDIA ==========================
+    // Your app uploads to: /chats/{chatId}/images|videos/<file>
+    match /chats/{chatId}/{folder}/{fileName} {
+      // reads can be public (download URLs) or change to isChatParticipant(chatId)
+      allow read: if true;
+      allow write: if isChatParticipant(chatId)
+                   && (
+                        (isImage() && under10MB()) ||
+                        (isVideo() && under200MB())
+                      );
+    }
+
+    // (optional) legacy path support
+    match /chat_media/{chatId}/{fileId} {
+      allow read: if true;
+      allow write: if isChatParticipant(chatId)
+                   && (
+                        (isImage() && under10MB()) ||
+                        (isVideo() && under200MB())
+                      );
+    }
+
+    // ============= POST MEDIA (existing) ===============
+    match /post_images/{file} {
+      allow read: if true;
+      allow write: if signedIn() && isImage() && under10MB();
+    }
+
+    match /post_videos/{file} {
+      allow read: if true;
+      allow write: if signedIn() && isVideo() && under200MB();
+    }
+
+    match /post_video_thumbs/{file} {
+      allow read: if true;
+      allow write: if signedIn() && isImage() && under10MB();
+    }
+
+    // Everything else: read-only
+    match /{allPaths=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}
+
