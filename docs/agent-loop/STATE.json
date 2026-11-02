@@ -1,7 +1,7 @@
 {
   "version": 1,
   "branch": "call-v2",
-  "phase": "mvp8_prebeta_gate",
+  "phase": "mvp9_final_blockers",
   "status": "ready_for_review",
   "accepted_checkpoint_sha": "de0e1fb",
   "starting_sha": "de0e1fb",
@@ -31,11 +31,10 @@
     "docs/agent-loop/STATE.json"
   ],
   "validation": {
-    "flutter_local": "2515 pass, 14 dirty-tree guard failures only",
-    "ci_clean_checkout": "success on cc74672",
-    "node": "62/62",
-    "rules_emulator": "274/274",
-    "deletion_e2e_emulators": "pass"
+    "rules_emulator": "275/275",
+    "deletion_unit": "6/6",
+    "deletion_e2e": "pass (3 users)",
+    "payments_switch": "pass"
   },
   "safety": {
     "deployed": false,
@@ -53,12 +52,10 @@
   "review": {
     "decision": "pending",
     "reviewer": "founder",
-    "notes": "Pre-beta gate; deploy not approved."
+    "notes": "Final blockers closed in code; staging awaits approval."
   },
   "implementation_shas": [
-    "6ed2c8d",
-    "cc74672",
-    "d1ef290",
-    "5aa3961"
+    "e44812f",
+    "34b3544"
   ]
 }

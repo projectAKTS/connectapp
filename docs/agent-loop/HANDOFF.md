@@ -248,3 +248,20 @@ exclude them by tag in the default run. Move the 2 stability tests into
 - **Web deletion page:** uses the placeholder `support@helperly.app`.
 - **Known call test:** an outdated test-mode helper, no production impact
   (see `docs/TESTING.md`).
+
+---
+
+## Final Beta Blockers Round (2026-11-01)
+
+| Item | SHA |
+|---|---|
+| Deleted users leave no identifiable references (comments, replies, reviews, call names, follows, likes, connections); cleanup failures never block deletion; collection-group index added | `e44812f` |
+| Every account declares 18+ before interacting (no grandfathering, no lock-out); createdAt rules removed | `34b3544` |
+| Staging plan (verified read-only) and operations checklist | this commit |
+
+### Validation
+
+- **Rules emulator:** 275/275.
+- **Deletion:** unit 6/6; end-to-end with three users passes.
+- **Payments:** the paid-session switch test still passes (charges,
+  Checkout and payouts are off on the server).
