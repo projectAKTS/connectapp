@@ -156,6 +156,42 @@ test("a first conversation can check for its chat before creating it", async () 
   await assertSucceeds(setDoc(doc(alice, "chats/alice_zed"), { users: ["alice", "zed"], participants: ["alice", "zed"] }));
 });
 
+test("first contact: text only until the other person writes; calls only to helpers or after a reply", async () => {
+  const { serverTimestamp } = require("firebase/firestore");
+  // zed contacts bob (not a helper) for the first time.
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, "users/zed"), { fullName: "Zed", ageDeclaration: "adult" });
+    await setDoc(doc(db, "users/helen"), { fullName: "Helen", ageDeclaration: "adult", role: "helper" });
+    await setDoc(doc(db, "chats/bob_zed"), { participants: ["bob", "zed"], repliedBy: ["zed"] });
+  });
+  const zed = as("zed");
+  const msgs = collection(zed, "chats/bob_zed/messages");
+  await assertSucceeds(addDoc(msgs, { authorId: "zed", type: "text", text: "Hello, can you help?" }));
+  await assertFails(addDoc(msgs, { authorId: "zed", type: "image", uri: "x" }));
+  await assertFails(addDoc(msgs, { authorId: "zed", type: "text", text: "see https://scam.example" }));
+  await assertFails(addDoc(msgs, { authorId: "zed", type: "text", text: "line\nWWW.scam.example" }));
+  const invite = (to) => ({ fromUid: "zed", toUid: to, status: "ringing", createdAt: serverTimestamp() });
+  await assertFails(addDoc(collection(zed, "callInvites"), invite("bob")));
+  await assertSucceeds(addDoc(collection(zed, "callInvites"), invite("helen")));
+
+  // The recipient may send anything: zed has written.
+  await assertSucceeds(addDoc(collection(as("bob"), "chats/bob_zed/messages"), { authorId: "bob", type: "image", uri: "x" }));
+
+  // Clients cannot mark someone as having written.
+  await assertFails(updateDoc(doc(zed, "chats/bob_zed"), { repliedBy: ["zed", "bob"] }));
+  await assertFails(setDoc(doc(zed, "chats/mallory_zed"), { participants: ["mallory", "zed"], repliedBy: ["mallory"] }));
+  await assertSucceeds(setDoc(doc(zed, "chats/mallory_zed"), { participants: ["mallory", "zed"] }));
+  await assertSucceeds(updateDoc(doc(zed, "chats/bob_zed"), { lastMessageText: "Hello" }));
+
+  // Once bob has written (the server adds him), media, links and calls work.
+  await testEnv.withSecurityRulesDisabled((ctx) =>
+    updateDoc(doc(ctx.firestore(), "chats/bob_zed"), { repliedBy: ["zed", "bob"] }));
+  await assertSucceeds(addDoc(msgs, { authorId: "zed", type: "image", uri: "x" }));
+  await assertSucceeds(addDoc(msgs, { authorId: "zed", type: "text", text: "https://example.org" }));
+  await assertSucceeds(addDoc(collection(zed, "callInvites"), invite("bob")));
+});
+
 test("conversation lists still work (array-contains queries)", async () => {
   const { query, where, getDocs } = require("firebase/firestore");
   const alice = as("alice");

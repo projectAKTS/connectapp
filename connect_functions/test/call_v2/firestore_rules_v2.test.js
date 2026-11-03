@@ -122,6 +122,9 @@ test("all private V2 operational collections deny client reads and writes", asyn
 });
 
 test("representative V1 call-invite access remains unchanged", async () => {
+  // The callee is a helper, so first-contact rules allow the call.
+  await testEnv.withSecurityRulesDisabled((ctx) =>
+    setDoc(doc(ctx.firestore(), "users/callee"), { role: "helper" }));
   await assertSucceeds(setDoc(userDoc("caller", "callInvites/invite_1"), {
     fromUid: "caller",
     toUid: "callee",

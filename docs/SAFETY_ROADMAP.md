@@ -18,6 +18,21 @@ Prepared 2026-11-02. Patterns come from apps that let strangers talk
 - **No call recording.** Messages stay with the other person after an
   account deletion; this is stated in the app.
 
+## Done On Staging (2026-11-02), Not Yet In Production
+
+- **#1, safety tips:** a card at the top of a new chat.
+- **#2, block and report in the chat:** the first-contact banner has
+  Block and Report buttons, as well as the menu. Report from the call
+  screen is deferred: call screens are kept stable.
+- **#3, first contact:**
+  - A stranger's first message arrives normally, under a "First time
+    talking with X" banner.
+  - Until the other person writes, only text without links can be sent.
+  - Non-helpers can be called only after they have written; helpers
+    stay callable, since that is the core flow.
+  - Enforced by the rules (`repliedBy`, written only by the server).
+  - Existing chats need `tool/backfill_replied_by.mjs`.
+
 ## Next (Recommended Order)
 
 | # | Feature | What it does | Like | Effort |

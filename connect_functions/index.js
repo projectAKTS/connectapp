@@ -1160,6 +1160,7 @@ const {
 } = require("./account/delete_account");
 const { minutesUntil, pushText } = require("./i18n/push_text");
 const { claimOnce } = require("./notifications/claim_once");
+const { repliedByUpdate } = require("./chat/replied_by");
 const { assertPaidSessionsEnabled } = require("./payments/paid_sessions");
 const {
   ChargeError,
@@ -1653,8 +1654,17 @@ exports.onChatMessageCreated = onDocumentCreated(
 
     // Keep sender unread at zero. Recipient unread is incremented per-message below.
     const chatRef = db.collection("chats").doc(chatId);
+    const repliedBy = await repliedByUpdate({
+      chatRef,
+      chat,
+      users,
+      authorId: `${authorId}`,
+      isSystem: m.system === true,
+      FieldValue: admin.firestore.FieldValue,
+    });
     await db.collection("chats").doc(chatId).set(
       {
+        ...(repliedBy ? { repliedBy } : {}),
         // Self-heal legacy chat docs and keep list metadata always fresh.
         users,
         participants: users,

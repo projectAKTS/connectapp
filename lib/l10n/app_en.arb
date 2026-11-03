@@ -883,5 +883,24 @@
     }
   },
   "consentTitle": "Help us improve Helperly",
-  "consentBody": "Both are optional and off unless you turn them on. You can change them anytime in Settings."
+  "consentBody": "Both are optional and off unless you turn them on. You can change them anytime in Settings.",
+  "chatSafetyTips": "Stay safe: never send money, codes or passwords, and keep your conversations in Helperly. Report anything that makes you uncomfortable.",
+  "chatFirstContactTitle": "First time talking with {name}",
+  "@chatFirstContactTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "chatFirstContactBody": "You don't know this person yet. Reply only if you want to. You can block or report them.",
+  "chatWaitingForReply": "Photos and links can be sent after {name} replies.",
+  "@chatWaitingForReply": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "callNeedsReply": "You can call this person after they reply to your message."
 }

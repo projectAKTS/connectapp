@@ -62,6 +62,44 @@ class _ChatScreenState extends State<ChatScreen> {
 
   String? _titleName;
 
+  // First contact (docs/SAFETY_ROADMAP.md #3): who has written here, kept by
+  // the server. Until the other person has, only text without links goes
+  // through; the rules enforce it, this only explains it.
+  List<String>? _repliedBy;
+  bool _chatDocLoaded = false;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _chatDocSub;
+  static final _linkPattern =
+      RegExp(r'(https?://|www\.)', caseSensitive: false);
+
+  bool get _otherHasWritten =>
+      _repliedBy?.contains(widget.otherUserId) ?? false;
+  bool get _iHaveWritten => _repliedBy?.contains(_me) ?? false;
+  String get _otherName => _titleName?.isNotEmpty == true
+      ? _titleName!
+      : context.l10n.chatThisPerson;
+
+  void _listenChatDoc() {
+    if (!mounted) return;
+    _chatDocSub = HelperlyTestRuntime.firestore
+        .collection('chats')
+        .doc(_chatId)
+        .snapshots()
+        .listen((snap) {
+      final raw = snap.data()?['repliedBy'];
+      if (!mounted) return;
+      setState(() {
+        _repliedBy = raw is List ? raw.map((e) => '$e').toList() : null;
+        _chatDocLoaded = true;
+      });
+    }, onError: (_) {});
+  }
+
+  void _explainWaitingForReply() {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(context.l10n.chatWaitingForReply(_otherName)),
+    ));
+  }
+
   bool _looksLikeUid(String value) {
     final v = value.trim();
     if (v.length < 16) return false;
@@ -122,6 +160,7 @@ class _ChatScreenState extends State<ChatScreen> {
       debugPrint('[Chat] ensureChatDoc STACK: $st');
     });
     _resolveTitleName();
+    unawaited(_ready.then((_) => _listenChatDoc(), onError: (_) {}));
   }
 
   Future<void> _ensureChatDoc() async {
@@ -246,6 +285,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (CurrentChat.otherUserId == widget.otherUserId) {
       CurrentChat.otherUserId = null;
     }
+    _chatDocSub?.cancel();
     _inputCtrl.dispose();
     super.dispose();
   }
@@ -343,6 +383,10 @@ class _ChatScreenState extends State<ChatScreen> {
       );
       return;
     }
+    if (!_otherHasWritten && _linkPattern.hasMatch(t)) {
+      _explainWaitingForReply();
+      return;
+    }
     _inputCtrl.clear();
     DiagnosticService.logChat('message_send_start', uid: _me, meta: {
       'chatId': _chatId,
@@ -400,6 +444,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _pickAttachment() async {
     if (_sending) return;
+    if (!_otherHasWritten) {
+      _explainWaitingForReply();
+      return;
+    }
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -691,53 +739,152 @@ class _ChatScreenState extends State<ChatScreen> {
                   _autoMarkReadFromSnapshot(snap.data!);
                 }
 
-                return Chat(
-                  l10n: _AppChatL10n(context.l10n),
-                  dateLocale: AppFormat.localeOf(context),
-                  messages: msgs,
-                  onSendPressed: (_) {},
-                  user: types.User(id: _me),
-                  theme: _chatTheme,
-                  onMessageTap: (ctx, msg) async {
-                    if (msg is types.FileMessage) await _openUri(msg.uri);
-                  },
-                  customBottomWidget: _Composer(
-                    controller: _inputCtrl,
-                    sending: _sending,
-                    onAttach: _pickAttachment,
-                    onSend: _sendText,
-                    pendingAttachmentName: _pendingAttachment == null
-                        ? null
-                        : p.basename(_pendingAttachment!.path),
-                    pendingAttachmentType: _pendingAttachment == null
-                        ? null
-                        : (_pendingIsImage
-                            ? context.l10n.messagePhoto
-                            : context.l10n.messageVideo),
-                    pendingAttachmentPath: _pendingAttachment == null
-                        ? null
-                        : _pendingAttachment!.path,
-                    pendingIsImage:
-                        _pendingAttachment == null ? null : _pendingIsImage,
-                    onClearPending: () {
-                      setState(() => _pendingAttachment = null);
-                    },
-                    onSendPending: _sendPendingAttachment,
-                  ),
-                  customMessageBuilder: (message, {required int messageWidth}) {
-                    final meta = message.metadata ?? {};
-                    final uri = (meta['uri'] ?? '') as String;
-                    final mime = (meta['mime'] ?? 'video/mp4') as String;
-                    if (uri.isNotEmpty && mime.startsWith('video/')) {
-                      return _VideoBubble(uri: uri, maxWidth: messageWidth);
-                    }
-                    return const SizedBox.shrink();
-                  },
+                final firstContact = _otherHasWritten && !_iHaveWritten;
+                return Column(
+                  children: [
+                    _ChatSafetyBanner(
+                      name: _otherName,
+                      firstContact: firstContact,
+                      showTips: !firstContact && msgs.length < 4,
+                      waitingForReply: _chatDocLoaded && !_otherHasWritten,
+                      onAction: _onSafetyAction,
+                    ),
+                    Expanded(
+                      child: Chat(
+                        l10n: _AppChatL10n(context.l10n),
+                        dateLocale: AppFormat.localeOf(context),
+                        messages: msgs,
+                        onSendPressed: (_) {},
+                        user: types.User(id: _me),
+                        theme: _chatTheme,
+                        onMessageTap: (ctx, msg) async {
+                          if (msg is types.FileMessage) await _openUri(msg.uri);
+                        },
+                        customBottomWidget: _Composer(
+                          controller: _inputCtrl,
+                          sending: _sending,
+                          onAttach: _pickAttachment,
+                          onSend: _sendText,
+                          pendingAttachmentName: _pendingAttachment == null
+                              ? null
+                              : p.basename(_pendingAttachment!.path),
+                          pendingAttachmentType: _pendingAttachment == null
+                              ? null
+                              : (_pendingIsImage
+                                  ? context.l10n.messagePhoto
+                                  : context.l10n.messageVideo),
+                          pendingAttachmentPath: _pendingAttachment == null
+                              ? null
+                              : _pendingAttachment!.path,
+                          pendingIsImage: _pendingAttachment == null
+                              ? null
+                              : _pendingIsImage,
+                          onClearPending: () {
+                            setState(() => _pendingAttachment = null);
+                          },
+                          onSendPending: _sendPendingAttachment,
+                        ),
+                        customMessageBuilder: (message,
+                            {required int messageWidth}) {
+                          final meta = message.metadata ?? {};
+                          final uri = (meta['uri'] ?? '') as String;
+                          final mime = (meta['mime'] ?? 'video/mp4') as String;
+                          if (uri.isNotEmpty && mime.startsWith('video/')) {
+                            return _VideoBubble(
+                                uri: uri, maxWidth: messageWidth);
+                          }
+                          return const SizedBox.shrink();
+                        },
+                      ),
+                    ),
+                  ],
                 );
               },
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+/// Top-of-chat safety card: when a stranger wrote first, who they are with
+/// block and report; otherwise safety tips while the chat is new.
+class _ChatSafetyBanner extends StatelessWidget {
+  final String name;
+  final bool firstContact;
+  final bool showTips;
+  final bool waitingForReply;
+  final ValueChanged<String> onAction;
+
+  const _ChatSafetyBanner({
+    required this.name,
+    required this.firstContact,
+    required this.showTips,
+    required this.waitingForReply,
+    required this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (!firstContact && !showTips) return const SizedBox.shrink();
+    final l10n = context.l10n;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: AppColors.button,
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.shield_outlined,
+                  size: 18, color: AppColors.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  firstContact
+                      ? l10n.chatFirstContactTitle(name)
+                      : l10n.chatSafetyTips,
+                  style: TextStyle(
+                    color: AppColors.text,
+                    fontWeight:
+                        firstContact ? FontWeight.w600 : FontWeight.w400,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (firstContact) ...[
+            const SizedBox(height: 4),
+            Text(l10n.chatFirstContactBody,
+                style: const TextStyle(color: AppColors.muted, fontSize: 13)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => onAction('block'),
+                  child: Text(l10n.blockAction),
+                ),
+                TextButton(
+                  onPressed: () => onAction('report'),
+                  child: Text(l10n.chatReport),
+                ),
+              ],
+            ),
+          ] else if (waitingForReply) ...[
+            const SizedBox(height: 4),
+            Text(l10n.chatWaitingForReply(name),
+                style: const TextStyle(color: AppColors.muted, fontSize: 13)),
+          ],
+        ],
       ),
     );
   }

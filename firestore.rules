@@ -112,6 +112,42 @@ service cloud.firestore {
       return others.size() != 1 || notRestrictedMinor(others[0]);
     }
 
+    // ---- First contact (docs/SAFETY_ROADMAP.md #3) ----
+    // `repliedBy` lists who has written in a chat. Only the server sets it
+    // (onChatMessageCreated; existing chats by tool/backfill_replied_by.mjs).
+    // Until the other person has written, you can send text only, and you
+    // can call them only if they are a helper.
+    function otherHasWritten(chat) {
+      let people = chat.keys().hasAny(['participants'])
+        ? chat.participants
+        : (chat.keys().hasAny(['users']) ? chat.users : []);
+      let others = people.removeAll([request.auth.uid]);
+      return chat.get('repliedBy', []).hasAny(others);
+    }
+
+    function isPlainTextMessage(msg) {
+      return msg.get('type', 'text') == 'text' &&
+        !msg.get('text', '').lower().matches('(?s).*(https?://|www[.]).*');
+    }
+
+    function isContactableHelper(uid) {
+      let path = /databases/$(database)/documents/users/$(uid);
+      return exists(path) && (
+        get(path).data.get('role', '') in ['helper', 'both'] ||
+        get(path).data.get('isHelper', false) == true);
+    }
+
+    function hasWrittenInChat(chatPath, uid) {
+      return exists(chatPath) &&
+        get(chatPath).data.get('repliedBy', []).hasAny([uid]);
+    }
+
+    function calleeAcceptsCall(from, to) {
+      return isContactableHelper(to) ||
+        hasWrittenInChat(/databases/$(database)/documents/chats/$(from + '_' + to), to) ||
+        hasWrittenInChat(/databases/$(database)/documents/chats/$(to + '_' + from), to);
+    }
+
     function optionalString(data, key) {
       return !(data.keys().hasAny([key])) || data[key] is string;
     }
@@ -285,7 +321,8 @@ service cloud.firestore {
       allow create: if request.auth != null
         && request.resource.data.fromUid == request.auth.uid
         && callerAgeAllowed()
-        && notRestrictedMinor(request.resource.data.toUid);
+        && notRestrictedMinor(request.resource.data.toUid)
+        && calleeAcceptsCall(request.auth.uid, request.resource.data.toUid);
       allow read: if request.auth != null
         && (resource.data.fromUid == request.auth.uid
           || resource.data.toUid == request.auth.uid);
@@ -338,7 +375,8 @@ service cloud.firestore {
 
     // ✅ Chats
     match /chats/{chatId} {
-      allow create: if isSignedIn() && (
+      allow create: if isSignedIn()
+        && !request.resource.data.keys().hasAny(['repliedBy']) && (
         (request.resource.data.keys().hasAny(['participants']) &&
           request.resource.data.participants is list &&
           request.resource.data.participants.hasAny([request.auth.uid])) ||
@@ -368,8 +406,9 @@ service cloud.firestore {
       );
 
       // Allow migration updates for legacy chat docs by checking either
-      // current data OR the incoming updated data.
-      allow update: if isSignedIn() && (
+      // current data OR the incoming updated data. `repliedBy` is server-only.
+      allow update: if isSignedIn()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['repliedBy']) && (
         (resource.data.keys().hasAny(['participants']) &&
           resource.data.participants is list &&
           resource.data.participants.hasAny([request.auth.uid])) ||
@@ -411,6 +450,8 @@ service cloud.firestore {
           && callerAgeAllowed()
           && otherNotMinorInChat(get(/databases/$(database)/documents/chats/$(chatId)).data)
           && notBlockedInChat(get(/databases/$(database)/documents/chats/$(chatId)).data)
+          && (isPlainTextMessage(request.resource.data) ||
+            otherHasWritten(get(/databases/$(database)/documents/chats/$(chatId)).data))
           && (
             (get(/databases/$(database)/documents/chats/$(chatId)).data.keys().hasAny(['participants']) &&
               get(/databases/$(database)/documents/chats/$(chatId)).data.participants is list &&

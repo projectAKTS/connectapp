@@ -81,6 +81,15 @@ r = await create(B, `chats/${chat}/messages`, `m_${run}`, { authorId: B.uid, tex
 check("message sent", r.status === 200, `status ${r.status}`);
 check("onChatMessageCreated ran once (notifiedAt claimed)", await waitFor(async () =>
   !!(await get(B, `chats/${chat}/messages/m_${run}`)).json.fields?.notifiedAt));
+const writers = async () => ((await get(B, `chats/${chat}`)).json.fields?.repliedBy?.arrayValue?.values || [])
+  .map((v) => v.stringValue);
+check("first contact: the server records who wrote", await waitFor(async () => (await writers()).includes(B.uid)));
+r = await create(B, `chats/${chat}/messages`, `img_${run}`, { authorId: B.uid, type: "image", uri: "x" });
+check("first contact: no photo before the other person writes", r.status === 403, `status ${r.status}`);
+await create(A, `chats/${chat}/messages`, `r_${run}`, { authorId: A.uid, text: "happy to help", type: "text" });
+await waitFor(async () => (await writers()).includes(A.uid));
+r = await create(B, `chats/${chat}/messages`, `img2_${run}`, { authorId: B.uid, type: "image", uri: "x" });
+check("first contact: photos allowed after a reply", r.status === 200, `status ${r.status}`);
 
 r = await create(B, "callInvites", `inv_${run}`, { fromUid: B.uid, fromName: "Smoke Seeker", toUid: A.uid,
   toName: "Smoke Helper", channel: `ch_${run}`, isVideo: false, status: "ringing", type: "call_invite" });

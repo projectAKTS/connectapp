@@ -33,6 +33,8 @@ class CallMessages {
         return l.callFinishingPrevious;
       case 'Unable to start call. Check your connection.':
         return l.callUnableToStart;
+      case 'You can call this person after they reply to your message.':
+        return l.callNeedsReply;
     }
     return message;
   }

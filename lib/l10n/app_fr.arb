@@ -567,5 +567,10 @@
   "ageRestrictedTitle": "Votre compte est suspendu",
   "ageRestrictedBody": "Helperly est réservé aux personnes de 18 ans et plus; ce compte ne peut donc pas être utilisé. Vos données sont conservées jusqu'à ce que vous supprimiez le compte ou que nous l'examinions. S'il s'agit d'une erreur, écrivez-nous à {email}.",
   "consentTitle": "Aidez-nous à améliorer Helperly",
-  "consentBody": "Les deux sont facultatifs et désactivés sauf si vous les activez. Vous pouvez les modifier en tout temps dans les Paramètres."
+  "consentBody": "Les deux sont facultatifs et désactivés sauf si vous les activez. Vous pouvez les modifier en tout temps dans les Paramètres.",
+  "chatSafetyTips": "Restez prudent : n’envoyez jamais d’argent, de codes ni de mots de passe, et gardez vos échanges dans Helperly. Signalez tout ce qui vous met mal à l’aise.",
+  "chatFirstContactTitle": "Premier échange avec {name}",
+  "chatFirstContactBody": "Vous ne connaissez pas encore cette personne. Répondez seulement si vous le souhaitez. Vous pouvez la bloquer ou la signaler.",
+  "chatWaitingForReply": "Les photos et les liens pourront être envoyés après la réponse de {name}.",
+  "callNeedsReply": "Vous pourrez appeler cette personne après sa réponse à votre message."
 }

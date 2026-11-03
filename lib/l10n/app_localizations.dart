@@ -3505,6 +3505,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Both are optional and off unless you turn them on. You can change them anytime in Settings.'**
   String get consentBody;
+
+  /// No description provided for @chatSafetyTips.
+  ///
+  /// In en, this message translates to:
+  /// **'Stay safe: never send money, codes or passwords, and keep your conversations in Helperly. Report anything that makes you uncomfortable.'**
+  String get chatSafetyTips;
+
+  /// No description provided for @chatFirstContactTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'First time talking with {name}'**
+  String chatFirstContactTitle(String name);
+
+  /// No description provided for @chatFirstContactBody.
+  ///
+  /// In en, this message translates to:
+  /// **'You don\'t know this person yet. Reply only if you want to. You can block or report them.'**
+  String get chatFirstContactBody;
+
+  /// No description provided for @chatWaitingForReply.
+  ///
+  /// In en, this message translates to:
+  /// **'Photos and links can be sent after {name} replies.'**
+  String chatWaitingForReply(String name);
+
+  /// No description provided for @callNeedsReply.
+  ///
+  /// In en, this message translates to:
+  /// **'You can call this person after they reply to your message.'**
+  String get callNeedsReply;
 }
 
 class _AppLocalizationsDelegate

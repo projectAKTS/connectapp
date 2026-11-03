@@ -1907,4 +1907,26 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get consentBody =>
       'Les deux sont facultatifs et désactivés sauf si vous les activez. Vous pouvez les modifier en tout temps dans les Paramètres.';
+
+  @override
+  String get chatSafetyTips =>
+      'Restez prudent : n’envoyez jamais d’argent, de codes ni de mots de passe, et gardez vos échanges dans Helperly. Signalez tout ce qui vous met mal à l’aise.';
+
+  @override
+  String chatFirstContactTitle(String name) {
+    return 'Premier échange avec $name';
+  }
+
+  @override
+  String get chatFirstContactBody =>
+      'Vous ne connaissez pas encore cette personne. Répondez seulement si vous le souhaitez. Vous pouvez la bloquer ou la signaler.';
+
+  @override
+  String chatWaitingForReply(String name) {
+    return 'Les photos et les liens pourront être envoyés après la réponse de $name.';
+  }
+
+  @override
+  String get callNeedsReply =>
+      'Vous pourrez appeler cette personne après sa réponse à votre message.';
 }

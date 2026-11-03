@@ -49,7 +49,8 @@ beforeEach(async () => {
     await user("newbie", { createdAt: NEW }); // old build, no declaration
     await user("adult", { createdAt: NEW, ageDeclaration: "adult" });
     await user("minor", { createdAt: OLD, ageDeclaration: "minor" });
-    await user("friend", { createdAt: OLD, ageDeclaration: "adult" });
+    // A helper, so first-contact rules allow calling them without a chat.
+    await user("friend", { createdAt: OLD, ageDeclaration: "adult", role: "helper" });
     for (const [a, b] of [["legacy", "friend"], ["ancient", "friend"], ["newbie", "friend"],
       ["adult", "friend"], ["minor", "friend"]]) {
       await setDoc(doc(db, `chats/${a}_${b}`), { participants: [a, b] });

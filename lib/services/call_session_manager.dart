@@ -1805,10 +1805,17 @@ class CallSessionManager {
       _callLifecycleArbiter.releaseOutgoingReservation(
         outgoingReservation.generation,
       );
+      // Denied by the rules: most often first-contact safety (the callee
+      // is not a helper and has not replied yet), not the connection.
+      final denied =
+          error is FirebaseException && error.code == 'permission-denied';
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
         SnackBar(
           content: Text(CallMessages.of(
-              context, 'Unable to start call. Check your connection.')),
+              context,
+              denied
+                  ? 'You can call this person after they reply to your message.'
+                  : 'Unable to start call. Check your connection.')),
         ),
       );
       return false;
