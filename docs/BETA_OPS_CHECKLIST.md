@@ -26,7 +26,7 @@ the Charter of the French Language or Law 25.
 
 | # | Item | Type | Done |
 |---|---|---|---|
-| 9 | Invitation message in French and English: free beta, 18+, peer experience and not professional advice, how to report, how to delete the account, support contact | L (French for Québec testers) and R | ☐ |
+| 9 | Invitation message in French and English: free beta, 18+, peer experience and not professional advice, how to report, how to delete the account, support contact | L (French for Québec testers) and R | ☐ draft: `docs/BETA_INVITATION.md` |
 | 10 | TestFlight and Play internal-testing descriptions in FR/EN | R | ☐ |
 
 ## Safety Operations
