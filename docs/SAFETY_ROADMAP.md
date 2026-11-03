@@ -18,7 +18,7 @@ Prepared 2026-11-02. Patterns come from apps that let strangers talk
 - **No call recording.** Messages stay with the other person after an
   account deletion; this is stated in the app.
 
-## Done On Staging (2026-11-02), Not Yet In Production
+## Done (2026-11-02)
 
 - **#1, safety tips:** a card at the top of a new chat.
 - **#2, block and report in the chat:** the first-contact banner has
@@ -32,6 +32,14 @@ Prepared 2026-11-02. Patterns come from apps that let strangers talk
     stay callable, since that is the core flow.
   - Enforced by the rules (`repliedBy`, written only by the server).
   - Existing chats need `tool/backfill_replied_by.mjs`.
+- **#4, scam warnings:**
+  - When a received message mentions money transfers, gift cards,
+    crypto, codes or passwords, or moving to another app (EN/FR), the
+    banner turns into a "Be careful" warning with Block and Report.
+  - On-device only: nothing is blocked or sent
+    (`lib/services/scam_signals.dart`).
+  - Live in production since 2026-11-02, except #4, which ships with the
+    next TestFlight build.
 
 ## Next (Recommended Order)
 

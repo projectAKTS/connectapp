@@ -1929,4 +1929,9 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get callNeedsReply =>
       'Vous pourrez appeler cette personne après sa réponse à votre message.';
+
+  @override
+  String chatScamWarning(String name) {
+    return 'Prudence : $name a parlé d’argent, de codes ou d’une autre application. N’envoyez jamais d’argent ni de codes, et gardez vos échanges dans Helperly.';
+  }
 }

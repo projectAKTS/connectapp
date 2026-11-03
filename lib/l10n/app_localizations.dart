@@ -3535,6 +3535,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'You can call this person after they reply to your message.'**
   String get callNeedsReply;
+
+  /// No description provided for @chatScamWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'Be careful: {name} mentioned money, codes or another app. Never send money or codes, and keep your conversations in Helperly.'**
+  String chatScamWarning(String name);
 }
 
 class _AppLocalizationsDelegate

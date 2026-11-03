@@ -572,5 +572,6 @@
   "chatFirstContactTitle": "Premier échange avec {name}",
   "chatFirstContactBody": "Vous ne connaissez pas encore cette personne. Répondez seulement si vous le souhaitez. Vous pouvez la bloquer ou la signaler.",
   "chatWaitingForReply": "Les photos et les liens pourront être envoyés après la réponse de {name}.",
-  "callNeedsReply": "Vous pourrez appeler cette personne après sa réponse à votre message."
+  "callNeedsReply": "Vous pourrez appeler cette personne après sa réponse à votre message.",
+  "chatScamWarning": "Prudence : {name} a parlé d’argent, de codes ou d’une autre application. N’envoyez jamais d’argent ni de codes, et gardez vos échanges dans Helperly."
 }

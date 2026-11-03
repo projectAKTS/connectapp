@@ -902,5 +902,13 @@
       }
     }
   },
-  "callNeedsReply": "You can call this person after they reply to your message."
+  "callNeedsReply": "You can call this person after they reply to your message.",
+  "chatScamWarning": "Be careful: {name} mentioned money, codes or another app. Never send money or codes, and keep your conversations in Helperly.",
+  "@chatScamWarning": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  }
 }

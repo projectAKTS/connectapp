@@ -1886,4 +1886,9 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get callNeedsReply =>
       'You can call this person after they reply to your message.';
+
+  @override
+  String chatScamWarning(String name) {
+    return 'Be careful: $name mentioned money, codes or another app. Never send money or codes, and keep your conversations in Helperly.';
+  }
 }

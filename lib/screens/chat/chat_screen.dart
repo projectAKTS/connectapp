@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:connect_app/services/content_filter.dart';
 import 'package:connect_app/services/safety_service.dart';
+import 'package:connect_app/services/scam_signals.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -740,11 +741,18 @@ class _ChatScreenState extends State<ChatScreen> {
                 }
 
                 final firstContact = _otherHasWritten && !_iHaveWritten;
+                // On-device only (docs/SAFETY_ROADMAP.md #4): nothing is
+                // blocked or sent anywhere.
+                final scamWarning = msgs.any((m) =>
+                    m is types.TextMessage &&
+                    m.author.id != _me &&
+                    ScamSignals.matches(m.text));
                 return Column(
                   children: [
                     _ChatSafetyBanner(
                       name: _otherName,
                       firstContact: firstContact,
+                      scamWarning: scamWarning,
                       showTips: !firstContact && msgs.length < 4,
                       waitingForReply: _chatDocLoaded && !_otherHasWritten,
                       onAction: _onSafetyAction,
@@ -813,6 +821,7 @@ class _ChatScreenState extends State<ChatScreen> {
 class _ChatSafetyBanner extends StatelessWidget {
   final String name;
   final bool firstContact;
+  final bool scamWarning;
   final bool showTips;
   final bool waitingForReply;
   final ValueChanged<String> onAction;
@@ -820,6 +829,7 @@ class _ChatSafetyBanner extends StatelessWidget {
   const _ChatSafetyBanner({
     required this.name,
     required this.firstContact,
+    required this.scamWarning,
     required this.showTips,
     required this.waitingForReply,
     required this.onAction,
@@ -827,7 +837,10 @@ class _ChatSafetyBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!firstContact && !showTips) return const SizedBox.shrink();
+    if (!firstContact && !scamWarning && !showTips) {
+      return const SizedBox.shrink();
+    }
+    final withActions = firstContact || scamWarning;
     final l10n = context.l10n;
     const secondary =
         TextStyle(color: AppColors.muted, fontSize: 13, height: 1.35);
@@ -856,10 +869,13 @@ class _ChatSafetyBanner extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.only(top: 1),
-            child:
-                Icon(Icons.shield_outlined, size: 18, color: AppColors.primary),
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(
+              scamWarning ? Icons.warning_amber_rounded : Icons.shield_outlined,
+              size: 18,
+              color: scamWarning ? AppColors.danger : AppColors.primary,
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -867,20 +883,23 @@ class _ChatSafetyBanner extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  firstContact
-                      ? l10n.chatFirstContactTitle(name)
-                      : l10n.chatSafetyTips,
+                  scamWarning
+                      ? l10n.chatScamWarning(name)
+                      : firstContact
+                          ? l10n.chatFirstContactTitle(name)
+                          : l10n.chatSafetyTips,
                   style: TextStyle(
                     color: AppColors.text,
-                    fontWeight:
-                        firstContact ? FontWeight.w600 : FontWeight.w400,
+                    fontWeight: withActions ? FontWeight.w600 : FontWeight.w400,
                     fontSize: 13,
                     height: 1.35,
                   ),
                 ),
-                if (firstContact) ...[
+                if (firstContact && !scamWarning) ...[
                   const SizedBox(height: 4),
                   Text(l10n.chatFirstContactBody, style: secondary),
+                ],
+                if (withActions) ...[
                   const SizedBox(height: 10),
                   Row(
                     children: [
