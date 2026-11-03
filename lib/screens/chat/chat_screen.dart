@@ -829,26 +829,44 @@ class _ChatSafetyBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!firstContact && !showTips) return const SizedBox.shrink();
     final l10n = context.l10n;
+    const secondary =
+        TextStyle(color: AppColors.muted, fontSize: 13, height: 1.35);
+    final actionStyle = TextButton.styleFrom(
+      foregroundColor: AppColors.primary,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      minimumSize: const Size(0, 36),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: const BorderSide(color: AppColors.border),
+      ),
+    );
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: AppColors.button,
         border: Border.all(color: AppColors.border),
         borderRadius: BorderRadius.circular(14),
       ),
-      child: Column(
+      // Icon on the left; every line of text in one column beside it, so
+      // they all start at the same edge.
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Icon(Icons.shield_outlined,
-                  size: 18, color: AppColors.primary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
+          const Padding(
+            padding: EdgeInsets.only(top: 1),
+            child:
+                Icon(Icons.shield_outlined, size: 18, color: AppColors.primary),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
                   firstContact
                       ? l10n.chatFirstContactTitle(name)
                       : l10n.chatSafetyTips,
@@ -857,33 +875,35 @@ class _ChatSafetyBanner extends StatelessWidget {
                     fontWeight:
                         firstContact ? FontWeight.w600 : FontWeight.w400,
                     fontSize: 13,
+                    height: 1.35,
                   ),
                 ),
-              ),
-            ],
-          ),
-          if (firstContact) ...[
-            const SizedBox(height: 4),
-            Text(l10n.chatFirstContactBody,
-                style: const TextStyle(color: AppColors.muted, fontSize: 13)),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: () => onAction('block'),
-                  child: Text(l10n.blockAction),
-                ),
-                TextButton(
-                  onPressed: () => onAction('report'),
-                  child: Text(l10n.chatReport),
-                ),
+                if (firstContact) ...[
+                  const SizedBox(height: 4),
+                  Text(l10n.chatFirstContactBody, style: secondary),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      TextButton(
+                        style: actionStyle,
+                        onPressed: () => onAction('block'),
+                        child: Text(l10n.blockAction),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton(
+                        style: actionStyle,
+                        onPressed: () => onAction('report'),
+                        child: Text(l10n.chatReport),
+                      ),
+                    ],
+                  ),
+                ] else if (waitingForReply) ...[
+                  const SizedBox(height: 6),
+                  Text(l10n.chatWaitingForReply(name), style: secondary),
+                ],
               ],
             ),
-          ] else if (waitingForReply) ...[
-            const SizedBox(height: 4),
-            Text(l10n.chatWaitingForReply(name),
-                style: const TextStyle(color: AppColors.muted, fontSize: 13)),
-          ],
+          ),
         ],
       ),
     );
