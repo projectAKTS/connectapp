@@ -140,3 +140,13 @@ EOF
   - Those pages also use the placeholder `support@helperly.app`.
   - Needs a real support address and the founder's decision.
 - [ ] **5. Revoke `AJDC73P524`:** 24 hours after step 4.
+
+## First-Contact Safety Release (2026-11-02, founder: "prod to all")
+
+1. **`onChatMessageCreated`** deployed by Claude. It maintains `repliedBy`.
+2. **Backfill:** dry run by Claude (34 chats); `--apply` run by the
+   founder, because Claude's permissions block production writes.
+   Verified: 34 of 34 chats have `repliedBy`.
+3. **Firestore and Storage rules** deployed by Claude. The live ruleset
+   is identical to `firestore.rules` (`200168a`). Hosting is still held.
+4. **iOS build 1.0.2 (202611022213)** uploaded to App Store Connect.
