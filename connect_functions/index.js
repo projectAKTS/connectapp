@@ -1161,6 +1161,7 @@ const {
 const { minutesUntil, pushText } = require("./i18n/push_text");
 const { claimOnce } = require("./notifications/claim_once");
 const { repliedByUpdate } = require("./chat/replied_by");
+const { missingFields } = require("./account/profile_defaults");
 const { assertPaidSessionsEnabled } = require("./payments/paid_sessions");
 const {
   ChargeError,
@@ -1817,45 +1818,50 @@ exports.onAuthUserCreated = functionsV1.auth.user().onCreate(async (user) => {
   const displayNameRaw = `${user.displayName || ""}`.trim();
   const resolvedName = displayNameRaw || fallbackNameFromEmail(email) || "User";
 
-  await db.collection("users").doc(uid).set(
-    {
-      fullName: resolvedName,
-      fullNameLower: resolvedName.toLowerCase(),
-      displayName: resolvedName,
-      displayName_lc: resolvedName.toLowerCase(),
-      bio: "",
-      followers: [],
-      following: [],
-      postsCount: 0,
-      profilePicture: "",
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      xpPoints: 0,
-      badges: [],
-      postCount: 0,
-      commentCount: 0,
-      helpfulMarks: 0,
-      dailyLoginStreak: 0,
-      postingStreak: 0,
-      lastLoginDate: null,
-      lastPostDate: null,
-      referralCount: 0,
-      categoryPosts: {
-        Career: 0,
-        Travel: 0,
-        Finance: 0,
-        Technology: 0,
-        Health: 0,
-      },
-      activePerks: {
-        priorityPostBoost: null,
-        profileHighlight: null,
-        commentBoost: null,
-      },
-      premiumStatus: "none",
-      trialUsed: false,
+  // The app may have written the profile already (name, photo, onboarding):
+  // only fill in what is missing, never overwrite it.
+  const defaults = {
+    fullName: resolvedName,
+    fullNameLower: resolvedName.toLowerCase(),
+    displayName: resolvedName,
+    displayName_lc: resolvedName.toLowerCase(),
+    bio: "",
+    followers: [],
+    following: [],
+    postsCount: 0,
+    profilePicture: "",
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    xpPoints: 0,
+    badges: [],
+    postCount: 0,
+    commentCount: 0,
+    helpfulMarks: 0,
+    dailyLoginStreak: 0,
+    postingStreak: 0,
+    lastLoginDate: null,
+    lastPostDate: null,
+    referralCount: 0,
+    categoryPosts: {
+      Career: 0,
+      Travel: 0,
+      Finance: 0,
+      Technology: 0,
+      Health: 0,
     },
-    { merge: true }
-  );
+    activePerks: {
+      priorityPostBoost: null,
+      profileHighlight: null,
+      commentBoost: null,
+    },
+    premiumStatus: "none",
+    trialUsed: false,
+  };
+  const userRef = db.collection("users").doc(uid);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(userRef);
+    const missing = missingFields(snap.exists ? snap.data() : {}, defaults);
+    if (Object.keys(missing).length) tx.set(userRef, missing, { merge: true });
+  });
   if (email) {
     await db
       .collection("users")
