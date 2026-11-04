@@ -47,3 +47,6 @@ secrets/
 
 # Staging Firebase client configs (kept out of git)
 /config/staging/
+
+# Firebase CLI deploy cache (local, changes on every hosting deploy)
+.firebase/
