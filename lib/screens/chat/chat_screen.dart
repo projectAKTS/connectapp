@@ -3,6 +3,7 @@ import 'package:connect_app/l10n/formatters.dart';
 import 'package:connect_app/l10n/l10n.dart';
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show ImageFilter;
 
 import 'package:connect_app/services/content_filter.dart';
 import 'package:connect_app/services/safety_service.dart';
@@ -67,6 +68,8 @@ class _ChatScreenState extends State<ChatScreen> {
   // the server. Until the other person has, only text without links goes
   // through; the rules enforce it, this only explains it.
   List<String>? _repliedBy;
+  // Received photos stay blurred until tapped (docs/SAFETY_ROADMAP.md #6).
+  final Set<String> _revealedImages = <String>{};
   bool _chatDocLoaded = false;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _chatDocSub;
   static final _linkPattern =
@@ -792,6 +795,19 @@ class _ChatScreenState extends State<ChatScreen> {
                           },
                           onSendPending: _sendPendingAttachment,
                         ),
+                        imageMessageBuilder: (m, {required int messageWidth}) {
+                          final image = ImageMessage(
+                              message: m, messageWidth: messageWidth);
+                          if (m.author.id == _me ||
+                              _revealedImages.contains(m.id)) {
+                            return image;
+                          }
+                          return _HiddenImage(
+                            onReveal: () =>
+                                setState(() => _revealedImages.add(m.id)),
+                            child: image,
+                          );
+                        },
                         customMessageBuilder: (message,
                             {required int messageWidth}) {
                           final meta = message.metadata ?? {};
@@ -811,6 +827,57 @@ class _ChatScreenState extends State<ChatScreen> {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+/// A received photo, blurred until the recipient taps it.
+class _HiddenImage extends StatelessWidget {
+  final Widget child;
+  final VoidCallback onReveal;
+
+  const _HiddenImage({required this.child, required this.onReveal});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRect(
+      child: Stack(
+        children: [
+          ImageFiltered(
+            imageFilter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+            child: child,
+          ),
+          Positioned.fill(
+            child: Material(
+              color: Colors.black26,
+              child: InkWell(
+                onTap: onReveal,
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.visibility_off_outlined,
+                            color: Colors.white),
+                        const SizedBox(height: 6),
+                        Text(
+                          context.l10n.chatTapToView,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

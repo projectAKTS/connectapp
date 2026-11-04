@@ -1934,4 +1934,10 @@ class AppLocalizationsFr extends AppLocalizations {
   String chatScamWarning(String name) {
     return 'Prudence : $name a parlé d’argent, de codes ou d’une autre application. N’envoyez jamais d’argent ni de codes, et gardez vos échanges dans Helperly.';
   }
+
+  @override
+  String get reportCallBehaviour => 'Comportement inapproprié pendant un appel';
+
+  @override
+  String get chatTapToView => 'Photo masquée · Touchez pour voir';
 }

@@ -148,6 +148,8 @@ class ValueLabels {
         return l.reportHarmfulAdvice;
       case 'Pretending to be someone else':
         return l.reportImpersonation;
+      case 'Inappropriate behaviour during a call':
+        return l.reportCallBehaviour;
       case 'Something else':
         return l.reportOther;
     }

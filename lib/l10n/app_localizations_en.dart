@@ -1891,4 +1891,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String chatScamWarning(String name) {
     return 'Be careful: $name mentioned money, codes or another app. Never send money or codes, and keep your conversations in Helperly.';
   }
+
+  @override
+  String get reportCallBehaviour => 'Inappropriate behaviour during a call';
+
+  @override
+  String get chatTapToView => 'Photo hidden · Tap to view';
 }

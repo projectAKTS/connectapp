@@ -27,6 +27,7 @@ class SafetyService {
     'Inappropriate content',
     'Harmful or misleading advice',
     'Pretending to be someone else',
+    'Inappropriate behaviour during a call',
     'Something else',
   ];
 

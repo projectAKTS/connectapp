@@ -3541,6 +3541,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Be careful: {name} mentioned money, codes or another app. Never send money or codes, and keep your conversations in Helperly.'**
   String chatScamWarning(String name);
+
+  /// No description provided for @reportCallBehaviour.
+  ///
+  /// In en, this message translates to:
+  /// **'Inappropriate behaviour during a call'**
+  String get reportCallBehaviour;
+
+  /// No description provided for @chatTapToView.
+  ///
+  /// In en, this message translates to:
+  /// **'Photo hidden · Tap to view'**
+  String get chatTapToView;
 }
 
 class _AppLocalizationsDelegate

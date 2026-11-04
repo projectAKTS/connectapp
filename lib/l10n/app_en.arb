@@ -910,5 +910,7 @@
         "type": "String"
       }
     }
-  }
+  },
+  "reportCallBehaviour": "Inappropriate behaviour during a call",
+  "chatTapToView": "Photo hidden · Tap to view"
 }
