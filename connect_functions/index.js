@@ -1162,6 +1162,7 @@ const { minutesUntil, pushText } = require("./i18n/push_text");
 const { claimOnce } = require("./notifications/claim_once");
 const { repliedByUpdate } = require("./chat/replied_by");
 const { missingFields } = require("./account/profile_defaults");
+const { POST_HIDE_THRESHOLD, openReporterCount } = require("./safety/report_threshold");
 const { assertPaidSessionsEnabled } = require("./payments/paid_sessions");
 const {
   ChargeError,
@@ -1173,6 +1174,34 @@ const { addReviewToRating, validStars } = require("./reviews/review_aggregate");
 // A seeker's review of a finished consultation updates the helper's average
 // rating. Rules let only the payer create it, once, after the session time.
 // `countedAt` makes retried events count the review once.
+// Hide a post from feeds once enough different people have reported it
+// (safety/report_threshold.js). The operator restores it by closing the
+// reports and removing `hiddenByReports` in the console.
+exports.onReportCreated = onDocumentCreated(
+  { document: "reports/{reportId}", region: "us-central1" },
+  async (event) => {
+    const report = event.data?.data() || {};
+    const postId = `${report.targetId || ""}`.trim();
+    if (report.type !== "post" || !postId) return;
+    const snap = await db
+      .collection("reports")
+      .where("type", "==", "post")
+      .where("targetId", "==", postId)
+      .get();
+    const reporters = openReporterCount(snap.docs.map((d) => d.data()));
+    if (reporters < POST_HIDE_THRESHOLD) return;
+    const postRef = db.collection("posts").doc(postId);
+    const post = await postRef.get();
+    if (!post.exists || post.get("hiddenByReports") === true) return;
+    await postRef.update({
+      hiddenByReports: true,
+      hiddenByReportsAt: admin.firestore.FieldValue.serverTimestamp(),
+      hiddenByReportsCount: reporters,
+    });
+    console.log("post_hidden_by_reports", { postId, reporters });
+  }
+);
+
 exports.onReviewCreated = onDocumentCreated(
   { document: "reviews/{consultationId}", region: "us-central1" },
   async (event) => {

@@ -192,6 +192,23 @@ test("first contact: text only until the other person writes; calls only to help
   await assertSucceeds(addDoc(collection(zed, "callInvites"), invite("bob")));
 });
 
+test("reported posts: a private hide list for the reporter; only the server hides a post", async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "posts/p_bob"), { userID: "bob", content: "x" });
+    await setDoc(doc(ctx.firestore(), "users/alice/private/account"), { email: "a@example.test" });
+  });
+  const alice = as("alice");
+  await assertSucceeds(setDoc(doc(alice, "users/alice/private/safety"), { hiddenPostIds: ["p_bob"] }));
+  await assertSucceeds(getDoc(doc(alice, "users/alice/private/safety")));
+  await assertFails(getDoc(doc(as("bob"), "users/alice/private/safety")));
+  await assertFails(setDoc(doc(as("bob"), "users/alice/private/safety"), { hiddenPostIds: [] }));
+  // Other private docs (the account email) stay server-only.
+  await assertFails(getDoc(doc(alice, "users/alice/private/account")));
+  // Nobody but the server sets or clears hiddenByReports.
+  await assertFails(updateDoc(doc(as("bob"), "posts/p_bob"), { hiddenByReports: false }));
+  await assertFails(updateDoc(doc(alice, "posts/p_bob"), { hiddenByReports: true }));
+});
+
 test("conversation lists still work (array-contains queries)", async () => {
   const { query, where, getDocs } = require("firebase/firestore");
   const alice = as("alice");

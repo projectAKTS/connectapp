@@ -1195,7 +1195,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           );
                         }
 
-                        final all = (snap.data?.docs ?? []).toList();
+                        final all = (snap.data?.docs ?? [])
+                            .where((d) =>
+                                isCurrentUser ||
+                                !SafetyService.instance.hidesPost(
+                                    d.id, d.data() as Map<String, dynamic>))
+                            .toList();
                         all.sort((a, b) {
                           final aTs = parseFirestoreTimestamp(a['timestamp']) ??
                               DateTime.fromMillisecondsSinceEpoch(0);

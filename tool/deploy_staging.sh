@@ -17,7 +17,7 @@ FUNCS=(callInviteTransition getAgoraRtcToken onCallInviteCreated onCallInviteUpd
   createStripeCustomer createSetupIntent listPaymentMethods setDefaultPaymentMethod
   removePaymentMethod cancelConsultation chargeStoredPaymentMethod
   createExpressAccountLink createStripeCheckoutSession handleStripeWebhook
-  deleteAccount processAccountDeletionRequests onReviewCreated)
+  deleteAccount processAccountDeletionRequests onReviewCreated onReportCreated)
 
 fail() { echo "STOP: $*" >&2; exit 1; }
 [ "$P" != "$PROD" ] || fail "target is production"

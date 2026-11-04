@@ -203,6 +203,14 @@ service cloud.firestore {
         && keepsMinorRestriction();
       allow delete: if false;
 
+      // The owner's private safety settings (posts they reported and hid).
+      // Other private docs (for example the account email) stay server-only.
+      match /private/{docId} {
+        allow read, write: if request.auth != null
+          && request.auth.uid == userId
+          && docId == 'safety';
+      }
+
       // 18+ policy: a self-declared minor stays restricted. Only an
       // operator (console / Admin SDK) can lift it after review.
       function keepsMinorRestriction() {

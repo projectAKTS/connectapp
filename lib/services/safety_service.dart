@@ -32,7 +32,14 @@ class SafetyService {
   ];
 
   final ValueNotifier<Set<String>> blocked = ValueNotifier(const <String>{});
+
+  /// Posts this user reported: hidden from them at once. Kept in
+  /// `users/{uid}/private/safety`, which only they can read, so reports stay
+  /// private.
+  final ValueNotifier<Set<String>> hiddenPosts =
+      ValueNotifier(const <String>{});
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _sub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _privateSub;
   String? _watchedUid;
 
   /// Keeps [blocked] in sync with the signed-in user's doc.
@@ -51,16 +58,38 @@ class SafetyService {
           ? raw.map((e) => '$e').where((e) => e.isNotEmpty).toSet()
           : const <String>{};
     }, onError: (_) {});
+    unawaited(_privateSub?.cancel());
+    _privateSub = _safetyDoc(uid).snapshots().listen((snap) {
+      final hidden = snap.data()?['hiddenPostIds'];
+      hiddenPosts.value = hidden is List
+          ? hidden.map((e) => '$e').where((e) => e.isNotEmpty).toSet()
+          : const <String>{};
+    }, onError: (_) {});
   }
 
   void stop() {
     unawaited(_sub?.cancel());
     _sub = null;
+    unawaited(_privateSub?.cancel());
+    _privateSub = null;
     _watchedUid = null;
     blocked.value = const <String>{};
+    hiddenPosts.value = const <String>{};
   }
 
+  DocumentReference<Map<String, dynamic>> _safetyDoc(String uid) =>
+      HelperlyTestRuntime.firestore
+          .collection('users')
+          .doc(uid)
+          .collection('private')
+          .doc('safety');
+
   bool isBlocked(String uid) => uid.isNotEmpty && blocked.value.contains(uid);
+
+  /// Whether a post stays out of feeds: this user reported it, or enough
+  /// people did and the server hid it until review (`hiddenByReports`).
+  bool hidesPost(String postId, Map<String, dynamic> data) =>
+      hiddenPosts.value.contains(postId) || data['hiddenByReports'] == true;
 
   Future<void> report({
     required String type,
@@ -79,6 +108,12 @@ class SafetyService {
       'status': 'open',
       'createdAt': FieldValue.serverTimestamp(),
     });
+    if (type == 'post' && targetId.isNotEmpty) {
+      hiddenPosts.value = {...hiddenPosts.value, targetId};
+      await _safetyDoc(uid).set({
+        'hiddenPostIds': FieldValue.arrayUnion([targetId]),
+      }, SetOptions(merge: true));
+    }
   }
 
   Future<void> setBlocked(String targetUid, bool block) async {

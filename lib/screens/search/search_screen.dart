@@ -170,6 +170,7 @@ class _SearchScreenState extends State<SearchScreen> {
         final userAvatar = (m['userAvatar'] ?? '').toString();
         final userId = _extractPostUserId(m);
         if (SafetyService.instance.isBlocked(userId)) continue;
+        if (SafetyService.instance.hidesPost(d.id, m)) continue;
         final tags = (m['tags'] is List)
             ? (m['tags'] as List).map((e) => e.toString()).toList()
             : <String>[];

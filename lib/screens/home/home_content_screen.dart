@@ -90,11 +90,13 @@ class HomeContentScreenState extends State<HomeContentScreen>
     widget.controller.attach(this);
     SafetyService.instance.watch();
     SafetyService.instance.blocked.addListener(_onBlockedChanged);
+    SafetyService.instance.hiddenPosts.addListener(_onBlockedChanged);
   }
 
   @override
   void dispose() {
     SafetyService.instance.blocked.removeListener(_onBlockedChanged);
+    SafetyService.instance.hiddenPosts.removeListener(_onBlockedChanged);
     widget.controller.detach(this);
     _scroll.dispose();
     super.dispose();
@@ -441,7 +443,8 @@ class HomeContentScreenState extends State<HomeContentScreen>
                           hasMedia) {
                         return false;
                       }
-                      return !SafetyService.instance.isBlocked(authorId);
+                      return !SafetyService.instance.isBlocked(authorId) &&
+                          !SafetyService.instance.hidesPost(doc.id, raw);
                     }).toList();
 
                     final shownPosts = visiblePosts
