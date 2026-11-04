@@ -1897,4 +1897,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get chatTapToView => 'Photo hidden · Tap to view';
+
+  @override
+  String get postSensitiveTapToView => 'Sensitive content · Tap to view';
 }

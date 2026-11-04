@@ -912,5 +912,6 @@
     }
   },
   "reportCallBehaviour": "Inappropriate behaviour during a call",
-  "chatTapToView": "Photo hidden · Tap to view"
+  "chatTapToView": "Photo hidden · Tap to view",
+  "postSensitiveTapToView": "Sensitive content · Tap to view"
 }

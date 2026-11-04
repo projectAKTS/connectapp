@@ -4,6 +4,7 @@ import 'package:connect_app/l10n/formatters.dart';
 import 'package:connect_app/l10n/value_labels.dart';
 import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/services/safety_service.dart';
+import 'package:connect_app/widgets/sensitive_media_cover.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
@@ -450,6 +451,17 @@ class HomeContentScreenState extends State<HomeContentScreen>
                     final shownPosts = visiblePosts
                         .take(_displayPostsLimit)
                         .toList(growable: false);
+                    // Everything filtered out (blocked, reported or hidden):
+                    // same message as an empty feed, not a blank area.
+                    if (shownPosts.isEmpty && !hasUploadingOwn) {
+                      return Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          context.l10n.homeNoPosts,
+                          style: const TextStyle(color: AppColors.muted),
+                        ),
+                      );
+                    }
 
                     return Column(
                       children: [
@@ -528,6 +540,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
                               rightTime: '',
                               body: body,
                               imageUrls: imageUrls,
+                              sensitive: raw['sensitive'] == true,
                               videoUrl: videoUrl,
                               videoThumbUrl: videoThumbUrl,
                               mediaAspect: aspect,
@@ -1083,6 +1096,9 @@ class _PostCell extends StatefulWidget {
   final String body;
 
   final List<String> imageUrls;
+
+  /// Photos the server's check marked sensitive: blurred until tapped.
+  final bool sensitive;
   final String videoUrl;
   final String videoThumbUrl;
   final double mediaAspect;
@@ -1106,6 +1122,7 @@ class _PostCell extends StatefulWidget {
     required this.rightTime,
     required this.body,
     required this.imageUrls,
+    this.sensitive = false,
     required this.videoUrl,
     required this.videoThumbUrl,
     required this.mediaAspect,
@@ -1207,7 +1224,7 @@ class _PostCellState extends State<_PostCell> {
   Widget build(BuildContext context) {
     Widget? media() {
       if (widget.imageUrls.isNotEmpty) {
-        return _MediaCarousel(
+        final carousel = _MediaCarousel(
           urls: widget.imageUrls,
           aspect: widget.mediaAspect,
           onOpenIndex: (idx) {
@@ -1220,6 +1237,11 @@ class _PostCellState extends State<_PostCell> {
               ),
             );
           },
+        );
+        if (!widget.sensitive || widget.isOwnPost) return carousel;
+        return SensitiveMediaCover(
+          label: context.l10n.postSensitiveTapToView,
+          child: carousel,
         );
       }
       if (widget.videoUrl.isNotEmpty) {

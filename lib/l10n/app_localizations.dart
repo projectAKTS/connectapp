@@ -3553,6 +3553,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Photo hidden · Tap to view'**
   String get chatTapToView;
+
+  /// No description provided for @postSensitiveTapToView.
+  ///
+  /// In en, this message translates to:
+  /// **'Sensitive content · Tap to view'**
+  String get postSensitiveTapToView;
 }
 
 class _AppLocalizationsDelegate

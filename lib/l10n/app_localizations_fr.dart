@@ -1940,4 +1940,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get chatTapToView => 'Photo masquée · Touchez pour voir';
+
+  @override
+  String get postSensitiveTapToView => 'Contenu sensible · Touchez pour voir';
 }

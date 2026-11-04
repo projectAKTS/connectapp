@@ -6,6 +6,8 @@ import 'package:video_player/video_player.dart';
 import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/theme/tokens.dart';
 import 'package:connect_app/widgets/full_screen_back_gesture.dart';
+import 'package:connect_app/widgets/sensitive_media_cover.dart';
+import 'package:connect_app/services/helperly_test_runtime.dart';
 
 class PostDetailScreen extends StatelessWidget {
   final String postId;
@@ -189,10 +191,21 @@ class PostDetailScreen extends StatelessWidget {
                               ),
                               const SizedBox(height: 10),
                               if (imageUrls.isNotEmpty) ...[
-                                _DetailMediaCarousel(
-                                  urls: imageUrls,
-                                  aspect: mediaAspect,
-                                ),
+                                if (data['sensitive'] == true &&
+                                    data['userID'] !=
+                                        HelperlyTestRuntime.currentUid)
+                                  SensitiveMediaCover(
+                                    label: context.l10n.postSensitiveTapToView,
+                                    child: _DetailMediaCarousel(
+                                      urls: imageUrls,
+                                      aspect: mediaAspect,
+                                    ),
+                                  )
+                                else
+                                  _DetailMediaCarousel(
+                                    urls: imageUrls,
+                                    aspect: mediaAspect,
+                                  ),
                                 const SizedBox(height: 12),
                               ] else if (videoUrl.isNotEmpty) ...[
                                 _DetailVideoPlayer(

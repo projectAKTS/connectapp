@@ -7,6 +7,7 @@ const { onSchedule } = require("firebase-functions/v2/scheduler");
 const {
   onDocumentCreated,
   onDocumentUpdated,
+  onDocumentWritten,
 } = require("firebase-functions/v2/firestore");
 const functionsV1 = require("firebase-functions/v1");
 const {
@@ -1163,6 +1164,12 @@ const { claimOnce } = require("./notifications/claim_once");
 const { repliedByUpdate } = require("./chat/replied_by");
 const { missingFields } = require("./account/profile_defaults");
 const { POST_HIDE_THRESHOLD, openReporterCount } = require("./safety/report_threshold");
+const {
+  verdictFor,
+  worstVerdict,
+  gcsUriFromDownloadUrl,
+  postImageUrls,
+} = require("./safety/image_safety");
 const { assertPaidSessionsEnabled } = require("./payments/paid_sessions");
 const {
   ChargeError,
@@ -1199,6 +1206,53 @@ exports.onReportCreated = onDocumentCreated(
       hiddenByReportsCount: reporters,
     });
     console.log("post_hidden_by_reports", { postId, reporters });
+  }
+);
+
+// Automatic photo check for posts (safety/image_safety.js): Cloud Vision
+// SafeSearch on the post's own photos whenever they change. Its own update
+// (imageSafety) leaves the photos unchanged, so it does not run again.
+exports.onPostImagesChanged = onDocumentWritten(
+  { document: "posts/{postId}", region: "us-central1" },
+  async (event) => {
+    const after = event.data?.after?.data();
+    if (!after) return;
+    const postId = event.params.postId;
+    const urls = postImageUrls(after);
+    const before = postImageUrls(event.data?.before?.data());
+    if (!urls.length) return;
+    if (after.imageSafety && JSON.stringify(urls) === JSON.stringify(before)) return;
+
+    const bucket = admin.storage().bucket().name;
+    const uris = urls.map((u) => gcsUriFromDownloadUrl(u, bucket)).filter(Boolean).slice(0, 10);
+    if (!uris.length) return;
+    const { access_token: token } = await admin.credential.applicationDefault().getAccessToken();
+    const res = await fetch("https://vision.googleapis.com/v1/images:annotate", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        requests: uris.map((uri) => ({
+          image: { source: { gcsImageUri: uri } },
+          features: [{ type: "SAFE_SEARCH_DETECTION" }],
+        })),
+      }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.error("image_safety_failed", { postId, status: res.status });
+      return;
+    }
+    const verdicts = (body.responses || []).map((r) =>
+      r.error ? "ok" : verdictFor(r.safeSearchAnnotation)
+    );
+    const verdict = worstVerdict(verdicts);
+    await event.data.after.ref.update({
+      imageSafety: verdict,
+      sensitive: verdict !== "ok",
+      ...(verdict === "blocked" ? { hiddenBySafety: true } : {}),
+      imageSafetyCheckedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    if (verdict !== "ok") console.log("post_image_flagged", { postId, verdict });
   }
 );
 

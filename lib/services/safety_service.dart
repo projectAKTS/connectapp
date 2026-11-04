@@ -86,10 +86,14 @@ class SafetyService {
 
   bool isBlocked(String uid) => uid.isNotEmpty && blocked.value.contains(uid);
 
-  /// Whether a post stays out of feeds: this user reported it, or enough
-  /// people did and the server hid it until review (`hiddenByReports`).
+  /// Whether a post stays out of feeds: this user reported it, enough people
+  /// did (`hiddenByReports`), or the photo check found it very likely adult
+  /// or violent (`hiddenBySafety`); the server keeps the last two until
+  /// review.
   bool hidesPost(String postId, Map<String, dynamic> data) =>
-      hiddenPosts.value.contains(postId) || data['hiddenByReports'] == true;
+      hiddenPosts.value.contains(postId) ||
+      data['hiddenByReports'] == true ||
+      data['hiddenBySafety'] == true;
 
   Future<void> report({
     required String type,

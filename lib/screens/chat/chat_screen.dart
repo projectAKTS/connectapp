@@ -3,7 +3,6 @@ import 'package:connect_app/l10n/formatters.dart';
 import 'package:connect_app/l10n/l10n.dart';
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' show ImageFilter;
 
 import 'package:connect_app/services/content_filter.dart';
 import 'package:connect_app/services/safety_service.dart';
@@ -27,6 +26,7 @@ import '../../services/helperly_test_runtime.dart';
 import '../profile/profile_screen.dart';
 import '/services/current_chat.dart';
 import 'package:connect_app/widgets/full_screen_back_gesture.dart';
+import 'package:connect_app/widgets/sensitive_media_cover.dart';
 
 class ChatScreen extends StatefulWidget {
   final String otherUserId;
@@ -802,7 +802,9 @@ class _ChatScreenState extends State<ChatScreen> {
                               _revealedImages.contains(m.id)) {
                             return image;
                           }
-                          return _HiddenImage(
+                          return SensitiveMediaCover(
+                            label: context.l10n.chatTapToView,
+                            revealed: false,
                             onReveal: () =>
                                 setState(() => _revealedImages.add(m.id)),
                             child: image,
@@ -827,57 +829,6 @@ class _ChatScreenState extends State<ChatScreen> {
             );
           },
         ),
-      ),
-    );
-  }
-}
-
-/// A received photo, blurred until the recipient taps it.
-class _HiddenImage extends StatelessWidget {
-  final Widget child;
-  final VoidCallback onReveal;
-
-  const _HiddenImage({required this.child, required this.onReveal});
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRect(
-      child: Stack(
-        children: [
-          ImageFiltered(
-            imageFilter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-            child: child,
-          ),
-          Positioned.fill(
-            child: Material(
-              color: Colors.black26,
-              child: InkWell(
-                onTap: onReveal,
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.visibility_off_outlined,
-                            color: Colors.white),
-                        const SizedBox(height: 6),
-                        Text(
-                          context.l10n.chatTapToView,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
