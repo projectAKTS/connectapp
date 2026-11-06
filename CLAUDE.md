@@ -43,7 +43,11 @@ call (Agora).
   for the first time, and they still use the placeholder
   `support@helperly.app`. **`helperly.app` belongs to another company**
   (a family-activities app with live Google mail, checked 2026-11-05);
-  `helperly.ca` and `helperly.com` are also taken. The placeholder is
+  `helperly.ca` and `helperly.com` are also taken, and the App Store
+  (CA/US) already lists "Helperly App", "Helperly User" and "Helperly
+  Provider" from others. "Helperly" is a working name; the founder wants
+  a global (non-French) brand. Candidates checked 2026-11-05: Peerway
+  (`peerway.app`, `getpeerway.com` free), Beenthru (`beenthru.app`). The placeholder is
   also in the app (`lib/config/legal_texts.dart`, the age-restricted
   screen), so mail written to it reaches that company: replace it before
   any tester beyond the team.
