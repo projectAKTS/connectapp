@@ -165,3 +165,6 @@ EOF
   code does not use `functions.config()`.
 - The app part (blurring sensitive video posts) ships with the next
   TestFlight build.
+- **iOS build 1.0.2 (202611060504)** from `314a57e` uploaded by Claude
+  (`EXPORT SUCCEEDED`). Testers get it after the export-compliance answer
+  in App Store Connect.

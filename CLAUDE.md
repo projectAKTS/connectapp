@@ -102,14 +102,19 @@ call (Agora).
   collection-group overrides. No TTL.
 - **APNs:** key `A55R9GWWX2`, secret version 7, also uploaded in both
   Firebase consoles. The old key `AJDC73P524` is **revoked**.
-- **iOS:** TestFlight 1.0.2 (`202611040659`), with legacy calls (no Call
+- **iOS:** 1.0.2 (`202611060504`, commit `314a57e`, video blur) uploaded
+  2026-11-06; it needs the export-compliance answer in App Store Connect
+  before testers get it. Before it: TestFlight 1.0.2 (`202611040659`),
+  with legacy calls (no Call
   V2 flags). Build and upload:
   ```bash
   BN=$(date +%Y%m%d%H%M)
   flutter build ipa --release --build-number=$BN --dart-define=CALL_V2_BUILD_COMMIT=$(git rev-parse --short HEAD)
   xcodebuild -exportArchive -archivePath build/ios/archive/Runner.xcarchive \
-    -exportOptionsPlist <app-store-connect upload plist, team 3UDYS4KQW3> -allowProvisioningUpdates
+    -exportOptionsPlist tool/ExportUpload.plist -exportPath /tmp/helperly-upload -allowProvisioningUpdates
   ```
+  `ios/exportOptions.plist` is for the old `com.akturk.akonnct` app: do
+  not use it. The Agora "Upload Symbols Failed" warnings are harmless.
 - **Backup:** `gs://connectapp-278b4-backups/2026-11-02-pre-mvp-deploy/`.
 - **Google Cloud Vision** is enabled in both projects, for post photo
   checks.
