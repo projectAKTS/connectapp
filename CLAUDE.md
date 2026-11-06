@@ -41,7 +41,12 @@ call (Agora).
 - **Never deploy production `hosting`** until the founder decides. It
   would publish the Terms, the privacy policy and the delete-account page
   for the first time, and they still use the placeholder
-  `support@helperly.app`.
+  `support@helperly.app`. **`helperly.app` belongs to another company**
+  (a family-activities app with live Google mail, checked 2026-11-05);
+  `helperly.ca` and `helperly.com` are also taken. The placeholder is
+  also in the app (`lib/config/legal_texts.dart`, the age-restricted
+  screen), so mail written to it reaches that company: replace it before
+  any tester beyond the team.
 - **Never deploy the main `firestore.indexes.json` to production.** It
   holds Call V2 TTL policies (automatic, irreversible deletion) and lacks
   production's 6 feed indexes. Use:

@@ -10,7 +10,7 @@ the Charter of the French Language or Law 25.
 |---|---|---|---|
 | 1 | Business registration (Registraire des entreprises, about $40) if operating as "Helperly" | L | ☐ |
 | 2 | Legal name of the operator, used in the Terms and the privacy policy | L | ☐ |
-| 3 | Domain (for example `helperly.app`) and two addresses forwarded to a monitored inbox: `support@`, `privacy@` (Cloudflare Email Routing is free) | L (support contact: Apple, Google Play, Law 25) | ☐ |
+| 3 | Domain (`helperly.app`, `.ca`, `.com` are taken by others; free on 2026-11-05: `gethelperly.com`, `gethelperly.ca`, `gethelperly.app`, `helperlyapp.ca`, `joinhelperly.com`, `usehelperly.com`) and two addresses forwarded to a monitored inbox: `support@`, `privacy@` (Cloudflare Email Routing is free) | L (support contact: Apple, Google Play, Law 25) | ☐ |
 | 4 | Person in charge of personal information = the founder; publish title and `privacy@` | L (Law 25) | ☐ |
 
 ## Legal Texts
