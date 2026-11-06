@@ -57,4 +57,4 @@ consequences of its use, and the likelihood of misuse.
 | Risk of serious injury | Low. Misuse would allow unwanted pushes to users; it gives no access to data |
 | Notifications | Not required (no personal information; no risk of serious injury) [VERIFY] |
 | Measures | New key `A55R9GWWX2` created and deployed (staging and production). The old key is revoked after 24 hours of verified operation. Do not open key files in editors |
-| Closed on | (after the old key is revoked) |
+| Closed on | 2026-11-05: the founder revoked `AJDC73P524` in Apple Developer after two days on the new key with no errors |
