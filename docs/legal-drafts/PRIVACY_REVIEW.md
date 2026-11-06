@@ -19,9 +19,22 @@ The live text is still `lib/config/legal_texts.dart` (and `public/`).
 
 ## Needs Factual Verification (Founder / Console)
 
-1. **Data locations:** the Firestore and Storage location of
-   `connectapp-278b4` (Firebase console > project settings), and the
-   Functions region (`us-central1` in code).
+1. **Data locations: verified 2026-11-05** (read-only `gcloud`, production
+   `connectapp-278b4`):
+   - Firestore `(default)`: `nam5`, a United States multi-region;
+   - Storage `connectapp-278b4.firebasestorage.app`: `US-CENTRAL1` (Iowa);
+   - backups `connectapp-278b4-backups`: `US` multi-region;
+   - Functions: all 23 in `us-central1`;
+   - post photos and video thumbnails are sent to Google Cloud Vision
+     through the global endpoint `vision.googleapis.com`, so the
+     processing location is not pinned to a region.
+
+   So "hosted in the United States" in the drafts is accurate. **Gap:** the
+   EN and FR privacy-policy drafts do not mention the automatic photo
+   check (Google Cloud Vision); only the PIA draft does. Law 25
+   transparency likely needs a sentence in both. Also found:
+   Firestore delete protection and point-in-time recovery are both off
+   (a setting change; founder's decision).
 2. **Retention settings:** the Analytics data-retention setting (2 or 14
    months) and the Crashlytics retention.
 3. **Agora:** the data-processing terms and regions used for the project.

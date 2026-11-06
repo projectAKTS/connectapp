@@ -208,11 +208,23 @@ class PostDetailScreen extends StatelessWidget {
                                   ),
                                 const SizedBox(height: 12),
                               ] else if (videoUrl.isNotEmpty) ...[
-                                _DetailVideoPlayer(
-                                  url: videoUrl,
-                                  thumbUrl: videoThumbUrl,
-                                  aspect: mediaAspect,
-                                ),
+                                if (data['sensitive'] == true &&
+                                    data['userID'] !=
+                                        HelperlyTestRuntime.currentUid)
+                                  SensitiveMediaCover(
+                                    label: context.l10n.postSensitiveTapToView,
+                                    child: _DetailVideoPlayer(
+                                      url: videoUrl,
+                                      thumbUrl: videoThumbUrl,
+                                      aspect: mediaAspect,
+                                    ),
+                                  )
+                                else
+                                  _DetailVideoPlayer(
+                                    url: videoUrl,
+                                    thumbUrl: videoThumbUrl,
+                                    aspect: mediaAspect,
+                                  ),
                                 const SizedBox(height: 12),
                               ],
                               _postTypeBadge(badge),

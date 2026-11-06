@@ -36,7 +36,7 @@ professional must review it. Items marked [VERIFY] need confirmation.
 | Provider | Purpose | Location | Safeguards |
 |---|---|---|---|
 | Google Firebase (Auth, Firestore, Storage, Functions, FCM) | Accounts, data, notifications | United States (`nam5`, `us-central1`) | Encryption in transit and at rest; Google Cloud data processing terms; access limited to the founder |
-| Google Cloud Vision (SafeSearch) | Automatic check of **post** photos for adult or violent content. Chat photos are not sent | United States | Same Google Cloud terms; images are processed and not stored by Vision; only the verdict is kept on the post |
+| Google Cloud Vision (SafeSearch) | Automatic check of **post** photos and post video thumbnails (one frame, not the video) for adult or violent content. Chat photos are not sent | Global endpoint `vision.googleapis.com`; the processing region is not pinned | Same Google Cloud terms; images are processed and not stored by Vision; only the verdict is kept on the post |
 | Agora | Live audio/video transport | Global network; media is not stored | Encrypted transport; tokens per call; no recording enabled |
 | Apple (APNs) / Google (FCM) | Push delivery | United States | Message previews only (sender name, text) |
 | Stripe (later) | Payments | United States / Canada | PCI DSS; not active during the beta |

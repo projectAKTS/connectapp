@@ -198,8 +198,11 @@ or `hiddenBySafety` in the Firestore console.
 3. **Beta invitation:** `docs/BETA_INVITATION.md` (FR first). Fill in the
    links and the support address.
 4. **Small safety follow-ups:**
-   - SafeSearch on post video thumbnails (`videoThumbUrl` in
-     `postImageUrls`);
+   - SafeSearch on post video thumbnails: **done on staging 2026-11-06**
+     (`postImageUrls` includes `videoThumbUrl`; sensitive video posts are
+     blurred in the feed and the detail screen). Production needs the
+     founder's go-ahead for `functions:onPostImagesChanged` and the next
+     TestFlight build;
    - at scale, check only new accounts and reported posts, to save Vision
      cost.
 5. **Later and needing approval:**

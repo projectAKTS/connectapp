@@ -33,3 +33,10 @@ test("post photos come from imageUrls or the older imageUrl", () => {
   assert.deepEqual(postImageUrls({ imageUrl: "c" }), ["c"]);
   assert.deepEqual(postImageUrls({}), []);
 });
+
+test("a video's thumbnail is checked too, without changing the post", () => {
+  assert.deepEqual(postImageUrls({ videoUrl: "v", videoThumbUrl: "t" }), ["t"]);
+  const post = { imageUrls: ["a"], videoThumbUrl: "t" };
+  assert.deepEqual(postImageUrls(post), ["a", "t"]);
+  assert.deepEqual(post.imageUrls, ["a"]);
+});

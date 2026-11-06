@@ -38,12 +38,17 @@ function gcsUriFromDownloadUrl(url, bucket) {
   return `gs://${bucket}/${decodeURIComponent(m[2])}`;
 }
 
-/** The post's photo URLs (`imageUrls`, or the older single `imageUrl`). */
+/**
+ * The post's images to check: its photos (`imageUrls`, or the older single
+ * `imageUrl`) and a video's thumbnail (`videoThumbUrl`).
+ */
 function postImageUrls(post) {
   const p = post || {};
   const urls = Array.isArray(p.imageUrls) ? p.imageUrls : [];
   const all = urls.length ? urls : p.imageUrl ? [p.imageUrl] : [];
-  return all.map((u) => `${u}`).filter(Boolean);
+  // shortcut: only a video's thumbnail frame is checked, not the video; add video moderation if videos get reported.
+  const thumb = p.videoThumbUrl ? [p.videoThumbUrl] : [];
+  return [...all, ...thumb].map((u) => `${u}`).filter(Boolean);
 }
 
 module.exports = { verdictFor, worstVerdict, gcsUriFromDownloadUrl, postImageUrls };

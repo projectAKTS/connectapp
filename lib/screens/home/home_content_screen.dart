@@ -1245,11 +1245,16 @@ class _PostCellState extends State<_PostCell> {
         );
       }
       if (widget.videoUrl.isNotEmpty) {
-        return _InlineVideoPlayer(
+        final player = _InlineVideoPlayer(
           url: widget.videoUrl,
           thumbUrl: widget.videoThumbUrl,
           aspect: widget.mediaAspect,
           onTap: widget.onOpenVideo,
+        );
+        if (!widget.sensitive || widget.isOwnPost) return player;
+        return SensitiveMediaCover(
+          label: context.l10n.postSensitiveTapToView,
+          child: player,
         );
       }
       return null;
