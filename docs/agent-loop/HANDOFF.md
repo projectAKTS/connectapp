@@ -242,3 +242,24 @@ launch:
   4. Only then revoke `AJDC73P524` in Apple Developer.
 - **Key file:** the founder keeps the `.p8` in a safe place until step 2,
   then deletes it.
+
+## Safety Round And Handoff To Claude Code (2026-11-03 to 2026-11-05)
+
+**Live in production** (`docs/PRODUCTION_DEPLOY_PLAN.md` has the details):
+- first-contact safety;
+- the safety banner and the scam warning;
+- blurred received chat photos;
+- the call report reason;
+- reported posts hidden for the reporter, and hidden for everyone after 2
+  reports;
+- the automatic post photo check (Cloud Vision);
+- the fix for the sign-up trigger overwriting the profile.
+
+The latest TestFlight build is 202611040659. Safe point:
+`safe-mvp-beta-2026-11-04`.
+
+**APNs:** the old key `AJDC73P524` was revoked on 2026-11-05. The
+incident is closed in `docs/legal-drafts/INCIDENT_REGISTER.md`.
+
+**Next sessions** start from `CLAUDE.md`, which holds the context, rules,
+state and next steps, and from `docs/agent-loop/NEW_SESSION_PROMPT.md`.
