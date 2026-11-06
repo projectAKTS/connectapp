@@ -153,3 +153,15 @@ EOF
 3. **Firestore and Storage rules** deployed by Claude. The live ruleset
    is identical to `firestore.rules` (`200168a`). Hosting is still held.
 4. **iOS build 1.0.2 (202611022213)** uploaded to App Store Connect.
+
+## Video Thumbnail Check (2026-11-06)
+
+- **`onPostImagesChanged`** deployed by the founder from `45950d1`: post
+  video thumbnails (`videoThumbUrl`) now go through the SafeSearch check.
+- Verified read-only: state `ACTIVE`, revision
+  `onpostimageschanged-00002-dir`, 23 functions in total, no warnings or
+  errors in the logs after the deploy.
+- The CLI's `functions.config()` deprecation notice does not apply: the
+  code does not use `functions.config()`.
+- The app part (blurring sensitive video posts) ships with the next
+  TestFlight build.
