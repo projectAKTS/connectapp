@@ -38,8 +38,8 @@ Prepared 2026-11-02. Patterns come from apps that let strangers talk
     banner turns into a "Be careful" warning with Block and Report.
   - On-device only: nothing is blocked or sent
     (`lib/services/scam_signals.dart`).
-  - Live in production since 2026-11-02, except #4, which ships with the
-    next TestFlight build.
+  - Live in production since 2026-11-02; #4 since TestFlight
+    `202611040659`.
 
 ## Next (Recommended Order)
 

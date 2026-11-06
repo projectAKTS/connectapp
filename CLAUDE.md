@@ -178,8 +178,11 @@ or `hiddenBySafety` in the Firestore console.
    Then replace the placeholders, ask him, and deploy production hosting.
    Google Play requires the delete-account page.
 2. **With browser access:**
-   - App Store Connect: TestFlight tester groups, the invitation link,
-     build status;
+   - App Store Connect: checked 2026-11-05. One internal group (2 team
+     members, both on `202611040659`), no external group or public link,
+     Test Information empty. Draft fields and the order of steps:
+     `docs/TESTFLIGHT_TEST_INFO.md` (blocked on support address, privacy
+     URL and demo accounts);
    - Firebase and Google Cloud consoles: verification; optionally a
      Vision quota and a $10 budget alert (the founder deferred this);
    - Google Play Console: only if Android testers appear.

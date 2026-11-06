@@ -128,7 +128,9 @@ EOF
 - [x] **1b. Production console APNs key upload** (founder).
 - [x] **3. iOS build** 1.0.2 (202611021334) uploaded to App Store Connect.
   - [ ] Android internal-testing build.
-  - [x] Testers update: the founder is the only tester and updated the iPhone.
+  - [x] Testers update: the founder updated the iPhone. (As of
+    2026-11-05 the internal group has 2 team members; both run
+    `202611040659`.)
 - [x] **4. Rules:** `firestore:rules,storage` deployed by Claude.
   - The live rulesets are identical to the local files.
   - The indexes are unchanged: 6 composite, no TTL.
@@ -139,7 +141,8 @@ EOF
     "do not publish legal documents".
   - Those pages also use the placeholder `support@helperly.app`.
   - Needs a real support address and the founder's decision.
-- [ ] **5. Revoke `AJDC73P524`:** 24 hours after step 4.
+- [x] **5. Revoke `AJDC73P524`:** revoked 2026-11-05 (see
+  `docs/agent-loop/HANDOFF.md`).
 
 ## First-Contact Safety Release (2026-11-02, founder: "prod to all")
 
