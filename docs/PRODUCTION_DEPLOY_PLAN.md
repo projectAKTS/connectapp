@@ -171,3 +171,36 @@ EOF
   - 2026-11-06: export compliance answered by the founder; the founder
     tested the build on the iPhone (feed, normal video and photo posts,
     chat, call): no problems.
+
+## Call Ringing Fix (2026-11-07, waiting for the founder's deploy)
+
+Founder's report: after a few test calls, the callee's iPhone stopped
+ringing (no CallKit screen, phone locked or app open).
+
+Evidence (production logs, read-only):
+- every incoming call got its VoIP push accepted by APNs (`sent: 1`);
+- after every ended, cancelled, declined or missed call the server also
+  sent a **VoIP push** (`APNS VoIP terminal result`), to the caller for
+  declined/missed. The iOS app ends the CallKit call for these but never
+  reports a new incoming call. iOS kills an app that does this and, after
+  a few times, stops delivering VoIP pushes to it: calls stop ringing.
+- separate problem: every FCM push to iOS fails since the old APNs key
+  `AJDC73P524` was revoked (`messaging/third-party-auth-error: Invalid
+  APNs credentials`, first seen 2026-11-07). The production Firebase
+  console still uses the revoked key, so chat notifications do not
+  arrive on iPhones.
+
+Fix: `onCallInviteUpdated` sends no VoIP push for terminal and
+answered-elsewhere updates, only the FCM push; a ringing call is ended by
+the app's invite listener, that FCM push, or the CallKit ring timeout.
+Guard test: `connect_functions/test/call_invites/voip_only_for_new_calls.test.js`.
+Verified on staging: a cancelled invite sends FCM and no VoIP.
+
+Founder:
+1. `firebase deploy --only functions:onCallInviteUpdated --project connectapp-278b4`
+2. Firebase console (production) > Project settings > Cloud Messaging >
+   Apple app `com.yakup.helperly` > APNs Authentication Key: replace the
+   key with `AuthKey_A55R9GWWX2.p8`, Key ID `A55R9GWWX2`, Team ID
+   `3UDYS4KQW3`.
+3. Both test iPhones: delete Helperly and reinstall it from TestFlight
+   (clears the iOS VoIP block), sign in, then test calls again.

@@ -1502,18 +1502,7 @@ async function sendAnsweredElsewherePush(inviteId, before, after) {
     acceptedInstallationId: after.acceptedInstallationId,
   });
   const payloadData = answeredElsewherePayload(inviteId, before, after);
-  if (targets.voip.length) {
-    try {
-      const voipRes = await sendVoipPushToTokens(targets.voip, payloadData);
-      console.log("APNS VoIP answered-elsewhere result:", {
-        identifierPresent: Boolean(inviteId),
-        tokenCount: targets.voip.length,
-        ...voipRes,
-      });
-    } catch (e) {
-      console.error("APNS VoIP answered-elsewhere send failed:", { error: `${e}` });
-    }
-  }
+  // No VoIP push here: see the comment in onCallInviteUpdated.
   if (targets.fcm.length) {
     try {
       await sendToTokens(targets.fcm, answeredElsewhereFcmMessage(payloadData));
@@ -1523,7 +1512,6 @@ async function sendAnsweredElsewherePush(inviteId, before, after) {
   }
   console.log("call invite answered-elsewhere push", {
     identifierPresent: Boolean(inviteId),
-    voipCount: targets.voip.length,
     fcmCount: targets.fcm.length,
   });
 }
@@ -1591,32 +1579,13 @@ exports.onCallInviteUpdated = onDocumentUpdated(
       data: payloadData,
     };
 
+    // Terminal updates never use VoIP. iOS requires every VoIP push to report
+    // a new incoming call to CallKit; a call_end push cannot, so iOS kills the
+    // app and, after a few such pushes, stops delivering VoIP pushes to it at
+    // all (incoming calls then never ring). A ringing call is ended instead by
+    // the app's invite listener, this FCM push, or the CallKit ring timeout.
     for (const uid of recipients) {
       const tokenSets = await getUserPushTokenSets(uid);
-      try {
-        const voipTokens = tokenSets.voip;
-        if (voipTokens.length) {
-          const voipRes = await sendVoipPushToTokens(voipTokens, payloadData);
-          console.log("APNS VoIP terminal result:", {
-            identifierPresent: Boolean(inviteId && uid && channel),
-            status: afterStatus,
-            tokenCount: voipTokens.length,
-            ...voipRes,
-          });
-        } else {
-          console.log("APNS VoIP terminal skipped: no tokens", {
-            identifierPresent: Boolean(inviteId && uid && channel),
-            status: afterStatus,
-          });
-        }
-      } catch (e) {
-        console.error("APNS VoIP terminal send failed:", {
-          identifierPresent: Boolean(inviteId && uid && channel),
-          status: afterStatus,
-          error: `${e}`,
-        });
-      }
-
       const fcmTokens = tokenSets.fcmAll;
       if (fcmTokens.length) {
         try {
