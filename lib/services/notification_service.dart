@@ -196,6 +196,7 @@ class NotificationService with WidgetsBindingObserver {
       navigatorKey: navigatorKey,
       listNativeCalls: _listActiveCallkitCalls,
       endNativeCall: _endActiveCallkitCall,
+      answerNativeCall: _answerExactCallkitCall,
       presentNativeIncomingCall: _presentIncomingCallkitFromManager,
       markNativeInviteState: _markNativeCallkitInviteState,
       clearStoredAcceptedCallRecovery: _clearStoredAcceptedCallRecovery,
@@ -583,6 +584,20 @@ class NotificationService with WidgetsBindingObserver {
     } catch (e) {
       await _diagPush('callkit_active_calls_list_error', meta: {'error': '$e'});
       return const <NativeCallSnapshot>[];
+    }
+  }
+
+  Future<bool> _answerExactCallkitCall(String callkitId) async {
+    final normalized = callkitId.trim();
+    if (!_isIosCallkitPlatform || normalized.isEmpty) return false;
+    try {
+      return await _pushTokenChannel.invokeMethod<bool>(
+            'answerExactCallkitCall',
+            <String, Object?>{'callkitId': normalized},
+          ) ==
+          true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -1677,6 +1692,8 @@ class NotificationService with WidgetsBindingObserver {
       await _rebindForCurrentUser();
       await CallSessionManager.instance
           .recoverForegroundIncomingInvites(source: 'resume_sync');
+      await CallSessionManager.instance
+          .presentForegroundCallkitIncomingScreen(source: 'resume_sync');
       await _primeCallPermissionsIfNeeded();
       await _resetStaleIncomingUiIfNeeded();
       await _recoverAcceptedCallkitCall();

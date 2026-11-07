@@ -758,6 +758,25 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
           return
         }
 
+        // The in-app incoming screen answers through CallKit, so the same
+        // native accept path runs as when the user taps Accept on CallKit.
+        if call.method == "answerExactCallkitCall" {
+          let rawId = ((call.arguments as? [String: Any])?["callkitId"] as? String) ?? ""
+          guard let uuid = UUID(
+            uuidString: rawId.trimmingCharacters(in: .whitespacesAndNewlines)
+          ) else {
+            result(false)
+            return
+          }
+          let transaction = CXTransaction(action: CXAnswerCallAction(call: uuid))
+          self.callV2ExactCallController.request(transaction) { error in
+            DispatchQueue.main.async {
+              result(error == nil)
+            }
+          }
+          return
+        }
+
         if call.method == "markCallkitInviteState" {
           guard let args = call.arguments as? [String: Any] else {
             result(false)

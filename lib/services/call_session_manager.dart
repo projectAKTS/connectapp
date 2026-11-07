@@ -327,6 +327,7 @@ class NativeCallSnapshot {
 
 typedef NativeCallListProvider = Future<List<NativeCallSnapshot>> Function();
 typedef NativeCallEnder = Future<void> Function(String callkitId);
+typedef NativeCallAnswerer = Future<bool> Function(String callkitId);
 typedef NativeIncomingCallPresenter = Future<bool> Function(
   CallInvitePayload payload,
 );
@@ -500,6 +501,7 @@ class CallSessionManager {
   GlobalKey<NavigatorState>? _navigatorKey;
   NativeCallListProvider? _listNativeCalls;
   NativeCallEnder? _endNativeCall;
+  NativeCallAnswerer? _answerNativeCall;
   NativeIncomingCallPresenter? _presentNativeIncomingCall;
   NativeInviteStateMarker? _markNativeInviteState;
   StoredAcceptedCallRecoveryClearer? _clearStoredAcceptedCallRecovery;
@@ -553,6 +555,9 @@ class CallSessionManager {
   // The invite whose Flutter IncomingCallScreen is on screen. A Flutter owner
   // without it is still waiting for the app to resume.
   String? _incomingPromptShownInviteId;
+  // The last invite CallKit rings for; the in-app incoming screen mirrors it
+  // while the app is in the foreground (iOS).
+  CallInvitePayload? _callkitOwnedIncomingPayload;
   CallInvitePayload? _pendingIncomingPromptPayload;
   String? _pendingIncomingPromptSource;
   _PendingAcceptedInviteIntent? _pendingAcceptedInviteIntent;
@@ -839,6 +844,8 @@ class CallSessionManager {
     _skipAcceptedNativeWatchBindingForTest = false;
     _iosCallkitOnlyIncomingUiForTest = null;
     _nativeAudioSessionGatesCalleeMediaForTest = null;
+    _answerNativeCall = null;
+    _callkitOwnedIncomingPayload = null;
     _installationId = '';
     _answeredElsewhereInviteIds.clear();
     _acceptsInFlight.clear();
@@ -1072,6 +1079,7 @@ class CallSessionManager {
     GlobalKey<NavigatorState>? navigatorKey,
     NativeCallListProvider? listNativeCalls,
     NativeCallEnder? endNativeCall,
+    NativeCallAnswerer? answerNativeCall,
     NativeIncomingCallPresenter? presentNativeIncomingCall,
     NativeInviteStateMarker? markNativeInviteState,
     StoredAcceptedCallRecoveryClearer? clearStoredAcceptedCallRecovery,
@@ -1108,6 +1116,9 @@ class CallSessionManager {
     }
     if (endNativeCall != null) {
       _endNativeCall = endNativeCall;
+    }
+    if (answerNativeCall != null) {
+      _answerNativeCall = answerNativeCall;
     }
     if (presentNativeIncomingCall != null) {
       _presentNativeIncomingCall = presentNativeIncomingCall;
@@ -4206,11 +4217,16 @@ class CallSessionManager {
       _incomingPromptActive = true;
       _incomingPromptInviteId = payload.inviteId;
       _incomingUiOwner = IncomingUiOwner.callkit;
+      _callkitOwnedIncomingPayload = payload;
       await _diagManager('incoming_callkit_owner_selected', meta: {
         'incomingUiOwner': _incomingUiOwner.name,
         'callkitMatchFound': true,
         'source': source,
       });
+      unawaited(_presentCallkitIncomingScreenIfForeground(
+        payload,
+        source: source,
+      ));
       return _IncomingCandidateResult.callkitOwned;
     }
     if (owner == IncomingUiOwner.none) {
@@ -4237,6 +4253,107 @@ class CallSessionManager {
       lifecycleGeneration: reservation.generation,
     );
     return _IncomingCandidateResult.flutterPrompted;
+  }
+
+  /// Shows the in-app incoming screen for the call CallKit is ringing for,
+  /// when the app comes to the foreground (iOS).
+  Future<void> presentForegroundCallkitIncomingScreen({
+    String source = 'resume',
+  }) async {
+    final payload = _callkitOwnedIncomingPayload;
+    if (payload == null) return;
+    await _presentCallkitIncomingScreenIfForeground(payload, source: source);
+  }
+
+  /// iOS: while CallKit rings and the app is in the foreground, also show the
+  /// in-app Accept/Decline screen. Both buttons act through CallKit (answer or
+  /// end the exact CallKit call), so the tested native accept and decline
+  /// paths run exactly as when the user taps them on CallKit.
+  Future<void> _presentCallkitIncomingScreenIfForeground(
+    CallInvitePayload payload, {
+    required String source,
+  }) async {
+    final answer = _answerNativeCall;
+    if (answer == null || !_iosCallkitOnlyIncomingUi) return;
+    bool stillRingingHere() =>
+        _incomingUiOwner == IncomingUiOwner.callkit &&
+        _incomingPromptInviteId == payload.inviteId &&
+        _incomingPromptShownInviteId != payload.inviteId;
+    if (!stillRingingHere() || !await _isAppActuallyForeground()) return;
+    final nav = await _waitForNavigator();
+    if (nav == null || !nav.mounted || !stillRingingHere()) return;
+    final match = await _matchingNativeCallForInvite(
+      inviteId: payload.inviteId,
+      channel: payload.channel,
+    );
+    final callkitId = match?.callkitId.trim() ?? '';
+    if (callkitId.isEmpty) return;
+    Map<String, dynamic>? latest;
+    try {
+      latest = await _readInviteData(payload.inviteId);
+    } catch (_) {}
+    if (_parseStatus(latest?['status']) != CallInviteStatus.ringing ||
+        !stillRingingHere()) {
+      return;
+    }
+
+    _incomingPromptShownInviteId = payload.inviteId;
+    var closedByStatus = false;
+    final sub = _db
+        .collection('callInvites')
+        .doc(payload.inviteId)
+        .snapshots()
+        .listen((snap) {
+      if (closedByStatus) return;
+      if (!snap.exists ||
+          _parseStatus(snap.data()?['status']) != CallInviteStatus.ringing) {
+        // Answered, declined or cancelled anywhere: CallKit already acted.
+        closedByStatus = true;
+        if (nav.mounted && nav.canPop()) nav.pop();
+      }
+    }, onError: (Object _) {});
+    bool? accepted;
+    try {
+      await _diagManager('ios_incoming_screen_shown', meta: {
+        'source': source,
+      });
+      accepted = await nav.push<bool>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => IncomingCallScreen(
+            channel: payload.channel,
+            isVideo: payload.isVideo,
+            fromName: payload.fromName,
+          ),
+        ),
+      );
+    } finally {
+      // Not awaited: Accept/Decline must not wait on the listener teardown.
+      unawaited(sub.cancel());
+      if (_incomingPromptShownInviteId == payload.inviteId) {
+        _incomingPromptShownInviteId = null;
+      }
+    }
+    if (closedByStatus || accepted == null) return;
+    if (accepted) {
+      var answered = false;
+      try {
+        answered = await answer(callkitId);
+      } catch (_) {}
+      await _diagManager('ios_incoming_screen_accept', meta: {
+        'source': source,
+        'answeredThroughCallkit': answered,
+      });
+    } else {
+      // Same path as a CallKit decline: writes `declined`, then ends CallKit.
+      await declineInvite(
+        inviteId: payload.inviteId,
+        source: '$source:ios_incoming_screen_decline',
+      );
+      await _diagManager('ios_incoming_screen_decline', meta: {
+        'source': source,
+      });
+    }
   }
 
   Future<void> _presentIncomingPrompt(
@@ -6185,7 +6302,14 @@ class CallSessionManager {
       'incomingUiOwner': owner.name,
       'callkitMatchFound': owner == IncomingUiOwner.callkit,
     });
-    if (owner == IncomingUiOwner.callkit) return;
+    if (owner == IncomingUiOwner.callkit) {
+      _callkitOwnedIncomingPayload = payload;
+      unawaited(_presentCallkitIncomingScreenIfForeground(
+        payload,
+        source: source,
+      ));
+      return;
+    }
     if (owner == IncomingUiOwner.none) {
       _incomingPromptActive = false;
       _incomingPromptInviteId = null;
