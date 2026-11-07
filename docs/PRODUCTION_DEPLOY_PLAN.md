@@ -211,3 +211,17 @@ Founder:
    Saved as tag `stable-calls-2026-11-07` / branch `stable/calls-2026-11-07`.
    Known iOS behaviour: with the Sleep Focus on, calls do not show (chat
    notifications do); see the next section.
+
+## In-App Incoming Screen on iOS (2026-11-07, branch `feat/ios-inapp-incoming`)
+
+- Founder's request: like WhatsApp, show Accept/Decline inside the app
+  when it is open, and when the user opens the app from the CallKit banner
+  or the notification while the call rings.
+- `44fe303`: the screen mirrors CallKit. Accept answers the exact CallKit
+  call (`answerExactCallkitCall`), Decline uses `declineInvite`, so the
+  tested CallKit paths run. Android unchanged. App-only: no server change.
+- Tests: 5 new (`test/call/ios_incoming_screen_test.dart`); full suite
+  2523 passed with the 16 known failures; clean-tree guards 221/221.
+- iOS build 1.0.2 (`202611062156`) uploaded from the branch for the
+  founder's iPhone test. Merge into `call-v2` only after that test.
+- Restore point if needed: tag `stable-calls-2026-11-07`.
