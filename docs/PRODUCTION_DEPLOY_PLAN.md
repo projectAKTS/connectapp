@@ -172,7 +172,7 @@ EOF
     tested the build on the iPhone (feed, normal video and photo posts,
     chat, call): no problems.
 
-## Call Ringing Fix (2026-11-07, waiting for the founder's deploy)
+## Call Ringing Fix (2026-11-07)
 
 Founder's report: after a few test calls, the callee's iPhone stopped
 ringing (no CallKit screen, phone locked or app open).
@@ -197,7 +197,7 @@ Guard test: `connect_functions/test/call_invites/voip_only_for_new_calls.test.js
 Verified on staging: a cancelled invite sends FCM and no VoIP.
 
 Founder:
-1. `firebase deploy --only functions:onCallInviteUpdated --project connectapp-278b4`
+1. [x] `firebase deploy --only functions:onCallInviteUpdated --project connectapp-278b4`: done by the founder; verified `ACTIVE`, revision `oncallinviteupdated-00008-dop`, no errors.
 2. Firebase console (production) > Project settings > Cloud Messaging >
    Apple app `com.yakup.helperly` > APNs Authentication Key: replace the
    key with `AuthKey_A55R9GWWX2.p8`, Key ID `A55R9GWWX2`, Team ID
