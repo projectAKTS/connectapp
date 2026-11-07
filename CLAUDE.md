@@ -18,7 +18,7 @@ call (Agora).
 | Thing | Value |
 |---|---|
 | Repo | `github.com/projectAKTS/connectapp`. Work on branch **`call-v2`** (`main` is old) |
-| Safe restore point | Tag `safe-mvp-beta-2026-11-04` and branch `stable/mvp-beta-2026-11-04` (commit `da520af`). Older: tag `stable-calls-oct-26`. Never move or delete these |
+| Safe restore point | **Calls:** tag `stable-calls-2026-11-07` and branch `stable/calls-2026-11-07` (commit `47e115d`): founder-tested calls and chat push on two iPhones. Before it: tag `safe-mvp-beta-2026-11-04` / branch `stable/mvp-beta-2026-11-04` (`da520af`); older: `stable-calls-oct-26`. Never move or delete these |
 | App code | `lib/` (Flutter 3.35.4 in CI; this Mac has 3.32.1) |
 | Backend | `connect_functions/` (Cloud Functions v2, Node 22) |
 | Rules | `firestore.rules`, `storage.rules`. Indexes: `firestore.indexes.json` (staging); **production uses `deploy/production/firestore.indexes.json`** |

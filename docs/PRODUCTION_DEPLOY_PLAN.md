@@ -204,3 +204,10 @@ Founder:
    `3UDYS4KQW3`.
 3. Both test iPhones: delete Helperly and reinstall it from TestFlight
    (clears the iOS VoIP block), sign in, then test calls again.
+2. [x] Production Firebase console: APNs key `A55R9GWWX2` uploaded by the
+   founder for `com.yakup.helperly` (development and production).
+3. [x] Both iPhones reinstalled. Founder's test 2026-11-07: calls (locked,
+   app open, cancel, decline) and chat notifications all work.
+   Saved as tag `stable-calls-2026-11-07` / branch `stable/calls-2026-11-07`.
+   Known iOS behaviour: with the Sleep Focus on, calls do not show (chat
+   notifications do); see the next section.
