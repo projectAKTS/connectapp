@@ -106,5 +106,7 @@
 	<array>
 		<string>webcredentials:connectapp-278b4.firebaseapp.com</string>
 	</array>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>
