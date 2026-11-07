@@ -168,3 +168,6 @@ EOF
 - **iOS build 1.0.2 (202611060504)** from `314a57e` uploaded by Claude
   (`EXPORT SUCCEEDED`). Testers get it after the export-compliance answer
   in App Store Connect.
+  - 2026-11-06: export compliance answered by the founder; the founder
+    tested the build on the iPhone (feed, normal video and photo posts,
+    chat, call): no problems.

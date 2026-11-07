@@ -103,8 +103,8 @@ call (Agora).
 - **APNs:** key `A55R9GWWX2`, secret version 7, also uploaded in both
   Firebase consoles. The old key `AJDC73P524` is **revoked**.
 - **iOS:** 1.0.2 (`202611060504`, commit `314a57e`, video blur) uploaded
-  2026-11-06; it needs the export-compliance answer in App Store Connect
-  before testers get it. Before it: TestFlight 1.0.2 (`202611040659`),
+  2026-11-06 and tested on the iPhone by the founder (no problems).
+  Before it: TestFlight 1.0.2 (`202611040659`),
   with legacy calls (no Call
   V2 flags). Build and upload:
   ```bash
