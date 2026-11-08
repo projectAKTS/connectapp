@@ -4282,12 +4282,25 @@ class CallSessionManager {
     if (!stillRingingHere() || !await _isAppActuallyForeground()) return;
     final nav = await _waitForNavigator();
     if (nav == null || !nav.mounted || !stillRingingHere()) return;
-    final match = await _matchingNativeCallForInvite(
-      inviteId: payload.inviteId,
-      channel: payload.channel,
-    );
-    final callkitId = match?.callkitId.trim() ?? '';
-    if (callkitId.isEmpty) return;
+    // A CallKit call Flutter just reported can take a moment to be listed.
+    var callkitId = '';
+    for (var attempt = 0; attempt < 15 && callkitId.isEmpty; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        if (!stillRingingHere()) return;
+      }
+      final match = await _matchingNativeCallForInvite(
+        inviteId: payload.inviteId,
+        channel: payload.channel,
+      );
+      callkitId = match?.callkitId.trim() ?? '';
+    }
+    if (callkitId.isEmpty) {
+      await _diagManager('ios_incoming_screen_no_native_call', meta: {
+        'source': source,
+      });
+      return;
+    }
     Map<String, dynamic>? latest;
     try {
       latest = await _readInviteData(payload.inviteId);

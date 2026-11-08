@@ -209,6 +209,58 @@ void main() {
     expect(answered, [nativeFor('inv_resume').callkitId]);
   });
 
+  testWidgets(
+      'Flutter presents CallKit before PushKit: the screen waits for the '
+      'native call to be listed', (tester) async {
+    await tester.pumpWidget(harness());
+    configure();
+    // Re-wire the presenter: the plugin lists the call only after a moment.
+    manager.configure(
+      navigatorKey: navigatorKey,
+      appForegroundProvider: () async => foreground,
+      listNativeCalls: () async => List<NativeCallSnapshot>.from(nativeCalls),
+      endNativeCall: (callkitId) async => ended.add(callkitId),
+      answerNativeCall: (callkitId) async {
+        answered.add(callkitId);
+        return true;
+      },
+      presentNativeIncomingCall: (payload) async {
+        Future<void>.delayed(const Duration(milliseconds: 800), () {
+          nativeCalls.add(nativeFor(payload.inviteId));
+        });
+        return true;
+      },
+      iosCallkitOnlyIncomingUiForTest: true,
+      skipActiveInviteBindingForTest: true,
+    );
+    await firestore.collection('callInvites').doc('inv_late').set({
+      'fromUid': callerUid,
+      'fromName': 'Screen Caller',
+      'toUid': calleeUid,
+      'toName': 'Screen Callee',
+      'channel': 'channel_inv_late',
+      'isVideo': false,
+      'status': CallInviteStatus.ringing.name,
+      'createdAt': Timestamp.now(),
+    });
+    final tap = manager.handleNotificationInviteTap(
+      inviteId: 'inv_late',
+      channel: 'channel_inv_late',
+      isVideo: false,
+      fromName: 'Screen Caller',
+      fromUid: callerUid,
+      source: 'ios_screen_test',
+    );
+    await pumpFor(tester, 50);
+    await tap;
+
+    expect(manager.debugSnapshot()['incomingUiOwner'], 'callkit');
+    expect(find.byType(IncomingCallScreen), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.call));
+    await pumpFor(tester);
+    expect(answered, [nativeFor('inv_late').callkitId]);
+  });
+
   testWidgets('without the native answerer (Android, tests): CallKit only',
       (tester) async {
     await tester.pumpWidget(harness());

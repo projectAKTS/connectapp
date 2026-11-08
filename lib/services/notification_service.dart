@@ -537,11 +537,30 @@ class NotificationService with WidgetsBindingObserver {
       final activeCalls = await FlutterCallkitIncoming.activeCalls();
       if (activeCalls is! List) return const <NativeCallSnapshot>[];
       final snapshots = <NativeCallSnapshot>[];
+      Map<String, String>? stored;
       for (final raw in activeCalls) {
         if (raw is! Map) continue;
         final body = Map<String, dynamic>.from(raw);
         final extra = _eventExtra(body);
-        final channel = _stringField(extra, body, 'channel');
+        var channel = _stringField(extra, body, 'channel');
+        if (channel.isEmpty && Platform.isIOS) {
+          // The plugin lists a call whose CallKit report is still in flight as
+          // a bare {id}. AppDelegate stored which invite that exact id was
+          // presented for, so recover the invite from there.
+          stored ??= await _readNativePushTokens();
+          final bareId = _stringField(extra, body, 'id').trim().toLowerCase();
+          final storedId =
+              (stored['lastPushkitIncomingCallkitId'] ?? '').toLowerCase();
+          final storedInvite =
+              (stored['lastPushkitIncomingCallId'] ?? '').trim();
+          if (bareId.isNotEmpty &&
+              bareId == storedId &&
+              storedInvite.isNotEmpty) {
+            body['inviteId'] = storedInvite;
+            channel = (stored['lastPushkitIncomingChannel'] ?? '').trim();
+            body['channel'] = channel;
+          }
+        }
         final inviteId = _stringField(
           extra,
           body,
@@ -2054,7 +2073,12 @@ class NotificationService with WidgetsBindingObserver {
       callkitId: callkitId.trim().toLowerCase(),
     );
     final native = await _nativeCallkitIdentityState(callkitId);
-    if (native == null) return pluginIdentity;
+    // An empty plugin identity (its `self.data` is only set for PushKit-
+    // presented calls) still gets the exact call AppDelegate recorded.
+    if (native == null &&
+        (pluginIdentity.callkitId.isNotEmpty || !_isIosCallkitPlatform)) {
+      return pluginIdentity;
+    }
     final tokens = await _readNativePushTokens();
     final nativeEvent = (tokens['lastCallkitEvent'] ?? '').trim().toLowerCase();
     final nativeCallkitId =
@@ -2064,12 +2088,14 @@ class NotificationService with WidgetsBindingObserver {
       if (nativeCallkitId == pluginIdentity.callkitId) return pluginIdentity;
       final exact = await _nativeCallkitIdentityState(nativeCallkitId);
       if (exact != null && exact.terminal && nativeInviteId.isNotEmpty) {
-        await _rejectPluginEventIdentity(
-          event,
-          inviteId: inviteId,
-          callkitId: callkitId,
-          native: native,
-        );
+        if (native != null) {
+          await _rejectPluginEventIdentity(
+            event,
+            inviteId: inviteId,
+            callkitId: callkitId,
+            native: native,
+          );
+        }
         CallV2DurableDiagnosticRecorder.instance.record(
           CallV2DurableDiagnosticStage.pluginEventIdentityReattributed,
           inviteIdentity: nativeInviteId,
@@ -2082,7 +2108,7 @@ class NotificationService with WidgetsBindingObserver {
         );
       }
     }
-    if (native.live) {
+    if (native != null && native.live) {
       await _rejectPluginEventIdentity(
         event,
         inviteId: inviteId,

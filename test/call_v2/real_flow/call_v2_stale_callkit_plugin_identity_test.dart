@@ -511,6 +511,25 @@ void main() {
       expect(opened, isEmpty);
     });
 
+    harnessTest(
+        'decline with empty plugin data (first call, Flutter-presented) '
+        'declines the exact native call', (tester) async {
+      await startHarness(tester);
+      await seedInvite('invite_b', CallInviteStatus.ringing);
+      ios.present('invite_b', fromPushKit: false);
+
+      ios.terminal('decline', 'invite_b');
+      // Plugin `self.data` was never set, so the event body is empty.
+      await notifications.debugSimulateCallkitPluginEventForTest(
+        Event.actionCallDecline,
+        <String, dynamic>{},
+      );
+      await pumpFor(tester, const Duration(seconds: 1));
+
+      expect(await status('invite_b'), CallInviteStatus.declined.name);
+      expect(opened, isEmpty);
+    });
+
     harnessTest('stale plugin decline for a live call is rejected',
         (tester) async {
       await startHarness(tester);
