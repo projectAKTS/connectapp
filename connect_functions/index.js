@@ -1753,7 +1753,7 @@ exports.onChatMessageCreated = onDocumentCreated(
         lastMessageAuthorId: `${authorId}`,
         lastMessageType,
         lastMessageText,
-        [`unreadBy.${authorId}`]: 0,
+        unreadBy: { [`${authorId}`]: 0 },
       },
       { merge: true }
     );
@@ -1792,7 +1792,7 @@ exports.onChatMessageCreated = onDocumentCreated(
             ),
             chatRef.set(
               {
-                [`unreadBy.${uid}`]: admin.firestore.FieldValue.increment(1),
+                unreadBy: { [uid]: admin.firestore.FieldValue.increment(1) },
               },
               { merge: true }
             ),

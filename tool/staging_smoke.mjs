@@ -110,6 +110,8 @@ check("missed call: a note is added to the chat", await waitFor(async () => (awa
 const note = (await missedNotes())[0]?.fields || {};
 check("missed call: note is from the caller, video, system",
   note.authorId?.stringValue === B.uid && note.isVideo?.booleanValue === true && note.system?.booleanValue === true);
+const chatUnreadA = async () => Number((await get(A, `chats/${chat}`)).json.fields?.unreadBy?.mapValue?.fields?.[A.uid]?.integerValue || 0);
+check("chat list: the per-chat unread count reaches the callee", await waitFor(async () => (await chatUnreadA()) >= 1), `unreadBy=${await chatUnreadA()}`);
 check("missed call: the callee has it unread", await waitFor(async () => (await unreadA()) === unreadBefore + 1), `before ${unreadBefore}, after ${await unreadA()}`);
 await create(B, "callInvites", `inv_declined_${run}`, { fromUid: B.uid, fromName: "Smoke Seeker", toUid: A.uid,
   toName: "Smoke Helper", channel: `ch_declined_${run}`, isVideo: false, status: "ringing", type: "call_invite" });

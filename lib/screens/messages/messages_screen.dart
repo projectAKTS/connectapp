@@ -328,7 +328,9 @@ class _MessagesScreenState extends State<MessagesScreen> {
             unreadBy is Map ? ((unreadBy[uid] as num?)?.toInt() ?? 0) : 0;
         if (unreadCount <= 0) continue;
         final ref = doc.reference;
-        await ref.set({'unreadBy.$uid': 0}, SetOptions(merge: true));
+        await ref.set({
+          'unreadBy': {uid: 0},
+        }, SetOptions(merge: true));
       }
     } catch (_) {}
   }

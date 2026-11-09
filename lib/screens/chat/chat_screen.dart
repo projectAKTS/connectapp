@@ -182,8 +182,7 @@ class _ChatScreenState extends State<ChatScreen> {
         'participants': users,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
-        'unreadBy.$_me': 0,
-        'unreadBy.${widget.otherUserId}': 0,
+        'unreadBy': {_me: 0, widget.otherUserId: 0},
       }, SetOptions(merge: true));
       debugPrint('[Chat] ensureChatDoc created chatId=$_chatId');
       return;
@@ -228,7 +227,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _markChatRead() async {
     try {
       await HelperlyTestRuntime.firestore.collection('chats').doc(_chatId).set({
-        'unreadBy.$_me': 0,
+        'unreadBy': {_me: 0},
       }, SetOptions(merge: true));
       await HelperlyTestRuntime.firestore.collection('users').doc(_me).set({
         'lastMessagesSeenAt': FieldValue.serverTimestamp(),
@@ -432,7 +431,7 @@ class _ChatScreenState extends State<ChatScreen> {
         'lastMessageAuthorId': _me,
         'lastMessageType': 'text',
         'lastMessageText': t,
-        'unreadBy.$_me': 0,
+        'unreadBy': {_me: 0},
       }, SetOptions(merge: true));
       DiagnosticService.logChat('message_send_done', uid: _me, meta: {
         'chatId': _chatId,
@@ -588,7 +587,7 @@ class _ChatScreenState extends State<ChatScreen> {
         'lastMessageAuthorId': _me,
         'lastMessageType': isImage ? 'image' : 'video',
         'lastMessageText': isImage ? 'Photo' : 'Video',
-        'unreadBy.$_me': 0,
+        'unreadBy': {_me: 0},
       }, SetOptions(merge: true));
       DiagnosticService.logChat('message_send_done', uid: _me, meta: {
         'chatId': _chatId,

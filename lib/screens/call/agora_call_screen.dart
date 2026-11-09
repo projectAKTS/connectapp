@@ -2457,7 +2457,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         'lastMessageAuthorId': me,
         'lastMessageType': 'missed_call',
         'lastMessageText': callText,
-        'unreadBy.$me': 0,
+        'unreadBy': {me: 0},
         'createdAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
