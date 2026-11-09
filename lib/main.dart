@@ -99,6 +99,8 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       now: DateTime.now(),
       ownInstallationId: await PushInstallationId.read(),
     );
+    debugPrint('[DIAG][android_call] background_decision '
+        'kind=${decision.kind.name} reason=${decision.reason}');
     await AndroidIncomingCall.apply(decision);
     // Not awaited: FlutterFire runs background messages one at a time and
     // waits for each handler, so awaiting the ring window would hold back a
