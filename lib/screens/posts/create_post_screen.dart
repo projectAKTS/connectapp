@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:connect_app/services/content_filter.dart';
 import 'package:connect_app/services/app_telemetry.dart';
 import 'package:flutter/material.dart';
+import 'package:connect_app/widgets/main_scaffold.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -629,7 +630,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         );
 
         Future.delayed(const Duration(milliseconds: 150), () {
-          if (mounted) Navigator.of(context).maybePop('posted');
+          if (!mounted) return;
+          // Opened as a tab root nothing pops: show the feed with the post.
+          if (!Navigator.of(context).canPop()) MainTabs.requested.value = 0;
+          Navigator.of(context).maybePop('posted');
         });
 
         _uploadMediaAndUpdatePost(
@@ -661,7 +665,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       AppTelemetry.event('post_created');
 
       Future.delayed(const Duration(milliseconds: 250), () {
-        if (mounted) Navigator.of(context).maybePop('posted');
+        if (!mounted) return;
+        // Opened as a tab root nothing pops: show the feed with the post.
+        if (!Navigator.of(context).canPop()) MainTabs.requested.value = 0;
+        Navigator.of(context).maybePop('posted');
       });
     } catch (e) {
       if (!mounted) return;

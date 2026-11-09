@@ -51,6 +51,12 @@ ThemeData buildAppTheme() {
       elevation: 0,
       scrolledUnderElevation: 0,
       foregroundColor: AppColors.text,
+      // One title style for every screen (some were light, some bold).
+      titleTextStyle: TextStyle(
+        color: AppColors.text,
+        fontSize: 20,
+        fontWeight: FontWeight.w700,
+      ),
     ),
 
     // Inputs / search pill

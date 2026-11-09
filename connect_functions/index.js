@@ -1777,15 +1777,15 @@ exports.onChatMessageCreated = onDocumentCreated(
             lastSeen && typeof lastSeen.toMillis === "function"
               ? lastSeen.toMillis()
               : 0;
-          // Skip stale increments if user has already opened messages
-          // after this message was created.
+          // The chat stays unread until it is opened (the app clears it then).
+          const chatIncrement = chatRef.set(
+            { unreadBy: { [uid]: admin.firestore.FieldValue.increment(1) } },
+            { merge: true }
+          );
+          // The inbox badge is cleared by opening the messages list: skip it
+          // if the list was opened after this message was created.
           if (lastSeenMs > 0 && lastSeenMs - messageCreatedAtMs >= 1000) {
-            console.log("onChatMessageCreated skip unread increment (already seen)", {
-              chatId,
-              uid,
-              lastSeenMs,
-              messageCreatedAtMs,
-            });
+            await chatIncrement;
             return;
           }
           await Promise.all([
@@ -1796,12 +1796,7 @@ exports.onChatMessageCreated = onDocumentCreated(
               },
               { merge: true }
             ),
-            chatRef.set(
-              {
-                unreadBy: { [uid]: admin.firestore.FieldValue.increment(1) },
-              },
-              { merge: true }
-            ),
+            chatIncrement,
           ]);
         } catch (e) {
           console.warn("onChatMessageCreated unread counter update failed", {

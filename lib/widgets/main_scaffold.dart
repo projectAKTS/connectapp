@@ -11,6 +11,11 @@ import 'package:connect_app/theme/tokens.dart';
 
 import 'package:connect_app/navigation/app_router.dart';
 
+/// Lets a screen inside a tab switch tabs (after posting, show the feed).
+class MainTabs {
+  static final requested = ValueNotifier<int?>(null);
+}
+
 /// ✅ Controller that HomeContentScreenState can register into (NO GlobalKey)
 class HomeTabController {
   HomeContentScreenState? _state;
@@ -57,6 +62,21 @@ class _MainScaffoldState extends State<MainScaffold> {
     _homeRoot = HomeContentScreen(controller: _homeController);
     _searchRoot = const SearchScreen();
     _createRoot = const CreatePostScreen();
+    MainTabs.requested.addListener(_onTabRequested);
+  }
+
+  @override
+  void dispose() {
+    MainTabs.requested.removeListener(_onTabRequested);
+    super.dispose();
+  }
+
+  void _onTabRequested() {
+    final index = MainTabs.requested.value;
+    if (index == null || !mounted) return;
+    MainTabs.requested.value = null;
+    setState(() => _selectedIndex = index);
+    if (index == 0) _homeController.scrollToTop();
   }
 
   NavigatorState? get _currentNav => _navKeys[_selectedIndex].currentState;

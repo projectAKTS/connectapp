@@ -1,3 +1,6 @@
+import 'package:connect_app/utils/time_utils.dart';
+import 'package:connect_app/l10n/formatters.dart';
+import 'package:connect_app/widgets/initials_avatar.dart';
 import 'package:connect_app/l10n/l10n.dart';
 import 'dart:async';
 
@@ -287,7 +290,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
         },
         SetOptions(merge: true),
       ).catchError((_) {});
-      _markAllChatsRead(uid);
+      // Each chat stays unread until it is opened, as in messaging apps.
     }
   }
 
@@ -300,39 +303,6 @@ class _MessagesScreenState extends State<MessagesScreen> {
 
   void _onBlockedChanged() {
     if (mounted) setState(() {});
-  }
-
-  Future<void> _markAllChatsRead(String uid) async {
-    try {
-      final chats = FirebaseFirestore.instance.collection('chats');
-      final snaps = <QuerySnapshot<Map<String, dynamic>>>[];
-      try {
-        snaps.add(await FirestoreReadHelper.getQuery(
-          chats.where('participants', arrayContains: uid),
-        ));
-      } catch (_) {}
-      try {
-        snaps.add(await FirestoreReadHelper.getQuery(
-          chats.where('users', arrayContains: uid),
-        ));
-      } catch (_) {}
-      final docsById = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{};
-      for (final snap in snaps) {
-        for (final doc in snap.docs) {
-          docsById[doc.id] = doc;
-        }
-      }
-      for (final doc in docsById.values) {
-        final unreadBy = doc.data()['unreadBy'];
-        final unreadCount =
-            unreadBy is Map ? ((unreadBy[uid] as num?)?.toInt() ?? 0) : 0;
-        if (unreadCount <= 0) continue;
-        final ref = doc.reference;
-        await ref.set({
-          'unreadBy': {uid: 0},
-        }, SetOptions(merge: true));
-      }
-    } catch (_) {}
   }
 
   @override
@@ -360,7 +330,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
       child: Scaffold(
         backgroundColor: AppColors.canvas,
         appBar: AppBar(
-          backgroundColor: AppColors.card,
+          backgroundColor: AppColors.canvas,
           elevation: 0,
           centerTitle: true,
           iconTheme: const IconThemeData(color: AppColors.text),
@@ -510,21 +480,22 @@ class _MessagesScreenState extends State<MessagesScreen> {
                                 '')
                             .toString();
 
+                        final unreadMap = chatData['unreadBy'];
+                        final unread = unreadMap is Map
+                            ? ((unreadMap[currentUid] as num?)?.toInt() ?? 0)
+                            : 0;
+                        final lastAt = parseFirestoreTimestamp(
+                            chatData['lastMessageAt'] ?? chatData['updatedAt']);
                         return ListTile(
-                          leading: CircleAvatar(
-                            radius: 24,
-                            backgroundColor: AppColors.avatarBg,
-                            backgroundImage:
-                                avatar.isNotEmpty ? NetworkImage(avatar) : null,
-                            child: avatar.isEmpty
-                                ? const Icon(Icons.person_outline,
-                                    color: AppColors.avatarFg)
-                                : null,
-                          ),
+                          leading: InitialsAvatar(
+                              url: avatar, name: otherName, radius: 24),
                           title: Text(
                             otherName,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w600,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight:
+                                  unread > 0 ? FontWeight.w700 : FontWeight.w600,
                               color: AppColors.text,
                               fontSize: 16,
                             ),
@@ -533,10 +504,48 @@ class _MessagesScreenState extends State<MessagesScreen> {
                             preview,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: AppColors.muted,
+                            style: TextStyle(
+                              color:
+                                  unread > 0 ? AppColors.text : AppColors.muted,
+                              fontWeight:
+                                  unread > 0 ? FontWeight.w600 : FontWeight.w400,
                               fontSize: 14,
                             ),
+                          ),
+                          trailing: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              if (lastAt != null)
+                                Text(
+                                  AppFormat.timeAgo(context, lastAt),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: unread > 0
+                                        ? AppColors.primary
+                                        : AppColors.muted,
+                                  ),
+                                ),
+                              if (unread > 0) ...[
+                                const SizedBox(height: 4),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 7, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primary,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    unread > 99 ? '99+' : '$unread',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
                           onTap: () {
                             debugPrint(

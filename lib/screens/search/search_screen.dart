@@ -36,6 +36,36 @@ class _SearchScreenState extends State<SearchScreen> {
 
   // Only the newest search may write results; older ones finish late.
   int _searchSeq = 0;
+
+  /// The scanned users and posts, reused while typing (not refetched for
+  /// every key); refreshed after a minute.
+  List<QueryDocumentSnapshot<Map<String, dynamic>>>? _userScan;
+  List<QueryDocumentSnapshot<Map<String, dynamic>>>? _postScan;
+  DateTime _scannedAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  Future<void> _refreshScans() async {
+    if (_userScan != null &&
+        _postScan != null &&
+        DateTime.now().difference(_scannedAt) < const Duration(minutes: 1)) {
+      return;
+    }
+    final results = await Future.wait([
+      FirestoreReadHelper.getQuery(
+        FirebaseFirestore.instance.collection('users').limit(300),
+        timeout: const Duration(seconds: 5),
+      ),
+      FirestoreReadHelper.getQuery(
+        FirebaseFirestore.instance
+            .collection('posts')
+            .orderBy('timestamp', descending: true)
+            .limit(200),
+        timeout: const Duration(seconds: 5),
+      ),
+    ]);
+    _userScan = results[0].docs;
+    _postScan = results[1].docs;
+    _scannedAt = DateTime.now();
+  }
   _Tab _tab = _Tab.all;
 
   // Results
@@ -96,7 +126,13 @@ class _SearchScreenState extends State<SearchScreen> {
       // every word in the name, bio, expertise, interests or city.
       final userDocs = <String, Map<String, dynamic>>{};
       final rawLower = raw.trim().toLowerCase();
-      for (final field in ['displayName_lc', 'userName_lc']) {
+      await _refreshScans();
+      // Name prefixes reach people beyond the scanned page only.
+      final scanIsComplete = (_userScan?.length ?? 0) < 300;
+      for (final field in [
+        if (!scanIsComplete) 'displayName_lc',
+        if (!scanIsComplete) 'userName_lc',
+      ]) {
         for (final prefix in {query, rawLower}) {
           if (prefix.isEmpty) continue;
           try {
@@ -113,15 +149,9 @@ class _SearchScreenState extends State<SearchScreen> {
           } catch (_) {}
         }
       }
-      try {
-        final usersSnap = await FirestoreReadHelper.getQuery(
-          FirebaseFirestore.instance.collection('users').limit(300),
-          timeout: const Duration(seconds: 5),
-        );
-        for (final d in usersSnap.docs) {
-          userDocs.putIfAbsent(d.id, () => d.data());
-        }
-      } catch (_) {}
+      for (final d in _userScan ?? const []) {
+        userDocs.putIfAbsent(d.id, () => d.data());
+      }
       final scoredPeople = <(int, _UserHit)>[];
       userDocs.forEach((id, m) {
         final hit = _userFromDoc(id, m);
@@ -151,15 +181,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
       // POSTS: the latest posts, every word in the text, author or tags.
       final posts = <_PostHit>[];
-      final postsSnap = await FirestoreReadHelper.getQuery(
-        FirebaseFirestore.instance
-            .collection('posts')
-            .orderBy('timestamp', descending: true)
-            .limit(200),
-        timeout: const Duration(seconds: 5),
-      );
-
-      for (final d in postsSnap.docs) {
+      for (final d in _postScan ?? const []) {
         final m = d.data();
         final content = (m['content'] ?? '').toString();
         final userName = (m['userName'] ?? 'User').toString();

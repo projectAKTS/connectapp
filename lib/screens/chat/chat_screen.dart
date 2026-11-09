@@ -1,3 +1,5 @@
+import 'package:connect_app/services/call_service.dart';
+import 'package:connect_app/widgets/initials_avatar.dart';
 // lib/screens/chat/chat_screen.dart
 import 'package:connect_app/l10n/formatters.dart';
 import 'package:connect_app/l10n/l10n.dart';
@@ -332,13 +334,14 @@ class _ChatScreenState extends State<ChatScreen> {
             uri: (m['uri'] ?? '') as String,
             mimeType: (m['mime'] ?? '') as String,
           );
-        // The server writes this note in English; show it in the reader's language.
+        // Call notes are shown centered like a date, in the reader's
+        // language (the server writes them in English).
         case 'missed_call':
-          return types.TextMessage(
+          return types.SystemMessage(
             id: d.id,
-            author: author,
             createdAt: createdAt,
             text: context.l10n.messageMissedCall,
+            metadata: {'isVideo': m['isVideo'] == true},
           );
         default:
           return types.TextMessage(
@@ -349,6 +352,17 @@ class _ChatScreenState extends State<ChatScreen> {
           );
       }
     }).toList();
+  }
+
+  Future<void> _call({required bool isVideo}) async {
+    if (_blockedGuard()) return;
+    final rootCtx = Navigator.of(context, rootNavigator: true).context;
+    await CallService().startCall(
+      rootCtx,
+      toUid: widget.otherUserId,
+      toName: _titleName ?? '',
+      isVideo: isVideo,
+    );
   }
 
   /// Blocking stops sending; the person stays reachable after unblocking.
@@ -650,14 +664,10 @@ class _ChatScreenState extends State<ChatScreen> {
             children: [
               GestureDetector(
                 onTap: openProfile,
-                child: CircleAvatar(
+                child: InitialsAvatar(
+                  url: widget.otherUserAvatar ?? '',
+                  name: _titleName ?? '',
                   radius: 16,
-                  backgroundColor: AppColors.avatarBg,
-                  foregroundImage: (widget.otherUserAvatar?.isNotEmpty ?? false)
-                      ? NetworkImage(widget.otherUserAvatar!)
-                      : null,
-                  child: const Icon(Icons.person_outline,
-                      color: AppColors.avatarFg, size: 18),
                 ),
               ),
               const SizedBox(width: 10),
@@ -681,6 +691,16 @@ class _ChatScreenState extends State<ChatScreen> {
             ],
           ),
           actions: [
+            IconButton(
+              tooltip: context.l10n.actionAudioCall,
+              icon: const Icon(Icons.call_outlined),
+              onPressed: () => _call(isVideo: false),
+            ),
+            IconButton(
+              tooltip: context.l10n.actionVideoCall,
+              icon: const Icon(Icons.videocam_outlined),
+              onPressed: () => _call(isVideo: true),
+            ),
             ValueListenableBuilder<Set<String>>(
               valueListenable: SafetyService.instance.blocked,
               builder: (context, blocked, _) {
@@ -775,6 +795,14 @@ class _ChatScreenState extends State<ChatScreen> {
                         onSendPressed: (_) {},
                         user: types.User(id: _me),
                         theme: _chatTheme,
+                        systemMessageBuilder: (msg) => _CallNote(
+                          text: msg.text,
+                          isVideo: msg.metadata?['isVideo'] == true,
+                          at: msg.createdAt == null
+                              ? null
+                              : DateTime.fromMillisecondsSinceEpoch(
+                                  msg.createdAt!),
+                        ),
                         onMessageTap: (ctx, msg) async {
                           if (msg is types.FileMessage) await _openUri(msg.uri);
                         },
@@ -1511,4 +1539,42 @@ class _AppChatL10n extends ChatL10n {
           sendButtonAccessibilityLabel: l.chatSendLabel,
           unreadMessagesLabel: l.chatUnread,
         );
+}
+
+/// A missed-call note in the conversation, centered with its time.
+class _CallNote extends StatelessWidget {
+  final String text;
+  final bool isVideo;
+  final DateTime? at;
+  const _CallNote({required this.text, required this.isVideo, this.at});
+
+  @override
+  Widget build(BuildContext context) {
+    final time = at == null ? '' : ' · ${AppFormat.time(context, at!)}';
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: AppColors.button,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isVideo ? Icons.missed_video_call_outlined : Icons.phone_missed,
+              size: 16,
+              color: AppColors.danger,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              '$text$time',
+              style: const TextStyle(fontSize: 13, color: AppColors.muted),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
