@@ -271,3 +271,14 @@ Founder:
   ```bash
   cd /Users/yakup/connectapp && git switch feat/missed-call-note && git pull && firebase deploy --only functions:onCallInviteUpdated,functions:onChatMessageCreated --project connectapp-278b4
   ```
+
+## Sign-In Profile Fix (2026-11-08, branch `feat/missed-call-note`)
+
+- `13be5d3`: a fresh sign-in wrote the fallback name "User" over the real
+  name (the profile read had the push-token write pending and looked empty).
+  Google and Apple sign-in reset photo, bio, followers and counters on every
+  sign-in; now only for a new account. Reproduced and verified on the staging
+  emulator. Production (read-only): 0 of 71 users named "User".
+- `6665fe1`: Android logs why a background call push did not ring.
+- App-only. iOS build uploaded to TestFlight; no server change.
+
