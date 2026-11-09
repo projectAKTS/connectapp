@@ -1189,6 +1189,9 @@ class NotificationService with WidgetsBindingObserver {
               final chatId = parts.length >= 3 ? parts[2] : '';
               _openChat(otherUserId, chatId: chatId);
             }
+            if (payload.startsWith('open_post|')) {
+              unawaited(_openPost(payload.substring('open_post|'.length)));
+            }
           },
         );
         _localInitialized = true;
@@ -2930,6 +2933,33 @@ class NotificationService with WidgetsBindingObserver {
       return;
     }
 
+    // ===== COMMENT ON MY POST ===============================================
+    if (data['type'] == 'post_comment') {
+      final postId = '${data['postId'] ?? ''}'.trim();
+      if (postId.isEmpty) return;
+      if (showLocal && _localInitialized) {
+        await _local.show(
+          _nextNotificationId(),
+          message.notification?.title ?? '',
+          message.notification?.body ?? '',
+          NotificationDetails(
+            android: AndroidNotificationDetails(
+              _androidChannel.id,
+              _androidChannel.name,
+              channelDescription: _androidChannel.description,
+              importance: Importance.high,
+              priority: Priority.high,
+            ),
+            iOS: const DarwinNotificationDetails(),
+          ),
+          payload: 'open_post|$postId',
+        );
+      } else if (!showLocal) {
+        await _openPost(postId);
+      }
+      return;
+    }
+
     // ===== GENERIC ==========================================================
     if (showLocal && message.notification != null) {
       await _local.show(
@@ -3543,6 +3573,12 @@ class NotificationService with WidgetsBindingObserver {
       return;
     }
     await _recoverAcceptedCallkitCall(trigger: 'retry_${result.name}');
+  }
+
+  Future<void> _openPost(String postId) async {
+    if (postId.trim().isEmpty) return;
+    final nav = await _waitForNavigator();
+    await nav?.pushNamed('/post/${postId.trim()}');
   }
 
   void _openChat(String otherUserId, {String? chatId}) {

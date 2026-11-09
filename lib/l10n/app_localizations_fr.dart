@@ -1943,4 +1943,22 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get postSensitiveTapToView => 'Contenu sensible · Touchez pour voir';
+
+  @override
+  String get postComment => 'Commenter';
+
+  @override
+  String get postCommentsTitle => 'Commentaires';
+
+  @override
+  String get commentSend => 'Envoyer';
+
+  @override
+  String get commentDelete => 'Supprimer le commentaire';
+
+  @override
+  String get commentReport => 'Signaler le commentaire';
+
+  @override
+  String get commentDeleted => 'Commentaire supprimé';
 }

@@ -3559,6 +3559,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Sensitive content · Tap to view'**
   String get postSensitiveTapToView;
+
+  /// No description provided for @postComment.
+  ///
+  /// In en, this message translates to:
+  /// **'Comment'**
+  String get postComment;
+
+  /// No description provided for @postCommentsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Comments'**
+  String get postCommentsTitle;
+
+  /// No description provided for @commentSend.
+  ///
+  /// In en, this message translates to:
+  /// **'Send'**
+  String get commentSend;
+
+  /// No description provided for @commentDelete.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete comment'**
+  String get commentDelete;
+
+  /// No description provided for @commentReport.
+  ///
+  /// In en, this message translates to:
+  /// **'Report comment'**
+  String get commentReport;
+
+  /// No description provided for @commentDeleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Comment deleted'**
+  String get commentDeleted;
 }
 
 class _AppLocalizationsDelegate

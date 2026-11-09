@@ -6,6 +6,7 @@ const { onRequest, onCall, HttpsError } = require("firebase-functions/v2/https")
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const {
   onDocumentCreated,
+  onDocumentDeleted,
   onDocumentUpdated,
   onDocumentWritten,
 } = require("firebase-functions/v2/firestore");
@@ -1891,6 +1892,81 @@ exports.onChatMessageCreated = onDocumentCreated(
       } catch (e) {
         console.error("APNS alert (chat) send failed:", e);
       }
+    }
+  }
+);
+
+const { commentNotificationFor } = require("./posts/post_comment");
+
+/** Counts the comment on its post and tells the post's author. */
+exports.onPostCommentCreated = onDocumentCreated(
+  {
+    document: "posts/{postId}/comments/{commentId}",
+    region: "us-central1",
+    secrets: [APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_VOIP_KEY_P8],
+  },
+  async (event) => {
+    const comment = event.data?.data() || {};
+    const postId = event.params.postId;
+    // At-least-once delivery: count and notify once per comment.
+    const claimed = await claimOnce(db, event.data.ref, "countedAt", () =>
+      admin.firestore.FieldValue.serverTimestamp(),
+    );
+    if (!claimed) return;
+    const postRef = db.collection("posts").doc(postId);
+    const postSnap = await postRef.get();
+    if (!postSnap.exists) return;
+    await postRef.update({ commentsCount: admin.firestore.FieldValue.increment(1) });
+
+    const post = postSnap.data() || {};
+    const authorUid = `${post.userID || post.userId || ""}`.trim();
+    const authorDoc = authorUid ? await db.collection("users").doc(authorUid).get() : null;
+    const author = authorDoc?.data() || {};
+    const note = commentNotificationFor({
+      post,
+      comment,
+      authorBlockedUids: author.blockedUids,
+    });
+    if (!note) return;
+    const title = note.commenterName || pushText(author.appLocale, "someone");
+    const body = `${pushText(author.appLocale, "commentedOnYourPost")}: ${note.snippet}`;
+    const data = { type: "post_comment", postId: `${postId}` };
+    const tokenSets = await getUserPushTokenSets(note.toUid);
+    let delivered = false;
+    if (tokenSets.fcmAll.length) {
+      try {
+        const res = await sendToTokens(tokenSets.fcmAll, {
+          notification: { title, body },
+          android: { priority: "high", notification: { channelId: "high_importance_channel", sound: "default" } },
+          apns: { headers: { "apns-priority": "10" }, payload: { aps: { sound: "default", contentAvailable: true } } },
+          data,
+        });
+        delivered = (res?.successCount || 0) > 0;
+      } catch (e) {
+        console.error("FCM comment send failed:", { error: `${e}` });
+      }
+    }
+    if (!delivered && tokenSets.apns.length) {
+      try {
+        await sendApnsAlertToTokens(tokenSets.apns, { title, body, data });
+      } catch (e) {
+        console.error("APNS comment send failed:", { error: `${e}` });
+      }
+    }
+  }
+);
+
+exports.onPostCommentDeleted = onDocumentDeleted(
+  { document: "posts/{postId}/comments/{commentId}", region: "us-central1" },
+  async (event) => {
+    // A comment never counted (deleted before its trigger ran) is not uncounted.
+    if (!event.data?.get("countedAt")) return;
+    const postRef = db.collection("posts").doc(event.params.postId);
+    try {
+      await postRef.update({ commentsCount: admin.firestore.FieldValue.increment(-1) });
+    } catch (e) {
+      // The post itself was deleted: nothing to count.
+      if (e?.code !== 5) throw e;
     }
   }
 );

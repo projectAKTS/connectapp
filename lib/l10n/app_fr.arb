@@ -576,5 +576,11 @@
   "chatScamWarning": "Prudence : {name} a parlé d’argent, de codes ou d’une autre application. N’envoyez jamais d’argent ni de codes, et gardez vos échanges dans Helperly.",
   "reportCallBehaviour": "Comportement inapproprié pendant un appel",
   "chatTapToView": "Photo masquée · Touchez pour voir",
-  "postSensitiveTapToView": "Contenu sensible · Touchez pour voir"
+  "postSensitiveTapToView": "Contenu sensible · Touchez pour voir",
+  "postComment": "Commenter",
+  "postCommentsTitle": "Commentaires",
+  "commentSend": "Envoyer",
+  "commentDelete": "Supprimer le commentaire",
+  "commentReport": "Signaler le commentaire",
+  "commentDeleted": "Commentaire supprimé"
 }

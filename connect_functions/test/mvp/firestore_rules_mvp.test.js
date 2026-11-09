@@ -209,6 +209,27 @@ test("reported posts: a private hide list for the reporter; only the server hide
   await assertFails(updateDoc(doc(alice, "posts/p_bob"), { hiddenByReports: true }));
 });
 
+test("comments: written as yourself, deletable by the commenter or the post's author", async () => {
+  const { serverTimestamp, deleteDoc } = require("firebase/firestore");
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "posts/p_bob"), { userID: "bob", content: "x" });
+    await setDoc(doc(ctx.firestore(), "posts/p_bob/comments/c_mallory"), { userID: "mallory", text: "hi" });
+  });
+  const mine = (uid, extra = {}) => ({
+    userID: uid, authorName: "A", authorAvatar: "", text: "Nice tip", timestamp: serverTimestamp(), ...extra,
+  });
+  const alice = as("alice");
+  await assertSucceeds(setDoc(doc(alice, "posts/p_bob/comments/c1"), mine("alice")));
+  await assertFails(setDoc(doc(alice, "posts/p_bob/comments/c2"), mine("bob")));
+  await assertFails(setDoc(doc(alice, "posts/p_bob/comments/c3"), mine("alice", { countedAt: 1 })));
+  await assertFails(setDoc(doc(alice, "posts/p_bob/comments/c4"), mine("alice", { text: "" })));
+  await assertFails(setDoc(doc(alice, "posts/p_bob/comments/c5"), mine("alice", { text: "x".repeat(1001) })));
+  await assertFails(updateDoc(doc(alice, "posts/p_bob/comments/c1"), { text: "edited" }));
+  await assertFails(deleteDoc(doc(alice, "posts/p_bob/comments/c_mallory")));
+  await assertSucceeds(deleteDoc(doc(as("bob"), "posts/p_bob/comments/c_mallory")));
+  await assertSucceeds(deleteDoc(doc(alice, "posts/p_bob/comments/c1")));
+});
+
 test("conversation lists still work (array-contains queries)", async () => {
   const { query, where, getDocs } = require("firebase/firestore");
   const alice = as("alice");

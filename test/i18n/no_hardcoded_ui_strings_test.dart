@@ -12,7 +12,6 @@ const _excluded = {
   'lib/screens/premium/premium_tab.dart', // gated
   'lib/screens/posts/boost_post_screen.dart', // unreachable
   'lib/screens/explore/explore_screen.dart', // unreachable
-  'lib/screens/posts/comment_screen.dart', // unreachable
   'lib/screens/FollowersScreen.dart', // unreachable
   'lib/screens/FollowingScreen.dart', // unreachable
   'lib/screens/profile/expert_directory_screen.dart', // unreachable

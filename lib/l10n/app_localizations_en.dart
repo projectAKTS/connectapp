@@ -1900,4 +1900,22 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get postSensitiveTapToView => 'Sensitive content · Tap to view';
+
+  @override
+  String get postComment => 'Comment';
+
+  @override
+  String get postCommentsTitle => 'Comments';
+
+  @override
+  String get commentSend => 'Send';
+
+  @override
+  String get commentDelete => 'Delete comment';
+
+  @override
+  String get commentReport => 'Report comment';
+
+  @override
+  String get commentDeleted => 'Comment deleted';
 }

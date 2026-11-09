@@ -18,6 +18,7 @@ const {
   addDoc,
   collection,
   doc,
+  serverTimestamp,
   setDoc,
   updateDoc,
 } = require("firebase/firestore");
@@ -69,7 +70,7 @@ function actions(uid) {
   const db = as(uid);
   return {
     post: () => setDoc(doc(db, `posts/${uid}_post`), { userID: uid, content: "x" }),
-    comment: () => addDoc(collection(db, "posts/p1/comments"), { userID: uid, content: "x" }),
+    comment: () => addDoc(collection(db, "posts/p1/comments"), { userID: uid, text: "x", timestamp: serverTimestamp() }),
     message: () => addDoc(collection(db, `chats/${uid}_friend/messages`), { authorId: uid, text: "x" }),
     call: () => addDoc(collection(db, "callInvites"), { fromUid: uid, toUid: "friend", status: "ringing" }),
     connect: () => setDoc(doc(db, `connections/${uid}_friend`), { users: [uid, "friend"], userId: uid, connectedUserId: "friend" }),

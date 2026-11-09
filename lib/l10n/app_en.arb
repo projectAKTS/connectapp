@@ -913,5 +913,11 @@
   },
   "reportCallBehaviour": "Inappropriate behaviour during a call",
   "chatTapToView": "Photo hidden · Tap to view",
-  "postSensitiveTapToView": "Sensitive content · Tap to view"
+  "postSensitiveTapToView": "Sensitive content · Tap to view",
+  "postComment": "Comment",
+  "postCommentsTitle": "Comments",
+  "commentSend": "Send",
+  "commentDelete": "Delete comment",
+  "commentReport": "Report comment",
+  "commentDeleted": "Comment deleted"
 }
