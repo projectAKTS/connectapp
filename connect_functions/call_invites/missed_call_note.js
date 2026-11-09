@@ -9,12 +9,16 @@
  * message is authored by the caller, so the normal chat push tells the
  * callee "<caller>: Missed call" and the chat shows it in its history.
  *
- * No note when the callee declined (they saw the call), when the call was
- * ever accepted, or when the callee has blocked the caller (the invite then
- * ends as missed with endReason "callee_unavailable" and must stay silent).
+ * A declined call gets the same note in the chat, as messaging apps show
+ * it, but silent: no push and no unread count, since the callee declined
+ * it themselves.
+ *
+ * No note when the call was ever accepted, or when the callee has blocked
+ * the caller (the invite then ends as missed with endReason
+ * "callee_unavailable" and must stay silent).
  */
 
-const MISSED_STATUSES = new Set(["missed", "cancelled"]);
+const NOTE_STATUSES = new Set(["missed", "cancelled", "declined"]);
 
 function normalizeStatus(value) {
   return `${value || ""}`.trim().toLowerCase();
@@ -27,7 +31,7 @@ function chatIdFor(a, b) {
 /** The note to write for this invite transition, or null. */
 function missedCallNoteFor(before, after) {
   const status = normalizeStatus(after?.status);
-  if (!MISSED_STATUSES.has(status)) return null;
+  if (!NOTE_STATUSES.has(status)) return null;
   if (normalizeStatus(before?.status) === status) return null;
   if (after?.acceptedAt || before?.acceptedAt) return null;
   if (`${after?.endReason || ""}`.trim() === "callee_unavailable") return null;
@@ -43,6 +47,7 @@ function missedCallNoteFor(before, after) {
     calleeUid,
     isVideo,
     text: isVideo ? "Missed video call" : "Missed audio call",
+    notify: status !== "declined",
   };
 }
 

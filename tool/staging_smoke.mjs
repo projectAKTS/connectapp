@@ -117,8 +117,12 @@ await create(B, "callInvites", `inv_declined_${run}`, { fromUid: B.uid, fromName
   toName: "Smoke Helper", channel: `ch_declined_${run}`, isVideo: false, status: "ringing", type: "call_invite" });
 await sleep(2000);
 await patch(A, `callInvites/inv_declined_${run}`, { status: "declined", declinedBy: A.uid });
+const unreadBeforeDecline = await unreadA();
+check("declined call: a silent note is added to the chat", await waitFor(async () =>
+  (await missedNotes()).some((d) => d.fields?.silent?.booleanValue === true)));
 await sleep(8000);
-check("declined call: no missed-call note", (await missedNotes()).length === 1);
+check("declined call: no unread for the callee", (await unreadA()) === unreadBeforeDecline,
+  `before ${unreadBeforeDecline}, after ${await unreadA()}`);
 
 r = await callable(B, "getAgoraRtcToken", { channelName: `ch_${run}`, uid: 1234, role: "publisher" });
 const appId = r.json?.result?.appId;

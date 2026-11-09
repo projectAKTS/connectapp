@@ -16,6 +16,7 @@ test("an unanswered call (timeout or caller hang-up) leaves a note for the calle
       calleeUid: "acallee",
       isVideo: false,
       text: "Missed audio call",
+      notify: true,
     }, status);
   }
   assert.equal(
@@ -24,8 +25,13 @@ test("an unanswered call (timeout or caller hang-up) leaves a note for the calle
   );
 });
 
-test("no note when the callee answered, declined, or blocked the caller", () => {
-  assert.equal(missedCallNoteFor(ringing, { ...ringing, status: "declined" }), null);
+test("a declined call leaves a silent note (no push, no unread)", () => {
+  const note = missedCallNoteFor(ringing, { ...ringing, status: "declined" });
+  assert.equal(note.chatId, "acallee_zcaller");
+  assert.equal(note.notify, false);
+});
+
+test("no note when the callee answered or blocked the caller", () => {
   assert.equal(missedCallNoteFor(ringing, { ...ringing, status: "ended" }), null);
   assert.equal(
     missedCallNoteFor(ringing, { ...ringing, status: "cancelled", acceptedAt: 1 }),

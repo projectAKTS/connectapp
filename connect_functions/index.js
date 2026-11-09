@@ -1504,6 +1504,7 @@ async function writeMissedCallNote(inviteRef, inviteId, before, after) {
       callStatus: "missed",
       isVideo: note.isVideo,
       inviteId: `${inviteId}`,
+      ...(note.notify ? {} : { silent: true }),
     });
     console.log("missed call note written", { identifierPresent: Boolean(inviteId) });
   } catch (e) {
@@ -1757,6 +1758,10 @@ exports.onChatMessageCreated = onDocumentCreated(
       },
       { merge: true }
     );
+
+    // A silent system note (a call the callee declined) shows in the chat
+    // but counts no unread and sends no push.
+    if (m.system === true && m.silent === true) return;
 
     // Keep a fast user-level unread counter for reliable badges in clients.
     await Promise.all(
