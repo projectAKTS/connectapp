@@ -8,6 +8,7 @@ import 'package:connect_app/widgets/advice_notice.dart';
 import 'package:connect_app/utils/profile_text.dart';
 import 'package:connect_app/services/helperly_test_runtime.dart';
 import 'package:connect_app/services/safety_service.dart';
+import 'package:connect_app/services/search_match.dart';
 import 'package:connect_app/models/help_topics.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -195,12 +196,19 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
     List<_Helper> list =
         _all.where((h) => !SafetyService.instance.isBlocked(h.id)).toList();
 
-    // Text query (name/handle/bio)
+    // Text query: every word in the name, bio or expertise, any language.
     if (query.isNotEmpty) {
-      list = list.where((h) {
-        final hay = '${_norm(h.name)} ${_norm(h.handle)} ${_norm(h.bio)}';
-        return hay.contains(query);
-      }).toList();
+      list = list
+          .where((h) =>
+              searchScore(
+                query: query,
+                name: h.name,
+                fields: [h.handle, h.bio, ...h.expertise, ...h.categories],
+                normalize: _norm,
+                expand: (w) => ValueLabels.topicSearchTerms(w, _norm),
+              ) >
+              0)
+          .toList();
     }
 
     // Availability / Verified

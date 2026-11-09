@@ -1,5 +1,4 @@
 // lib/screens/search/search_screen.dart
-import 'package:connect_app/l10n/formatters.dart';
 import 'package:connect_app/l10n/value_labels.dart';
 import 'package:connect_app/l10n/l10n.dart';
 import 'dart:async';
@@ -9,12 +8,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import 'package:connect_app/theme/tokens.dart';
-import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
 import 'package:connect_app/screens/posts/post_detail_screen.dart';
 import 'package:connect_app/services/firestore_read_helper.dart';
 import 'package:connect_app/services/helperly_test_runtime.dart';
 import 'package:connect_app/services/safety_service.dart';
+import 'package:connect_app/services/search_match.dart';
+import 'package:connect_app/widgets/post_card.dart';
 import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 import 'package:connect_app/widgets/initials_avatar.dart';
 
@@ -85,81 +85,77 @@ class _SearchScreenState extends State<SearchScreen> {
     _recordSearchTerm(raw).ignore(); // best-effort, non-blocking
 
     try {
-      // USERS
-      final people = <_UserHit>[];
+      // A word naming a topic in any language also matches its other names
+      // ("logement" finds "Housing").
+      Set<String> expand(String word) =>
+          ValueLabels.topicSearchTerms(word, _norm);
+      List<String> strings(dynamic v) =>
+          v is List ? v.map((e) => '$e').toList() : const <String>[];
 
-      bool anyIndexedHit = false;
-      // userName_lc prefix
-      try {
-        final qs = await FirestoreReadHelper.getQuery(
-          FirebaseFirestore.instance
-              .collection('users')
-              .orderBy('userName_lc')
-              .startAt([query]).endAt(['$query\uf8ff']).limit(40),
-          timeout: const Duration(seconds: 5),
-        );
-        for (final d in qs.docs) {
-          final hit = _userFromDoc(d.id, d.data());
-          if (hit != null) people.add(hit);
-        }
-        anyIndexedHit = people.isNotEmpty;
-      } catch (_) {}
-
-      // displayName_lc prefix. The field is lowercased but keeps accents
-      // ("élodie"), while [query] has them folded ("elodie"), so the typed
-      // text is tried as well.
+      // USERS: name prefixes (beyond the scanned page), then a scan matching
+      // every word in the name, bio, expertise, interests or city.
+      final userDocs = <String, Map<String, dynamic>>{};
       final rawLower = raw.trim().toLowerCase();
-      for (final prefix in {query, rawLower}) {
-        if (prefix.isEmpty) continue;
-        try {
-          final qs = await FirestoreReadHelper.getQuery(
-            FirebaseFirestore.instance
-                .collection('users')
-                .orderBy('displayName_lc')
-                .startAt([prefix]).endAt(['$prefix\uf8ff']).limit(40),
-            timeout: const Duration(seconds: 5),
-          );
-          for (final d in qs.docs) {
-            final hit = _userFromDoc(d.id, d.data());
-            if (hit != null && !people.any((p) => p.userId == hit.userId)) {
-              people.add(hit);
+      for (final field in ['displayName_lc', 'userName_lc']) {
+        for (final prefix in {query, rawLower}) {
+          if (prefix.isEmpty) continue;
+          try {
+            final qs = await FirestoreReadHelper.getQuery(
+              FirebaseFirestore.instance
+                  .collection('users')
+                  .orderBy(field)
+                  .startAt([prefix]).endAt(['$prefix\uf8ff']).limit(40),
+              timeout: const Duration(seconds: 5),
+            );
+            for (final d in qs.docs) {
+              userDocs[d.id] = d.data();
             }
-          }
-          anyIndexedHit = anyIndexedHit || people.isNotEmpty;
-        } catch (_) {}
+          } catch (_) {}
+        }
       }
-
-      // Fallback scan (still fast enough for small datasets)
-      if (!anyIndexedHit) {
+      try {
         final usersSnap = await FirestoreReadHelper.getQuery(
           FirebaseFirestore.instance.collection('users').limit(300),
           timeout: const Duration(seconds: 5),
         );
         for (final d in usersSnap.docs) {
-          final m = d.data();
-          final name =
-              (m['displayName'] ?? m['fullName'] ?? m['userName'] ?? '')
-                  .toString();
-          final handle = (m['userName'] ?? '').toString();
-          final bio = (m['bio'] ?? '').toString();
-          final hay = '${_norm(name)} ${_norm(handle)} ${_norm(bio)}';
-          if (hay.contains(query)) {
-            final hit = _userFromDoc(d.id, m);
-            if (hit != null) people.add(hit);
-          }
+          userDocs.putIfAbsent(d.id, () => d.data());
         }
-      }
+      } catch (_) {}
+      final scoredPeople = <(int, _UserHit)>[];
+      userDocs.forEach((id, m) {
+        final hit = _userFromDoc(id, m);
+        if (hit == null) return;
+        final score = searchScore(
+          query: raw,
+          name: hit.name,
+          fields: [
+            hit.handle,
+            hit.bio,
+            ...strings(m['expertiseTags']),
+            ...strings(m['interestTags']),
+            '${m['city'] ?? ''}',
+          ],
+          normalize: _norm,
+          expand: expand,
+        );
+        if (score > 0) scoredPeople.add((score, hit));
+      });
+      // Helpers first within the same rank: the app is for finding help.
+      scoredPeople.sort((x, y) {
+        final byScore = y.$1.compareTo(x.$1);
+        if (byScore != 0) return byScore;
+        return (y.$2.isHelper ? 1 : 0).compareTo(x.$2.isHelper ? 1 : 0);
+      });
+      final people = [for (final e in scoredPeople) e.$2];
 
-      // POSTS
+      // POSTS: the latest posts, every word in the text, author or tags.
       final posts = <_PostHit>[];
-      // A topic named in any language also finds posts tagged with its id
-      // ("logement" finds "Housing").
-      final postTerms = ValueLabels.topicSearchTerms(query, _norm);
       final postsSnap = await FirestoreReadHelper.getQuery(
         FirebaseFirestore.instance
             .collection('posts')
             .orderBy('timestamp', descending: true)
-            .limit(120),
+            .limit(200),
         timeout: const Duration(seconds: 5),
       );
 
@@ -171,15 +167,18 @@ class _SearchScreenState extends State<SearchScreen> {
         final userId = _extractPostUserId(m);
         if (SafetyService.instance.isBlocked(userId)) continue;
         if (SafetyService.instance.hidesPost(d.id, m)) continue;
-        final tags = (m['tags'] is List)
-            ? (m['tags'] as List).map((e) => e.toString()).toList()
-            : <String>[];
-
-        final hay =
-            '${_norm(content)} ${_norm(userName)} ${_norm(tags.join(" "))}';
-        if (postTerms.any(hay.contains)) {
+        final tags = strings(m['tags']);
+        final score = searchScore(
+          query: raw,
+          name: userName,
+          fields: [content, ...tags],
+          normalize: _norm,
+          expand: expand,
+        );
+        if (score > 0) {
           posts.add(_PostHit(
             id: d.id,
+            data: m,
             authorId: userId,
             authorName: userName,
             authorAvatar: userAvatar,
@@ -535,7 +534,19 @@ class _ResultsList extends StatelessWidget {
         children.add(
             _SectionHeader(tab == _Tab.all ? context.l10n.searchPosts : ''));
         for (final p in posts) {
-          children.add(_PostTile(hit: p));
+          children.add(Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: PostCard(
+              key: ValueKey(p.id),
+              postId: p.id,
+              data: p.data,
+              onOpenDetail: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => PostDetailScreen(postId: p.id),
+                ),
+              ),
+            ),
+          ));
         }
       } else if (tab == _Tab.posts) {
         children.add(const _EmptyState());
@@ -629,240 +640,6 @@ class _UserTile extends StatelessWidget {
             ),
           );
         },
-      ),
-    );
-  }
-}
-
-class _PostTile extends StatelessWidget {
-  final _PostHit hit;
-  const _PostTile({required this.hit});
-
-  String _ago(BuildContext context, dynamic ts) {
-    final dt = parseFirestoreTimestamp(ts);
-    return dt == null ? '' : AppFormat.timeAgo(context, dt);
-  }
-
-  // ---- Pull "**Something Post**" from first non-empty line
-  (String?, String) _extractBadgeAndBody(String raw) {
-    final lines = raw.split('\n');
-    int idx = 0;
-    while (idx < lines.length && lines[idx].trim().isEmpty) idx++;
-    if (idx >= lines.length) return (null, raw);
-
-    final first = lines[idx].trim();
-    final reg = RegExp(r'^\*\*(.+?)\*\*$'); // **Something**
-    final m = reg.firstMatch(first);
-    if (m != null && m.group(1) != null) {
-      final label = m.group(1)!.trim();
-      if (label.toLowerCase().endsWith(' post')) {
-        final rest = [...lines]..removeAt(idx);
-        if (idx < rest.length && rest[idx].trim().isEmpty) {
-          rest.removeAt(idx);
-        }
-        return (label, rest.join('\n').trimLeft());
-      }
-    }
-    return (null, raw);
-  }
-
-  // Simple markdown (**bold** only)
-  TextSpan _mdSpan(String text) {
-    const base = TextStyle(
-      fontSize: 15.5,
-      height: 1.35,
-      color: AppColors.text,
-    );
-    const strong = TextStyle(
-      fontSize: 15.5,
-      height: 1.35,
-      color: AppColors.text,
-      fontWeight: FontWeight.w700,
-    );
-
-    final spans = <TextSpan>[];
-    int i = 0;
-    while (i < text.length) {
-      final start = text.indexOf('**', i);
-      if (start == -1) {
-        spans.add(TextSpan(text: text.substring(i), style: base));
-        break;
-      }
-      if (start > i) {
-        spans.add(TextSpan(text: text.substring(i, start), style: base));
-      }
-      final end = text.indexOf('**', start + 2);
-      if (end == -1) {
-        spans.add(TextSpan(text: text.substring(start), style: base));
-        break;
-      }
-      spans.add(TextSpan(text: text.substring(start + 2, end), style: strong));
-      i = end + 2;
-    }
-    return TextSpan(children: spans, style: base);
-  }
-
-  Widget _postTypeBadge(String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppColors.primary.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: AppColors.primary.withOpacity(0.18)),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: AppColors.primary,
-          fontWeight: FontWeight.w700,
-          fontSize: 13,
-          letterSpacing: 0.2,
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final (maybeBadge, body) = _extractBadgeAndBody(hit.content);
-    final badgeLabel = maybeBadge ?? context.l10n.postTypeQuick;
-    final contentSpan = _mdSpan(body);
-
-    void openDetail() {
-      Navigator.of(context, rootNavigator: true).push(
-        MaterialPageRoute(
-          builder: (_) => FullScreenBackGesture(
-            child: PostDetailScreen(postId: hit.id),
-          ),
-        ),
-      );
-    }
-
-    void openProfile() {
-      if (hit.authorId.isEmpty) return;
-      Navigator.of(context, rootNavigator: true).push(
-        MaterialPageRoute(
-          builder: (_) => FullScreenBackGesture(
-            child: ProfileScreen(userID: hit.authorId),
-          ),
-        ),
-      );
-    }
-
-    return Card(
-      color: AppColors.card,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: AppColors.border),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: openDetail,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header (avatar + name + time)
-              Row(
-                children: [
-                  InkWell(
-                    borderRadius: BorderRadius.circular(18),
-                    onTap: openProfile,
-                    child: InitialsAvatar(
-                        url: hit.authorAvatar,
-                        name: hit.authorName,
-                        radius: 18),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(6),
-                      onTap: openProfile,
-                      child: Text(
-                        hit.authorName,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.text,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _ago(context, hit.ts),
-                    style:
-                        const TextStyle(fontSize: 13, color: AppColors.muted),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-
-              // Badge + content (matching Profile/Home style)
-              _postTypeBadge(badgeLabel),
-              const SizedBox(height: 8),
-              RichText(
-                text: contentSpan,
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-              ),
-
-              const SizedBox(height: 6),
-
-              // NEW: explicit CTA so users know there is more
-              TextButton(
-                onPressed: openDetail,
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  foregroundColor: AppColors.primary,
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      context.l10n.searchViewFullPost,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    SizedBox(width: 4),
-                    Icon(Icons.arrow_forward_ios_rounded, size: 13),
-                  ],
-                ),
-              ),
-
-              // Tags
-              if (hit.tags.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: hit.tags
-                      .map(
-                        (t) => Chip(
-                          label: Text(
-                            t,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.text,
-                            ),
-                          ),
-                          backgroundColor: AppColors.button,
-                          shape: const StadiumBorder(
-                            side: BorderSide(color: AppColors.border),
-                          ),
-                        ),
-                      )
-                      .toList(),
-                ),
-              ],
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -978,6 +755,7 @@ class _UserHit {
 
 class _PostHit {
   final String id;
+  final Map<String, dynamic> data;
   final String authorId;
   final String authorName;
   final String authorAvatar;
@@ -986,6 +764,7 @@ class _PostHit {
   final dynamic ts;
   _PostHit({
     required this.id,
+    required this.data,
     required this.authorId,
     required this.authorName,
     required this.authorAvatar,
