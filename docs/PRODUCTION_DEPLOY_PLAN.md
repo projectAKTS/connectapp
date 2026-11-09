@@ -265,8 +265,9 @@ Founder:
 - Founder's test 2026-11-08: unanswered calls show the note and the push.
   Founder: a declined call showed nothing in the chat. Now a declined call
   also leaves the note, silent (`silent: true`: no push, no unread), as
-  messaging apps show it. Staging smoke 31/31. Production: the same two
-  functions again:
+  messaging apps show it. Staging smoke 31/31. Production: deployed by the
+  founder 2026-11-08; verified `ACTIVE`, revisions `oncallinviteupdated-00010-diy`,
+  `onchatmessagecreated-00041-lar`, no errors. Command used:
   ```bash
   cd /Users/yakup/connectapp && git switch feat/missed-call-note && git pull && firebase deploy --only functions:onCallInviteUpdated,functions:onChatMessageCreated --project connectapp-278b4
   ```
