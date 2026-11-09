@@ -282,3 +282,17 @@ Founder:
 - `6665fe1`: Android logs why a background call push did not ring.
 - App-only. iOS build uploaded to TestFlight; no server change.
 
+
+## Posts, Comments, Search and UI Polish (2026-11-09, branch `feat/missed-call-note`)
+
+- `23fb5f0` comments (screen, counts, author notification, safe rules),
+  `e9224ce` profile post list, `6fafdb9` search, `9c6ba4f` messages/chat polish.
+- Staging: rules, `onPostCommentCreated`, `onPostCommentDeleted`,
+  `onChatMessageCreated` deployed; smoke 31/31; checked on the emulator.
+- Full Flutter suite: 2532 passed, the 16 known failures.
+
+Founder (production), from the `feat/missed-call-note` checkout:
+```bash
+firebase deploy --only firestore:rules,functions:onPostCommentCreated,functions:onPostCommentDeleted,functions:onChatMessageCreated --project connectapp-278b4
+```
+Then a new TestFlight build (not uploaded yet).
