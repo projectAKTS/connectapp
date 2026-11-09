@@ -251,10 +251,12 @@ Founder:
   app to both iPhones first, then deploy the functions.
 
 Founder:
-1. Install the new TestFlight build on both iPhones and check: an
-   unanswered call leaves "Missed call" in the chat with a notification;
-   opening the chat clears its badge.
+1. Install the new TestFlight build on both iPhones (nothing new shows yet:
+   both changes need the functions).
 2. Then, from the `feat/missed-call-note` checkout:
    ```bash
    firebase deploy --only functions:onCallInviteUpdated,functions:onChatMessageCreated --project connectapp-278b4
    ```
+3. Test: an unanswered call leaves "Missed call" in the chat with a
+   notification; a new message shows a badge on that chat; opening the chat
+   clears it.
