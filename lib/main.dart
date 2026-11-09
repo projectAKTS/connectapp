@@ -11,6 +11,7 @@ import 'package:connect_app/screens/age/age_gate_screens.dart';
 import 'package:connect_app/widgets/telemetry_consent_prompt.dart';
 import 'package:connect_app/services/app_prefs.dart';
 import 'package:connect_app/services/locale_controller.dart';
+import 'package:connect_app/services/user_doc_sign_in_patch.dart';
 
 // Firebase
 import 'package:firebase_core/firebase_core.dart';
@@ -430,57 +431,14 @@ class _AuthGateState extends State<AuthGate> {
         ref,
         timeout: const Duration(seconds: 5),
       );
-      final data = snap.data() ?? const <String, dynamic>{};
-      final authName = (user.displayName ?? '').trim();
-      final existingName =
-          (data['displayName'] ?? data['fullName'] ?? '').toString().trim();
-      final resolvedName = existingName.isNotEmpty
-          ? existingName
-          : (authName.isNotEmpty ? authName : 'User');
-
-      final patch = <String, dynamic>{
-        // Lets the server write push notifications in the app's language.
-        'appLocale': LocaleController.instance.effective.languageCode,
-        'displayName': resolvedName,
-        'displayName_lc': resolvedName.toLowerCase(),
-        'fullName': resolvedName,
-        'fullNameLower': resolvedName.toLowerCase(),
-      };
-
-      if (!snap.exists) {
-        patch.addAll({
-          'bio': '',
-          'followers': [],
-          'following': [],
-          'postsCount': 0,
-          'profilePicture': '',
-          'createdAt': FieldValue.serverTimestamp(),
-          'xpPoints': 0,
-          'badges': [],
-          'postCount': 0,
-          'commentCount': 0,
-          'helpfulMarks': 0,
-          'dailyLoginStreak': 0,
-          'postingStreak': 0,
-          'lastLoginDate': null,
-          'lastPostDate': null,
-          'referralCount': 0,
-          'categoryPosts': {
-            'Career': 0,
-            'Travel': 0,
-            'Finance': 0,
-            'Technology': 0,
-            'Health': 0,
-          },
-          'activePerks': {
-            'priorityPostBoost': null,
-            'profileHighlight': null,
-            'commentBoost': null,
-          },
-          'premiumStatus': 'none',
-          'trialUsed': false,
-        });
-      }
+      final patch = userDocSignInPatch(
+        exists: snap.exists,
+        fromServer:
+            !snap.metadata.isFromCache && !snap.metadata.hasPendingWrites,
+        data: snap.data() ?? const <String, dynamic>{},
+        authName: user.displayName ?? '',
+        appLocale: LocaleController.instance.effective.languageCode,
+      );
 
       await ref
           .set(patch, SetOptions(merge: true))

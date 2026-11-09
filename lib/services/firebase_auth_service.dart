@@ -160,7 +160,9 @@ class FirebaseAuthService {
       final creds = await _auth.signInWithCredential(credential);
       final user = creds.user;
 
-      if (user != null) {
+      // Only a new account gets the starting profile: on a returning user it
+      // would reset the photo, bio, followers and counters.
+      if (user != null && (creds.additionalUserInfo?.isNewUser ?? false)) {
         await initializeUserInFirestore(
           user,
           user.displayName ?? 'Anonymous',
@@ -235,11 +237,14 @@ class FirebaseAuthService {
           await user.updateDisplayName(resolvedName);
         }
 
-        await initializeUserInFirestore(
-          user,
-          resolvedName,
-          email,
-        );
+        // Only a new account gets the starting profile (see Google above).
+        if (creds.additionalUserInfo?.isNewUser ?? false) {
+          await initializeUserInFirestore(
+            user,
+            resolvedName,
+            email,
+          );
+        }
       }
 
       print('✅ ----- APPLE SIGN-IN SUCCESS -----');
