@@ -295,4 +295,6 @@ Founder (production), from the `feat/missed-call-note` checkout:
 ```bash
 firebase deploy --only firestore:rules,functions:onPostCommentCreated,functions:onPostCommentDeleted,functions:onChatMessageCreated --project connectapp-278b4
 ```
-Then a new TestFlight build (not uploaded yet).
+[x] Done by the founder 2026-11-09: rules released; `onPostCommentCreated-00001`,
+`onPostCommentDeleted-00001`, `onChatMessageCreated-00042` ACTIVE, no errors.
+Then a new TestFlight build.
