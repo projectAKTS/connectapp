@@ -210,8 +210,8 @@ class _ChatScreenState extends State<ChatScreen> {
             .limit(50),
         timeout: const Duration(seconds: 5),
       );
-      final messages = _toMessages(snap);
       if (!mounted) return;
+      final messages = _toMessages(snap);
       setState(() => _cachedMessages = messages);
       DiagnosticService.logChat('chat_messages_initial_done', uid: _me, meta: {
         'chatId': _chatId,
@@ -332,6 +332,14 @@ class _ChatScreenState extends State<ChatScreen> {
             size: (m['size'] ?? 0) as int,
             uri: (m['uri'] ?? '') as String,
             mimeType: (m['mime'] ?? '') as String,
+          );
+        // The server writes this note in English; show it in the reader's language.
+        case 'missed_call':
+          return types.TextMessage(
+            id: d.id,
+            author: author,
+            createdAt: createdAt,
+            text: context.l10n.messageMissedCall,
           );
         default:
           return types.TextMessage(

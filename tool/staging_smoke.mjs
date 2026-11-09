@@ -95,6 +95,29 @@ r = await create(B, "callInvites", `inv_${run}`, { fromUid: B.uid, fromName: "Sm
   toName: "Smoke Helper", channel: `ch_${run}`, isVideo: false, status: "ringing", type: "call_invite" });
 check("call invite created (adults)", r.status === 200, `status ${r.status}`);
 
+// Unanswered call: the caller hangs up while it rings, the callee gets a note.
+const missedNotes = async () => ((await get(A, `chats/${chat}/messages?pageSize=50`)).json.documents || [])
+  .filter((d) => d.fields?.type?.stringValue === "missed_call");
+const unreadA = async () => Number((await get(A, `users/${A.uid}`)).json.fields?.unreadMessagesCount?.integerValue || 0);
+await sleep(8000); // let the earlier messages finish counting
+const unreadBefore = await unreadA();
+await create(B, "callInvites", `inv_missed_${run}`, { fromUid: B.uid, fromName: "Smoke Seeker", toUid: A.uid,
+  toName: "Smoke Helper", channel: `ch_missed_${run}`, isVideo: true, status: "ringing", type: "call_invite" });
+await sleep(2000);
+r = await patch(B, `callInvites/inv_missed_${run}`, { status: "cancelled", endReason: "caller_cancelled" });
+check("caller cancels a ringing call", r.status === 200, `status ${r.status}`);
+check("missed call: a note is added to the chat", await waitFor(async () => (await missedNotes()).length === 1));
+const note = (await missedNotes())[0]?.fields || {};
+check("missed call: note is from the caller, video, system",
+  note.authorId?.stringValue === B.uid && note.isVideo?.booleanValue === true && note.system?.booleanValue === true);
+check("missed call: the callee has it unread", await waitFor(async () => (await unreadA()) === unreadBefore + 1), `before ${unreadBefore}, after ${await unreadA()}`);
+await create(B, "callInvites", `inv_declined_${run}`, { fromUid: B.uid, fromName: "Smoke Seeker", toUid: A.uid,
+  toName: "Smoke Helper", channel: `ch_declined_${run}`, isVideo: false, status: "ringing", type: "call_invite" });
+await sleep(2000);
+await patch(A, `callInvites/inv_declined_${run}`, { status: "declined", declinedBy: A.uid });
+await sleep(8000);
+check("declined call: no missed-call note", (await missedNotes()).length === 1);
+
 r = await callable(B, "getAgoraRtcToken", { channelName: `ch_${run}`, uid: 1234, role: "publisher" });
 const appId = r.json?.result?.appId;
 check("Agora token from staging app (not production)", !!(r.json?.result?.token && appId && appId !== PROD_AGORA),

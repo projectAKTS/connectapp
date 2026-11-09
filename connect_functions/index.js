@@ -1484,6 +1484,32 @@ const {
   isAnsweredElsewhereTransition,
 } = require("./call_invites/answered_elsewhere");
 const { declinedElsewhereFcmRecipients } = require("./call_invites/declined_elsewhere");
+const { missedCallNoteFor } = require("./call_invites/missed_call_note");
+
+/** Adds the "Missed call" note to the chat once; its chat push tells the callee. */
+async function writeMissedCallNote(inviteRef, inviteId, before, after) {
+  const note = missedCallNoteFor(before, after);
+  if (!note) return;
+  try {
+    const claimed = await claimOnce(db, inviteRef, "missedCallNoteAt", () =>
+      admin.firestore.FieldValue.serverTimestamp(),
+    );
+    if (!claimed) return;
+    await db.collection("chats").doc(note.chatId).collection("messages").add({
+      authorId: note.callerUid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      type: "missed_call",
+      text: note.text,
+      system: true,
+      callStatus: "missed",
+      isVideo: note.isVideo,
+      inviteId: `${inviteId}`,
+    });
+    console.log("missed call note written", { identifierPresent: Boolean(inviteId) });
+  } catch (e) {
+    console.error("missed call note failed:", { error: `${e}` });
+  }
+}
 
 /** Stops the callee's other devices ringing once one device has accepted. */
 async function sendAnsweredElsewherePush(inviteId, before, after) {
@@ -1534,6 +1560,7 @@ exports.onCallInviteUpdated = onDocumentUpdated(
       return;
     }
     if (!TERMINAL_CALL_INVITE_STATUSES.has(afterStatus)) return;
+    await writeMissedCallNote(event.data.after.ref, inviteId, before, after);
 
     const channel = `${after.channel || before.channel || ""}`.trim();
     if (!channel) return;
@@ -1781,8 +1808,9 @@ exports.onChatMessageCreated = onDocumentCreated(
     );
 
     for (const uid of recipients) {
-      const body =
-        messageText || pushText(recipientLocales[uid], "sentYouAMessage");
+      const body = lastMessageType === "missed_call"
+        ? pushText(recipientLocales[uid], m.isVideo ? "missedVideoCall" : "missedAudioCall")
+        : messageText || pushText(recipientLocales[uid], "sentYouAMessage");
       const tokenSets = await getUserPushTokenSets(uid);
       const tokens = tokenSets.fcmAll;
       let fcmDelivered = false;
