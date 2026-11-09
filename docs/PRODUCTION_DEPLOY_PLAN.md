@@ -253,7 +253,9 @@ Founder:
 Founder:
 1. Install the new TestFlight build on both iPhones (nothing new shows yet:
    both changes need the functions).
-2. Then, from the `feat/missed-call-note` checkout:
+2. [x] Done by the founder 2026-11-08; verified `ACTIVE`, revisions
+   `oncallinviteupdated-00009-bat`, `onchatmessagecreated-00040-haz`, no errors.
+   From the `feat/missed-call-note` checkout:
    ```bash
    firebase deploy --only functions:onCallInviteUpdated,functions:onChatMessageCreated --project connectapp-278b4
    ```
