@@ -1918,4 +1918,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get commentDeleted => 'Comment deleted';
+
+  @override
+  String get profilePosts => 'Posts';
 }

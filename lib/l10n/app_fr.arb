@@ -582,5 +582,6 @@
   "commentSend": "Envoyer",
   "commentDelete": "Supprimer le commentaire",
   "commentReport": "Signaler le commentaire",
-  "commentDeleted": "Commentaire supprimé"
+  "commentDeleted": "Commentaire supprimé",
+  "profilePosts": "Publications"
 }

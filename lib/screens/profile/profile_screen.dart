@@ -16,6 +16,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import 'package:connect_app/utils/time_utils.dart';
 import '../posts/post_detail_screen.dart';
+import 'package:connect_app/widgets/post_card.dart';
 import 'edit_profile_screen.dart';
 import 'package:connect_app/services/call_service.dart';
 import 'package:connect_app/theme/tokens.dart';
@@ -35,7 +36,6 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final ScrollController _scrollController = ScrollController();
   late final Stream<QuerySnapshot> _postsStream;
-  late final PageController _pageController;
 
   Map<String, dynamic>? userData;
   bool isLoading = true;
@@ -49,38 +49,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // ✅ prevent multiple pops (fixes _debugLocked)
   bool _popQueued = false;
-
-  // ---- Filters (match Create Post templates) ----
-  // label -> slug
-  final Map<String, String?> _filters = const {
-    'All': null,
-    'Quick': 'quick',
-    'Experience': 'experience',
-    'Advice Request': 'advice',
-    'How-To Guide': 'how-to',
-    'Lessons Learned': 'lessons',
-  };
-  String _selectedFilterLabel = 'All';
-
-  /// The filter keys above are ids; this is what the chip shows.
-  String _filterLabel(BuildContext context, String key) {
-    final l = context.l10n;
-    switch (key) {
-      case 'All':
-        return l.postFilterAll;
-      case 'Quick':
-        return l.postFilterQuick;
-      case 'Experience':
-        return l.postFilterExperience;
-      case 'Advice Request':
-        return l.postFilterAdvice;
-      case 'How-To Guide':
-        return l.postFilterHowTo;
-      case 'Lessons Learned':
-        return l.postFilterLessons;
-    }
-    return key;
-  }
 
   bool _bioExpanded = false;
 
@@ -103,6 +71,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
   List<String> _stringList(dynamic v) =>
       (v is List) ? v.map((e) => e.toString()).toList() : const <String>[];
 
+  /// Newest first; others do not see posts hidden by reports or the photo check.
+  List<QueryDocumentSnapshot> _visiblePosts(List<QueryDocumentSnapshot> docs) {
+    final out = docs
+        .where((d) =>
+            isCurrentUser ||
+            !SafetyService.instance
+                .hidesPost(d.id, d.data() as Map<String, dynamic>))
+        .toList();
+    DateTime at(QueryDocumentSnapshot d) =>
+        parseFirestoreTimestamp(
+            (d.data() as Map<String, dynamic>)['timestamp']) ??
+        DateTime.fromMillisecondsSinceEpoch(0);
+    out.sort((a, b) => at(b).compareTo(at(a)));
+    return out;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -116,13 +100,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         .where('userID', isEqualTo: widget.userID)
         .snapshots();
 
-    _pageController = PageController(viewportFraction: 0.88);
   }
 
   @override
   void dispose() {
     _scrollController.dispose();
-    _pageController.dispose();
     super.dispose();
   }
 
@@ -425,107 +407,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return const AssetImage('assets/default_profile.png');
   }
 
-  // ====== Parsing helpers ======
-  String? _firstBoldLineLabel(String content) {
-    final lines = content.split('\n');
-    int idx = 0;
-    while (idx < lines.length && lines[idx].trim().isEmpty) idx++;
-    if (idx >= lines.length) return null;
-    final m = RegExp(r'^\*\*(.+?)\*\*$').firstMatch(lines[idx].trim());
-    return m?.group(1);
-  }
-
-  (String slug, String badgeText, String body) _classifyPost(
-      Map<String, dynamic> map) {
-    final rawContent = (map['content'] ?? '').toString();
-
-    final lblFromContent = _firstBoldLineLabel(rawContent);
-    if (lblFromContent != null &&
-        lblFromContent.toLowerCase().endsWith(' post')) {
-      final lower = lblFromContent.toLowerCase();
-
-      String slug;
-      if (lower.contains('advice')) {
-        slug = 'advice';
-      } else if (lower.contains('how')) {
-        slug = 'how-to';
-      } else if (lower.contains('lesson')) {
-        slug = 'lessons';
-      } else if (lower.contains('experience')) {
-        slug = 'experience';
-      } else if (lower.contains('quick')) {
-        slug = 'quick';
-      } else {
-        slug = 'quick';
-      }
-
-      final lines = rawContent.split('\n');
-      int idx = 0;
-      while (idx < lines.length && lines[idx].trim().isEmpty) idx++;
-      if (idx < lines.length) {
-        lines.removeAt(idx);
-        if (idx < lines.length && lines[idx].trim().isEmpty) {
-          lines.removeAt(idx);
-        }
-      }
-      final body = lines.join('\n').trimLeft();
-      return (slug, lblFromContent, body);
-    }
-
-    return ('quick', 'Quick Post', rawContent);
-  }
-
-  TextSpan _mdSpan(String text) {
-    const base = TextStyle(fontSize: 15, height: 1.35, color: AppColors.text);
-    const strong = TextStyle(
-      fontSize: 15,
-      height: 1.35,
-      color: AppColors.text,
-      fontWeight: FontWeight.w700,
-    );
-
-    final spans = <TextSpan>[];
-    int i = 0;
-    while (i < text.length) {
-      final start = text.indexOf('**', i);
-      if (start == -1) {
-        spans.add(TextSpan(text: text.substring(i), style: base));
-        break;
-      }
-      if (start > i) {
-        spans.add(TextSpan(text: text.substring(i, start), style: base));
-      }
-      final end = text.indexOf('**', start + 2);
-      if (end == -1) {
-        spans.add(TextSpan(text: text.substring(start), style: base));
-        break;
-      }
-      spans.add(TextSpan(text: text.substring(start + 2, end), style: strong));
-      i = end + 2;
-    }
-    return TextSpan(children: spans, style: base);
-  }
-
-  Widget _postTypeBadge(String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppColors.primary.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: AppColors.primary.withOpacity(0.18)),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: AppColors.primary,
-          fontWeight: FontWeight.w700,
-          fontSize: 13,
-          letterSpacing: 0.2,
-        ),
-      ),
-    );
-  }
-
   // ========= Account row (new) =========
   Widget _accountRow({
     required IconData icon,
@@ -677,7 +558,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final badges = _stringList(userData!['badges']);
     final streakDays = _i(userData!['streakDays']);
     final xpPoints = _i(userData!['xpPoints']);
-    final helpfulMarks = _i(userData!['helpfulMarks']);
     final ratingCount = _i(userData!['ratingCount']);
     final rating = (userData!['rating'] is num)
         ? (userData!['rating'] as num).toDouble()
@@ -859,17 +739,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(height: 16),
 
                   // Stats
-                  _softCard(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
-                    child: _StatsStrip(
-                      streakText: context.l10n.profileStreakDays(streakDays),
-                      xpText: '$xpPoints',
-                      helpfulText: '$helpfulMarks',
-                      ratingText: ratingCount > 0
-                          ? '${rating.toStringAsFixed(1)} ($ratingCount)'
-                          : null,
-                    ),
+                  StreamBuilder<QuerySnapshot>(
+                    stream: _postsStream,
+                    builder: (context, snap) {
+                      // Helpful marks are the post likes; nothing keeps the
+                      // profile's own counter in sync.
+                      final helpful = _visiblePosts(snap.data?.docs ?? [])
+                          .fold<int>(
+                              0,
+                              (total, d) =>
+                                  total +
+                                  _i((d.data() as Map<String, dynamic>)['likes']));
+                      return _softCard(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        child: _StatsStrip(
+                          streakText:
+                              context.l10n.profileStreakDays(streakDays),
+                          xpText: '$xpPoints',
+                          helpfulText: '$helpful',
+                          ratingText: ratingCount > 0
+                              ? '${rating.toStringAsFixed(1)} ($ratingCount)'
+                              : null,
+                        ),
+                      );
+                    },
                   ),
 
                   if (ratingCount > 0) ...[
@@ -1178,239 +1072,47 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ],
 
                   const SizedBox(height: 16),
-                  _sectionTitle(context.l10n.profileFeaturedPosts),
-                  SizedBox(
-                    height: 210,
-                    child: StreamBuilder<QuerySnapshot>(
-                      stream: _postsStream,
-                      builder: (ctx, snap) {
-                        if (snap.connectionState == ConnectionState.waiting) {
-                          return const Center(
-                              child: CircularProgressIndicator());
-                        }
-                        if (snap.hasError) {
-                          return Center(
-                            child: Text(context.l10n.profileLoadError,
-                                style: const TextStyle(color: Colors.red)),
-                          );
-                        }
-
-                        final all = (snap.data?.docs ?? [])
-                            .where((d) =>
-                                isCurrentUser ||
-                                !SafetyService.instance.hidesPost(
-                                    d.id, d.data() as Map<String, dynamic>))
-                            .toList();
-                        all.sort((a, b) {
-                          final aTs = parseFirestoreTimestamp(a['timestamp']) ??
-                              DateTime.fromMillisecondsSinceEpoch(0);
-                          final bTs = parseFirestoreTimestamp(b['timestamp']) ??
-                              DateTime.fromMillisecondsSinceEpoch(0);
-                          return bTs.compareTo(aTs);
-                        });
-
-                        final featured = all.take(3).toList();
-                        if (featured.isEmpty) {
-                          return Center(
-                            child: Text(context.l10n.profileNoFeaturedPosts,
-                                style: TextStyle(color: AppColors.muted)),
-                          );
-                        }
-
-                        return PageView.builder(
-                          controller: _pageController,
-                          itemCount: featured.length,
-                          padEnds: false,
-                          physics: const BouncingScrollPhysics(),
-                          itemBuilder: (c, i) {
-                            final doc = featured[i];
-                            final data = doc.data() as Map<String, dynamic>;
-                            final date =
-                                parseFirestoreTimestamp(data['timestamp']);
-                            final (_, badgeText, body) = _classifyPost(data);
-
-                            return Padding(
-                              padding: EdgeInsets.only(
-                                left: i == 0 ? 0 : 10,
-                                right: i == featured.length - 1 ? 0 : 10,
-                              ),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(16),
-                                onTap: () {
-                                  Navigator.of(context).push(
-                                    CupertinoPageRoute(
-                                        builder: (_) =>
-                                            PostDetailScreen(postId: doc.id)),
-                                  );
-                                },
-                                child: _softCard(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      _postTypeBadge(badgeText),
-                                      const SizedBox(height: 8),
-                                      Expanded(
-                                        child: RichText(
-                                          text: _mdSpan(body),
-                                          maxLines: 4,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                      if (date != null)
-                                        Text(
-                                          AppFormat.date(context, date),
-                                          style: const TextStyle(
-                                              fontSize: 12,
-                                              color: AppColors.muted),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        );
-                      },
-                    ),
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  // Filters
-                  SizedBox(
-                    height: 44,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: _filters.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 8),
-                      itemBuilder: (ctx, i) {
-                        final label = _filters.keys.elementAt(i);
-                        final selected = (label == _selectedFilterLabel);
-                        return ChoiceChip(
-                          key: ValueKey(label),
-                          label: Text(
-                            _filterLabel(context, label),
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: selected
-                                  ? AppColors.text
-                                  : AppColors.text.withOpacity(0.85),
-                            ),
-                          ),
-                          selected: selected,
-                          onSelected: (_) =>
-                              setState(() => _selectedFilterLabel = label),
-                          selectedColor: AppColors.button,
-                          backgroundColor: AppColors.card,
-                          side: const BorderSide(color: AppColors.border),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
-                        );
-                      },
-                    ),
-                  ),
-
-                  const SizedBox(height: 16),
-                  _sectionTitle(context.l10n.profileRecentActivity),
-
+                  _sectionTitle(context.l10n.profilePosts),
                   StreamBuilder<QuerySnapshot>(
                     stream: _postsStream,
                     builder: (ctx, snap) {
-                      if (snap.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
                       if (snap.hasError) {
                         return Center(
                           child: Text(context.l10n.profileLoadError,
                               style: const TextStyle(color: Colors.red)),
                         );
                       }
-
-                      var docs = (snap.data?.docs ?? []).toList()
-                        ..sort((a, b) {
-                          final aTs = parseFirestoreTimestamp(a['timestamp']) ??
-                              DateTime.fromMillisecondsSinceEpoch(0);
-                          final bTs = parseFirestoreTimestamp(b['timestamp']) ??
-                              DateTime.fromMillisecondsSinceEpoch(0);
-                          return bTs.compareTo(aTs);
-                        });
-
-                      final selectedSlug = _filters[_selectedFilterLabel];
-
-                      final items = docs.map((doc) {
-                        final map = doc.data() as Map<String, dynamic>;
-                        final tuple = _classifyPost(map);
-                        return (
-                          doc,
-                          tuple.$1,
-                          tuple.$2,
-                          tuple.$3,
-                          parseFirestoreTimestamp(map['timestamp'])
+                      if (!snap.hasData) {
+                        return const Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Center(child: CircularProgressIndicator()),
                         );
-                      }).toList();
-
-                      final filtered = selectedSlug == null
-                          ? items
-                          : items.where((e) => e.$2 == selectedSlug).toList();
-
-                      if (filtered.isEmpty) {
+                      }
+                      final docs = _visiblePosts(snap.data!.docs);
+                      if (docs.isEmpty) {
                         return Padding(
-                          padding: EdgeInsets.symmetric(vertical: 24),
+                          padding: const EdgeInsets.symmetric(vertical: 24),
                           child: Center(
                             child: Text(context.l10n.profileNoActivity,
-                                style: TextStyle(color: AppColors.muted)),
+                                style: const TextStyle(color: AppColors.muted)),
                           ),
                         );
                       }
-
-                      return ListView.separated(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: filtered.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 12),
-                        itemBuilder: (c, i) {
-                          final row = filtered[i];
-                          final doc = row.$1;
-                          final badgeText = row.$3;
-                          final body = row.$4;
-                          final dt = row.$5;
-
-                          return InkWell(
-                            borderRadius: BorderRadius.circular(16),
-                            onTap: () {
-                              Navigator.of(context).push(
+                      return Column(
+                        children: [
+                          for (final doc in docs)
+                            PostCard(
+                              key: ValueKey(doc.id),
+                              postId: doc.id,
+                              data: doc.data() as Map<String, dynamic>,
+                              onOpenDetail: () => Navigator.of(context).push(
                                 CupertinoPageRoute(
-                                    builder: (_) =>
-                                        PostDetailScreen(postId: doc.id)),
-                              );
-                            },
-                            child: _softCard(
-                              padding:
-                                  const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  _postTypeBadge(badgeText),
-                                  const SizedBox(height: 8),
-                                  RichText(
-                                    text: _mdSpan(body),
-                                    maxLines: 8,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  if (dt != null) ...[
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      AppFormat.date(context, dt),
-                                      style: const TextStyle(
-                                          fontSize: 12, color: AppColors.muted),
-                                    ),
-                                  ],
-                                ],
+                                  builder: (_) =>
+                                      PostDetailScreen(postId: doc.id),
+                                ),
                               ),
                             ),
-                          );
-                        },
+                        ],
                       );
                     },
                   ),

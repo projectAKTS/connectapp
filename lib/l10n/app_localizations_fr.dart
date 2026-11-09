@@ -1961,4 +1961,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get commentDeleted => 'Commentaire supprimé';
+
+  @override
+  String get profilePosts => 'Publications';
 }

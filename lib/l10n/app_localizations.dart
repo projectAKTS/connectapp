@@ -3595,6 +3595,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Comment deleted'**
   String get commentDeleted;
+
+  /// No description provided for @profilePosts.
+  ///
+  /// In en, this message translates to:
+  /// **'Posts'**
+  String get profilePosts;
 }
 
 class _AppLocalizationsDelegate
