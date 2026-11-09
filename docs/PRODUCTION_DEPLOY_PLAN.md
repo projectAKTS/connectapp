@@ -225,3 +225,36 @@ Founder:
 - iOS build 1.0.2 (`202611062156`) uploaded from the branch for the
   founder's iPhone test. Merge into `call-v2` only after that test.
 - Restore point if needed: tag `stable-calls-2026-11-07`.
+- `76b9278` fixes two cases where Flutter, not PushKit, presents CallKit (the
+  Firestore invite arrives 1–4 s before the VoIP push): the screen now waits
+  for the CallKit call to be listed, and a banner Decline with empty plugin
+  data uses the call AppDelegate recorded. Build `202611081451`.
+- [x] Founder's iPhone test 2026-11-08 (build `202611081451`): in-app screen
+  on all 3 foreground calls, Accept and Decline from it, banner Accept in the
+  background, banner Decline. Production invites confirmed `declined`.
+  Merged into `call-v2`; tag `stable-calls-2026-11-08`.
+
+## Missed-Call Note and Per-Chat Unread Fix (2026-11-08, branch `feat/missed-call-note`)
+
+- `f1b166e`: a call that ends unanswered (ring timeout, or the caller hangs
+  up while it rings) adds a system `missed_call` message from the caller to
+  the chat, once per invite (`missedCallNoteAt`). The normal chat push then
+  shows "<caller>: Missed audio/video call" in the callee's language. None
+  for a decline, an accepted call, or a blocked caller.
+- `69a8cbf`: per-chat unread counts were written as literal
+  `unreadBy.<uid>` fields (`set` with merge does not read dots), so the
+  chat list's unread badges never showed. Server and app now write the
+  `unreadBy` map.
+- Staging: both functions deployed; `node tool/staging_smoke.mjs` 30/30.
+- **Order matters.** The old app clears unread with the literal field, so
+  with the new server its per-chat badges would never clear. Ship the new
+  app to both iPhones first, then deploy the functions.
+
+Founder:
+1. Install the new TestFlight build on both iPhones and check: an
+   unanswered call leaves "Missed call" in the chat with a notification;
+   opening the chat clears its badge.
+2. Then, from the `feat/missed-call-note` checkout:
+   ```bash
+   firebase deploy --only functions:onCallInviteUpdated,functions:onChatMessageCreated --project connectapp-278b4
+   ```
