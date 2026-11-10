@@ -2020,7 +2020,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get commonRemove => 'Retirer';
 
   @override
-  String get profileTabMedia => 'Photos et vidéos';
+  String get profileTabMedia => 'Médias';
 
   @override
   String get profileNoMedia => 'Aucune photo ni vidéo pour l’instant.';
@@ -2037,5 +2037,20 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String profileSpeaks(String languages) {
     return 'Parle $languages';
+  }
+
+  @override
+  String get profileNoReviews =>
+      'Aucun avis pour l’instant. Les avis apparaissent ici après les séances réservées.';
+
+  @override
+  String profileReviewsCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count avis',
+      one: '1 avis',
+    );
+    return '$_temp0';
   }
 }

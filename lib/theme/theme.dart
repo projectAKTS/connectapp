@@ -1,3 +1,4 @@
+import 'package:connect_app/navigation/swipe_back.dart';
 import 'package:flutter/material.dart';
 import 'tokens.dart';
 
@@ -37,6 +38,11 @@ ThemeData buildAppTheme() {
   return ThemeData(
     useMaterial3: true,
     fontFamily: family,
+    // Swipe right anywhere to go back, on every page and platform.
+    pageTransitionsTheme: const PageTransitionsTheme(builders: {
+      TargetPlatform.iOS: SwipeBackPageTransitionsBuilder(),
+      TargetPlatform.android: SwipeBackPageTransitionsBuilder(),
+    }),
 
     // === COLORS ===
     scaffoldBackgroundColor: AppColors.canvas,

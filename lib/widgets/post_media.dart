@@ -25,16 +25,35 @@ class PostPhotos extends StatefulWidget {
 
 class _PostPhotosState extends State<PostPhotos> {
   int _index = 0;
+  int? _decodeWidth;
+
+  /// Decoded at the size shown, not the 1600px upload: decoding full
+  /// photos while swiping is what made the carousel stutter.
+  ImageProvider _provider(int i) => ResizeImage.resizeIfNeeded(
+      _decodeWidth, null, NetworkImage(widget.urls[i]));
+
+  void _warm(int width) {
+    if (_decodeWidth == width) return;
+    _decodeWidth = width;
+    // Load every photo now so each swipe lands on a ready picture.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      for (var i = 0; i < widget.urls.length; i++) {
+        precacheImage(_provider(i), context, onError: (_, __) {});
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final urls = widget.urls;
     Widget photo(int i) => GestureDetector(
           onTap: () => openImageViewer(context, urls: urls, initialIndex: i),
-          child: Image.network(
-            urls[i],
+          child: Image(
+            image: _provider(i),
             fit: BoxFit.cover,
             width: double.infinity,
+            gaplessPlayback: true,
             loadingBuilder: (c, w, p) =>
                 p == null ? w : const ColoredBox(color: AppColors.button),
             errorBuilder: (_, __, ___) => const ColoredBox(
@@ -51,33 +70,38 @@ class _PostPhotosState extends State<PostPhotos> {
       borderRadius: BorderRadius.circular(14),
       child: AspectRatio(
         aspectRatio: widget.aspect,
-        child: urls.length == 1
-            ? photo(0)
-            : Stack(
-                children: [
-                  PageView.builder(
-                    itemCount: urls.length,
-                    onPageChanged: (i) => setState(() => _index = i),
-                    itemBuilder: (_, i) => photo(i),
-                  ),
-                  Positioned(
-                    top: 10,
-                    right: 10,
-                    child: ViewerPill(
-                      text: context.l10n.mediaCounter(_index + 1, urls.length),
-                    ),
-                  ),
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 10,
-                    child: IgnorePointer(
-                      child: PageDots(
-                          count: urls.length, index: _index, light: true),
-                    ),
-                  ),
-                ],
+        child: LayoutBuilder(builder: (context, box) {
+          final dpr = MediaQuery.devicePixelRatioOf(context);
+          _warm((box.maxWidth * dpr).round());
+          if (urls.length == 1) return photo(0);
+          return Stack(
+            children: [
+              PageView.builder(
+                itemCount: urls.length,
+                // Builds the next photo ahead of the swipe.
+                allowImplicitScrolling: true,
+                onPageChanged: (i) => setState(() => _index = i),
+                itemBuilder: (_, i) => photo(i),
               ),
+              Positioned(
+                top: 10,
+                right: 10,
+                child: ViewerPill(
+                  text: context.l10n.mediaCounter(_index + 1, urls.length),
+                ),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 10,
+                child: IgnorePointer(
+                  child:
+                      PageDots(count: urls.length, index: _index, light: true),
+                ),
+              ),
+            ],
+          );
+        }),
       ),
     );
   }
@@ -243,7 +267,7 @@ class _PostVideoState extends State<PostVideo> {
           if (widget.thumbUrl.isNotEmpty)
             Image.network(
               widget.thumbUrl,
-              fit: BoxFit.contain,
+              fit: BoxFit.cover,
               errorBuilder: (_, __, ___) => const SizedBox.shrink(),
             ),
           Center(
@@ -291,10 +315,15 @@ class _PostVideoState extends State<PostVideo> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          Center(
-            child: AspectRatio(
-              aspectRatio: v.aspectRatio,
-              child: VideoPlayer(c),
+          // Fill the post's box like the photo did; full screen shows it all.
+          ClipRect(
+            child: FittedBox(
+              fit: BoxFit.cover,
+              child: SizedBox(
+                width: v.size.width > 0 ? v.size.width : 16,
+                height: v.size.height > 0 ? v.size.height : 9,
+                child: VideoPlayer(c),
+              ),
             ),
           ),
           if (!v.isPlaying)

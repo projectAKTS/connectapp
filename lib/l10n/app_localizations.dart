@@ -3701,7 +3701,7 @@ abstract class AppLocalizations {
   /// No description provided for @profileTabMedia.
   ///
   /// In en, this message translates to:
-  /// **'Photos & videos'**
+  /// **'Media'**
   String get profileTabMedia;
 
   /// No description provided for @profileNoMedia.
@@ -3733,6 +3733,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Speaks {languages}'**
   String profileSpeaks(String languages);
+
+  /// No description provided for @profileNoReviews.
+  ///
+  /// In en, this message translates to:
+  /// **'No reviews yet. Reviews appear here after booked sessions.'**
+  String get profileNoReviews;
+
+  /// No description provided for @profileReviewsCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 review} other{{count} reviews}}'**
+  String profileReviewsCount(int count);
 }
 
 class _AppLocalizationsDelegate

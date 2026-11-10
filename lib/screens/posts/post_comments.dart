@@ -104,7 +104,7 @@ class _CommentTile extends StatelessWidget {
     void openProfile() {
       if (_uid.isEmpty) return;
       Navigator.of(context).push(
-        CupertinoPageRoute(builder: (_) => ProfileScreen(userID: _uid)),
+        MaterialPageRoute(builder: (_) => ProfileScreen(userID: _uid)),
       );
     }
 

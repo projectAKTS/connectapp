@@ -1042,7 +1042,7 @@ class _ComposerMedia extends StatelessWidget {
                   fit: StackFit.expand,
                   children: [
                     if (thumb != null && thumb.isNotEmpty)
-                      Image.file(File(thumb), fit: BoxFit.contain),
+                      Image.file(File(thumb), fit: BoxFit.cover),
                     Center(
                       child: Container(
                         width: 60,

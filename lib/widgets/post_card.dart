@@ -168,7 +168,7 @@ class PostCardState extends State<PostCard> {
   void _openProfile() {
     if (_authorId.isEmpty) return;
     Navigator.of(context).push(
-      CupertinoPageRoute(builder: (_) => ProfileScreen(userID: _authorId)),
+      MaterialPageRoute(builder: (_) => ProfileScreen(userID: _authorId)),
     );
   }
 

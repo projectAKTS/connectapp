@@ -210,7 +210,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
               // ✅ Keep as tab push (perfectly preserves position)
               item(Icons.person_outline, context.l10n.actionViewProfile, () {
                 tabNav.push(
-                  CupertinoPageRoute(
+                  MaterialPageRoute(
                     builder: (_) => ProfileScreen(userID: otherUserId),
                   ),
                 );
@@ -300,7 +300,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
                     ? _WelcomeCard(
                         name: firstFrom(fallbackName),
                         onFindHelper: () => Navigator.of(context).push(
-                          CupertinoPageRoute(
+                          MaterialPageRoute(
                               builder: (_) => const FindHelperScreen()),
                         ),
                       )
@@ -316,7 +316,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
                           return _WelcomeCard(
                             name: firstFrom(name),
                             onFindHelper: () => Navigator.of(context).push(
-                              CupertinoPageRoute(
+                              MaterialPageRoute(
                                   builder: (_) => const FindHelperScreen()),
                             ),
                           );
@@ -456,7 +456,7 @@ class HomeContentScreenState extends State<HomeContentScreen>
                               postId: doc.id,
                               data: raw,
                               onOpenDetail: () => Navigator.of(context).push(
-                                CupertinoPageRoute(
+                                MaterialPageRoute(
                                   builder: (_) =>
                                       PostDetailScreen(postId: doc.id),
                                 ),
@@ -570,8 +570,7 @@ class _HomeTopBarState extends State<_HomeTopBar> {
             builder: (context, userSnap) {
               final data = userSnap.data?.data() as Map<String, dynamic>? ??
                   const <String, dynamic>{};
-              final lastSeen =
-                  parseFirestoreTimestamp(data['lastMessagesSeenAt']);
+              final lastSeen = seenTimestamp(data, 'lastMessagesSeenAt');
               final userUnreadCounter =
                   _asUnreadCount(data['unreadMessagesCount']);
 
@@ -637,7 +636,7 @@ class _HomeTopBarState extends State<_HomeTopBar> {
                               tooltip: context.l10n.homeMessages,
                               onPressed: () {
                                 Navigator.of(context).push(
-                                  CupertinoPageRoute(
+                                  MaterialPageRoute(
                                     builder: (_) => MessagesScreen(
                                       userId: currentUid,
                                     ),
@@ -839,7 +838,7 @@ class _WelcomeCardState extends State<_WelcomeCard> {
                                     label: context.l10n.homeMyConnections,
                                     onTap: () {
                                       Navigator.of(context).push(
-                                        CupertinoPageRoute(
+                                        MaterialPageRoute(
                                           builder: (_) =>
                                               const ConnectionsScreen(),
                                         ),

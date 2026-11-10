@@ -1977,7 +1977,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonRemove => 'Remove';
 
   @override
-  String get profileTabMedia => 'Photos & videos';
+  String get profileTabMedia => 'Media';
 
   @override
   String get profileNoMedia => 'No photos or videos yet.';
@@ -1994,5 +1994,20 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String profileSpeaks(String languages) {
     return 'Speaks $languages';
+  }
+
+  @override
+  String get profileNoReviews =>
+      'No reviews yet. Reviews appear here after booked sessions.';
+
+  @override
+  String profileReviewsCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count reviews',
+      one: '1 review',
+    );
+    return '$_temp0';
   }
 }

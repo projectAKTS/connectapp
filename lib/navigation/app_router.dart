@@ -21,7 +21,7 @@ class AppRouter {
     if (uri != null) {
       if (uri.pathSegments.length == 2 && uri.pathSegments[0] == 'profile') {
         final userId = uri.pathSegments[1];
-        return CupertinoPageRoute(
+        return MaterialPageRoute(
           settings: settings,
           builder: (_) =>
               FullScreenBackGesture(child: ProfileScreen(userID: userId)),
@@ -30,7 +30,7 @@ class AppRouter {
 
       if (uri.pathSegments.length == 2 && uri.pathSegments[0] == 'post') {
         final postId = uri.pathSegments[1];
-        return CupertinoPageRoute(
+        return MaterialPageRoute(
           settings: settings,
           builder: (_) =>
               FullScreenBackGesture(child: PostDetailScreen(postId: postId)),
@@ -49,7 +49,7 @@ class AppRouter {
           '[TabRoute:/chat] otherUserId=$otherUserId otherUserName=$otherUserName');
 
       if (otherUserId == null || otherUserId.isEmpty) {
-        return CupertinoPageRoute(
+        return MaterialPageRoute(
           settings: settings,
           builder: (_) => const Scaffold(
             body: Center(child: Text('Missing otherUserId')),
@@ -57,7 +57,7 @@ class AppRouter {
         );
       }
 
-      return CupertinoPageRoute(
+      return MaterialPageRoute(
         settings: settings,
         builder: (_) => FullScreenBackGesture(
           child: ChatScreen(
@@ -79,7 +79,7 @@ class AppRouter {
           id.isEmpty ||
           targetName == null ||
           targetName.isEmpty) {
-        return CupertinoPageRoute(
+        return MaterialPageRoute(
           settings: settings,
           builder: (_) => const Scaffold(
             body: Center(child: Text('Invalid consultation arguments')),
@@ -87,7 +87,7 @@ class AppRouter {
         );
       }
 
-      return CupertinoPageRoute(
+      return MaterialPageRoute(
         settings: settings,
         builder: (_) => FullScreenBackGesture(
           child: ConsultationBookingScreen(
@@ -109,7 +109,7 @@ class AppRouter {
     final shared = onGenerateSharedRoute(settings);
     if (shared != null) return shared;
 
-    return CupertinoPageRoute(
+    return MaterialPageRoute(
       settings: settings,
       builder: (_) => FullScreenBackGesture(child: tabRoot),
     );

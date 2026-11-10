@@ -961,7 +961,7 @@
   "createTakePhoto": "Take a photo",
   "createRecordVideo": "Record a video",
   "commonRemove": "Remove",
-  "profileTabMedia": "Photos & videos",
+  "profileTabMedia": "Media",
   "profileNoMedia": "No photos or videos yet.",
   "profileCanHelpWith": "Can help with",
   "profileEditProfile": "Edit profile",
@@ -971,6 +971,15 @@
     "placeholders": {
       "languages": {
         "type": "String"
+      }
+    }
+  },
+  "profileNoReviews": "No reviews yet. Reviews appear here after booked sessions.",
+  "profileReviewsCount": "{count, plural, =1{1 review} other{{count} reviews}}",
+  "@profileReviewsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
       }
     }
   }

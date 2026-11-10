@@ -178,7 +178,7 @@ class _FollowUserRow extends StatelessWidget {
           ),
           onTap: () {
             Navigator.of(context).push(
-              CupertinoPageRoute(builder: (_) => ProfileScreen(userID: userId)),
+              MaterialPageRoute(builder: (_) => ProfileScreen(userID: userId)),
             );
           },
         );

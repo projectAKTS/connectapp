@@ -13,3 +13,12 @@ DateTime? parseFirestoreTimestamp(dynamic ts) {
   }
   return null;
 }
+
+/// A "last seen" time on the user's own document. Right after the app writes
+/// it as a server timestamp the local copy holds null until the server
+/// answers; reading that as "never seen" briefly marks everything unread.
+DateTime? seenTimestamp(Map<String, dynamic>? data, String key) {
+  if (data == null || !data.containsKey(key)) return null;
+  return parseFirestoreTimestamp(data[key]) ??
+      (data[key] == null ? DateTime.now() : null);
+}

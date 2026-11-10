@@ -389,14 +389,14 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                           onOpenProfile: (uid) {
                             if (uid.trim().isEmpty) return;
                             Navigator.of(context).push(
-                              CupertinoPageRoute(
+                              MaterialPageRoute(
                                   builder: (_) => ProfileScreen(userID: uid)),
                             );
                           },
                           onMessage: (uid, name, avatar) {
                             if (uid.trim().isEmpty) return;
                             Navigator.of(context).push(
-                              CupertinoPageRoute(
+                              MaterialPageRoute(
                                 builder: (_) => ChatScreen(
                                   otherUserId: uid,
                                   otherUserName: name,
@@ -590,7 +590,7 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                                         onOpenProfile: (uid) {
                                           if (uid.trim().isEmpty) return;
                                           Navigator.of(context).push(
-                                            CupertinoPageRoute(
+                                            MaterialPageRoute(
                                               builder: (_) =>
                                                   ProfileScreen(userID: uid),
                                             ),
@@ -599,7 +599,7 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                                         onMessage: (uid, name, avatar) {
                                           if (uid.trim().isEmpty) return;
                                           Navigator.of(context).push(
-                                            CupertinoPageRoute(
+                                            MaterialPageRoute(
                                               builder: (_) => ChatScreen(
                                                 otherUserId: uid,
                                                 otherUserName: name,

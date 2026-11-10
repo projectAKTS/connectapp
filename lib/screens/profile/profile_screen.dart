@@ -2,7 +2,6 @@
 import 'package:connect_app/l10n/value_labels.dart';
 import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/l10n/formatters.dart';
-import 'dart:io';
 import 'package:connect_app/screens/settings/settings_screen.dart';
 import 'package:connect_app/utils/profile_text.dart';
 import 'package:connect_app/services/safety_service.dart';
@@ -44,15 +43,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool isFollowing = false;
   bool _followBusy = false;
 
-  // Horizontal swipe-back helpers
-  double? _dragStartX;
-  bool _dragFromEdge = false;
-
-  // ✅ prevent multiple pops (fixes _debugLocked)
-  bool _popQueued = false;
-
   bool _bioExpanded = false;
-  bool _showMedia = false;
+  _ProfileTab _tab = _ProfileTab.posts;
   late final Stream<QuerySnapshot> _followersStream;
 
   // helpers
@@ -100,7 +92,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _openFollowList(FollowListType type) {
     Navigator.of(context).push(
-      CupertinoPageRoute(
+      MaterialPageRoute(
         builder: (_) => FollowListScreen(type: type, userId: widget.userID),
       ),
     );
@@ -108,7 +100,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _openEditProfile() {
     Navigator.of(context).push(
-      CupertinoPageRoute(
+      MaterialPageRoute(
         builder: (_) => EditProfileScreen(userData: userData!),
       ),
     );
@@ -360,32 +352,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   // ---------- Horizontal swipe-back handlers ----------
-  void _handleHorizontalDragStart(DragStartDetails details) {
-    if (Platform.isIOS) return; // ✅ iOS already has native swipe-back
-    _dragStartX = details.globalPosition.dx;
-    _dragFromEdge = (_dragStartX ?? 0) < 32.0;
-  }
-
-  void _handleHorizontalDragUpdate(DragUpdateDetails details) {
-    if (Platform.isIOS) return; // ✅ prevent double-gesture pop on iOS
-    if (!_dragFromEdge) return;
-
-    final nav = Navigator.of(context);
-    if (!nav.canPop()) return;
-    if (_popQueued) return;
-
-    if (details.primaryDelta != null && details.primaryDelta! > 16) {
-      _dragFromEdge = false;
-      _popQueued = true;
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        nav.maybePop();
-        _popQueued = false;
-      });
-    }
-  }
-
   // ---------- UI helpers ----------
   Widget _softCard({
     required Widget child,
@@ -595,6 +561,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final rating = (userData!['rating'] is num)
         ? (userData!['rating'] as num).toDouble()
         : 0.0;
+    // Reviews come from booked sessions, so the tab is for helpers (or
+    // anyone who already has some).
+    final tabs = [
+      _ProfileTab.posts,
+      if (isHelper || ratingCount > 0) _ProfileTab.reviews,
+      _ProfileTab.media,
+    ];
+    final tab = tabs.contains(_tab) ? _tab : _ProfileTab.posts;
+    final showMedia = tab == _ProfileTab.media;
 
     // For Account section status (safe defaults)
     final premiumStatus = _s(userData!['premiumStatus']);
@@ -657,10 +632,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         body: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onHorizontalDragStart:
-              Platform.isIOS ? null : _handleHorizontalDragStart,
-          onHorizontalDragUpdate:
-              Platform.isIOS ? null : _handleHorizontalDragUpdate,
           child: RefreshIndicator.adaptive(
             onRefresh: _onRefresh,
             edgeOffset: 0,
@@ -884,12 +855,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ],
                     ),
 
-                  if (ratingCount > 0) ...[
-                    const SizedBox(height: 16),
-                    _sectionTitle(context.l10n.profileReviews),
-                    _ReviewsList(helperUid: widget.userID),
-                  ],
-
                   // ✅ Account hub (ONLY for current user)
                   if (isCurrentUser) ...[
                     const SizedBox(height: 16),
@@ -907,8 +872,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               final d = userSnap.data?.data()
                                       as Map<String, dynamic>? ??
                                   const <String, dynamic>{};
-                              final lastSeen = parseFirestoreTimestamp(
-                                  d['lastMessagesSeenAt']);
+                              final lastSeen =
+                                  seenTimestamp(d, 'lastMessagesSeenAt');
                               final directUnread = _unreadValue(
                                 d['unreadMessagesCount'],
                               );
@@ -989,7 +954,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                         badgeCount: unread,
                                         onTap: () {
                                           Navigator.of(context).push(
-                                            CupertinoPageRoute(
+                                            MaterialPageRoute(
                                               builder: (_) => MessagesScreen(
                                                 userId: myUid,
                                               ),
@@ -1014,8 +979,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               if (userSnap.hasData) {
                                 final d = userSnap.data!.data()
                                     as Map<String, dynamic>?;
-                                lastSeen = parseFirestoreTimestamp(
-                                    d?['lastConsultationsSeenAt']);
+                                lastSeen =
+                                    seenTimestamp(d, 'lastConsultationsSeenAt');
                               }
 
                               return StreamBuilder<QuerySnapshot>(
@@ -1132,82 +1097,91 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                   const SizedBox(height: 20),
                   _PostsTabs(
-                    showMedia: _showMedia,
-                    onChanged: (v) => setState(() => _showMedia = v),
+                    tabs: tabs,
+                    selected: tab,
+                    onChanged: (v) => setState(() => _tab = v),
                   ),
                   const SizedBox(height: 12),
-                  StreamBuilder<QuerySnapshot>(
-                    stream: _postsStream,
-                    builder: (ctx, snap) {
-                      if (snap.hasError) {
-                        return Center(
-                          child: Text(context.l10n.profileLoadError,
-                              style: const TextStyle(color: Colors.red)),
-                        );
-                      }
-                      if (!snap.hasData) {
-                        return const Padding(
-                          padding: EdgeInsets.all(24),
-                          child: Center(child: CircularProgressIndicator()),
-                        );
-                      }
-                      final all = _visiblePosts(snap.data!.docs);
-                      final docs = _showMedia
-                          ? all
-                              .where((d) =>
-                                  _mediaThumb(
-                                      d.data() as Map<String, dynamic>) !=
-                                  null)
-                              .toList()
-                          : all;
-                      if (docs.isEmpty) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 32),
-                          child: Center(
-                            child: Text(
-                                _showMedia
-                                    ? context.l10n.profileNoMedia
-                                    : context.l10n.profileNoActivity,
-                                style: const TextStyle(color: AppColors.muted)),
-                          ),
-                        );
-                      }
-                      void open(String id) => Navigator.of(context).push(
-                            CupertinoPageRoute(
-                              builder: (_) => PostDetailScreen(postId: id),
+                  if (tab == _ProfileTab.reviews)
+                    _ReviewsTab(
+                      helperUid: widget.userID,
+                      rating: rating,
+                      ratingCount: ratingCount,
+                    )
+                  else
+                    StreamBuilder<QuerySnapshot>(
+                      stream: _postsStream,
+                      builder: (ctx, snap) {
+                        if (snap.hasError) {
+                          return Center(
+                            child: Text(context.l10n.profileLoadError,
+                                style: const TextStyle(color: Colors.red)),
+                          );
+                        }
+                        if (!snap.hasData) {
+                          return const Padding(
+                            padding: EdgeInsets.all(24),
+                            child: Center(child: CircularProgressIndicator()),
+                          );
+                        }
+                        final all = _visiblePosts(snap.data!.docs);
+                        final docs = showMedia
+                            ? all
+                                .where((d) =>
+                                    _mediaThumb(
+                                        d.data() as Map<String, dynamic>) !=
+                                    null)
+                                .toList()
+                            : all;
+                        if (docs.isEmpty) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 32),
+                            child: Center(
+                              child: Text(
+                                  showMedia
+                                      ? context.l10n.profileNoMedia
+                                      : context.l10n.profileNoActivity,
+                                  style:
+                                      const TextStyle(color: AppColors.muted)),
                             ),
                           );
-                      if (_showMedia) {
-                        return GridView.count(
-                          crossAxisCount: 3,
-                          mainAxisSpacing: 3,
-                          crossAxisSpacing: 3,
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
+                        }
+                        void open(String id) => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => PostDetailScreen(postId: id),
+                              ),
+                            );
+                        if (showMedia) {
+                          return GridView.count(
+                            crossAxisCount: 3,
+                            mainAxisSpacing: 3,
+                            crossAxisSpacing: 3,
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            children: [
+                              for (final doc in docs)
+                                _MediaTile(
+                                  data: doc.data() as Map<String, dynamic>,
+                                  thumb: _mediaThumb(
+                                      doc.data() as Map<String, dynamic>)!,
+                                  onTap: () => open(doc.id),
+                                ),
+                            ],
+                          );
+                        }
+                        return Column(
                           children: [
                             for (final doc in docs)
-                              _MediaTile(
+                              PostCard(
+                                key: ValueKey(doc.id),
+                                postId: doc.id,
                                 data: doc.data() as Map<String, dynamic>,
-                                thumb: _mediaThumb(
-                                    doc.data() as Map<String, dynamic>)!,
-                                onTap: () => open(doc.id),
+                                onOpenDetail: () => open(doc.id),
                               ),
                           ],
                         );
-                      }
-                      return Column(
-                        children: [
-                          for (final doc in docs)
-                            PostCard(
-                              key: ValueKey(doc.id),
-                              postId: doc.id,
-                              data: doc.data() as Map<String, dynamic>,
-                              onOpenDetail: () => open(doc.id),
-                            ),
-                        ],
-                      );
-                    },
-                  ),
+                      },
+                    ),
 
                   const SizedBox(height: 28),
                 ],
@@ -1268,14 +1242,34 @@ class _HeaderStats extends StatelessWidget {
 }
 
 /// "Posts | Photos & videos" switch above the author's posts.
+enum _ProfileTab { posts, reviews, media }
+
+/// Posts, reviews and media switch above the author's content.
 class _PostsTabs extends StatelessWidget {
-  final bool showMedia;
-  final ValueChanged<bool> onChanged;
-  const _PostsTabs({required this.showMedia, required this.onChanged});
+  final List<_ProfileTab> tabs;
+  final _ProfileTab selected;
+  final ValueChanged<_ProfileTab> onChanged;
+  const _PostsTabs(
+      {required this.tabs, required this.selected, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
-    Widget tab(String label, IconData icon, bool selected, bool value) {
+    Widget tab(_ProfileTab value) {
+      final (label, icon) = switch (value) {
+        _ProfileTab.posts => (
+            context.l10n.profilePosts,
+            Icons.view_agenda_outlined
+          ),
+        _ProfileTab.reviews => (
+            context.l10n.profileReviews,
+            Icons.star_outline_rounded
+          ),
+        _ProfileTab.media => (
+            context.l10n.profileTabMedia,
+            Icons.grid_on_rounded
+          ),
+      };
+      final on = value == selected;
       return Expanded(
         child: InkWell(
           onTap: () => onChanged(value),
@@ -1284,8 +1278,8 @@ class _PostsTabs extends StatelessWidget {
             decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(
-                  color: selected ? AppColors.text : AppColors.border,
-                  width: selected ? 2 : 1,
+                  color: on ? AppColors.text : AppColors.border,
+                  width: on ? 2 : 1,
                 ),
               ),
             ),
@@ -1293,8 +1287,7 @@ class _PostsTabs extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(icon,
-                    size: 18,
-                    color: selected ? AppColors.text : AppColors.muted),
+                    size: 18, color: on ? AppColors.text : AppColors.muted),
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(
@@ -1302,7 +1295,7 @@ class _PostsTabs extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
-                      color: selected ? AppColors.text : AppColors.muted,
+                      color: on ? AppColors.text : AppColors.muted,
                     ),
                   ),
                 ),
@@ -1313,12 +1306,52 @@ class _PostsTabs extends StatelessWidget {
       );
     }
 
-    return Row(
+    return Row(children: [for (final t in tabs) tab(t)]);
+  }
+}
+
+/// Star average and the written reviews from booked sessions.
+class _ReviewsTab extends StatelessWidget {
+  final String helperUid;
+  final double rating;
+  final int ratingCount;
+  const _ReviewsTab(
+      {required this.helperUid,
+      required this.rating,
+      required this.ratingCount});
+
+  @override
+  Widget build(BuildContext context) {
+    if (ratingCount == 0) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 32),
+        child: Center(
+          child: Text(context.l10n.profileNoReviews,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.muted)),
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        tab(context.l10n.profilePosts, Icons.view_agenda_outlined, !showMedia,
-            false),
-        tab(context.l10n.profileTabMedia, Icons.grid_on_rounded, showMedia,
-            true),
+        Row(
+          children: [
+            const Icon(Icons.star_rounded, color: Color(0xFFF2B01E), size: 26),
+            const SizedBox(width: 6),
+            Text(
+              rating.toStringAsFixed(1),
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              context.l10n.profileReviewsCount(ratingCount),
+              style: const TextStyle(color: AppColors.muted),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _ReviewsList(helperUid: helperUid),
       ],
     );
   }
@@ -1378,7 +1411,7 @@ class _ReviewsList extends StatelessWidget {
   final String helperUid;
   const _ReviewsList({required this.helperUid});
 
-  static const int _shown = 5;
+  static const int _shown = 20;
 
   @override
   Widget build(BuildContext context) {

@@ -600,10 +600,12 @@
   "createTakePhoto": "Prendre une photo",
   "createRecordVideo": "Filmer une vidéo",
   "commonRemove": "Retirer",
-  "profileTabMedia": "Photos et vidéos",
+  "profileTabMedia": "Médias",
   "profileNoMedia": "Aucune photo ni vidéo pour l’instant.",
   "profileCanHelpWith": "Peut aider pour",
   "profileEditProfile": "Modifier le profil",
   "profileRoleHelper": "Aidant",
-  "profileSpeaks": "Parle {languages}"
+  "profileSpeaks": "Parle {languages}",
+  "profileNoReviews": "Aucun avis pour l’instant. Les avis apparaissent ici après les séances réservées.",
+  "profileReviewsCount": "{count, plural, =1{1 avis} other{{count} avis}}"
 }
