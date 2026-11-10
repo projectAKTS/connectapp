@@ -16,6 +16,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import 'package:connect_app/utils/time_utils.dart';
 import '../posts/post_detail_screen.dart';
+import 'package:connect_app/widgets/initials_avatar.dart';
 import 'package:connect_app/widgets/post_card.dart';
 import 'edit_profile_screen.dart';
 import 'package:connect_app/services/call_service.dart';
@@ -51,6 +52,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _popQueued = false;
 
   bool _bioExpanded = false;
+  bool _showMedia = false;
+  late final Stream<QuerySnapshot> _followersStream;
 
   // helpers
   String _s(dynamic v, [String fallback = '']) =>
@@ -87,6 +90,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return out;
   }
 
+  /// First photo or the video frame of a post, for the media grid.
+  static String? _mediaThumb(Map<String, dynamic> m) {
+    final photos = postImageUrls(m);
+    if (photos.isNotEmpty) return photos.first;
+    final frame = (m['videoThumbUrl'] ?? '').toString();
+    return frame.isNotEmpty ? frame : null;
+  }
+
+  void _openFollowList(FollowListType type) {
+    Navigator.of(context).push(
+      CupertinoPageRoute(
+        builder: (_) => FollowListScreen(type: type, userId: widget.userID),
+      ),
+    );
+  }
+
+  void _openEditProfile() {
+    Navigator.of(context).push(
+      CupertinoPageRoute(
+        builder: (_) => EditProfileScreen(userData: userData!),
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -99,7 +126,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         .collection('posts')
         .where('userID', isEqualTo: widget.userID)
         .snapshots();
-
+    _followersStream = FirebaseFirestore.instance
+        .collection('followers')
+        .doc(widget.userID)
+        .collection('userFollowers')
+        .snapshots();
   }
 
   @override
@@ -401,12 +432,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  ImageProvider _avatarProvider(Map<String, dynamic> data) {
-    final url = (data['profilePicture'] ?? '') as String? ?? '';
-    if (url.isNotEmpty) return NetworkImage(url);
-    return const AssetImage('assets/default_profile.png');
-  }
-
   // ========= Account row (new) =========
   Widget _accountRow({
     required IconData icon,
@@ -556,8 +581,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final fullName = _s(userData!['fullName'], 'Unknown User');
     final bio = placeholderBioToEmpty(_s(userData!['bio']));
     final badges = _stringList(userData!['badges']);
-    final streakDays = _i(userData!['streakDays']);
-    final xpPoints = _i(userData!['xpPoints']);
+    final role = _s(userData!['role']);
+    final isHelper =
+        role == 'helper' || role == 'both' || userData!['isHelper'] == true;
+    final city = _s(userData!['city']).trim();
+    final roleAndCity = [
+      if (isHelper) context.l10n.profileRoleHelper,
+      if (city.isNotEmpty) city,
+    ].join(' · ');
+    final expertise = _stringList(userData!['expertiseTags']);
+    final languages = _stringList(userData!['languages']);
     final ratingCount = _i(userData!['ratingCount']);
     final rating = (userData!['rating'] is num)
         ? (userData!['rating'] as num).toDouble()
@@ -587,17 +620,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           title: Text(context.l10n.profileTitle),
           actions: [
             if (isCurrentUser) ...[
-              IconButton(
-                icon: const Icon(Icons.edit),
-                tooltip: "Edit Profile",
-                onPressed: () {
-                  Navigator.of(context).push(
-                    CupertinoPageRoute(
-                      builder: (_) => EditProfileScreen(userData: userData!),
-                    ),
-                  );
-                },
-              ),
               IconButton(
                 icon: const Icon(Icons.settings_outlined),
                 tooltip: context.l10n.profileSettings,
@@ -652,44 +674,111 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Avatar
-                  Center(
-                    child: Stack(
-                      alignment: Alignment.topRight,
-                      children: [
-                        CircleAvatar(
-                          radius: 56,
-                          backgroundColor: AppColors.avatarBg,
-                          foregroundColor: AppColors.avatarFg,
-                          backgroundImage: _avatarProvider(userData!),
-                        ),
-                        if (isBoosted)
-                          Container(
-                            margin: const EdgeInsets.only(right: 6, top: 6),
-                            decoration: const BoxDecoration(
-                              color: AppColors.button,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const CircleAvatar(
-                              radius: 14,
-                              backgroundColor: Colors.orange,
-                              child: Icon(Icons.star,
-                                  color: Colors.white, size: 18),
-                            ),
+                  // Header: photo, name, role and city
+                  Row(
+                    children: [
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          InitialsAvatar(
+                            url: _s(userData!['profilePicture']),
+                            name: fullName,
+                            radius: 40,
                           ),
-                      ],
-                    ),
+                          if (isBoosted)
+                            const Positioned(
+                              right: -2,
+                              top: -2,
+                              child: CircleAvatar(
+                                radius: 12,
+                                backgroundColor: Colors.orange,
+                                child: Icon(Icons.star,
+                                    color: Colors.white, size: 15),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              fullName,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                                height: 1.15,
+                              ),
+                            ),
+                            if (roleAndCity.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                roleAndCity,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: AppColors.muted,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    fullName,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        fontSize: 26, fontWeight: FontWeight.w800),
+                  const SizedBox(height: 16),
+
+                  // Counts
+                  StreamBuilder<QuerySnapshot>(
+                    stream: _postsStream,
+                    builder: (context, snap) {
+                      final posts = _visiblePosts(snap.data?.docs ?? []);
+                      // Helpful marks are the post likes; nothing keeps the
+                      // profile's own counter in sync.
+                      final helpful = posts.fold<int>(
+                          0,
+                          (total, d) =>
+                              total +
+                              _i((d.data() as Map<String, dynamic>)['likes']));
+                      return StreamBuilder<QuerySnapshot>(
+                        stream: _followersStream,
+                        builder: (context, followersSnap) => _HeaderStats(
+                          cells: [
+                            (
+                              '${posts.length}',
+                              context.l10n.profilePosts,
+                              null,
+                            ),
+                            (
+                              '${followersSnap.data?.docs.length ?? 0}',
+                              context.l10n.profileFollowers,
+                              () => _openFollowList(FollowListType.followers),
+                            ),
+                            (
+                              '${_stringList(userData!['following']).length}',
+                              context.l10n.profileFollowingList,
+                              () => _openFollowList(FollowListType.following),
+                            ),
+                            ('$helpful', context.l10n.profileStatHelpful, null),
+                            if (ratingCount > 0)
+                              (
+                                '★ ${rating.toStringAsFixed(1)}',
+                                context.l10n.profileStatRating,
+                                null,
+                              ),
+                          ],
+                        ),
+                      );
+                    },
                   ),
 
                   if (bio.isNotEmpty) ...[
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 14),
                     _ExpandableBio(
                       text: bio,
                       expanded: _bioExpanded,
@@ -698,9 +787,69 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ],
 
-                  // Follow / Connect for other users
-                  if (!isCurrentUser) ...[
+                  if (expertise.isNotEmpty) ...[
                     const SizedBox(height: 14),
+                    Text(
+                      context.l10n.profileCanHelpWith,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                        color: AppColors.muted,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final t in expertise)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(99),
+                            ),
+                            child: Text(
+                              ValueLabels.topic(context.l10n, t),
+                              style: const TextStyle(
+                                color: AppColors.primary,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                  if (languages.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        const Icon(Icons.translate_rounded,
+                            size: 16, color: AppColors.muted),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            context.l10n.profileSpeaks(languages
+                                .map((c) =>
+                                    ValueLabels.language(context.l10n, c))
+                                .join(', ')),
+                            style: const TextStyle(color: AppColors.muted),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+
+                  const SizedBox(height: 16),
+                  if (isCurrentUser)
+                    _OutlinedActionButton(
+                      icon: Icons.edit_outlined,
+                      label: context.l10n.profileEditProfile,
+                      onTap: _openEditProfile,
+                    )
+                  else
                     Row(
                       children: [
                         Expanded(
@@ -734,37 +883,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ],
                     ),
-                  ],
-
-                  const SizedBox(height: 16),
-
-                  // Stats
-                  StreamBuilder<QuerySnapshot>(
-                    stream: _postsStream,
-                    builder: (context, snap) {
-                      // Helpful marks are the post likes; nothing keeps the
-                      // profile's own counter in sync.
-                      final helpful = _visiblePosts(snap.data?.docs ?? [])
-                          .fold<int>(
-                              0,
-                              (total, d) =>
-                                  total +
-                                  _i((d.data() as Map<String, dynamic>)['likes']));
-                      return _softCard(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10),
-                        child: _StatsStrip(
-                          streakText:
-                              context.l10n.profileStreakDays(streakDays),
-                          xpText: '$xpPoints',
-                          helpfulText: '$helpful',
-                          ratingText: ratingCount > 0
-                              ? '${rating.toStringAsFixed(1)} ($ratingCount)'
-                              : null,
-                        ),
-                      );
-                    },
-                  ),
 
                   if (ratingCount > 0) ...[
                     const SizedBox(height: 16),
@@ -775,69 +893,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   // ✅ Account hub (ONLY for current user)
                   if (isCurrentUser) ...[
                     const SizedBox(height: 16),
-                    _sectionTitle(context.l10n.profileSocial),
                     _softCard(
                       padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
                       child: Column(
                         children: [
-                          StreamBuilder<QuerySnapshot>(
-                            stream: FirebaseFirestore.instance
-                                .collection('followers')
-                                .doc(widget.userID)
-                                .collection('userFollowers')
-                                .snapshots(),
-                            builder: (context, followersSnap) {
-                              final followersCount =
-                                  followersSnap.data?.docs.length ?? 0;
-                              return _accountRow(
-                                icon: Icons.group_outlined,
-                                title: context.l10n.profileFollowers,
-                                subtitle: context.l10n
-                                    .profilePeopleCount(followersCount),
-                                onTap: () {
-                                  Navigator.of(context).push(
-                                    CupertinoPageRoute(
-                                      builder: (_) => FollowListScreen(
-                                        type: FollowListType.followers,
-                                        userId: widget.userID,
-                                      ),
-                                    ),
-                                  );
-                                },
-                              );
-                            },
-                          ),
-                          const Divider(height: 1, color: AppColors.border),
-                          StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                            stream: FirebaseFirestore.instance
-                                .collection('users')
-                                .doc(widget.userID)
-                                .snapshots(),
-                            builder: (context, meSnap) {
-                              final me = meSnap.data?.data() ??
-                                  const <String, dynamic>{};
-                              final followingCount = (me['following'] is List)
-                                  ? (me['following'] as List).length
-                                  : 0;
-                              return _accountRow(
-                                icon: Icons.person_add_alt_1_outlined,
-                                title: context.l10n.profileFollowingList,
-                                subtitle: context.l10n
-                                    .profilePeopleCount(followingCount),
-                                onTap: () {
-                                  Navigator.of(context).push(
-                                    CupertinoPageRoute(
-                                      builder: (_) => FollowListScreen(
-                                        type: FollowListType.following,
-                                        userId: widget.userID,
-                                      ),
-                                    ),
-                                  );
-                                },
-                              );
-                            },
-                          ),
-                          const Divider(height: 1, color: AppColors.border),
                           StreamBuilder<DocumentSnapshot>(
                             stream: FirebaseFirestore.instance
                                 .collection('users')
@@ -1071,8 +1130,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ],
 
-                  const SizedBox(height: 16),
-                  _sectionTitle(context.l10n.profilePosts),
+                  const SizedBox(height: 20),
+                  _PostsTabs(
+                    showMedia: _showMedia,
+                    onChanged: (v) => setState(() => _showMedia = v),
+                  ),
+                  const SizedBox(height: 12),
                   StreamBuilder<QuerySnapshot>(
                     stream: _postsStream,
                     builder: (ctx, snap) {
@@ -1088,14 +1151,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           child: Center(child: CircularProgressIndicator()),
                         );
                       }
-                      final docs = _visiblePosts(snap.data!.docs);
+                      final all = _visiblePosts(snap.data!.docs);
+                      final docs = _showMedia
+                          ? all
+                              .where((d) =>
+                                  _mediaThumb(
+                                      d.data() as Map<String, dynamic>) !=
+                                  null)
+                              .toList()
+                          : all;
                       if (docs.isEmpty) {
                         return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 24),
+                          padding: const EdgeInsets.symmetric(vertical: 32),
                           child: Center(
-                            child: Text(context.l10n.profileNoActivity,
+                            child: Text(
+                                _showMedia
+                                    ? context.l10n.profileNoMedia
+                                    : context.l10n.profileNoActivity,
                                 style: const TextStyle(color: AppColors.muted)),
                           ),
+                        );
+                      }
+                      void open(String id) => Navigator.of(context).push(
+                            CupertinoPageRoute(
+                              builder: (_) => PostDetailScreen(postId: id),
+                            ),
+                          );
+                      if (_showMedia) {
+                        return GridView.count(
+                          crossAxisCount: 3,
+                          mainAxisSpacing: 3,
+                          crossAxisSpacing: 3,
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          children: [
+                            for (final doc in docs)
+                              _MediaTile(
+                                data: doc.data() as Map<String, dynamic>,
+                                thumb: _mediaThumb(
+                                    doc.data() as Map<String, dynamic>)!,
+                                onTap: () => open(doc.id),
+                              ),
+                          ],
                         );
                       }
                       return Column(
@@ -1105,12 +1202,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               key: ValueKey(doc.id),
                               postId: doc.id,
                               data: doc.data() as Map<String, dynamic>,
-                              onOpenDetail: () => Navigator.of(context).push(
-                                CupertinoPageRoute(
-                                  builder: (_) =>
-                                      PostDetailScreen(postId: doc.id),
-                                ),
-                              ),
+                              onOpenDetail: () => open(doc.id),
                             ),
                         ],
                       );
@@ -1129,78 +1221,152 @@ class _ProfileScreenState extends State<ProfileScreen> {
 }
 
 // ---------- Compact stats strip ----------
-class _StatsStrip extends StatelessWidget {
-  final String streakText;
-  final String xpText;
-  final String helpfulText;
-
-  /// Average stars and count, e.g. "4.8 (12)"; null before any rating.
-  final String? ratingText;
-  const _StatsStrip({
-    required this.streakText,
-    required this.xpText,
-    required this.helpfulText,
-    this.ratingText,
-  });
+/// Posts, followers and the like as a row of numbers under the name.
+class _HeaderStats extends StatelessWidget {
+  final List<(String, String, VoidCallback?)> cells;
+  const _HeaderStats({required this.cells});
 
   @override
   Widget build(BuildContext context) {
-    Widget cell(IconData icon, String label, String value) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, size: 18, color: AppColors.text),
-            const SizedBox(width: 6),
-            Text(label, style: const TextStyle(color: AppColors.muted)),
-          ]),
-          const SizedBox(height: 6),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
-        ],
-      );
-    }
-
-    Widget divider() => Container(
-          width: 1,
-          height: 30,
-          margin: const EdgeInsets.symmetric(horizontal: 6),
-          color: AppColors.border,
-        );
-
-    if (!MvpFeatures.gamificationStats) {
-      final helpful = cell(Icons.thumb_up_alt_outlined,
-          context.l10n.profileStatHelpful, helpfulText);
-      if (ratingText == null) return Center(child: helpful);
-      return Row(
-        children: [
-          Expanded(child: Center(child: helpful)),
-          divider(),
-          Expanded(
-            child: Center(
-                child: cell(Icons.star_rounded, context.l10n.profileStatRating,
-                    ratingText!)),
-          ),
-        ],
-      );
-    }
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        Expanded(
-            child: Center(
-                child: cell(Icons.local_fire_department_rounded,
-                    context.l10n.profileStatStreak, streakText))),
-        divider(),
-        Expanded(
-            child: Center(
-                child: cell(Icons.emoji_events_outlined,
-                    context.l10n.profileStatXp, xpText))),
-        divider(),
-        Expanded(
-            child: Center(
-                child: cell(Icons.thumb_up_alt_outlined,
-                    context.l10n.profileStatHelpful, helpfulText))),
+        for (final (value, label, onTap) in cells)
+          Expanded(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Column(
+                  children: [
+                    Text(
+                      value,
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.text,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        color: AppColors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
       ],
+    );
+  }
+}
+
+/// "Posts | Photos & videos" switch above the author's posts.
+class _PostsTabs extends StatelessWidget {
+  final bool showMedia;
+  final ValueChanged<bool> onChanged;
+  const _PostsTabs({required this.showMedia, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    Widget tab(String label, IconData icon, bool selected, bool value) {
+      return Expanded(
+        child: InkWell(
+          onTap: () => onChanged(value),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: selected ? AppColors.text : AppColors.border,
+                  width: selected ? 2 : 1,
+                ),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon,
+                    size: 18,
+                    color: selected ? AppColors.text : AppColors.muted),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    label,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: selected ? AppColors.text : AppColors.muted,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        tab(context.l10n.profilePosts, Icons.view_agenda_outlined, !showMedia,
+            false),
+        tab(context.l10n.profileTabMedia, Icons.grid_on_rounded, showMedia,
+            true),
+      ],
+    );
+  }
+}
+
+/// One square in the photos and videos grid.
+class _MediaTile extends StatelessWidget {
+  final Map<String, dynamic> data;
+  final String thumb;
+  final VoidCallback onTap;
+  const _MediaTile(
+      {required this.data, required this.thumb, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final isVideo = (data['videoUrl'] ?? '').toString().isNotEmpty;
+    final many = postImageUrls(data).length > 1;
+    return GestureDetector(
+      onTap: onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.network(
+              thumb,
+              fit: BoxFit.cover,
+              loadingBuilder: (c, w, p) =>
+                  p == null ? w : const ColoredBox(color: AppColors.button),
+              errorBuilder: (_, __, ___) =>
+                  const ColoredBox(color: AppColors.button),
+            ),
+            if (isVideo || many)
+              Positioned(
+                top: 6,
+                right: 6,
+                child: Icon(
+                  isVideo
+                      ? Icons.play_circle_fill_rounded
+                      : Icons.collections_rounded,
+                  color: Colors.white,
+                  size: 20,
+                  shadows: const [Shadow(blurRadius: 6, color: Colors.black54)],
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1302,18 +1468,22 @@ class _ExpandableBio extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final maxLines = expanded ? null : 2;
+    final maxLines = expanded ? null : 3;
     final overflow = expanded ? TextOverflow.visible : TextOverflow.ellipsis;
-    final showToggle = text.trim().length > 80;
+    final showToggle = text.trim().length > 120;
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           text,
-          textAlign: TextAlign.center,
           maxLines: maxLines,
           overflow: overflow,
-          style: const TextStyle(color: AppColors.muted),
+          style: const TextStyle(
+            color: AppColors.text,
+            fontSize: 15,
+            height: 1.35,
+          ),
         ),
         if (showToggle) ...[
           const SizedBox(height: 6),

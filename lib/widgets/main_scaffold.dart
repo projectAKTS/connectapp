@@ -114,15 +114,19 @@ class _MainScaffoldState extends State<MainScaffold> {
   Widget _buildTabNavigator(int index, Widget root) {
     return Offstage(
       offstage: _selectedIndex != index,
-      child: Navigator(
-        key: _navKeys[index],
-        onGenerateRoute: (settings) {
-          // ✅ IMPORTANT: make tab navigator understand shared routes too
-          return AppRouter.onGenerateTabRoute(
-            settings: settings,
-            tabRoot: root,
-          );
-        },
+      // Hidden tabs stop animations and pause any playing feed video.
+      child: TickerMode(
+        enabled: _selectedIndex == index,
+        child: Navigator(
+          key: _navKeys[index],
+          onGenerateRoute: (settings) {
+            // ✅ IMPORTANT: make tab navigator understand shared routes too
+            return AppRouter.onGenerateTabRoute(
+              settings: settings,
+              tabRoot: root,
+            );
+          },
+        ),
       ),
     );
   }

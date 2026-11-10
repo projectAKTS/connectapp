@@ -6,14 +6,13 @@ import 'package:flutter/material.dart';
 import 'package:connect_app/l10n/formatters.dart';
 import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/l10n/value_labels.dart';
-import 'package:connect_app/screens/posts/post_image_viewer.dart';
-import 'package:connect_app/screens/posts/post_video_player.dart';
 import 'package:connect_app/screens/profile/profile_screen.dart';
 import 'package:connect_app/services/helperly_test_runtime.dart';
 import 'package:connect_app/services/safety_service.dart';
 import 'package:connect_app/theme/tokens.dart';
 import 'package:connect_app/utils/time_utils.dart';
 import 'package:connect_app/widgets/initials_avatar.dart';
+import 'package:connect_app/widgets/post_media.dart';
 import 'package:connect_app/widgets/sensitive_media_cover.dart';
 
 /// Author uid of a post, across the field names older builds used.
@@ -125,7 +124,8 @@ class PostCardState extends State<PostCard> {
         .collection('posts')
         .doc(widget.postId)
         .delete();
-    if (mounted && widget.onOpenDetail == null) Navigator.of(context).maybePop();
+    if (mounted && widget.onOpenDetail == null)
+      Navigator.of(context).maybePop();
   }
 
   Future<void> _onOtherPostAction(String action) async {
@@ -176,35 +176,30 @@ class PostCardState extends State<PostCard> {
     final imageUrls = postImageUrls(raw);
     final videoUrl = (raw['videoUrl'] ?? '').toString();
     final sensitive = raw['sensitive'] == true && !_isOwnPost;
-    final aspect = (() {
-      final v = raw['mediaAspectRatio'];
-      if (v is num && v > 0) return v.toDouble();
-      return 16 / 9;
-    })();
+    final aspect = postMediaAspect(raw['mediaAspectRatio']);
     Widget? media;
     if (imageUrls.isNotEmpty) {
-      media = _MediaCarousel(
-        urls: imageUrls,
-        aspect: aspect,
-        onOpenIndex: (idx) => Navigator.of(context).push(
-          PageRouteBuilder(
-            opaque: false,
-            pageBuilder: (_, __, ___) => PostImageViewer(url: imageUrls[idx]),
-          ),
-        ),
-      );
+      media = PostPhotos(urls: imageUrls, aspect: aspect);
     } else if (videoUrl.isNotEmpty) {
-      media = _InlineVideoPlayer(
+      final ms = raw['videoDurationMs'];
+      media = PostVideo(
         url: videoUrl,
         thumbUrl: (raw['videoThumbUrl'] ?? '').toString(),
         aspect: aspect,
-        onTap: () => Navigator.of(context).push(
-          PageRouteBuilder(
-            opaque: false,
-            pageBuilder: (_, __, ___) => PostVideoPlayer(url: videoUrl),
-          ),
-        ),
+        duration: ms is num ? Duration(milliseconds: ms.toInt()) : null,
       );
+    } else {
+      final status = (raw['mediaUploadStatus'] ?? '').toString();
+      final started = parseFirestoreTimestamp(raw['mediaUploadStartedAt']);
+      // An upload the app never finished (closed mid-way) counts as failed.
+      final stale = started != null &&
+          DateTime.now().difference(started) > const Duration(minutes: 20);
+      final failed = status == 'failed' || (status == 'uploading' && stale);
+      if (status == 'uploading' && !stale) {
+        media = PostMediaPending(aspect: aspect, failed: false);
+      } else if (failed && _isOwnPost) {
+        media = PostMediaPending(aspect: aspect, failed: true);
+      }
     }
     if (media == null || !sensitive) return media;
     return SensitiveMediaCover(
@@ -675,189 +670,6 @@ class _ShowMoreButton extends StatelessWidget {
             color: AppColors.muted,
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ===== Media widgets =====
-class _MediaCarousel extends StatefulWidget {
-  final List<String> urls;
-  final double aspect;
-  final ValueChanged<int> onOpenIndex;
-
-  const _MediaCarousel({
-    required this.urls,
-    required this.aspect,
-    required this.onOpenIndex,
-  });
-
-  @override
-  State<_MediaCarousel> createState() => _MediaCarouselState();
-}
-
-class _MediaCarouselState extends State<_MediaCarousel> {
-  int _index = 0;
-
-  @override
-  Widget build(BuildContext context) {
-    final urls = widget.urls;
-
-    if (urls.length == 1) {
-      return _MediaImage(
-        url: urls.first,
-        aspect: widget.aspect,
-        onTap: () => widget.onOpenIndex(0),
-      );
-    }
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: Stack(
-        children: [
-          AspectRatio(
-            aspectRatio: widget.aspect,
-            child: PageView.builder(
-              itemCount: urls.length,
-              onPageChanged: (i) => setState(() => _index = i),
-              itemBuilder: (_, i) {
-                return InkWell(
-                  onTap: () => widget.onOpenIndex(i),
-                  child: Image.network(
-                    urls[i],
-                    fit: BoxFit.cover,
-                    loadingBuilder: (c, w, p) =>
-                        p == null ? w : Container(color: AppColors.button),
-                    errorBuilder: (_, __, ___) => Container(
-                      color: AppColors.button,
-                      alignment: Alignment.center,
-                      child: const Icon(Icons.broken_image,
-                          color: AppColors.muted),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          Positioned(
-            bottom: 10,
-            left: 0,
-            right: 0,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(urls.length, (i) {
-                final active = i == _index;
-                return AnimatedContainer(
-                  duration: const Duration(milliseconds: 160),
-                  margin: const EdgeInsets.symmetric(horizontal: 3),
-                  width: active ? 14 : 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(active ? 0.55 : 0.25),
-                    borderRadius: BorderRadius.circular(99),
-                  ),
-                );
-              }),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MediaImage extends StatelessWidget {
-  final String url;
-  final double aspect;
-  final VoidCallback? onTap;
-
-  const _MediaImage({
-    required this.url,
-    required this.aspect,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: AspectRatio(
-        aspectRatio: aspect,
-        child: InkWell(
-          onTap: onTap,
-          child: Image.network(
-            url,
-            fit: BoxFit.cover,
-            loadingBuilder: (c, w, p) =>
-                p == null ? w : Container(color: AppColors.button),
-            errorBuilder: (_, __, ___) => Container(
-              color: AppColors.button,
-              alignment: Alignment.center,
-              child: const Icon(Icons.broken_image, color: AppColors.muted),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _InlineVideoPlayer extends StatelessWidget {
-  final String url;
-  final String thumbUrl;
-  final double aspect;
-  final VoidCallback? onTap;
-
-  const _InlineVideoPlayer({
-    required this.url,
-    required this.thumbUrl,
-    required this.aspect,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final aspect = this.aspect > 0 ? this.aspect : (16 / 9);
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: AspectRatio(
-        aspectRatio: (aspect.isFinite && aspect > 0) ? aspect : (16 / 9),
-        child: InkWell(
-          onTap: onTap,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (thumbUrl.isNotEmpty)
-                Image.network(
-                  thumbUrl,
-                  fit: BoxFit.cover,
-                  loadingBuilder: (c, w, p) =>
-                      p == null ? w : Container(color: AppColors.button),
-                  errorBuilder: (_, __, ___) => Container(
-                    color: AppColors.button,
-                    alignment: Alignment.center,
-                    child: const Icon(Icons.videocam_outlined,
-                        color: AppColors.muted, size: 30),
-                  ),
-                )
-              else
-                Container(
-                  color: AppColors.button,
-                  alignment: Alignment.center,
-                  child: const Icon(Icons.videocam_outlined,
-                      color: AppColors.muted, size: 30),
-                ),
-              const Center(
-                child: Icon(
-                  Icons.play_circle_fill_rounded,
-                  color: Colors.white,
-                  size: 52,
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

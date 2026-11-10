@@ -12,11 +12,16 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 
 import 'package:connect_app/services/post_service.dart';
 import 'package:connect_app/services/streak_service.dart';
+import 'package:connect_app/services/firestore_read_helper.dart';
+import 'package:connect_app/services/helperly_test_runtime.dart';
 import 'package:connect_app/theme/tokens.dart';
+import 'package:connect_app/widgets/initials_avatar.dart';
+import 'package:connect_app/widgets/post_media.dart';
 
 import 'package:connect_app/screens/posts/post_image_viewer.dart';
 import 'package:connect_app/screens/posts/post_video_player.dart';
@@ -49,8 +54,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   File? _videoFile;
   String? _videoThumbPath;
   double? _mediaAspect;
+  Duration? _videoDuration;
 
   final picker = ImagePicker();
+
+  static const _maxPhotos = 10;
+  static const _maxVideo = Duration(minutes: 3);
+
+  String _myName = '';
+  String _myAvatar = '';
 
   String? _selectedTemplate; // null => Quick
 
@@ -150,6 +162,24 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _a2Focus.addListener(syncTyping);
     _a3Focus.addListener(syncTyping);
     _tagFocus.addListener(syncTyping);
+    _loadMe();
+  }
+
+  Future<void> _loadMe() async {
+    final uid = HelperlyTestRuntime.currentUid;
+    _myName = HelperlyTestRuntime.currentDisplayName ?? '';
+    if (uid == null || uid.isEmpty) return;
+    try {
+      final me = await FirestoreReadHelper.getDoc(
+          HelperlyTestRuntime.firestore.collection('users').doc(uid));
+      final d = me.data() ?? const <String, dynamic>{};
+      if (!mounted) return;
+      setState(() {
+        final name = '${d['displayName'] ?? d['fullName'] ?? ''}'.trim();
+        if (name.isNotEmpty) _myName = name;
+        _myAvatar = '${d['profilePicture'] ?? ''}';
+      });
+    } catch (_) {}
   }
 
   @override
@@ -242,86 +272,103 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   // —— Media pickers ————————————————————————————————————————
-  Future<void> _pickPhotos({required bool addMore}) async {
-    final picks = await picker.pickMultiImage(maxWidth: 1600, imageQuality: 85);
-    if (picks.isEmpty) return;
+  /// Width / height of a picture as it is shown.
+  static Future<double?> _imageAspect(File f) async {
+    try {
+      final img = await decodeImageFromList(await f.readAsBytes());
+      final a = img.width / img.height;
+      img.dispose();
+      return a.isFinite && a > 0 ? a : null;
+    } catch (_) {
+      return null;
+    }
+  }
 
+  void _snack(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  /// Adds photos (up to [_maxPhotos]); photos replace a chosen video.
+  Future<void> _addPhotos(List<File> files) async {
+    if (files.isEmpty || !mounted) return;
+    final keep = _videoFile == null ? List<File>.from(_imageFiles) : <File>[];
+    final room = _maxPhotos - keep.length;
+    if (files.length > room) {
+      _snack(context.l10n.createPhotoLimit(_maxPhotos));
+    }
+    keep.addAll(files.take(room < 0 ? 0 : room));
+    if (keep.isEmpty) return;
+    final aspect = await _imageAspect(keep.first);
+    if (!mounted) return;
     setState(() {
-      if (!addMore) _imageFiles.clear();
-      _imageFiles.addAll(picks.map((e) => File(e.path)));
-
+      _imageFiles
+        ..clear()
+        ..addAll(keep);
       _videoFile = null;
       _videoThumbPath = null;
-      _mediaAspect = 1.0;
+      _videoDuration = null;
+      _mediaAspect = aspect ?? 1.0;
     });
   }
 
-  Future<void> _takePhoto({required bool addMore}) async {
+  Future<void> _pickPhotos() async {
+    HapticFeedback.selectionClick();
+    final picks = await picker.pickMultiImage(maxWidth: 1600, imageQuality: 85);
+    await _addPhotos(picks.map((e) => File(e.path)).toList());
+  }
+
+  Future<void> _takePhoto() async {
     final picked = await picker.pickImage(
       source: ImageSource.camera,
       maxWidth: 1600,
       imageQuality: 85,
     );
-    if (picked == null) return;
-
-    final photo = File(picked.path);
-    setState(() {
-      if (!addMore) _imageFiles.clear();
-      _imageFiles.add(photo);
-
-      _videoFile = null;
-      _videoThumbPath = null;
-      _mediaAspect = 1.0;
-    });
+    if (picked != null) await _addPhotos([File(picked.path)]);
   }
 
   Future<void> _pickVideo() async {
-    final picked = await picker.pickVideo(
+    HapticFeedback.selectionClick();
+    await _setVideo(await picker.pickVideo(
       source: ImageSource.gallery,
-      maxDuration: const Duration(minutes: 3),
-    );
-    if (picked == null) return;
-
-    final video = File(picked.path);
-
-    String? thumbPath;
-    try {
-      final tempDir = await getTemporaryDirectory();
-      final out = await VideoThumbnail.thumbnailFile(
-        video: video.path,
-        thumbnailPath: tempDir.path,
-        imageFormat: ImageFormat.JPEG,
-        maxWidth: 900,
-        quality: 80,
-        timeMs: 0,
-      );
-      thumbPath = out;
-    } catch (_) {
-      thumbPath = null;
-    }
-
-    setState(() {
-      _videoFile = video;
-      _videoThumbPath = thumbPath;
-      _mediaAspect = 16 / 9;
-
-      _imageFiles.clear();
-    });
+      maxDuration: _maxVideo,
+    ));
   }
 
   Future<void> _recordVideo() async {
-    final picked = await picker.pickVideo(
+    await _setVideo(await picker.pickVideo(
       source: ImageSource.camera,
-      maxDuration: const Duration(minutes: 3),
-    );
-    if (picked == null) return;
+      maxDuration: _maxVideo,
+    ));
+  }
 
+  /// A video replaces any photos; its frame gives the preview and shape.
+  Future<void> _setVideo(XFile? picked) async {
+    if (picked == null) return;
     final video = File(picked.path);
+
+    Duration? length;
+    double? aspect;
+    try {
+      final probe = VideoPlayerController.file(video);
+      await probe.initialize();
+      length = probe.value.duration;
+      aspect = probe.value.aspectRatio;
+      await probe.dispose();
+    } catch (_) {}
+    // The library picker does not enforce maxDuration everywhere.
+    if (!mounted) return;
+    if (length != null && length > _maxVideo + const Duration(seconds: 1)) {
+      _snack(context.l10n.createVideoTooLong(_maxVideo.inMinutes));
+      return;
+    }
 
     String? thumbPath;
     try {
       final tempDir = await getTemporaryDirectory();
-      final out = await VideoThumbnail.thumbnailFile(
+      thumbPath = await VideoThumbnail.thumbnailFile(
         video: video.path,
         thumbnailPath: tempDir.path,
         imageFormat: ImageFormat.JPEG,
@@ -329,30 +376,44 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         quality: 80,
         timeMs: 0,
       );
-      thumbPath = out;
     } catch (_) {
       thumbPath = null;
     }
+    // The frame is already upright; the player's size may not be.
+    if (thumbPath != null) {
+      aspect = await _imageAspect(File(thumbPath)) ?? aspect;
+    }
+    if (!mounted) return;
 
     setState(() {
       _videoFile = video;
       _videoThumbPath = thumbPath;
-      _mediaAspect = 16 / 9;
-
+      _videoDuration = length;
+      _mediaAspect = aspect ?? 16 / 9;
       _imageFiles.clear();
     });
   }
 
-  void _removePhotoAt(int index) {
-    setState(() {
-      if (index >= 0 && index < _imageFiles.length) _imageFiles.removeAt(index);
-    });
+  void _openCamera() {
+    HapticFeedback.selectionClick();
+    FocusScope.of(context).unfocus();
+    _chooseMediaType(context, onPhoto: _takePhoto, onVideo: _recordVideo);
+  }
+
+  Future<void> _removePhotoAt(int index) async {
+    if (index < 0 || index >= _imageFiles.length) return;
+    setState(() => _imageFiles.removeAt(index));
+    if (index == 0 && _imageFiles.isNotEmpty) {
+      final aspect = await _imageAspect(_imageFiles.first);
+      if (mounted) setState(() => _mediaAspect = aspect ?? 1.0);
+    }
   }
 
   void _removeVideo() {
     setState(() {
       _videoFile = null;
       _videoThumbPath = null;
+      _videoDuration = null;
       _mediaAspect = null;
     });
   }
@@ -362,83 +423,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _imageFiles.clear();
       _videoFile = null;
       _videoThumbPath = null;
+      _videoDuration = null;
       _mediaAspect = null;
     });
-  }
-
-  // ✅ media sheet: bottom sheet style + INSTANT updates (no reopen)
-  void _openMediaSheet() {
-    HapticFeedback.lightImpact();
-    FocusScope.of(context).unfocus();
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-      ),
-      builder: (sheetCtx) {
-        return SafeArea(
-          child: StatefulBuilder(
-            builder: (ctx, setSheetState) {
-              Future<void> pickPhotosFromSheet({required bool addMore}) async {
-                await _pickPhotos(addMore: addMore);
-                if (mounted) setSheetState(() {}); // ✅ instant
-              }
-
-              Future<void> takePhotoFromSheet({required bool addMore}) async {
-                await _takePhoto(addMore: addMore);
-                if (mounted) setSheetState(() {});
-              }
-
-              Future<void> pickVideoFromSheet() async {
-                await _pickVideo();
-                if (mounted) setSheetState(() {});
-              }
-
-              Future<void> recordVideoFromSheet() async {
-                await _recordVideo();
-                if (mounted) setSheetState(() {});
-              }
-
-              void removeAllFromSheet() {
-                _removeAllMedia();
-                if (mounted) setSheetState(() {});
-              }
-
-              void removePhotoAtFromSheet(int i) {
-                _removePhotoAt(i);
-                if (mounted) setSheetState(() {});
-              }
-
-              void removeVideoFromSheet() {
-                _removeVideo();
-                if (mounted) setSheetState(() {});
-              }
-
-              return Padding(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
-                child: _MediaPanel(
-                  imageFiles: _imageFiles,
-                  videoFile: _videoFile,
-                  videoThumbPath: _videoThumbPath,
-                  onAddPhotos: () => pickPhotosFromSheet(addMore: false),
-                  onTakePhoto: () => takePhotoFromSheet(addMore: false),
-                  onAddVideo: pickVideoFromSheet,
-                  onRecordVideo: recordVideoFromSheet,
-                  onRemoveAll: removeAllFromSheet,
-                  onRemovePhotoAt: removePhotoAtFromSheet,
-                  onRemoveVideo: removeVideoFromSheet,
-                  onAddMorePhotos: () => pickPhotosFromSheet(addMore: true),
-                  onTakeMorePhotos: () => takePhotoFromSheet(addMore: true),
-                ),
-              );
-            },
-          ),
-        );
-      },
-    );
   }
 
   // —— Templates ————————————————————————————————————————————————
@@ -618,6 +605,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           mediaUploading: true,
           mediaCount: mediaCount,
           hasVideo: videoFile != null,
+          mediaAspectRatio: mediaAspect,
+          videoDurationMs:
+              videoFile != null ? _videoDuration?.inMilliseconds : null,
         );
 
         await _streakService.updateStreak(currentUser.uid);
@@ -774,6 +764,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         focusedBorder: InputBorder.none,
       ),
     );
+    final canClose = Navigator.of(context).canPop();
+    final photoCount = _imageFiles.length;
 
     return Theme(
       data: localTheme,
@@ -782,26 +774,21 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         child: Scaffold(
           resizeToAvoidBottomInset: true,
           appBar: AppBar(
-            leading: const SizedBox(width: 0),
-            title: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  context.l10n.createTitle,
-                  style: TextStyle(
-                    color: AppColors.text,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                Text(
-                  _templateLabel(_selectedTemplate),
-                  style: const TextStyle(
-                    color: AppColors.muted,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
+            automaticallyImplyLeading: false,
+            leading: canClose
+                ? IconButton(
+                    tooltip: context.l10n.mediaClose,
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  )
+                : null,
+            title: Text(
+              context.l10n.createTitle,
+              style: const TextStyle(
+                color: AppColors.text,
+                fontWeight: FontWeight.w700,
+                fontSize: 17,
+              ),
             ),
             centerTitle: true,
             actions: [
@@ -813,11 +800,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     backgroundColor:
                         _canPost ? AppColors.primary : AppColors.button,
                     foregroundColor: _canPost ? Colors.white : AppColors.muted,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 10),
+                    shape: const StadiumBorder(),
+                    minimumSize: const Size(72, 38),
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
                   ),
                   child: _isPosting
                       ? const SizedBox(
@@ -827,7 +812,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                               strokeWidth: 2, color: Colors.white),
                         )
                       : Text(context.l10n.tabPost,
-                          style: TextStyle(fontWeight: FontWeight.w700)),
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
                 ),
               ),
             ],
@@ -838,87 +823,138 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 absorbing: _isPosting,
                 child: Column(
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-                      child: Row(
+                    Expanded(
+                      child: ListView(
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                         children: [
-                          _ModeChip(
-                            label: context.l10n.postFilterQuick,
-                            selected: _selectedTemplate == null,
-                            onTap: _setQuickPost,
+                          Row(
+                            children: [
+                              InitialsAvatar(
+                                  url: _myAvatar, name: _myName, radius: 22),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (_myName.isNotEmpty)
+                                      Text(
+                                        _myName,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 15,
+                                          color: AppColors.text,
+                                        ),
+                                      ),
+                                    const SizedBox(height: 4),
+                                    _TypeSelector(
+                                      label: _templateLabel(_selectedTemplate),
+                                      onTap: _openTemplateSheet,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 8),
-                          _ModeChip(
-                            label: context.l10n.createTemplate,
-                            selected: _selectedTemplate != null,
-                            onTap: _openTemplateSheet,
-                          ),
-                          const Spacer(),
+                          const SizedBox(height: 14),
+                          _selectedTemplate == null
+                              ? _QuickEditor(
+                                  controller: _quickController,
+                                  focusNode: _quickFocus,
+                                  onChanged: () => setState(() {}),
+                                  readOnly: _isPosting,
+                                )
+                              : _TemplateEditor(
+                                  template: templates[_selectedTemplate]!,
+                                  a1: _a1,
+                                  a2: _a2,
+                                  a3: _a3,
+                                  a1Focus: _a1Focus,
+                                  a2Focus: _a2Focus,
+                                  a3Focus: _a3Focus,
+                                  onChanged: () => setState(() {}),
+                                  readOnly: _isPosting,
+                                ),
+                          if (selectedTags.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: [
+                                for (final t in selectedTags)
+                                  _TagChip(
+                                    label: t,
+                                    onRemove: () =>
+                                        setState(() => selectedTags.remove(t)),
+                                  ),
+                              ],
+                            ),
+                          ],
+                          if (_hasMedia) ...[
+                            const SizedBox(height: 16),
+                            _ComposerMedia(
+                              photos: _imageFiles,
+                              videoFile: _videoFile,
+                              videoThumbPath: _videoThumbPath,
+                              videoDuration: _videoDuration,
+                              aspect: postMediaAspect(_mediaAspect),
+                              canAddPhotos: photoCount < _maxPhotos,
+                              onAddPhotos: _pickPhotos,
+                              onRemovePhoto: _removePhotoAt,
+                              onRemoveVideo: _removeVideo,
+                            ),
+                          ],
                         ],
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-                        child: _selectedTemplate == null
-                            ? _QuickEditor(
-                                controller: _quickController,
-                                focusNode: _quickFocus,
-                                onChanged: () => setState(() {}),
-                                readOnly: _isPosting,
-                              )
-                            : _TemplateEditor(
-                                template: templates[_selectedTemplate]!,
-                                a1: _a1,
-                                a2: _a2,
-                                a3: _a3,
-                                a1Focus: _a1Focus,
-                                a2Focus: _a2Focus,
-                                a3Focus: _a3Focus,
-                                onChanged: () => setState(() {}),
-                                readOnly: _isPosting,
-                              ),
+                    Container(
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        border:
+                            Border(top: BorderSide(color: AppColors.border)),
                       ),
-                    ),
-
-                    // ✅ keep 2 buttons exactly like before (Media + Tags)
-                    SafeArea(
-                      top: false,
-                      child: Container(
-                        decoration: const BoxDecoration(
-                          color: Colors.white,
-                          border:
-                              Border(top: BorderSide(color: AppColors.border)),
-                        ),
-                        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                      padding: const EdgeInsets.fromLTRB(6, 2, 14, 2),
+                      child: SafeArea(
+                        top: false,
                         child: Row(
                           children: [
-                            Expanded(
-                              child: _PillButton(
-                                label: (_imageFiles.isNotEmpty ||
-                                        _videoFile != null)
-                                    ? context.l10n.createMediaCount(
-                                        _imageFiles.length +
-                                            (_videoFile != null ? 1 : 0))
-                                    : context.l10n.createMedia,
-                                icon: Icons.photo_library_outlined,
-                                onTap: _openMediaSheet,
-                                selected: _hasMedia,
-                              ),
+                            _ToolButton(
+                              icon: Icons.photo_library_outlined,
+                              tooltip: context.l10n.createAddPhotos,
+                              active: photoCount > 0,
+                              onTap: _pickPhotos,
                             ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: _PillButton(
-                                label: selectedTags.isNotEmpty
-                                    ? context.l10n
-                                        .createTagsCount(selectedTags.length)
-                                    : context.l10n.createTags,
-                                icon: Icons.tag_outlined,
-                                onTap: _openTagsSheet,
-                                selected: selectedTags.isNotEmpty,
-                              ),
+                            _ToolButton(
+                              icon: Icons.photo_camera_outlined,
+                              tooltip: context.l10n.createUseCamera,
+                              onTap: _openCamera,
                             ),
+                            _ToolButton(
+                              icon: Icons.videocam_outlined,
+                              tooltip: context.l10n.createAddVideo,
+                              active: _videoFile != null,
+                              onTap: _pickVideo,
+                            ),
+                            _ToolButton(
+                              icon: Icons.tag_rounded,
+                              tooltip: context.l10n.createTags,
+                              active: selectedTags.isNotEmpty,
+                              onTap: _openTagsSheet,
+                            ),
+                            const Spacer(),
+                            if (photoCount > 0)
+                              Text(
+                                context.l10n
+                                    .mediaCounter(photoCount, _maxPhotos),
+                                style: const TextStyle(
+                                  color: AppColors.muted,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -929,20 +965,20 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               if (_isPosting)
                 Positioned.fill(
                   child: Container(
-                    color: Colors.white.withOpacity(0.65),
+                    color: Colors.white.withValues(alpha: 0.65),
                     child: Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          SizedBox(
+                          const SizedBox(
                             width: 28,
                             height: 28,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           ),
-                          SizedBox(height: 12),
+                          const SizedBox(height: 12),
                           Text(
                             context.l10n.createPosting,
-                            style: TextStyle(
+                            style: const TextStyle(
                               fontWeight: FontWeight.w700,
                               color: AppColors.text,
                             ),
@@ -960,187 +996,240 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 }
 
-// ===== Media panel (bottom sheet content) =====
+// ===== Composer media =====
 
-class _MediaPanel extends StatelessWidget {
-  final List<File> imageFiles;
+/// The chosen photos or video, shown in the composer the way the post
+/// will look. Tap to view full screen; the x removes one.
+class _ComposerMedia extends StatelessWidget {
+  final List<File> photos;
   final File? videoFile;
   final String? videoThumbPath;
-
+  final Duration? videoDuration;
+  final double aspect;
+  final bool canAddPhotos;
   final VoidCallback onAddPhotos;
-  final VoidCallback onTakePhoto;
-  final VoidCallback onAddVideo;
-  final VoidCallback onRecordVideo;
-
-  final VoidCallback onRemoveAll;
-  final ValueChanged<int> onRemovePhotoAt;
+  final ValueChanged<int> onRemovePhoto;
   final VoidCallback onRemoveVideo;
-  final VoidCallback onAddMorePhotos;
-  final VoidCallback onTakeMorePhotos;
 
-  const _MediaPanel({
-    required this.imageFiles,
+  const _ComposerMedia({
+    required this.photos,
     required this.videoFile,
     required this.videoThumbPath,
+    required this.videoDuration,
+    required this.aspect,
+    required this.canAddPhotos,
     required this.onAddPhotos,
-    required this.onTakePhoto,
-    required this.onAddVideo,
-    required this.onRecordVideo,
-    required this.onRemoveAll,
-    required this.onRemovePhotoAt,
+    required this.onRemovePhoto,
     required this.onRemoveVideo,
-    required this.onAddMorePhotos,
-    required this.onTakeMorePhotos,
   });
 
   @override
   Widget build(BuildContext context) {
-    final hasPhotos = imageFiles.isNotEmpty;
-    final hasVideo = videoFile != null;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
-      ),
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                context.l10n.createMedia,
-                style: TextStyle(
-                  color: AppColors.text,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 14,
-                  letterSpacing: -0.2,
-                ),
-              ),
-              const Spacer(),
-              InkWell(
-                borderRadius: BorderRadius.circular(10),
-                onTap: onRemoveAll,
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                  child: Text(
-                    context.l10n.createRemoveAll,
-                    style: TextStyle(
-                      color: AppColors.muted,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 13,
+    final video = videoFile;
+    if (video != null) {
+      final thumb = videoThumbPath;
+      return _Removable(
+        onRemove: onRemoveVideo,
+        child: GestureDetector(
+          onTap: () => openVideoPlayer(context, file: video),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: AspectRatio(
+              aspectRatio: aspect,
+              child: ColoredBox(
+                color: Colors.black,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (thumb != null && thumb.isNotEmpty)
+                      Image.file(File(thumb), fit: BoxFit.contain),
+                    Center(
+                      child: Container(
+                        width: 60,
+                        height: 60,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.5),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.8),
+                              width: 2),
+                        ),
+                        child: const Icon(Icons.play_arrow_rounded,
+                            color: Colors.white, size: 36),
+                      ),
                     ),
-                  ),
+                    if (videoDuration != null)
+                      Positioned(
+                        left: 10,
+                        bottom: 10,
+                        child: ViewerPill(
+                          icon: Icons.videocam_rounded,
+                          text: formatMediaDuration(videoDuration!),
+                        ),
+                      ),
+                  ],
                 ),
               ),
-            ],
+            ),
           ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _SheetAction(
-                  icon: Icons.photo_library_outlined,
-                  label: hasPhotos || hasVideo
-                      ? context.l10n.commonChooseFromLibrary
-                      : context.l10n.createAddFromLibrary,
-                  onTap: () => _chooseMediaType(
-                    context,
-                    onPhoto: hasPhotos ? onAddMorePhotos : onAddPhotos,
-                    onVideo: onAddVideo,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _SheetAction(
-                  icon: Icons.photo_camera_outlined,
-                  label: context.l10n.createUseCamera,
-                  onTap: () => _chooseMediaType(
-                    context,
-                    onPhoto: hasPhotos ? onTakeMorePhotos : onTakePhoto,
-                    onVideo: onRecordVideo,
-                  ),
-                ),
-              ),
-            ],
+        ),
+      );
+    }
+
+    if (photos.length == 1) {
+      return _Removable(
+        onRemove: () => onRemovePhoto(0),
+        child: GestureDetector(
+          onTap: () => openImageViewer(context, files: photos),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: AspectRatio(
+              aspectRatio: aspect,
+              child: Image.file(photos.first, fit: BoxFit.cover),
+            ),
           ),
-          const SizedBox(height: 12),
-          if (hasPhotos)
-            _PhotosRow(
-              imageFiles: imageFiles,
-              onRemoveAt: onRemovePhotoAt,
-              onAdd: onAddMorePhotos,
-            ),
-          if (hasVideo) ...[
-            if (hasPhotos) const SizedBox(height: 12),
-            _BigVideoPreview(
-              thumbPath: videoThumbPath,
-              videoFile: videoFile!,
-              onRemove: onRemoveVideo,
-            ),
-          ],
-          if (!hasPhotos && !hasVideo)
-            Padding(
-              padding: EdgeInsets.only(top: 6),
-              child: Text(
-                context.l10n.createNoMedia,
-                style: TextStyle(
-                    color: AppColors.muted, fontWeight: FontWeight.w600),
+        ),
+      );
+    }
+
+    const height = 220.0;
+    return SizedBox(
+      height: height,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        clipBehavior: Clip.none,
+        itemCount: photos.length + (canAddPhotos ? 1 : 0),
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, i) {
+          if (i == photos.length) {
+            return Material(
+              color: AppColors.button,
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: onAddPhotos,
+                child: SizedBox(
+                  width: height * 0.6,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.add_photo_alternate_outlined,
+                          color: AppColors.muted, size: 30),
+                      const SizedBox(height: 6),
+                      Text(
+                        context.l10n.createAddPhotos,
+                        style: const TextStyle(
+                          color: AppColors.muted,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }
+          return _Removable(
+            onRemove: () => onRemovePhoto(i),
+            child: GestureDetector(
+              onTap: () =>
+                  openImageViewer(context, files: photos, initialIndex: i),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: SizedBox(
+                  width: height * 0.8,
+                  height: height,
+                  child: Image.file(photos[i], fit: BoxFit.cover),
+                ),
               ),
             ),
-        ],
+          );
+        },
       ),
     );
   }
 }
 
-class _SheetAction extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
+/// A round x in the corner of a photo or video.
+class _Removable extends StatelessWidget {
+  final Widget child;
+  final VoidCallback onRemove;
+  const _Removable({required this.child, required this.onRemove});
 
-  const _SheetAction({
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        child,
+        Positioned(
+          top: 8,
+          right: 8,
+          child: ViewerRoundButton(
+            size: 30,
+            icon: Icons.close_rounded,
+            tooltip: context.l10n.commonRemove,
+            onTap: onRemove,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Icon button in the composer's bottom bar.
+class _ToolButton extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final bool active;
+  const _ToolButton({
     required this.icon,
-    required this.label,
+    required this.tooltip,
     required this.onTap,
+    this.active = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onTap,
+      iconSize: 24,
+      color: active ? AppColors.primary : AppColors.muted,
+      icon: Icon(icon),
+    );
+  }
+}
+
+/// "Quick post ▾": picks the post type.
+class _TypeSelector extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  const _TypeSelector({required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
     return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(14),
+      color: Colors.transparent,
+      shape: const StadiumBorder(side: BorderSide(color: AppColors.border)),
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        customBorder: const StadiumBorder(),
         onTap: onTap,
-        child: Container(
-          height: 44,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.border),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 4, 6, 4),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 20, color: AppColors.muted),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  label,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppColors.text,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.2,
-                  ),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: AppColors.text,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
                 ),
               ),
+              const Icon(Icons.arrow_drop_down_rounded,
+                  color: AppColors.muted, size: 20),
             ],
           ),
         ),
@@ -1149,77 +1238,39 @@ class _SheetAction extends StatelessWidget {
   }
 }
 
-class _PhotosRow extends StatelessWidget {
-  final List<File> imageFiles;
-  final ValueChanged<int> onRemoveAt;
-  final VoidCallback onAdd;
-
-  const _PhotosRow({
-    required this.imageFiles,
-    required this.onRemoveAt,
-    required this.onAdd,
-  });
+/// A chosen tag under the text, with an x to drop it.
+class _TagChip extends StatelessWidget {
+  final String label;
+  final VoidCallback onRemove;
+  const _TagChip({required this.label, required this.onRemove});
 
   @override
   Widget build(BuildContext context) {
-    const double size = 86;
-    const double radius = 16;
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 4, 4, 4),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(99),
+      ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          ...List.generate(imageFiles.length, (i) {
-            return Padding(
-              padding: const EdgeInsets.only(right: 10),
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  InkWell(
-                    borderRadius: BorderRadius.circular(radius),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        PageRouteBuilder(
-                          opaque: false,
-                          pageBuilder: (_, __, ___) =>
-                              PostImageViewer(file: imageFiles[i]),
-                        ),
-                      );
-                    },
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(radius),
-                      child: SizedBox(
-                        width: size,
-                        height: size,
-                        child: Image.file(imageFiles[i], fit: BoxFit.cover),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    right: -6,
-                    top: -6,
-                    child: _MiniRemoveButton(onTap: () => onRemoveAt(i)),
-                  ),
-                ],
-              ),
-            );
-          }),
+          Text(
+            label,
+            style: const TextStyle(
+              color: AppColors.primary,
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(width: 2),
           InkWell(
-            borderRadius: BorderRadius.circular(radius),
-            onTap: onAdd,
-            child: Container(
-              width: size,
-              height: size,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(radius),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: const Center(
-                child:
-                    Icon(Icons.add_rounded, size: 28, color: AppColors.muted),
-              ),
+            customBorder: const CircleBorder(),
+            onTap: onRemove,
+            child: const Padding(
+              padding: EdgeInsets.all(2),
+              child:
+                  Icon(Icons.close_rounded, size: 16, color: AppColors.primary),
             ),
           ),
         ],
@@ -1256,8 +1307,8 @@ void _chooseMediaType(
                 ),
               ),
               ListTile(
-                leading: const Icon(Icons.image_outlined),
-                title: Text(context.l10n.messagePhoto),
+                leading: const Icon(Icons.photo_camera_outlined),
+                title: Text(context.l10n.createTakePhoto),
                 onTap: () {
                   Navigator.pop(ctx);
                   onPhoto();
@@ -1265,7 +1316,7 @@ void _chooseMediaType(
               ),
               ListTile(
                 leading: const Icon(Icons.videocam_outlined),
-                title: Text(context.l10n.messageVideo),
+                title: Text(context.l10n.createRecordVideo),
                 onTap: () {
                   Navigator.pop(ctx);
                   onVideo();
@@ -1277,105 +1328,6 @@ void _chooseMediaType(
       );
     },
   );
-}
-
-class _BigVideoPreview extends StatelessWidget {
-  final String? thumbPath;
-  final File videoFile;
-  final VoidCallback onRemove;
-
-  const _BigVideoPreview({
-    required this.thumbPath,
-    required this.videoFile,
-    required this.onRemove,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(16),
-      onTap: () {
-        Navigator.push(
-          context,
-          PageRouteBuilder(
-            opaque: false,
-            pageBuilder: (_, __, ___) => PostVideoPlayer(file: videoFile),
-          ),
-        );
-      },
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: SizedBox(
-              height: 140,
-              width: double.infinity,
-              child: (thumbPath != null && thumbPath!.isNotEmpty)
-                  ? Image.file(File(thumbPath!), fit: BoxFit.cover)
-                  : Container(
-                      color: AppColors.button,
-                      alignment: Alignment.center,
-                      child: const Icon(Icons.videocam_rounded,
-                          color: AppColors.muted, size: 34),
-                    ),
-            ),
-          ),
-          Positioned.fill(
-            child: Center(
-              child: Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.45),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: const Icon(Icons.play_arrow_rounded,
-                    color: Colors.white, size: 34),
-              ),
-            ),
-          ),
-          Positioned(
-            right: 10,
-            top: 10,
-            child: Material(
-              color: Colors.black.withOpacity(0.50),
-              borderRadius: BorderRadius.circular(999),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(999),
-                onTap: onRemove,
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  child: Icon(Icons.close, size: 18, color: Colors.white),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MiniRemoveButton extends StatelessWidget {
-  final VoidCallback onTap;
-  const _MiniRemoveButton({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.black.withOpacity(0.55),
-      borderRadius: BorderRadius.circular(999),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onTap,
-        child: const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          child: Icon(Icons.close, size: 16, color: Colors.white),
-        ),
-      ),
-    );
-  }
 }
 
 // ===== Tags =====
@@ -1655,53 +1607,6 @@ class _TemplateEditor extends StatelessWidget {
 
 // ===== UI components =====
 
-class _ModeChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _ModeChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final bg =
-        selected ? AppColors.primary.withOpacity(0.10) : AppColors.button;
-    final fg = selected ? AppColors.primary : AppColors.text;
-
-    return Material(
-      color: bg,
-      borderRadius: BorderRadius.circular(999),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: selected
-                  ? AppColors.primary.withOpacity(0.25)
-                  : AppColors.border,
-            ),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: fg,
-              fontWeight: FontWeight.w700,
-              fontSize: 13,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _TemplateRowPro extends StatelessWidget {
   final String title;
   final String subtitle;
@@ -1775,64 +1680,6 @@ class _TemplateRowPro extends StatelessWidget {
                     ? Icons.check_circle_rounded
                     : Icons.chevron_right_rounded,
                 color: selected ? AppColors.primary : AppColors.border,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PillButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-  final bool selected;
-
-  const _PillButton({
-    required this.label,
-    required this.icon,
-    required this.onTap,
-    required this.selected,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final bg = selected ? AppColors.primary.withOpacity(0.10) : Colors.white;
-    final border =
-        selected ? AppColors.primary.withOpacity(0.25) : AppColors.border;
-    final iconColor = selected ? AppColors.primary : AppColors.muted;
-
-    return Material(
-      color: bg,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Container(
-          height: 44,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: border),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 20, color: iconColor),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  label,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.text,
-                    fontSize: 13,
-                    letterSpacing: -0.2,
-                  ),
-                ),
               ),
             ],
           ),

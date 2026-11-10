@@ -1964,4 +1964,78 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get profilePosts => 'Publications';
+
+  @override
+  String get mediaClose => 'Fermer';
+
+  @override
+  String mediaCounter(int index, int total) {
+    return '$index / $total';
+  }
+
+  @override
+  String get mediaMute => 'Couper le son';
+
+  @override
+  String get mediaUnmute => 'Activer le son';
+
+  @override
+  String get mediaFullScreen => 'Plein écran';
+
+  @override
+  String get mediaPlay => 'Lire';
+
+  @override
+  String get mediaPause => 'Pause';
+
+  @override
+  String get postMediaUploading => 'Envoi du média…';
+
+  @override
+  String get postMediaFailed => 'Échec de l’envoi du média';
+
+  @override
+  String createPhotoLimit(int count) {
+    return 'Vous pouvez ajouter jusqu’à $count photos.';
+  }
+
+  @override
+  String createVideoTooLong(int minutes) {
+    return 'Les vidéos peuvent durer jusqu’à $minutes minutes.';
+  }
+
+  @override
+  String get createAddPhotos => 'Photos';
+
+  @override
+  String get createAddVideo => 'Vidéo';
+
+  @override
+  String get createTakePhoto => 'Prendre une photo';
+
+  @override
+  String get createRecordVideo => 'Filmer une vidéo';
+
+  @override
+  String get commonRemove => 'Retirer';
+
+  @override
+  String get profileTabMedia => 'Photos et vidéos';
+
+  @override
+  String get profileNoMedia => 'Aucune photo ni vidéo pour l’instant.';
+
+  @override
+  String get profileCanHelpWith => 'Peut aider pour';
+
+  @override
+  String get profileEditProfile => 'Modifier le profil';
+
+  @override
+  String get profileRoleHelper => 'Aidant';
+
+  @override
+  String profileSpeaks(String languages) {
+    return 'Parle $languages';
+  }
 }

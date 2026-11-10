@@ -1921,4 +1921,78 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get profilePosts => 'Posts';
+
+  @override
+  String get mediaClose => 'Close';
+
+  @override
+  String mediaCounter(int index, int total) {
+    return '$index / $total';
+  }
+
+  @override
+  String get mediaMute => 'Mute';
+
+  @override
+  String get mediaUnmute => 'Unmute';
+
+  @override
+  String get mediaFullScreen => 'Full screen';
+
+  @override
+  String get mediaPlay => 'Play';
+
+  @override
+  String get mediaPause => 'Pause';
+
+  @override
+  String get postMediaUploading => 'Uploading media…';
+
+  @override
+  String get postMediaFailed => 'Media upload failed';
+
+  @override
+  String createPhotoLimit(int count) {
+    return 'You can add up to $count photos.';
+  }
+
+  @override
+  String createVideoTooLong(int minutes) {
+    return 'Videos can be up to $minutes minutes long.';
+  }
+
+  @override
+  String get createAddPhotos => 'Photos';
+
+  @override
+  String get createAddVideo => 'Video';
+
+  @override
+  String get createTakePhoto => 'Take a photo';
+
+  @override
+  String get createRecordVideo => 'Record a video';
+
+  @override
+  String get commonRemove => 'Remove';
+
+  @override
+  String get profileTabMedia => 'Photos & videos';
+
+  @override
+  String get profileNoMedia => 'No photos or videos yet.';
+
+  @override
+  String get profileCanHelpWith => 'Can help with';
+
+  @override
+  String get profileEditProfile => 'Edit profile';
+
+  @override
+  String get profileRoleHelper => 'Helper';
+
+  @override
+  String profileSpeaks(String languages) {
+    return 'Speaks $languages';
+  }
 }

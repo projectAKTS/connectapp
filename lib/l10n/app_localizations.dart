@@ -3601,6 +3601,138 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Posts'**
   String get profilePosts;
+
+  /// No description provided for @mediaClose.
+  ///
+  /// In en, this message translates to:
+  /// **'Close'**
+  String get mediaClose;
+
+  /// No description provided for @mediaCounter.
+  ///
+  /// In en, this message translates to:
+  /// **'{index} / {total}'**
+  String mediaCounter(int index, int total);
+
+  /// No description provided for @mediaMute.
+  ///
+  /// In en, this message translates to:
+  /// **'Mute'**
+  String get mediaMute;
+
+  /// No description provided for @mediaUnmute.
+  ///
+  /// In en, this message translates to:
+  /// **'Unmute'**
+  String get mediaUnmute;
+
+  /// No description provided for @mediaFullScreen.
+  ///
+  /// In en, this message translates to:
+  /// **'Full screen'**
+  String get mediaFullScreen;
+
+  /// No description provided for @mediaPlay.
+  ///
+  /// In en, this message translates to:
+  /// **'Play'**
+  String get mediaPlay;
+
+  /// No description provided for @mediaPause.
+  ///
+  /// In en, this message translates to:
+  /// **'Pause'**
+  String get mediaPause;
+
+  /// No description provided for @postMediaUploading.
+  ///
+  /// In en, this message translates to:
+  /// **'Uploading media…'**
+  String get postMediaUploading;
+
+  /// No description provided for @postMediaFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Media upload failed'**
+  String get postMediaFailed;
+
+  /// No description provided for @createPhotoLimit.
+  ///
+  /// In en, this message translates to:
+  /// **'You can add up to {count} photos.'**
+  String createPhotoLimit(int count);
+
+  /// No description provided for @createVideoTooLong.
+  ///
+  /// In en, this message translates to:
+  /// **'Videos can be up to {minutes} minutes long.'**
+  String createVideoTooLong(int minutes);
+
+  /// No description provided for @createAddPhotos.
+  ///
+  /// In en, this message translates to:
+  /// **'Photos'**
+  String get createAddPhotos;
+
+  /// No description provided for @createAddVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Video'**
+  String get createAddVideo;
+
+  /// No description provided for @createTakePhoto.
+  ///
+  /// In en, this message translates to:
+  /// **'Take a photo'**
+  String get createTakePhoto;
+
+  /// No description provided for @createRecordVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Record a video'**
+  String get createRecordVideo;
+
+  /// No description provided for @commonRemove.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove'**
+  String get commonRemove;
+
+  /// No description provided for @profileTabMedia.
+  ///
+  /// In en, this message translates to:
+  /// **'Photos & videos'**
+  String get profileTabMedia;
+
+  /// No description provided for @profileNoMedia.
+  ///
+  /// In en, this message translates to:
+  /// **'No photos or videos yet.'**
+  String get profileNoMedia;
+
+  /// No description provided for @profileCanHelpWith.
+  ///
+  /// In en, this message translates to:
+  /// **'Can help with'**
+  String get profileCanHelpWith;
+
+  /// No description provided for @profileEditProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit profile'**
+  String get profileEditProfile;
+
+  /// No description provided for @profileRoleHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Helper'**
+  String get profileRoleHelper;
+
+  /// No description provided for @profileSpeaks.
+  ///
+  /// In en, this message translates to:
+  /// **'Speaks {languages}'**
+  String profileSpeaks(String languages);
 }
 
 class _AppLocalizationsDelegate

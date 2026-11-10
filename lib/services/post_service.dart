@@ -28,23 +28,23 @@ class PostService {
     final String userAvatar = userSnap.data()?['profilePicture'] ?? '';
 
     final Map<String, dynamic> postData = {
-      'id':            postId,
-      'userID':        user.uid,
-      'userName':      userName,
-      'userAvatar':    userAvatar,
-      'content':       content,
-      'postType':      postType,
-      'tags':          tags,
-      'timestamp':     FieldValue.serverTimestamp(),
-      'likes':         0,
+      'id': postId,
+      'userID': user.uid,
+      'userName': userName,
+      'userAvatar': userAvatar,
+      'content': content,
+      'postType': postType,
+      'tags': tags,
+      'timestamp': FieldValue.serverTimestamp(),
+      'likes': 0,
       'commentsCount': 0,
-      'helpfulVotes':  0,
+      'helpfulVotes': 0,
       'engagementScore': 0,
-      'isBoosted':     false,
+      'isBoosted': false,
       'boostExpiresAt': null,
-      'boostScore':    0,
-      'likedBy':       <String>[],
-      'isFeatured':    false,
+      'boostScore': 0,
+      'likedBy': <String>[],
+      'isFeatured': false,
     };
 
     // Include media keys only when present
@@ -79,6 +79,8 @@ class PostService {
     bool mediaUploading = false,
     int mediaCount = 0,
     bool hasVideo = false,
+    double? mediaAspectRatio,
+    int? videoDurationMs,
   }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw Exception('User must be logged in');
@@ -91,26 +93,31 @@ class PostService {
     final String userAvatar = userSnap.data()?['profilePicture'] ?? '';
 
     final Map<String, dynamic> postData = {
-      'id':            postId,
-      'userID':        user.uid,
-      'userName':      userName,
-      'userAvatar':    userAvatar,
-      'content':       content,
-      'postType':      postType,
-      'tags':          tags,
-      'timestamp':     FieldValue.serverTimestamp(),
-      'likes':         0,
+      'id': postId,
+      'userID': user.uid,
+      'userName': userName,
+      'userAvatar': userAvatar,
+      'content': content,
+      'postType': postType,
+      'tags': tags,
+      'timestamp': FieldValue.serverTimestamp(),
+      'likes': 0,
       'commentsCount': 0,
-      'helpfulVotes':  0,
+      'helpfulVotes': 0,
       'engagementScore': 0,
-      'isBoosted':     false,
+      'isBoosted': false,
       'boostExpiresAt': null,
-      'boostScore':    0,
-      'likedBy':       <String>[],
-      'isFeatured':    false,
+      'boostScore': 0,
+      'likedBy': <String>[],
+      'isFeatured': false,
       'mediaUploadStatus': mediaUploading ? 'uploading' : 'ready',
       'mediaCount': mediaCount,
       'hasVideo': hasVideo,
+      // Known before the upload, so the feed can hold the right space.
+      if (mediaAspectRatio != null && mediaAspectRatio > 0)
+        'mediaAspectRatio': mediaAspectRatio,
+      if (videoDurationMs != null && videoDurationMs > 0)
+        'videoDurationMs': videoDurationMs,
       if (mediaUploading) 'mediaUploadStartedAt': FieldValue.serverTimestamp(),
     };
 

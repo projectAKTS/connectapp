@@ -920,5 +920,58 @@
   "commentDelete": "Delete comment",
   "commentReport": "Report comment",
   "commentDeleted": "Comment deleted",
-  "profilePosts": "Posts"
+  "profilePosts": "Posts",
+  "mediaClose": "Close",
+  "mediaCounter": "{index} / {total}",
+  "@mediaCounter": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "mediaMute": "Mute",
+  "mediaUnmute": "Unmute",
+  "mediaFullScreen": "Full screen",
+  "mediaPlay": "Play",
+  "mediaPause": "Pause",
+  "postMediaUploading": "Uploading media…",
+  "postMediaFailed": "Media upload failed",
+  "createPhotoLimit": "You can add up to {count} photos.",
+  "@createPhotoLimit": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "createVideoTooLong": "Videos can be up to {minutes} minutes long.",
+  "@createVideoTooLong": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "createAddPhotos": "Photos",
+  "createAddVideo": "Video",
+  "createTakePhoto": "Take a photo",
+  "createRecordVideo": "Record a video",
+  "commonRemove": "Remove",
+  "profileTabMedia": "Photos & videos",
+  "profileNoMedia": "No photos or videos yet.",
+  "profileCanHelpWith": "Can help with",
+  "profileEditProfile": "Edit profile",
+  "profileRoleHelper": "Helper",
+  "profileSpeaks": "Speaks {languages}",
+  "@profileSpeaks": {
+    "placeholders": {
+      "languages": {
+        "type": "String"
+      }
+    }
+  }
 }
