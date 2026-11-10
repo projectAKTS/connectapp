@@ -2081,7 +2081,8 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
 
   private let lateCallObserver = CXCallObserver()
   private lazy var lateCallProvider: CXProvider = {
-    let config = CXProviderConfiguration()
+    // The named initializer also works below iOS 14 (the app's minimum).
+    let config = CXProviderConfiguration(localizedName: "Helperly")
     config.supportsVideo = true
     config.maximumCallsPerCallGroup = 1
     config.includesCallsInRecents = false
