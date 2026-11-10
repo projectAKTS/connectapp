@@ -302,7 +302,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       helperText: helperText,
       labelStyle: _subLabelStyle,
       floatingLabelStyle: _subLabelStyle,
-      floatingLabelBehavior: FloatingLabelBehavior.never,
+      // The label stays visible above a filled field, so a value like a
+      // name still says what it is.
+      floatingLabelBehavior: FloatingLabelBehavior.auto,
       helperStyle: const TextStyle(
         fontSize: 12,
         fontWeight: FontWeight.w500,

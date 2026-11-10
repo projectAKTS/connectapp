@@ -8,6 +8,7 @@ import FirebaseMessaging
 import UserNotifications
 import flutter_callkit_incoming
 import AVFAudio
+import AVFoundation
 import CallKit
 import CryptoKit
 
@@ -632,6 +633,40 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
         binaryMessenger: controller.binaryMessenger
       )
       callProximityChannel = proximityChannel
+      // Shrinks a chosen post video before upload (phone videos are often
+      // hundreds of MB). Answers the new file's path, or nil to keep the
+      // original.
+      let videoChannel = FlutterMethodChannel(
+        name: "connectapp/videoCompress",
+        binaryMessenger: controller.binaryMessenger
+      )
+      videoChannel.setMethodCallHandler { call, result in
+        guard call.method == "compress",
+          let args = call.arguments as? [String: Any],
+          let path = args["path"] as? String
+        else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        let asset = AVURLAsset(url: URL(fileURLWithPath: path))
+        // 720p for short clips; 540p keeps long ones (up to 3 min) small.
+        let seconds = CMTimeGetSeconds(asset.duration)
+        let preset = seconds > 60 ? AVAssetExportPreset960x540 : AVAssetExportPreset1280x720
+        guard let export = AVAssetExportSession(asset: asset, presetName: preset) else {
+          result(nil)
+          return
+        }
+        let out = URL(fileURLWithPath: NSTemporaryDirectory())
+          .appendingPathComponent("post_\(UUID().uuidString).mp4")
+        export.outputURL = out
+        export.outputFileType = .mp4
+        export.shouldOptimizeForNetworkUse = true
+        export.exportAsynchronously {
+          DispatchQueue.main.async {
+            result(export.status == .completed ? out.path : nil)
+          }
+        }
+      }
       proximityChannel.setMethodCallHandler { call, result in
         guard call.method == "setProximityScreenOff" else {
           result(FlutterMethodNotImplemented)
@@ -1994,6 +2029,23 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
     )
     if ensureOutcome != "presented" && ensureOutcome != "existing" {
       NSLog("Helperly PushKit late incoming suppressed identifier_present=true")
+      // iOS 13+ requires every VoIP push to report a call to CallKit, or it
+      // kills the app and, if it keeps happening, stops delivering VoIP
+      // pushes (calls would stop ringing). For a call that has already
+      // ended, report a stand-in call and end it at once so nothing rings.
+      // Only when no other call is on the phone, so a call in progress never
+      // sees a waiting-call screen.
+      if ensureOutcome == "suppressedTerminal" && lateCallObserver.calls.isEmpty {
+        reportAndEndLateCall(fromName: fromName, isVideo: isVideo) {
+          self.storePushkitState(
+            "late_push_reported_and_ended",
+            payloadType: payloadType.isEmpty ? "call_invite" : payloadType,
+            detail: "identifier_present=true"
+          )
+          finish()
+        }
+        return
+      }
       finish()
       return
     }
@@ -2024,6 +2076,36 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
     // iOS can terminate the app if PushKit handling takes too long.
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
       finish()
+    }
+  }
+
+  private let lateCallObserver = CXCallObserver()
+  private lazy var lateCallProvider: CXProvider = {
+    let config = CXProviderConfiguration()
+    config.supportsVideo = true
+    config.maximumCallsPerCallGroup = 1
+    config.includesCallsInRecents = false
+    return CXProvider(configuration: config)
+  }()
+
+  /// Reports a call for a late VoIP push and ends it straight away, so the
+  /// push counts as reported without ringing. Uses its own provider and a
+  /// fresh id, apart from the real calls.
+  private func reportAndEndLateCall(
+    fromName: String,
+    isVideo: Bool,
+    done: @escaping () -> Void
+  ) {
+    let id = UUID()
+    let update = CXCallUpdate()
+    update.localizedCallerName = fromName
+    update.hasVideo = isVideo
+    let provider = lateCallProvider
+    provider.reportNewIncomingCall(with: id, update: update) { error in
+      if error == nil {
+        provider.reportCall(with: id, endedAt: Date(), reason: .remoteEnded)
+      }
+      DispatchQueue.main.async { done() }
     }
   }
 

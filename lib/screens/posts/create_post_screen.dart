@@ -17,6 +17,7 @@ import 'package:video_thumbnail/video_thumbnail.dart';
 
 import 'package:connect_app/services/post_service.dart';
 import 'package:connect_app/services/streak_service.dart';
+import 'package:connect_app/services/video_compressor.dart';
 import 'package:connect_app/services/firestore_read_helper.dart';
 import 'package:connect_app/services/helperly_test_runtime.dart';
 import 'package:connect_app/theme/tokens.dart';
@@ -702,13 +703,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       }
 
       if (videoFile != null) {
+        // Upload a smaller copy when the phone can make one.
+        final upload = await VideoCompressor.compress(videoFile) ?? videoFile;
         final vRef = FirebaseStorage.instance
             .ref()
             .child('post_videos')
             .child(ownerUid)
             .child('${DateTime.now().millisecondsSinceEpoch}.mp4');
         await vRef
-            .putFile(videoFile, SettableMetadata(contentType: 'video/mp4'))
+            .putFile(upload, SettableMetadata(contentType: 'video/mp4'))
             .timeout(const Duration(minutes: 5));
         videoUrl = await vRef.getDownloadURL();
 

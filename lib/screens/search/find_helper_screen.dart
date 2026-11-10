@@ -1,3 +1,4 @@
+import 'package:connect_app/config/mvp_features.dart';
 import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/l10n/value_labels.dart';
 import 'package:connect_app/models/profile_languages.dart';
@@ -152,6 +153,8 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
           hourlyRate: _toDouble(m['hourlyRate']),
           rating: _toDouble(m['rating']) ?? 0.0,
           createdAt: m['createdAt'],
+          city: (m['city'] ?? '').toString().trim(),
+          ratingCount: _toDouble(m['ratingCount'])?.toInt() ?? 0,
         ));
       }
 
@@ -410,7 +413,7 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
                   : _hits.isEmpty
                       ? _EmptyState(text: context.l10n.findHelperNoMatches)
                       : ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(12, 6, 12, 24),
+                          padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
                           itemCount: _hits.length,
                           itemBuilder: (_, i) => _HelperTile(helper: _hits[i]),
                         ),
@@ -437,6 +440,8 @@ class _Helper {
   final double? hourlyRate;
   final double rating;
   final dynamic createdAt;
+  final String city;
+  final int ratingCount;
 
   _Helper({
     required this.id,
@@ -452,6 +457,8 @@ class _Helper {
     required this.hourlyRate,
     required this.rating,
     required this.createdAt,
+    this.city = '',
+    this.ratingCount = 0,
   });
 }
 
@@ -462,101 +469,136 @@ class _HelperTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      color: AppColors.card,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: AppColors.border),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () {
-          Navigator.of(context, rootNavigator: true).push(
-            MaterialPageRoute(
-              builder: (_) => FullScreenBackGesture(
-                child: ProfileScreen(userID: helper.id),
+    final h = helper;
+    final topics = (h.expertise.isNotEmpty ? h.expertise : h.categories);
+    final meta = <String>[
+      if (h.rating > 0)
+        h.ratingCount > 0
+            ? '★ ${h.rating.toStringAsFixed(1)} (${h.ratingCount})'
+            : '★ ${h.rating.toStringAsFixed(1)}',
+      if (h.city.isNotEmpty) h.city,
+      if (MvpFeatures.paidSessions && h.hourlyRate != null)
+        context.l10n
+            .pricePerHour(AppFormat.money(context, h.hourlyRate!, decimals: 0)),
+    ].join(' · ');
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: AppColors.card,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: AppColors.border),
+        ),
+        child: InkWell(
+          customBorder:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).push(
+              MaterialPageRoute(
+                builder: (_) => ProfileScreen(userID: h.id),
               ),
-            ),
-          );
-        },
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              InitialsAvatar(url: helper.avatar, name: helper.name, radius: 24),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // name + verified badge
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            helper.name,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.text,
-                              fontSize: 16,
+            );
+          },
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 10, 14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                InitialsAvatar(url: h.avatar, name: h.name, radius: 26),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              h.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.text,
+                                fontSize: 16,
+                              ),
                             ),
-                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                        if (helper.isVerified)
-                          const Padding(
-                            padding: EdgeInsets.only(left: 6),
-                            child: Icon(Icons.verified,
-                                color: AppColors.primary, size: 18),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    if (helper.handle.isNotEmpty)
-                      Text('@${helper.handle}',
-                          style: const TextStyle(color: AppColors.muted)),
-                    if (helper.handle.isNotEmpty) const SizedBox(height: 6),
-                    if (helper.bio.isNotEmpty)
-                      Text(
-                        helper.bio,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                        style:
-                            const TextStyle(color: AppColors.text, height: 1.3),
+                          if (h.isVerified)
+                            const Padding(
+                              padding: EdgeInsets.only(left: 4),
+                              child: Icon(Icons.verified,
+                                  color: AppColors.primary, size: 17),
+                            ),
+                          // Derived from a stated time window, not live
+                          // presence, so it must not claim "now".
+                          if (h.isAvailable) ...[
+                            const SizedBox(width: 8),
+                            _AvailableDot(
+                                label: context.l10n.findHelperAvailable),
+                          ],
+                        ],
                       ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: [
-                        if (helper.hourlyRate != null)
-                          _Tag(context.l10n.pricePerHour(AppFormat.money(
-                              context, helper.hourlyRate!,
-                              decimals: 0))),
-                        // Derived from a stated time window, not live
-                        // presence, so it must not claim "now".
-                        if (helper.isAvailable)
-                          _Tag(context.l10n.findHelperAvailable),
-                        ...(helper.expertise.isNotEmpty
-                                ? helper.expertise
-                                : helper.categories)
-                            .take(3)
-                            .map((c) =>
-                                _Tag(ValueLabels.topic(context.l10n, c))),
-                        if (helper.languages.isNotEmpty)
-                          _Tag(helper.languages
-                              .take(2)
-                              .map((c) => ValueLabels.language(context.l10n, c))
-                              .join(' · ')),
-                        if (helper.rating > 0)
-                          _Tag('★ ${helper.rating.toStringAsFixed(1)}'),
+                      if (meta.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          meta,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: AppColors.muted, fontSize: 13),
+                        ),
                       ],
-                    ),
-                  ],
+                      if (h.bio.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          h.bio,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: AppColors.text, height: 1.3),
+                        ),
+                      ],
+                      if (topics.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            for (final t in topics.take(3))
+                              _Tag(ValueLabels.topic(context.l10n, t)),
+                          ],
+                        ),
+                      ],
+                      if (h.languages.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            const Icon(Icons.translate_rounded,
+                                size: 14, color: AppColors.muted),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                h.languages
+                                    .map((c) =>
+                                        ValueLabels.language(context.l10n, c))
+                                    .join(', '),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    color: AppColors.muted, fontSize: 13),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+                const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+              ],
+            ),
           ),
         ),
       ),
@@ -564,16 +606,58 @@ class _HelperTile extends StatelessWidget {
   }
 }
 
+/// Green dot with "Available".
+class _AvailableDot extends StatelessWidget {
+  final String label;
+  const _AvailableDot({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: const BoxDecoration(
+            color: Color(0xFF2E9E5B),
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: const TextStyle(
+            color: Color(0xFF2E9E5B),
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// A help topic, tinted like the profile's "can help with" chips.
 class _Tag extends StatelessWidget {
   final String text;
   const _Tag(this.text);
   @override
   Widget build(BuildContext context) {
-    return Chip(
-      label: Text(text, style: const TextStyle(fontWeight: FontWeight.w600)),
-      backgroundColor: AppColors.button,
-      shape: const StadiumBorder(side: BorderSide(color: AppColors.border)),
-      visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: AppColors.primary,
+          fontWeight: FontWeight.w600,
+          fontSize: 12.5,
+        ),
+      ),
     );
   }
 }
@@ -617,87 +701,82 @@ class _FilterRow extends StatelessWidget {
     // Helper to pass COPIES so parent mutations don't clear our local sets.
     Set<String> _copy(Set<String> s) => Set<String>.of(s);
 
-    // —— First row (always single line, horizontally scrollable):
-    final firstRow = SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          _FilterChipButton(
-            icon: Icons.category_outlined,
-            label: selectedCategories.isEmpty
-                ? context.l10n.filterCategory
-                : context.l10n.filterCategoryCount(selectedCategories.length),
-            onTap: () async {
-              final result = await _pickListSheet(
-                context,
-                title: context.l10n.filterSelectCategories,
-                options: HelpTopics.topics,
-                labelOf: (id) => ValueLabels.topic(context.l10n, id),
-                initial: selectedCategories,
+    // All filters on one line that scrolls sideways.
+    final firstRow = Row(
+      children: [
+        _FilterChipButton(
+          icon: Icons.category_outlined,
+          label: selectedCategories.isEmpty
+              ? context.l10n.filterCategory
+              : context.l10n.filterCategoryCount(selectedCategories.length),
+          onTap: () async {
+            final result = await _pickListSheet(
+              context,
+              title: context.l10n.filterSelectCategories,
+              options: HelpTopics.topics,
+              labelOf: (id) => ValueLabels.topic(context.l10n, id),
+              initial: selectedCategories,
+            );
+            if (result != null) {
+              onChanged(
+                categories: Set.of(result),
+                languages: _copy(selectedLanguages),
+                onlyAvailable: onlyAvailable,
+                onlyVerified: onlyVerified,
+                minPrice: minPrice,
+                maxPrice: maxPrice,
+                sort: sort,
               );
-              if (result != null) {
-                onChanged(
-                  categories: Set.of(result),
-                  languages: _copy(selectedLanguages),
-                  onlyAvailable: onlyAvailable,
-                  onlyVerified: onlyVerified,
-                  minPrice: minPrice,
-                  maxPrice: maxPrice,
-                  sort: sort,
-                );
-              }
-            },
-          ),
-          const SizedBox(width: 8),
-          _FilterChipButton(
-            icon: Icons.language,
-            label: selectedLanguages.isEmpty
-                ? context.l10n.filterLanguage
-                : context.l10n.filterLanguageCount(selectedLanguages.length),
-            onTap: () async {
-              final result = await _pickListSheet(
-                context,
-                title: context.l10n.filterSelectLanguages,
-                // Spoken-language codes, as stored on profiles.
-                options: ValueLabels.languageCodes,
-                labelOf: (code) => ValueLabels.language(context.l10n, code),
-                initial: selectedLanguages,
+            }
+          },
+        ),
+        const SizedBox(width: 8),
+        _FilterChipButton(
+          icon: Icons.language,
+          label: selectedLanguages.isEmpty
+              ? context.l10n.filterLanguage
+              : context.l10n.filterLanguageCount(selectedLanguages.length),
+          onTap: () async {
+            final result = await _pickListSheet(
+              context,
+              title: context.l10n.filterSelectLanguages,
+              // Spoken-language codes, as stored on profiles.
+              options: ValueLabels.languageCodes,
+              labelOf: (code) => ValueLabels.language(context.l10n, code),
+              initial: selectedLanguages,
+            );
+            if (result != null) {
+              onChanged(
+                categories: _copy(selectedCategories),
+                languages: Set.of(result),
+                onlyAvailable: onlyAvailable,
+                onlyVerified: onlyVerified,
+                minPrice: minPrice,
+                maxPrice: maxPrice,
+                sort: sort,
               );
-              if (result != null) {
-                onChanged(
-                  categories: _copy(selectedCategories),
-                  languages: Set.of(result),
-                  onlyAvailable: onlyAvailable,
-                  onlyVerified: onlyVerified,
-                  minPrice: minPrice,
-                  maxPrice: maxPrice,
-                  sort: sort,
-                );
-              }
-            },
+            }
+          },
+        ),
+        const SizedBox(width: 8),
+        _TogglePill(
+          label: context.l10n.findHelperAvailable,
+          value: onlyAvailable,
+          onChanged: (v) => onChanged(
+            categories: _copy(selectedCategories),
+            languages: _copy(selectedLanguages),
+            onlyAvailable: v,
+            onlyVerified: onlyVerified,
+            minPrice: minPrice,
+            maxPrice: maxPrice,
+            sort: sort,
           ),
-          const SizedBox(width: 8),
-          _TogglePill(
-            label: context.l10n.findHelperAvailable,
-            value: onlyAvailable,
-            onChanged: (v) => onChanged(
-              categories: _copy(selectedCategories),
-              languages: _copy(selectedLanguages),
-              onlyAvailable: v,
-              onlyVerified: onlyVerified,
-              minPrice: minPrice,
-              maxPrice: maxPrice,
-              sort: sort,
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
 
-    // —— Second row
-    final secondRow = Wrap(
+    final secondRow = Row(
       spacing: 8,
-      runSpacing: 10,
       children: [
         _TogglePill(
           label: context.l10n.filterVerified,
@@ -712,19 +791,21 @@ class _FilterRow extends StatelessWidget {
             sort: sort,
           ),
         ),
-        _PricePill(
-          minPrice: minPrice,
-          maxPrice: maxPrice,
-          onChanged: (min, max) => onChanged(
-            categories: _copy(selectedCategories),
-            languages: _copy(selectedLanguages),
-            onlyAvailable: onlyAvailable,
-            onlyVerified: onlyVerified,
-            minPrice: min,
-            maxPrice: max,
-            sort: sort,
+        // Prices only matter once paid sessions are on.
+        if (MvpFeatures.paidSessions)
+          _PricePill(
+            minPrice: minPrice,
+            maxPrice: maxPrice,
+            onChanged: (min, max) => onChanged(
+              categories: _copy(selectedCategories),
+              languages: _copy(selectedLanguages),
+              onlyAvailable: onlyAvailable,
+              onlyVerified: onlyVerified,
+              minPrice: min,
+              maxPrice: max,
+              sort: sort,
+            ),
           ),
-        ),
         _SortPill(
           current: sort,
           onChanged: (s) => onChanged(
@@ -740,13 +821,12 @@ class _FilterRow extends StatelessWidget {
       ],
     );
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        firstRow,
-        const SizedBox(height: 10),
-        secondRow,
-      ],
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      clipBehavior: Clip.none,
+      child: Row(
+        children: [firstRow, const SizedBox(width: 8), secondRow],
+      ),
     );
   }
 }
