@@ -470,7 +470,7 @@
   "editProfileNameRequired": "Display name is required.",
   "editProfileBio": "Bio",
   "editProfileBioHint": "Write a short intro about yourself",
-  "editProfileLocationLanguage": "Location & Language",
+  "editProfileLocationLanguage": "Location & language",
   "editProfileCountry": "Country",
   "editProfilePreferences": "Preferences",
   "editProfileRole": "Role",
@@ -482,7 +482,7 @@
   "editProfileSkills": "Skills",
   "editProfileCommaSeparated": "Comma separated",
   "editProfileExperience": "Experience",
-  "editProfileHelperProfile": "Helper Profile",
+  "editProfileHelperProfile": "Helper profile",
   "editProfileModeChat": "Chat",
   "editProfileModeCall": "Call",
   "editProfileModeVideo": "Video",
@@ -988,5 +988,11 @@
   "editProfileUseApp": "How you use Helperly",
   "editProfileInterests": "Interests",
   "editProfileAddCountry": "Choose",
-  "editProfileAvailabilityHint": "When people can reach you"
+  "editProfileAvailabilityHint": "When people can reach you",
+  "availabilityAllDay": "All day",
+  "availabilityMornings": "Mornings",
+  "availabilityAfternoons": "Afternoons",
+  "availabilityEvenings": "Evenings",
+  "availabilityCustom": "Custom",
+  "editProfileExperienceHint": "e.g. 3 years helping newcomers find housing"
 }

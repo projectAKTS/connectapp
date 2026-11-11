@@ -1002,7 +1002,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get editProfileBioHint => 'Write a short intro about yourself';
 
   @override
-  String get editProfileLocationLanguage => 'Location & Language';
+  String get editProfileLocationLanguage => 'Location & language';
 
   @override
   String get editProfileCountry => 'Country';
@@ -1039,7 +1039,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get editProfileExperience => 'Experience';
 
   @override
-  String get editProfileHelperProfile => 'Helper Profile';
+  String get editProfileHelperProfile => 'Helper profile';
 
   @override
   String get editProfileModeChat => 'Chat';
@@ -2028,4 +2028,23 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get editProfileAvailabilityHint => 'When people can reach you';
+
+  @override
+  String get availabilityAllDay => 'All day';
+
+  @override
+  String get availabilityMornings => 'Mornings';
+
+  @override
+  String get availabilityAfternoons => 'Afternoons';
+
+  @override
+  String get availabilityEvenings => 'Evenings';
+
+  @override
+  String get availabilityCustom => 'Custom';
+
+  @override
+  String get editProfileExperienceHint =>
+      'e.g. 3 years helping newcomers find housing';
 }

@@ -1919,7 +1919,7 @@ abstract class AppLocalizations {
   /// No description provided for @editProfileLocationLanguage.
   ///
   /// In en, this message translates to:
-  /// **'Location & Language'**
+  /// **'Location & language'**
   String get editProfileLocationLanguage;
 
   /// No description provided for @editProfileCountry.
@@ -1991,7 +1991,7 @@ abstract class AppLocalizations {
   /// No description provided for @editProfileHelperProfile.
   ///
   /// In en, this message translates to:
-  /// **'Helper Profile'**
+  /// **'Helper profile'**
   String get editProfileHelperProfile;
 
   /// No description provided for @editProfileModeChat.
@@ -3781,6 +3781,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'When people can reach you'**
   String get editProfileAvailabilityHint;
+
+  /// No description provided for @availabilityAllDay.
+  ///
+  /// In en, this message translates to:
+  /// **'All day'**
+  String get availabilityAllDay;
+
+  /// No description provided for @availabilityMornings.
+  ///
+  /// In en, this message translates to:
+  /// **'Mornings'**
+  String get availabilityMornings;
+
+  /// No description provided for @availabilityAfternoons.
+  ///
+  /// In en, this message translates to:
+  /// **'Afternoons'**
+  String get availabilityAfternoons;
+
+  /// No description provided for @availabilityEvenings.
+  ///
+  /// In en, this message translates to:
+  /// **'Evenings'**
+  String get availabilityEvenings;
+
+  /// No description provided for @availabilityCustom.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom'**
+  String get availabilityCustom;
+
+  /// No description provided for @editProfileExperienceHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. 3 years helping newcomers find housing'**
+  String get editProfileExperienceHint;
 }
 
 class _AppLocalizationsDelegate

@@ -613,5 +613,11 @@
   "editProfileUseApp": "Votre utilisation de Helperly",
   "editProfileInterests": "Centres d’intérêt",
   "editProfileAddCountry": "Choisir",
-  "editProfileAvailabilityHint": "Quand on peut vous joindre"
+  "editProfileAvailabilityHint": "Quand on peut vous joindre",
+  "availabilityAllDay": "Toute la journée",
+  "availabilityMornings": "Matins",
+  "availabilityAfternoons": "Après-midi",
+  "availabilityEvenings": "Soirées",
+  "availabilityCustom": "Personnalisé",
+  "editProfileExperienceHint": "ex. 3 ans à aider des nouveaux arrivants à se loger"
 }

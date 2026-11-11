@@ -5,6 +5,7 @@ import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/l10n/value_labels.dart';
 import 'package:connect_app/models/profile_languages.dart';
 import 'package:connect_app/utils/availability_time.dart';
+import 'package:connect_app/utils/profile_text.dart';
 import 'package:connect_app/widgets/initials_avatar.dart';
 import 'package:connect_app/widgets/spoken_languages_field.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -63,7 +64,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               .toString(),
     );
     _bioCtrl = TextEditingController(
-      text: (widget.userData['bio'] ?? '').toString(),
+      // Old signups stored a placeholder sentence; show it as empty.
+      text: placeholderBioToEmpty((widget.userData['bio'] ?? '').toString()),
     );
     _cityCtrl = TextEditingController(
       text: (widget.userData['city'] ?? '').toString(),
@@ -150,10 +152,46 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Future<String?> _uploadProfileImage(String uid) async {
     if (_imageFile == null) return _profileImageUrl;
     final ref = FirebaseStorage.instance.ref().child(
-      'users/$uid/profile_${DateTime.now().millisecondsSinceEpoch}.jpg',
-    );
+          'users/$uid/profile_${DateTime.now().millisecondsSinceEpoch}.jpg',
+        );
     await ref.putFile(_imageFile!, SettableMetadata(contentType: 'image/jpeg'));
     return ref.getDownloadURL();
+  }
+
+  /// Common hours, so most helpers pick with one tap; Custom opens clocks.
+  static const _presets = <String, (TimeOfDay, TimeOfDay)>{
+    'allDay': (TimeOfDay(hour: 9, minute: 0), TimeOfDay(hour: 21, minute: 0)),
+    'mornings': (TimeOfDay(hour: 8, minute: 0), TimeOfDay(hour: 12, minute: 0)),
+    'afternoons': (
+      TimeOfDay(hour: 12, minute: 0),
+      TimeOfDay(hour: 17, minute: 0)
+    ),
+    'evenings': (
+      TimeOfDay(hour: 17, minute: 0),
+      TimeOfDay(hour: 21, minute: 0)
+    ),
+  };
+
+  /// The preset matching the stored hours, 'custom', or null when not set.
+  String? get _availabilityChoice {
+    if (_startTime == null || _endTime == null) return null;
+    for (final e in _presets.entries) {
+      if (e.value.$1 == _startTime && e.value.$2 == _endTime) return e.key;
+    }
+    return 'custom';
+  }
+
+  void _choosePreset(String key) {
+    final range = _presets[key]!;
+    setState(() {
+      // Tapping the chosen one again clears it.
+      if (_availabilityChoice == key) {
+        _startTime = _endTime = null;
+      } else {
+        _startTime = range.$1;
+        _endTime = range.$2;
+      }
+    });
   }
 
   Future<void> _pickAvailability() async {
@@ -191,8 +229,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     FocusScope.of(context).unfocus();
     final availabilityValue =
         (_isHelperRole && _startTime != null && _endTime != null)
-        ? AvailabilityTime.store(_startTime!, _endTime!)
-        : '';
+            ? AvailabilityTime.store(_startTime!, _endTime!)
+            : '';
 
     setState(() => _saving = true);
     try {
@@ -213,9 +251,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         'interestTags': _parseCsv(_interestTagsCtrl.text.trim()),
         'skills': _parseCsv(_skillsCtrl.text.trim()),
         'experience': _experienceCtrl.text.trim(),
-        'expertiseTags': _isHelperRole
-            ? _selectedExpertise.toList()
-            : <String>[],
+        'expertiseTags':
+            _isHelperRole ? _selectedExpertise.toList() : <String>[],
         'mode': _isHelperRole ? _mode : 'chat',
         'availability': availabilityValue,
         'profilePicture': (uploadedImageUrl ?? '').trim(),
@@ -278,9 +315,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final availability = (_startTime == null || _endTime == null)
         ? ''
         : '${_startTime!.format(context)} – ${_endTime!.format(context)}';
-    final languages = _spoken
-        .map((c) => ValueLabels.language(l10n, c))
-        .join(', ');
+    final languages =
+        _spoken.map((c) => ValueLabels.language(l10n, c)).join(', ');
 
     return Scaffold(
       backgroundColor: AppColors.canvas,
@@ -441,6 +477,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     _TextRow(
                       label: l10n.editProfileExperience,
                       controller: _experienceCtrl,
+                      hint: l10n.editProfileExperienceHint,
                       minLines: 2,
                       maxLines: 5,
                     ),
@@ -456,12 +493,55 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         onChanged: (v) => setState(() => _mode = v),
                       ),
                     ),
-                    _PickerRow(
+                    _Labeled(
                       label: l10n.onboardingAvailability,
-                      value: availability,
-                      placeholder: l10n.editProfileAvailabilityHint,
-                      icon: Icons.schedule,
-                      onTap: _pickAvailability,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final (key, label) in [
+                                ('allDay', l10n.availabilityAllDay),
+                                ('mornings', l10n.availabilityMornings),
+                                ('afternoons', l10n.availabilityAfternoons),
+                                ('evenings', l10n.availabilityEvenings),
+                              ])
+                                _TopicChip(
+                                  label: label,
+                                  selected: _availabilityChoice == key,
+                                  onTap: () => _choosePreset(key),
+                                ),
+                              _TopicChip(
+                                label: l10n.availabilityCustom,
+                                selected: _availabilityChoice == 'custom',
+                                onTap: _pickAvailability,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              const Icon(Icons.schedule,
+                                  size: 16, color: AppColors.muted),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  availability.isEmpty
+                                      ? l10n.editProfileAvailabilityHint
+                                      : availability,
+                                  style: const TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w500,
+                                    color: AppColors.muted,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -567,16 +647,16 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(4, 18, 4, 8),
-    child: Text(
-      text,
-      style: const TextStyle(
-        fontSize: 15,
-        fontWeight: FontWeight.w700,
-        color: AppColors.text,
-      ),
-    ),
-  );
+        padding: const EdgeInsets.fromLTRB(4, 18, 4, 8),
+        child: Text(
+          text,
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            color: AppColors.text,
+          ),
+        ),
+      );
 }
 
 /// Rows in one rounded card with hairlines between them, like iOS settings.
@@ -619,16 +699,16 @@ class _Labeled extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: _labelStyle),
-        const SizedBox(height: 10),
-        child,
-      ],
-    ),
-  );
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: _labelStyle),
+            const SizedBox(height: 10),
+            child,
+          ],
+        ),
+      );
 }
 
 /// A label above a borderless field; the whole row focuses the field.
@@ -697,7 +777,6 @@ class _PickerRow extends StatelessWidget {
   final String label;
   final String value;
   final String placeholder;
-  final IconData icon;
   final VoidCallback onTap;
   const _PickerRow({
     super.key,
@@ -705,7 +784,6 @@ class _PickerRow extends StatelessWidget {
     required this.value,
     required this.placeholder,
     required this.onTap,
-    this.icon = Icons.chevron_right,
   });
 
   @override
@@ -729,7 +807,7 @@ class _PickerRow extends StatelessWidget {
                 ],
               ),
             ),
-            Icon(icon, color: AppColors.muted, size: 22),
+            const Icon(Icons.chevron_right, color: AppColors.muted, size: 22),
           ],
         ),
       ),

@@ -2071,4 +2071,23 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get editProfileAvailabilityHint => 'Quand on peut vous joindre';
+
+  @override
+  String get availabilityAllDay => 'Toute la journée';
+
+  @override
+  String get availabilityMornings => 'Matins';
+
+  @override
+  String get availabilityAfternoons => 'Après-midi';
+
+  @override
+  String get availabilityEvenings => 'Soirées';
+
+  @override
+  String get availabilityCustom => 'Personnalisé';
+
+  @override
+  String get editProfileExperienceHint =>
+      'ex. 3 ans à aider des nouveaux arrivants à se loger';
 }
