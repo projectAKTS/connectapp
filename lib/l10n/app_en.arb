@@ -465,7 +465,7 @@
   "postFilterAdvice": "Advice Request",
   "postFilterHowTo": "How-To Guide",
   "postFilterLessons": "Lessons Learned",
-  "editProfileTitle": "Edit Profile",
+  "editProfileTitle": "Edit profile",
   "editProfileSaveFailed": "Could not save your profile. Please try again.",
   "editProfileNameRequired": "Display name is required.",
   "editProfileBio": "Bio",
@@ -982,5 +982,11 @@
         "type": "int"
       }
     }
-  }
+  },
+  "editProfileChangePhoto": "Change photo",
+  "editProfileBasics": "Basic info",
+  "editProfileUseApp": "How you use Helperly",
+  "editProfileInterests": "Interests",
+  "editProfileAddCountry": "Choose",
+  "editProfileAvailabilityHint": "When people can reach you"
 }

@@ -2053,4 +2053,22 @@ class AppLocalizationsFr extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get editProfileChangePhoto => 'Changer la photo';
+
+  @override
+  String get editProfileBasics => 'Informations';
+
+  @override
+  String get editProfileUseApp => 'Votre utilisation de Helperly';
+
+  @override
+  String get editProfileInterests => 'Centres d’intérêt';
+
+  @override
+  String get editProfileAddCountry => 'Choisir';
+
+  @override
+  String get editProfileAvailabilityHint => 'Quand on peut vous joindre';
 }

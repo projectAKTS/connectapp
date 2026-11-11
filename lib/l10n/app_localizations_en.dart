@@ -986,7 +986,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get postFilterLessons => 'Lessons Learned';
 
   @override
-  String get editProfileTitle => 'Edit Profile';
+  String get editProfileTitle => 'Edit profile';
 
   @override
   String get editProfileSaveFailed =>
@@ -2010,4 +2010,22 @@ class AppLocalizationsEn extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get editProfileChangePhoto => 'Change photo';
+
+  @override
+  String get editProfileBasics => 'Basic info';
+
+  @override
+  String get editProfileUseApp => 'How you use Helperly';
+
+  @override
+  String get editProfileInterests => 'Interests';
+
+  @override
+  String get editProfileAddCountry => 'Choose';
+
+  @override
+  String get editProfileAvailabilityHint => 'When people can reach you';
 }

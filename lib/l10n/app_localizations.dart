@@ -1889,7 +1889,7 @@ abstract class AppLocalizations {
   /// No description provided for @editProfileTitle.
   ///
   /// In en, this message translates to:
-  /// **'Edit Profile'**
+  /// **'Edit profile'**
   String get editProfileTitle;
 
   /// No description provided for @editProfileSaveFailed.
@@ -3745,6 +3745,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count, plural, =1{1 review} other{{count} reviews}}'**
   String profileReviewsCount(int count);
+
+  /// No description provided for @editProfileChangePhoto.
+  ///
+  /// In en, this message translates to:
+  /// **'Change photo'**
+  String get editProfileChangePhoto;
+
+  /// No description provided for @editProfileBasics.
+  ///
+  /// In en, this message translates to:
+  /// **'Basic info'**
+  String get editProfileBasics;
+
+  /// No description provided for @editProfileUseApp.
+  ///
+  /// In en, this message translates to:
+  /// **'How you use Helperly'**
+  String get editProfileUseApp;
+
+  /// No description provided for @editProfileInterests.
+  ///
+  /// In en, this message translates to:
+  /// **'Interests'**
+  String get editProfileInterests;
+
+  /// No description provided for @editProfileAddCountry.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose'**
+  String get editProfileAddCountry;
+
+  /// No description provided for @editProfileAvailabilityHint.
+  ///
+  /// In en, this message translates to:
+  /// **'When people can reach you'**
+  String get editProfileAvailabilityHint;
 }
 
 class _AppLocalizationsDelegate

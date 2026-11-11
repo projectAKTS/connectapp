@@ -5,6 +5,7 @@ import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/l10n/value_labels.dart';
 import 'package:connect_app/models/profile_languages.dart';
 import 'package:connect_app/utils/availability_time.dart';
+import 'package:connect_app/widgets/initials_avatar.dart';
 import 'package:connect_app/widgets/spoken_languages_field.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -53,27 +54,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   bool get _isHelperRole => _role == 'helper' || _role == 'both';
 
-  static const TextStyle _sectionTitleStyle = TextStyle(
-    fontSize: 15,
-    fontWeight: FontWeight.w600,
-    color: AppColors.text,
-  );
-  static const TextStyle _subLabelStyle = TextStyle(
-    fontSize: 13,
-    fontWeight: FontWeight.w600,
-    color: AppColors.muted,
-  );
-  static const TextStyle _chipLabelStyle = TextStyle(
-    fontSize: 13,
-    fontWeight: FontWeight.w500,
-    color: AppColors.text,
-  );
-  static const TextStyle _inputTextStyle = TextStyle(
-    fontSize: 16,
-    fontWeight: FontWeight.w500,
-    color: AppColors.text,
-  );
-
   @override
   void initState() {
     super.initState();
@@ -82,10 +62,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           (widget.userData['displayName'] ?? widget.userData['fullName'] ?? '')
               .toString(),
     );
-    _bioCtrl =
-        TextEditingController(text: (widget.userData['bio'] ?? '').toString());
-    _cityCtrl =
-        TextEditingController(text: (widget.userData['city'] ?? '').toString());
+    _bioCtrl = TextEditingController(
+      text: (widget.userData['bio'] ?? '').toString(),
+    );
+    _cityCtrl = TextEditingController(
+      text: (widget.userData['city'] ?? '').toString(),
+    );
     // Suggest the device's offset when empty; the field stays editable.
     final storedZone = (widget.userData['timeZone'] ?? '').toString().trim();
     _timeZoneCtrl = TextEditingController(
@@ -121,8 +103,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             : const <String>[],
       );
 
-    final range =
-        AvailabilityTime.parse('${widget.userData['availability'] ?? ''}');
+    final range = AvailabilityTime.parse(
+      '${widget.userData['availability'] ?? ''}',
+    );
     if (range != null) {
       _startTime = range.$1;
       _endTime = range.$2;
@@ -167,7 +150,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Future<String?> _uploadProfileImage(String uid) async {
     if (_imageFile == null) return _profileImageUrl;
     final ref = FirebaseStorage.instance.ref().child(
-        'users/$uid/profile_${DateTime.now().millisecondsSinceEpoch}.jpg');
+      'users/$uid/profile_${DateTime.now().millisecondsSinceEpoch}.jpg',
+    );
     await ref.putFile(_imageFile!, SettableMetadata(contentType: 'image/jpeg'));
     return ref.getDownloadURL();
   }
@@ -207,8 +191,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     FocusScope.of(context).unfocus();
     final availabilityValue =
         (_isHelperRole && _startTime != null && _endTime != null)
-            ? AvailabilityTime.store(_startTime!, _endTime!)
-            : '';
+        ? AvailabilityTime.store(_startTime!, _endTime!)
+        : '';
 
     setState(() => _saving = true);
     try {
@@ -229,8 +213,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         'interestTags': _parseCsv(_interestTagsCtrl.text.trim()),
         'skills': _parseCsv(_skillsCtrl.text.trim()),
         'experience': _experienceCtrl.text.trim(),
-        'expertiseTags':
-            _isHelperRole ? _selectedExpertise.toList() : <String>[],
+        'expertiseTags': _isHelperRole
+            ? _selectedExpertise.toList()
+            : <String>[],
         'mode': _isHelperRole ? _mode : 'chat',
         'availability': availabilityValue,
         'profilePicture': (uploadedImageUrl ?? '').trim(),
@@ -257,407 +242,626 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
-  Widget _section({
-    required IconData icon,
-    required String title,
-    required List<Widget> children,
-  }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
-        boxShadow: const [AppShadows.soft],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: AppColors.muted, size: 18),
-              const SizedBox(width: 8),
-              Text(
-                title,
-                style: _sectionTitleStyle,
+  Future<void> _pickCountry() async {
+    final l10n = context.l10n;
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: AppColors.canvas,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final c in const ['Canada', 'USA', 'Other'])
+              ListTile(
+                title: Text(ValueLabels.country(l10n, c)),
+                trailing: _country == c
+                    ? const Icon(Icons.check, color: AppColors.primary)
+                    : null,
+                onTap: () => Navigator.of(ctx).pop(c),
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          ...children,
-        ],
+          ],
+        ),
       ),
     );
+    if (picked != null) setState(() => _country = picked);
   }
 
-  InputDecoration _fieldDecoration({
-    required String label,
-    String? hint,
-    String? helperText,
-  }) {
-    return InputDecoration(
-      labelText: label,
-      hintText: hint,
-      helperText: helperText,
-      labelStyle: _subLabelStyle,
-      floatingLabelStyle: _subLabelStyle,
-      // The label stays visible above a filled field, so a value like a
-      // name still says what it is.
-      floatingLabelBehavior: FloatingLabelBehavior.auto,
-      helperStyle: const TextStyle(
-        fontSize: 12,
-        fontWeight: FontWeight.w500,
-        color: AppColors.muted,
-      ),
-      hintStyle: const TextStyle(
-        fontSize: 16,
-        fontWeight: FontWeight.w500,
-        color: AppColors.muted,
-      ),
-      filled: true,
-      fillColor: AppColors.button,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppColors.border),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppColors.border),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppColors.primary),
-      ),
-    );
-  }
-
-  Widget _roleChip(String value, String label, IconData icon) {
-    final selected = _role == value;
-    return ChoiceChip(
-      selected: selected,
-      showCheckmark: false,
-      avatar: Icon(
-        selected ? Icons.check : icon,
-        size: 18,
-        color: selected ? AppColors.text : AppColors.muted,
-      ),
-      label: Text(label),
-      selectedColor: AppColors.button,
-      backgroundColor: AppColors.card,
-      side: BorderSide(
-        color: selected
-            ? AppColors.primary.withValues(alpha: 0.45)
-            : AppColors.border,
-      ),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      labelStyle: _chipLabelStyle,
-      onSelected: (_) {
-        HapticFeedback.selectionClick();
-        setState(() => _role = value);
-      },
-    );
-  }
-
-  Widget _modePill(String value, String label) {
-    final selected = _mode == value;
-    return ChoiceChip(
-      selected: selected,
-      showCheckmark: false,
-      label: Text(label),
-      selectedColor: AppColors.button,
-      backgroundColor: AppColors.card,
-      side: BorderSide(
-        color: selected
-            ? AppColors.primary.withValues(alpha: 0.45)
-            : AppColors.border,
-      ),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      labelStyle: _chipLabelStyle,
-      onSelected: (_) {
-        HapticFeedback.selectionClick();
-        setState(() => _mode = value);
-      },
-    );
+  Future<void> _pickLanguages() async {
+    final picked = await showSpokenLanguagesSheet(context, _spoken);
+    if (picked != null) setState(() => _spoken = picked);
   }
 
   @override
   Widget build(BuildContext context) {
-    final availabilityLabel = (_startTime == null || _endTime == null)
-        ? context.l10n.commonNotSet
+    final l10n = context.l10n;
+    final availability = (_startTime == null || _endTime == null)
+        ? ''
         : '${_startTime!.format(context)} – ${_endTime!.format(context)}';
+    final languages = _spoken
+        .map((c) => ValueLabels.language(l10n, c))
+        .join(', ');
 
     return Scaffold(
       backgroundColor: AppColors.canvas,
       appBar: AppBar(
         backgroundColor: AppColors.canvas,
-        title: Text(context.l10n.editProfileTitle),
+        surfaceTintColor: Colors.transparent,
+        title: Text(l10n.editProfileTitle),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: _saving
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 18),
+                    child: SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  )
+                : TextButton(
+                    key: const Key('edit_profile_save'),
+                    onPressed: _saveProfile,
+                    style: TextButton.styleFrom(
+                        backgroundColor: Colors.transparent),
+                    child: Text(
+                      l10n.commonSave,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ),
+          ),
+        ],
       ),
       body: Form(
         key: _formKey,
+        // Not a ListView: every field stays built, so the name check runs
+        // even when the name is scrolled out of sight.
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 48),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _section(
-                icon: Icons.account_circle_outlined,
-                title: context.l10n.profileTitle,
+              _PhotoHeader(
+                file: _imageFile,
+                url: _profileImageUrl ?? '',
+                name: _displayNameCtrl.text,
+                label: l10n.editProfileChangePhoto,
+                onTap: _pickImage,
+              ),
+              _SectionLabel(l10n.editProfileBasics),
+              _Group(
                 children: [
-                  Center(
-                    child: GestureDetector(
-                      onTap: _pickImage,
-                      child: Stack(
+                  _TextRow(
+                    label: l10n.onboardingDisplayName,
+                    controller: _displayNameCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? l10n.editProfileNameRequired
+                        : null,
+                  ),
+                  _TextRow(
+                    label: l10n.editProfileBio,
+                    controller: _bioCtrl,
+                    hint: l10n.editProfileBioHint,
+                    minLines: 3,
+                    maxLines: 6,
+                  ),
+                ],
+              ),
+              _SectionLabel(l10n.editProfileLocationLanguage),
+              _Group(
+                children: [
+                  _TextRow(
+                    label: l10n.onboardingCity,
+                    controller: _cityCtrl,
+                    hint: l10n.onboardingCityHint,
+                    textCapitalization: TextCapitalization.words,
+                  ),
+                  _PickerRow(
+                    label: l10n.editProfileCountry,
+                    value: _country == null
+                        ? ''
+                        : ValueLabels.country(l10n, _country!),
+                    placeholder: l10n.editProfileAddCountry,
+                    onTap: _pickCountry,
+                  ),
+                  _TextRow(
+                    label: l10n.onboardingTimeZone,
+                    controller: _timeZoneCtrl,
+                    hint: l10n.onboardingTimeZoneHint,
+                  ),
+                  _PickerRow(
+                    key: const Key('spoken_languages_field'),
+                    label: l10n.spokenLanguagesLabel,
+                    value: languages,
+                    placeholder: l10n.spokenLanguagesHint,
+                    onTap: _pickLanguages,
+                  ),
+                ],
+              ),
+              _SectionLabel(l10n.editProfileUseApp),
+              _Group(
+                children: [
+                  _Labeled(
+                    label: l10n.editProfileRole,
+                    child: _Segmented(
+                      selected: _role,
+                      options: [
+                        ('seeker', l10n.editProfileRoleGetHelp),
+                        ('helper', l10n.editProfileRoleGiveHelp),
+                        ('both', l10n.editProfileRoleBoth),
+                      ],
+                      onChanged: (v) => setState(() => _role = v),
+                    ),
+                  ),
+                  _TextRow(
+                    label: l10n.editProfileInterests,
+                    controller: _interestTagsCtrl,
+                    hint: l10n.editProfileTopicsHelper,
+                  ),
+                ],
+              ),
+              if (_isHelperRole) ...[
+                _SectionLabel(l10n.editProfileHelperProfile),
+                _Group(
+                  children: [
+                    _Labeled(
+                      label: l10n.onboardingExpertise,
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
                         children: [
-                          CircleAvatar(
-                            radius: 46,
-                            backgroundColor: AppColors.avatarBg,
-                            foregroundColor: AppColors.avatarFg,
-                            backgroundImage: _imageFile != null
-                                ? FileImage(_imageFile!)
-                                : ((_profileImageUrl ?? '').isNotEmpty
-                                    ? NetworkImage(_profileImageUrl!)
-                                    : null),
-                            child: (_imageFile == null &&
-                                    (_profileImageUrl ?? '').isEmpty)
-                                ? const Icon(Icons.camera_alt, size: 26)
-                                : null,
-                          ),
-                          Positioned(
-                            right: 0,
-                            bottom: 0,
-                            child: Container(
-                              decoration: const BoxDecoration(
-                                color: AppColors.button,
-                                shape: BoxShape.circle,
-                              ),
-                              padding: const EdgeInsets.all(6),
-                              child: const Icon(Icons.edit, size: 16),
+                          for (final e in _allExpertise)
+                            _TopicChip(
+                              label: ValueLabels.topic(l10n, e),
+                              selected: _selectedExpertise.contains(e),
+                              onTap: () => setState(() {
+                                _selectedExpertise.contains(e)
+                                    ? _selectedExpertise.remove(e)
+                                    : _selectedExpertise.add(e);
+                              }),
                             ),
-                          ),
                         ],
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  TextFormField(
-                    controller: _displayNameCtrl,
-                    style: _inputTextStyle,
-                    decoration: _fieldDecoration(
-                        label: context.l10n.onboardingDisplayName),
-                    validator: (v) {
-                      if (v == null || v.trim().isEmpty) {
-                        return context.l10n.editProfileNameRequired;
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 10),
-                  TextFormField(
-                    controller: _bioCtrl,
-                    style: _inputTextStyle,
-                    minLines: 3,
-                    maxLines: 5,
-                    decoration: _fieldDecoration(
-                      label: context.l10n.editProfileBio,
-                      hint: context.l10n.editProfileBioHint,
+                    _TextRow(
+                      label: l10n.editProfileSkills,
+                      controller: _skillsCtrl,
+                      hint: l10n.editProfileCommaSeparated,
                     ),
-                  ),
-                ],
-              ),
-              _section(
-                icon: Icons.public_outlined,
-                title: context.l10n.editProfileLocationLanguage,
-                children: [
-                  TextFormField(
-                    controller: _cityCtrl,
-                    style: _inputTextStyle,
-                    decoration:
-                        _fieldDecoration(label: context.l10n.onboardingCity),
-                  ),
-                  const SizedBox(height: 10),
-                  TextFormField(
-                    controller: _timeZoneCtrl,
-                    style: _inputTextStyle,
-                    decoration: _fieldDecoration(
-                      label: context.l10n.onboardingTimeZone,
-                      hint: context.l10n.onboardingTimeZoneHint,
+                    _TextRow(
+                      label: l10n.editProfileExperience,
+                      controller: _experienceCtrl,
+                      minLines: 2,
+                      maxLines: 5,
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  DropdownButtonFormField<String>(
-                    key: ValueKey('country_${_country ?? ''}'),
-                    initialValue: _country,
-                    decoration: _fieldDecoration(
-                        label: context.l10n.editProfileCountry),
-                    style: _inputTextStyle,
-                    isDense: true,
-                    dropdownColor: AppColors.card,
-                    iconEnabledColor: AppColors.muted,
-                    items: const ['Canada', 'USA', 'Other']
-                        .map((c) => DropdownMenuItem(
-                            value: c,
-                            child: Text(ValueLabels.country(context.l10n, c))))
-                        .toList(),
-                    onChanged: (v) => setState(() => _country = v),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(context.l10n.spokenLanguagesLabel,
-                      style: const TextStyle(
-                          fontSize: 12.5, color: AppColors.muted)),
-                  const SizedBox(height: 6),
-                  SpokenLanguagesField(
-                    codes: _spoken,
-                    onChanged: (codes) => setState(() => _spoken = codes),
-                  ),
-                ],
-              ),
-              _section(
-                icon: Icons.tune_outlined,
-                title: context.l10n.editProfilePreferences,
-                children: [
-                  Text(
-                    context.l10n.editProfileRole,
-                    style: _subLabelStyle,
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _roleChip('seeker', context.l10n.editProfileRoleGetHelp,
-                          Icons.help_outline),
-                      _roleChip('helper', context.l10n.editProfileRoleGiveHelp,
-                          Icons.volunteer_activism_outlined),
-                      _roleChip('both', context.l10n.editProfileRoleBoth,
-                          Icons.all_inclusive),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _interestTagsCtrl,
-                    style: _inputTextStyle,
-                    decoration: _fieldDecoration(
-                      label: context.l10n.editProfileTopics,
-                      helperText: context.l10n.editProfileTopicsHelper,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextFormField(
-                    controller: _skillsCtrl,
-                    style: _inputTextStyle,
-                    decoration: _fieldDecoration(
-                      label: context.l10n.editProfileSkills,
-                      helperText: context.l10n.editProfileCommaSeparated,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextFormField(
-                    controller: _experienceCtrl,
-                    style: _inputTextStyle,
-                    minLines: 2,
-                    maxLines: 4,
-                    decoration: _fieldDecoration(
-                        label: context.l10n.editProfileExperience),
-                  ),
-                ],
-              ),
-              if (_isHelperRole)
-                _section(
-                  icon: Icons.handshake_outlined,
-                  title: context.l10n.editProfileHelperProfile,
-                  children: [
-                    Text(
-                      context.l10n.onboardingExpertise,
-                      style: _subLabelStyle,
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _allExpertise.map((e) {
-                        final selected = _selectedExpertise.contains(e);
-                        return ChoiceChip(
-                          selected: selected,
-                          showCheckmark: false,
-                          label: Text(ValueLabels.topic(context.l10n, e)),
-                          avatar: Icon(
-                            Icons.check,
-                            size: 18,
-                            color:
-                                selected ? AppColors.text : Colors.transparent,
-                          ),
-                          selectedColor: AppColors.button,
-                          backgroundColor: AppColors.card,
-                          side: BorderSide(
-                            color: selected
-                                ? AppColors.primary.withValues(alpha: 0.45)
-                                : AppColors.border,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          onSelected: (_) {
-                            HapticFeedback.selectionClick();
-                            setState(() {
-                              selected
-                                  ? _selectedExpertise.remove(e)
-                                  : _selectedExpertise.add(e);
-                            });
-                          },
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 14),
-                    Text(
-                      context.l10n.onboardingPreferredMode,
-                      style: _subLabelStyle,
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        _modePill('chat', context.l10n.editProfileModeChat),
-                        _modePill('call', context.l10n.editProfileModeCall),
-                        _modePill('video', context.l10n.editProfileModeVideo),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.access_time, size: 20),
-                      title: Text(
-                        context.l10n.onboardingAvailability,
-                        style: _subLabelStyle,
+                    _Labeled(
+                      label: l10n.onboardingPreferredMode,
+                      child: _Segmented(
+                        selected: _mode,
+                        options: [
+                          ('chat', l10n.editProfileModeChat),
+                          ('call', l10n.editProfileModeCall),
+                          ('video', l10n.editProfileModeVideo),
+                        ],
+                        onChanged: (v) => setState(() => _mode = v),
                       ),
-                      subtitle: Text(availabilityLabel),
-                      trailing: TextButton(
-                        onPressed: _pickAvailability,
-                        child: Text(context.l10n.editProfileSet),
-                      ),
+                    ),
+                    _PickerRow(
+                      label: l10n.onboardingAvailability,
+                      value: availability,
+                      placeholder: l10n.editProfileAvailabilityHint,
+                      icon: Icons.schedule,
+                      onTap: _pickAvailability,
                     ),
                   ],
                 ),
+              ],
             ],
           ),
         ),
       ),
-      bottomNavigationBar: SafeArea(
-        minimum: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-        child: ElevatedButton(
-          onPressed: _saving ? null : _saveProfile,
-          child: _saving
-              ? const SizedBox(
-                  height: 18,
-                  width: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
+    );
+  }
+}
+
+const _labelStyle = TextStyle(
+  fontSize: 12.5,
+  fontWeight: FontWeight.w600,
+  color: AppColors.muted,
+);
+const _valueStyle = TextStyle(
+  fontSize: 16,
+  fontWeight: FontWeight.w500,
+  color: AppColors.text,
+  height: 1.35,
+);
+const _placeholderStyle = TextStyle(
+  fontSize: 16,
+  fontWeight: FontWeight.w400,
+  color: Color(0xFFA9A6A2),
+  height: 1.35,
+);
+
+class _PhotoHeader extends StatelessWidget {
+  final File? file;
+  final String url;
+  final String name;
+  final String label;
+  final VoidCallback onTap;
+  const _PhotoHeader({
+    required this.file,
+    required this.url,
+    required this.name,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const radius = 48.0;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 4),
+      child: Column(
+        children: [
+          GestureDetector(
+            onTap: onTap,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                file != null
+                    ? CircleAvatar(
+                        radius: radius,
+                        backgroundImage: FileImage(file!),
+                      )
+                    : InitialsAvatar(url: url, name: name, radius: radius),
+                Positioned(
+                  right: -2,
+                  bottom: -2,
+                  child: Container(
+                    padding: const EdgeInsets.all(7),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.canvas, width: 3),
+                    ),
+                    child: const Icon(
+                      Icons.photo_camera_outlined,
+                      size: 16,
+                      color: Colors.white,
+                    ),
                   ),
-                )
-              : Text(context.l10n.editProfileSaveChanges),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: onTap,
+            style: TextButton.styleFrom(backgroundColor: Colors.transparent),
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                color: AppColors.primary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  final String text;
+  const _SectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(4, 18, 4, 8),
+    child: Text(
+      text,
+      style: const TextStyle(
+        fontSize: 15,
+        fontWeight: FontWeight.w700,
+        color: AppColors.text,
+      ),
+    ),
+  );
+}
+
+/// Rows in one rounded card with hairlines between them, like iOS settings.
+class _Group extends StatelessWidget {
+  final List<Widget> children;
+  const _Group({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0)
+              const Divider(
+                height: 1,
+                thickness: 1,
+                indent: 14,
+                color: AppColors.border,
+              ),
+            children[i],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _Labeled extends StatelessWidget {
+  final String label;
+  final Widget child;
+  const _Labeled({required this.label, required this.child});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: _labelStyle),
+        const SizedBox(height: 10),
+        child,
+      ],
+    ),
+  );
+}
+
+/// A label above a borderless field; the whole row focuses the field.
+class _TextRow extends StatelessWidget {
+  final String label;
+  final TextEditingController controller;
+  final String? hint;
+  final int minLines;
+  final int maxLines;
+  final TextCapitalization textCapitalization;
+  final FormFieldValidator<String>? validator;
+  const _TextRow({
+    required this.label,
+    required this.controller,
+    this.hint,
+    this.minLines = 1,
+    this.maxLines = 1,
+    this.textCapitalization = TextCapitalization.sentences,
+    this.validator,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const none = InputBorder.none;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: _labelStyle),
+          TextFormField(
+            controller: controller,
+            style: _valueStyle,
+            minLines: minLines,
+            maxLines: maxLines,
+            textCapitalization: textCapitalization,
+            validator: validator,
+            cursorColor: AppColors.primary,
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: _placeholderStyle,
+              hintMaxLines: 2,
+              isDense: true,
+              filled: false,
+              contentPadding: const EdgeInsets.only(top: 6, bottom: 6),
+              border: none,
+              enabledBorder: none,
+              focusedBorder: none,
+              errorBorder: none,
+              focusedErrorBorder: none,
+              errorStyle: const TextStyle(
+                fontSize: 12.5,
+                color: AppColors.danger,
+                height: 1.2,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A label and its current value; tapping opens a picker.
+class _PickerRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final String placeholder;
+  final IconData icon;
+  final VoidCallback onTap;
+  const _PickerRow({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.placeholder,
+    required this.onTap,
+    this.icon = Icons.chevron_right,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: _labelStyle),
+                  const SizedBox(height: 6),
+                  Text(
+                    value.isEmpty ? placeholder : value,
+                    style: value.isEmpty ? _placeholderStyle : _valueStyle,
+                  ),
+                ],
+              ),
+            ),
+            Icon(icon, color: AppColors.muted, size: 22),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// iOS-style segmented control: one choice out of a few.
+class _Segmented extends StatelessWidget {
+  final String selected;
+  final List<(String, String)> options;
+  final ValueChanged<String> onChanged;
+  const _Segmented({
+    required this.selected,
+    required this.options,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: AppColors.button,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        children: [
+          for (final (value, label) in options)
+            Expanded(
+              child: Semantics(
+                button: true,
+                selected: value == selected,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    if (value == selected) return;
+                    HapticFeedback.selectionClick();
+                    onChanged(value);
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOut,
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    decoration: BoxDecoration(
+                      color: value == selected
+                          ? AppColors.canvas
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(9),
+                      boxShadow: value == selected
+                          ? const [
+                              BoxShadow(
+                                color: Color(0x14000000),
+                                blurRadius: 6,
+                                offset: Offset(0, 1),
+                              ),
+                            ]
+                          : null,
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: value == selected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                        color: value == selected
+                            ? AppColors.text
+                            : AppColors.muted,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TopicChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _TopicChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.primary : AppColors.canvas,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: selected ? AppColors.primary : AppColors.border,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (selected) ...[
+                const Icon(Icons.check, size: 15, color: Colors.white),
+                const SizedBox(width: 4),
+              ],
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: selected ? Colors.white : AppColors.text,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

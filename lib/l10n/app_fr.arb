@@ -607,5 +607,11 @@
   "profileRoleHelper": "Aidant",
   "profileSpeaks": "Parle {languages}",
   "profileNoReviews": "Aucun avis pour l’instant. Les avis apparaissent ici après les séances réservées.",
-  "profileReviewsCount": "{count, plural, =1{1 avis} other{{count} avis}}"
+  "profileReviewsCount": "{count, plural, =1{1 avis} other{{count} avis}}",
+  "editProfileChangePhoto": "Changer la photo",
+  "editProfileBasics": "Informations",
+  "editProfileUseApp": "Votre utilisation de Helperly",
+  "editProfileInterests": "Centres d’intérêt",
+  "editProfileAddCountry": "Choisir",
+  "editProfileAvailabilityHint": "Quand on peut vous joindre"
 }
