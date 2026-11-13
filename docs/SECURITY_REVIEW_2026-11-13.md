@@ -36,11 +36,25 @@ card write.
 - Call invites: either party can change any field.
 - `users/{uid}` is readable by every signed-in user, `blockedUids` included.
 
-## Shipping
+## Shipped
 
-1. Staging: `firebase deploy --only firestore:rules,functions:getAgoraRtcToken --project helperly-call-v2-dev --force`, then `node tool/staging_smoke.mjs` and a call between the two emulators.
-2. Production (the founder runs it, after the staging check):
-   `firebase deploy --only firestore:rules --project connectapp-278b4` and
-   `firebase deploy --only functions:getAgoraRtcToken --project connectapp-278b4`.
-   The first is not one of the three allowed commands as written (that one
-   also deploys storage and hosting, and hosting is held).
+- **Production, 2026-11-13:** `firestore.rules` deployed by the founder
+  from this branch. The live ruleset is identical to the branch file
+  (checked read-only).
+- **Staging, 2026-11-13:** rules and `getAgoraRtcToken`.
+  `tool/staging_smoke.mjs` now also checks the call token (both people get
+  one, a third person gets `PERMISSION_DENIED`): 33/33. Before the deploy
+  the third-person check failed, which showed the hole live. An audio call
+  between the two Android emulators (Emu Callee to Amira) rang, was
+  accepted and showed "Connected" on both; the function log shows a token
+  issued to each for the app's own channel name.
+
+## Still To Ship
+
+`getAgoraRtcToken` to production, by the founder, from the main checkout
+(it has `connect_functions/.env.connectapp-278b4`; a worktree does not),
+after this branch is merged there:
+
+    firebase deploy --only functions:getAgoraRtcToken --project connectapp-278b4
+
+Then one call on the iPhone (unlocked, locked, killed).

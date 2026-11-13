@@ -129,6 +129,19 @@ const appId = r.json?.result?.appId;
 check("Agora token from staging app (not production)", !!(r.json?.result?.token && appId && appId !== PROD_AGORA),
   `status ${r.status}, appId …${(appId || "").slice(-4)}`);
 
+// A pair-call channel (c_<uidA 12>_<uidB 12>_<time>) gives a token only to its two people.
+const pairChannel = (() => {
+  const [x, y] = [A.uid, B.uid].map((u) => u.replace(/[^A-Za-z0-9_]/g, "").slice(0, 12)).sort();
+  return `c_${x}_${y}_${run}`;
+})();
+r = await callable(A, "getAgoraRtcToken", { channelName: pairChannel, uid: 0, role: "publisher" });
+const rB = await callable(B, "getAgoraRtcToken", { channelName: pairChannel, uid: 0, role: "publisher" });
+check("call token: both people in the call get one", !!(r.json?.result?.token && rB.json?.result?.token),
+  `status ${r.status}/${rB.status}`);
+r = await callable(C, "getAgoraRtcToken", { channelName: pairChannel, uid: 0, role: "publisher" });
+check("call token: a third person is refused", r.json?.error?.status === "PERMISSION_DENIED" && !r.json?.result,
+  r.json?.error?.status || `status ${r.status}`);
+
 r = await callable(B, "chargeStoredPaymentMethod", { operationId: `op_smoke_${run}_0001`, durationMinutes: 10, callType: "audio", helperId: A.uid });
 check("payments refused on the server", r.json?.error?.status === "FAILED_PRECONDITION" &&
   /beta/.test(r.json?.error?.message || ""), r.json?.error?.message);
