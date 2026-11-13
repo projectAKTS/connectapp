@@ -1486,6 +1486,7 @@ const {
 } = require("./call_invites/answered_elsewhere");
 const { declinedElsewhereFcmRecipients } = require("./call_invites/declined_elsewhere");
 const { missedCallNoteFor } = require("./call_invites/missed_call_note");
+const { callerMayJoinChannel } = require("./call_invites/channel_access");
 
 /** Adds the "Missed call" note to the chat once; its chat push tells the callee. */
 async function writeMissedCallNote(inviteRef, inviteId, before, after) {
@@ -2185,6 +2186,11 @@ exports.getAgoraRtcToken = onCall(
     const channelName = (request.data?.channelName || "").toString().trim();
     if (!channelName || channelName.length > 64 || !/^[A-Za-z0-9_]+$/.test(channelName)) {
       throw new HttpsError("invalid-argument", "Invalid channelName");
+    }
+    // A pair-call channel carries both callers' uids: nobody else gets a token.
+    if (!callerMayJoinChannel(channelName, request.auth.uid)) {
+      console.warn("getAgoraRtcToken refused: caller not in channel", { uid: request.auth.uid });
+      throw new HttpsError("permission-denied", "Not a participant of this call");
     }
 
     const rawUid = request.data?.uid;
