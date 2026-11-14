@@ -28,13 +28,27 @@ card write.
   a consultation completed, or turn reviews off until paid sessions exist.
 - **Refund against an invented payment** (`cancelConsultation`): harmless
   while payments are off; fix before turning them on.
-- Chat safety checks apply only to two-person chats; a chat created with
-  one or three participants skips them.
 - Two accounts of one person can hide any post (report threshold).
-- A post can be created with server-only flags (`isBoosted`,
-  `imageSafety`, `hiddenBySafety`).
-- Call invites: either party can change any field.
 - `users/{uid}` is readable by every signed-in user, `blockedUids` included.
+  Fixing it means moving `blockedUids` to an owner-only document and
+  changing the app.
+- Call invites: either side can still set any `status` (for example the
+  caller can mark a call accepted). Who may set which status is not
+  limited yet.
+
+## Fixed On Branch `fix/rules-medium` (2026-11-13)
+
+| Hole | Fix | Test |
+|---|---|---|
+| A chat with one or three people skipped the block, minor and first-contact checks | A chat names exactly two different people (both lists the same pair); an update cannot add, drop or swap anyone; a message needs exactly one other person | `firestore_rules_security_medium.test.js` |
+| A post could be created with server-only flags or fake counts (`isBoosted`, `isFeatured`, `imageSafety`, `sensitive`, `hiddenBy*`, `likes`, `likedBy`, `commentsCount`, …) | A new post starts with zero counts and no boost; the safety and report flags cannot be set by a client | same |
+| Either side of a call invite could change any field, including who calls whom | `fromUid`, `toUid`, `fromName`, `toName`, `channel` and `createdAt` cannot change after the invite is made | same |
+
+Rules tests 51/51; node tests 87/87; the 221 working-tree guards pass in a
+clean tree; staging smoke 33/33. On staging, between the two Android
+emulators: a chat message sent, an audio call (Emu Callee to Amira)
+connected on both, a second call declined, and the missed-call note
+written; neither device logged a permission error.
 
 ## Shipped
 
@@ -49,12 +63,16 @@ card write.
   accepted and showed "Connected" on both; the function log shows a token
   issued to each for the app's own channel name.
 
+- **Production, 2026-11-13:** `getAgoraRtcToken` deployed by the founder
+  from the main checkout (updated 03:37 UTC on 2026-11-14). No errors or
+  refusals in its log afterwards (checked read-only).
+
 ## Still To Ship
 
-`getAgoraRtcToken` to production, by the founder, from the main checkout
-(it has `connect_functions/.env.connectapp-278b4`; a worktree does not),
-after this branch is merged there:
+The `fix/rules-medium` rules to production, by the founder, from the main
+checkout after the branch is merged there:
 
-    firebase deploy --only functions:getAgoraRtcToken --project connectapp-278b4
+    cd ~/connectapp && firebase deploy --only firestore:rules --project connectapp-278b4
 
-Then one call on the iPhone (unlocked, locked, killed).
+Then check read-only that the live ruleset equals `firestore.rules`. The
+app needs no change.
