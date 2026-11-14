@@ -145,6 +145,12 @@ check("call token: a third person is refused", r.json?.error?.status === "PERMIS
 r = await callable(B, "chargeStoredPaymentMethod", { operationId: `op_smoke_${run}_0001`, durationMinutes: 10, callType: "audio", helperId: A.uid });
 check("payments refused on the server", r.json?.error?.status === "FAILED_PRECONDITION" &&
   /beta/.test(r.json?.error?.message || ""), r.json?.error?.message);
+r = await callable(B, "bookPaidSession", { operationId: `op_smoke_${run}_0002`, durationMinutes: 10, callType: "audio", helperId: A.uid, scheduledAtMs: Date.now() + 86400000 });
+check("paid booking refused on the server", r.json?.error?.status === "FAILED_PRECONDITION" &&
+  /beta/.test(r.json?.error?.message || ""), r.json?.error?.message);
+r = await create(B, "consultations", `cons_fake_${run}`, { userId: B.uid, targetUserId: A.uid,
+  participants: [B.uid, A.uid], cost: 50, paymentIntentId: "pi_fake", status: "paid" });
+check("a client cannot write a paid consultation", r.status === 403, `status ${r.status}`);
 r = await callable(A, "createExpressAccountLink", {});
 check("helper payout onboarding refused", r.json?.error?.status === "FAILED_PRECONDITION", r.json?.error?.message);
 r = await callable(B, "createStripeCheckoutSession", { consultationId: "x", cost: 5 });

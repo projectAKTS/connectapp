@@ -31,7 +31,7 @@ test("payments are refused unless explicitly enabled", () => {
 test("every money-moving callable checks the switch before touching Stripe", () => {
   const src = fs.readFileSync(path.resolve(__dirname, "../../index.js"), "utf8");
   assert.match(src, /defineBoolean\("PAID_SESSIONS_ENABLED", \{\s*default: false,?\s*\}\)/);
-  for (const name of ["chargeStoredPaymentMethod", "createExpressAccountLink", "createStripeCheckoutSession"]) {
+  for (const name of ["bookPaidSession", "createExpressAccountLink", "getPayoutStatus"]) {
     const start = src.indexOf(`exports.${name} = onCall(`);
     assert.ok(start >= 0, name);
     const body = src.slice(start, src.indexOf("\nexports.", start + 10));
@@ -39,5 +39,16 @@ test("every money-moving callable checks the switch before touching Stripe", () 
     const stripeUse = body.indexOf("getStripeClient()");
     assert.ok(gate > 0, `${name} has the gate`);
     assert.ok(stripeUse < 0 || gate < stripeUse, `${name} gates before Stripe`);
+  }
+});
+
+test("the old charge and Checkout callables refuse without touching Stripe", () => {
+  const src = fs.readFileSync(path.resolve(__dirname, "../../index.js"), "utf8");
+  for (const name of ["chargeStoredPaymentMethod", "createStripeCheckoutSession"]) {
+    const start = src.indexOf(`exports.${name} = onCall(`);
+    assert.ok(start >= 0, name);
+    const body = src.slice(start, src.indexOf("\nexports.", start + 10));
+    assert.ok(!body.includes("getStripeClient()"), `${name} does not use Stripe`);
+    assert.match(body, /Please update the app to book a paid session/);
   }
 });

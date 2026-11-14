@@ -17,6 +17,7 @@ FUNCS=(callInviteTransition getAgoraRtcToken onCallInviteCreated onCallInviteUpd
   createStripeCustomer createSetupIntent listPaymentMethods setDefaultPaymentMethod
   removePaymentMethod cancelConsultation chargeStoredPaymentMethod
   createExpressAccountLink createStripeCheckoutSession handleStripeWebhook
+  bookPaidSession reportSessionProblem releaseHeldPayouts getPayoutStatus
   deleteAccount processAccountDeletionRequests onReviewCreated onReportCreated onPostImagesChanged)
 
 fail() { echo "STOP: $*" >&2; exit 1; }

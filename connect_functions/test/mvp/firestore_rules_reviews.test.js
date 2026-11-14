@@ -1,7 +1,7 @@
 "use strict";
 
-// MVP-5 rules: only the payer reviews a consultation, once, after its start
-// time; helpers cannot set their own rating.
+// MVP-5 rules: only the payer reviews a paid consultation, once, after the
+// server marked it completed; helpers cannot set their own rating.
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -55,12 +55,15 @@ beforeEach(async () => {
         ...data,
       });
     await setDoc(doc(db, "users/bob"), { fullName: "Bob", rating: 4, ratingCount: 1 });
-    await consultation("past", { scheduledAt: Timestamp.fromMillis(Date.now() - HOUR) });
-    await consultation("future", { scheduledAt: Timestamp.fromMillis(Date.now() + HOUR) });
-    await consultation("cancelled", {
-      scheduledAt: Timestamp.fromMillis(Date.now() - HOUR),
-      status: "cancelled",
-    });
+    const paid = { amountCents: 449, scheduledAt: Timestamp.fromMillis(Date.now() - 2 * HOUR) };
+    await consultation("past", { ...paid, status: "completed" });
+    // Paid, session over, but not released yet (problem window).
+    await consultation("future", { ...paid, status: "paid" });
+    await consultation("cancelled", { ...paid, status: "cancelled" });
+    await consultation("review", { ...paid, status: "under_review" });
+    // A free or client-written consultation, even if marked completed.
+    await consultation("free", { amountCents: 0, cost: 0, status: "completed" });
+    await consultation("legacy", { cost: 50, status: "completed" });
   });
 });
 
@@ -89,9 +92,12 @@ test("the payer reviews a past consultation once", async () => {
   assert.equal(read.data().stars, 5);
 });
 
-test("no review before the session, after a cancellation, or by others", async () => {
+test("no review before completion, after a cancellation, for free sessions, or by others", async () => {
   await assertFails(setDoc(doc(as("alice"), "reviews/future"), review("future")));
   await assertFails(setDoc(doc(as("alice"), "reviews/cancelled"), review("cancelled")));
+  await assertFails(setDoc(doc(as("alice"), "reviews/review"), review("review")));
+  await assertFails(setDoc(doc(as("alice"), "reviews/free"), review("free")));
+  await assertFails(setDoc(doc(as("alice"), "reviews/legacy"), review("legacy")));
   await assertFails(
     setDoc(doc(as("bob"), "reviews/past"), review("past", { reviewerUid: "bob", helperUid: "alice" })),
   );

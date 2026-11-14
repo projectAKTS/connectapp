@@ -22,6 +22,14 @@ const AUDIO_PRICES = Object.freeze({
 
 const VIDEO_MULTIPLIER = 1.3;
 
+// The platform's share of a paid session (PricingConfig.platformFee).
+const PLATFORM_FEE_RATE = 0.2;
+
+/** Platform fee in cents for an amount in cents; the helper gets the rest. */
+function platformFeeCents(amountCents) {
+  return Math.round(amountCents * PLATFORM_FEE_RATE);
+}
+
 function round2(value) {
   return Math.round(value * 100) / 100;
 }
@@ -73,6 +81,8 @@ function resolveChargeAmount(data) {
 }
 
 module.exports = {
+  PLATFORM_FEE_RATE,
+  platformFeeCents,
   PRICING_VERSION,
   AUDIO_PRICES,
   consultationPrice,

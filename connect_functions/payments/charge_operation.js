@@ -55,6 +55,15 @@ function piState(status) {
  * Charges once per operation. [priced] is the server-side price
  * ({amount, durationMinutes, callType, legacy}); [customer] the user's
  * Stripe ids. Returns {success, id, amount, operationId, replayed}.
+ *
+ * Paid bookings also pass:
+ * - [booking]: what to book once paid, stored on the operation so the
+ *   webhook can finish a booking the app never came back for;
+ * - [customerPresent]: the seeker is in the app, so the bank may ask them
+ *   to confirm (3D Secure);
+ * - [returnAction]: return {requiresAction, clientSecret} instead of an
+ *   error when the bank asks for that;
+ * - [transferGroup] and [extraMetadata] for the PaymentIntent.
  */
 async function chargeOnce({
   db,
@@ -67,6 +76,11 @@ async function chargeOnce({
   pricingVersion,
   serverTimestamp,
   now = () => Date.now(),
+  booking = null,
+  customerPresent = false,
+  returnAction = false,
+  transferGroup = null,
+  extraMetadata = {},
 }) {
   if (!OPERATION_ID.test(`${operationId || ""}`)) {
     throw new ChargeError("invalid-argument", "operationId required");
@@ -94,6 +108,7 @@ async function chargeOnce({
       durationMinutes: priced.durationMinutes ?? null,
       callType: priced.callType || "",
       status: "processing",
+      ...(booking ? { booking } : {}),
       createdAtMs: now(),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -136,6 +151,9 @@ async function chargeOnce({
       if (state === "failed") {
         throw new ChargeError("failed-precondition", `payment_${found.status}`);
       }
+      if (state === "requires_action" && returnAction) {
+        return actionNeeded(found, amountCents, operationId);
+      }
       throw new ChargeError("aborted", "Payment still processing; retry");
     }
     if (now() - (existing.createdAtMs || 0) > KEY_TTL_MS) {
@@ -152,9 +170,12 @@ async function chargeOnce({
         currency: "cad",
         customer: customer.stripeCustomerId,
         payment_method: customer.defaultPaymentMethodId,
-        off_session: true,
+        payment_method_types: ["card"],
+        off_session: !customerPresent,
         confirm: true,
+        ...(transferGroup ? { transfer_group: transferGroup } : {}),
         metadata: {
+          ...extraMetadata,
           kind: "consultation",
           operationId,
           seekerUid: uid,
@@ -196,10 +217,26 @@ async function chargeOnce({
     paymentIntentId: pi.id,
     stripeStatus: pi.status,
   }, serverTimestamp);
+  if (state === "requires_action" && returnAction) {
+    return actionNeeded(pi, amountCents, operationId);
+  }
   if (state !== "succeeded") {
     throw new ChargeError("failed-precondition", `payment_${pi.status}`);
   }
   return { success: true, id: pi.id, amount: amountCents / 100, operationId, replayed: false };
+}
+
+// The bank wants the seeker to confirm: the app shows the bank's screen
+// with this client secret, then calls again with the same operation.
+function actionNeeded(pi, amountCents, operationId) {
+  return {
+    success: false,
+    requiresAction: true,
+    clientSecret: pi.client_secret,
+    id: pi.id,
+    amount: amountCents / 100,
+    operationId,
+  };
 }
 
 async function findExistingIntent(stripe, op, operationId) {
@@ -251,6 +288,7 @@ async function reconcilePaymentIntent(db, pi, serverTimestamp) {
 }
 
 module.exports = {
+  OPERATION_ID,
   COLLECTION,
   KEY_TTL_MS,
   ChargeError,

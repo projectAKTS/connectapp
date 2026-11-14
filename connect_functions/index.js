@@ -32,6 +32,8 @@ admin.initializeApp();
 const db = admin.firestore();
 const fcm = admin.messaging();
 const STRIPE_SECRET = defineSecret("STRIPE_SECRET");
+// Signing secret of the Stripe webhook endpoint (Stripe dashboard).
+const STRIPE_WEBHOOK_SECRET = defineSecret("STRIPE_WEBHOOK_SECRET");
 const AGORA_APP_ID = defineSecret("AGORA_APP_ID");
 const AGORA_APP_CERTIFICATE = defineSecret("AGORA_APP_CERTIFICATE");
 const APNS_KEY_ID = defineSecret("APNS_KEY_ID");
@@ -153,6 +155,26 @@ function getStripeClient() {
   const secret = STRIPE_SECRET.value();
   if (!secret) throw new Error("Stripe secret missing");
   return require("stripe")(secret);
+}
+
+// Dependencies for payments/paid_booking.js.
+function paidBookingDeps(stripe) {
+  return {
+    db,
+    stripe,
+    now: () => Date.now(),
+    serverTimestamp: () => admin.firestore.FieldValue.serverTimestamp(),
+    toTimestamp: (ms) => admin.firestore.Timestamp.fromMillis(ms),
+    newRoomId: () => require("crypto").randomUUID(),
+    pricingVersion: PRICING_VERSION,
+  };
+}
+
+function rethrowCharge(e, label) {
+  if (e instanceof ChargeError) throw new HttpsError(e.code, e.message);
+  if (e instanceof HttpsError) throw e;
+  console.error(`${label} error:`, e);
+  throw new HttpsError("internal", `${label} failed`);
 }
 
 function getStripeMode() {
@@ -698,6 +720,7 @@ exports.scheduledConsultationReminder = onSchedule(
       );
       if (!claimed) continue;
       const data = doc.data();
+      if (data.status === "cancelled" || data.status === "cancelling") continue;
       const participants = Array.isArray(data.participants)
         ? data.participants
         : [];
@@ -856,113 +879,110 @@ exports.cancelConsultation = onCall(
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated");
     const { consultationId } = request.data || {};
-    if (!consultationId)
-      throw new HttpsError("invalid-argument", "consultationId required");
-
-    const uid = request.auth.uid;
-    const ref = db.collection("consultations").doc(consultationId);
-    const doc = await ref.get();
-    if (!doc.exists) throw new HttpsError("not-found", "Consultation not found");
-
-    const data = doc.data() || {};
-    if (data.userId !== uid) throw new HttpsError("permission-denied");
-    if (data.status === "cancelled") {
-      return {
-        ok: true,
-        refundAmount: data.refundAmount || 0,
-        refundPercent: data.refundPercent || 0,
-      };
+    // Either person may cancel. Only server-written paid bookings are
+    // refunded, from the amounts the server charged
+    // (payments/paid_booking.js); nothing a client wrote is trusted.
+    try {
+      return await cancelPaidConsultation(
+        paidBookingDeps(getStripeClient()),
+        request.auth.uid,
+        consultationId,
+      );
+    } catch (e) {
+      rethrowCharge(e, "Cancel");
     }
-
-    const scheduledAt = data.scheduledAt?.toDate?.() || null;
-    const now = new Date();
-    let refundPercent = 0;
-    if (scheduledAt) {
-      const diffMs = scheduledAt.getTime() - now.getTime();
-      if (diffMs >= 24 * 60 * 60 * 1000) refundPercent = 100;
-      else if (diffMs >= 60 * 60 * 1000) refundPercent = 50;
-    }
-
-    const cost = Number(data.cost || 0);
-    const amountCents = Math.round(cost * 100);
-    const refundCents = Math.round((amountCents * refundPercent) / 100);
-    let refundId = null;
-
-    const stripe = getStripeClient();
-    if (refundCents > 0 && data.paymentIntentId) {
-      const refund = await stripe.refunds.create({
-        payment_intent: data.paymentIntentId,
-        amount: refundCents,
-      });
-      refundId = refund.id;
-    }
-
-    await ref.set(
-      {
-        status: "cancelled",
-        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
-        refundAmount: refundCents / 100,
-        refundPercent,
-        refundId,
-      },
-      { merge: true }
-    );
-
-    return {
-      ok: true,
-      refundAmount: refundCents / 100,
-      refundPercent,
-      refundId,
-    };
   }
 );
 
-// 6️⃣ Charge Stored Payment Method
-exports.chargeStoredPaymentMethod = onCall(
+// Books and charges a paid session in one step; the server writes the
+// consultation (payments/paid_booking.js).
+exports.bookPaidSession = onCall(
   { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated");
     assertPaidSessionsEnabled(PAID_SESSIONS_ENABLED.value(), HttpsError);
-    const stripe = getStripeClient();
-    const uid = request.auth.uid;
-    const data = request.data || {};
-    // The server prices the session; a client-sent amount is never trusted.
-    const priced = resolveChargeAmount(data);
-    if (priced.error) throw new HttpsError("invalid-argument", priced.error);
-    const helperId = `${data.helperId || ""}`.trim();
-    if (helperId && helperId === uid) {
-      throw new HttpsError("invalid-argument", "You cannot book yourself");
-    }
-
-    // One booking attempt = one operationId, reused by the app for every
-    // retry, so a retry can never charge twice. Builds without it must
-    // update before they can pay.
-    if (!data.operationId) {
-      throw new HttpsError("failed-precondition", "Please update the app to book a paid session");
-    }
-
-    const doc = await db.collection("users").doc(uid).get();
-    const u = doc.data() || {};
-    if (!u.stripeCustomerId || !u.defaultPaymentMethodId)
-      throw new HttpsError("failed-precondition", "No stored payment method");
-
     try {
-      return await chargeOnce({
-        db,
-        stripe,
-        uid,
-        operationId: `${data.operationId}`,
-        helperId,
-        priced,
-        customer: u,
-        pricingVersion: PRICING_VERSION,
-        serverTimestamp: () => admin.firestore.FieldValue.serverTimestamp(),
-      });
+      return await bookPaidSession(
+        paidBookingDeps(getStripeClient()),
+        request.auth.uid,
+        request.data || {},
+      );
     } catch (e) {
-      if (e instanceof ChargeError) throw new HttpsError(e.code, e.message);
-      console.error("Charge error:", e);
-      throw new HttpsError("internal", "Payment failed");
+      rethrowCharge(e, "Booking");
     }
+  }
+);
+
+// The seeker reports a problem before the helper is paid; the money is
+// held for the founder to decide.
+exports.reportSessionProblem = onCall(
+  { region: "us-central1", invoker: "public" },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated");
+    const { consultationId, reason } = request.data || {};
+    try {
+      return await reportSessionProblem(
+        paidBookingDeps(null),
+        request.auth.uid,
+        consultationId,
+        reason,
+      );
+    } catch (e) {
+      rethrowCharge(e, "Report");
+    }
+  }
+);
+
+// Hourly: pays helpers their share a day after each session.
+exports.releaseHeldPayouts = onSchedule(
+  { schedule: "every 60 minutes", region: "us-central1", secrets: [STRIPE_SECRET] },
+  async () => {
+    const snap = await db
+      .collection("consultations")
+      .where("releaseAfter", "<=", admin.firestore.Timestamp.now())
+      .limit(100)
+      .get();
+    if (snap.empty) return;
+    const results = await releaseDue(
+      paidBookingDeps(getStripeClient()),
+      snap.docs.map((d) => d.id),
+    );
+    console.log("releaseHeldPayouts", results);
+  }
+);
+
+// A helper's payout account status, read from Stripe and stored (only the
+// server writes `payoutsEnabled`).
+exports.getPayoutStatus = onCall(
+  { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated");
+    assertPaidSessionsEnabled(PAID_SESSIONS_ENABLED.value(), HttpsError);
+    const ref = db.collection("users").doc(request.auth.uid);
+    const accountId = (await ref.get()).data()?.stripeAccountId;
+    if (!accountId) return { connected: false, payoutsEnabled: false, detailsSubmitted: false };
+    const account = await getStripeClient().accounts.retrieve(accountId);
+    const status = payoutStatusFromAccount(account);
+    await ref.set(
+      {
+        payoutsEnabled: status.payoutsEnabled,
+        payoutsCheckedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    return { connected: true, ...status };
+  }
+);
+
+// 6️⃣ Charge Stored Payment Method: replaced by bookPaidSession, which
+// charges and books in one step. Old builds charged here and then wrote the
+// booking themselves; they must update before they can pay.
+exports.chargeStoredPaymentMethod = onCall(
+  { region: "us-central1", invoker: "public" },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated");
+    assertPaidSessionsEnabled(PAID_SESSIONS_ENABLED.value(), HttpsError);
+    throw new HttpsError("failed-precondition", "Please update the app to book a paid session");
   }
 );
 
@@ -1037,6 +1057,7 @@ exports.createExpressAccountLink = onCall(
         country: "CA",
         email: (await accountEmail(uid)) || data.email || undefined,
         capabilities: { transfers: { requested: true } },
+        metadata: { uid },
       });
       accountId = acct.id;
       await ref.update({ stripeAccountId: acct.id });
@@ -1054,96 +1075,95 @@ exports.createExpressAccountLink = onCall(
   }
 );
 
-// 5️⃣ Create Stripe Checkout Session
+// 5️⃣ Stripe Checkout: not used. It trusted the client's price and helper
+// account; paid sessions go through bookPaidSession.
 exports.createStripeCheckoutSession = onCall(
-  { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
+  { region: "us-central1", invoker: "public" },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated");
-    assertPaidSessionsEnabled(PAID_SESSIONS_ENABLED.value(), HttpsError);
-    const stripe = getStripeClient();
-    const uid = request.auth.uid;
-    const {
-      consultationId,
-      cost,
-      helperStripeAccountId,
-      currency = "cad",
-      successUrl,
-      cancelUrl,
-    } = request.data || {};
-
-    if (!consultationId || !cost || !helperStripeAccountId)
-      throw new HttpsError("invalid-argument", "Missing required fields");
-
-    const platformFee = Math.round(cost * 100 * 0.15);
-    const customerId = await getOrCreateCustomer(uid);
-
-    const session = await stripe.checkout.sessions.create({
-      customer: customerId,
-      payment_method_types: ["card"],
-      line_items: [
-        {
-          price_data: {
-            currency,
-            product_data: { name: `Consultation (${consultationId})` },
-            unit_amount: Math.round(cost * 100),
-          },
-          quantity: 1,
-        },
-      ],
-      mode: "payment",
-      success_url: successUrl || "https://yourapp.page.link/success",
-      cancel_url: cancelUrl || "https://yourapp.page.link/cancel",
-      payment_intent_data: {
-        application_fee_amount: platformFee,
-        transfer_data: { destination: helperStripeAccountId },
-        metadata: { consultationId, uid },
-      },
-    });
-
-    return { sessionId: session.id, checkoutUrl: session.url };
+    throw new HttpsError("failed-precondition", "Please update the app to book a paid session");
   }
 );
 
-// 6️⃣ Stripe Webhook
+// 6️⃣ Stripe Webhook (endpoint signing secret: STRIPE_WEBHOOK_SECRET).
 exports.handleStripeWebhook = onRequest(
-  { region: "us-central1", secrets: [STRIPE_SECRET] },
+  { region: "us-central1", secrets: [STRIPE_SECRET, STRIPE_WEBHOOK_SECRET] },
   async (req, res) => {
+    const endpointSecret = STRIPE_WEBHOOK_SECRET.value();
+    if (!endpointSecret) {
+      console.error("STRIPE_WEBHOOK_SECRET is not set");
+      return res.status(500).send("Webhook not configured");
+    }
     const stripe = getStripeClient();
-    const sig = req.headers["stripe-signature"];
-    const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
     let event;
     try {
-      event = stripe.webhooks.constructEvent(req.rawBody, sig, endpointSecret);
+      event = stripe.webhooks.constructEvent(
+        req.rawBody,
+        req.headers["stripe-signature"],
+        endpointSecret,
+      );
     } catch (e) {
       console.error("Webhook signature failed:", e.message);
       return res.status(400).send(`Webhook Error: ${e.message}`);
     }
-
-    if (
-      event.type === "payment_intent.succeeded" ||
-      event.type === "payment_intent.payment_failed" ||
-      event.type === "payment_intent.canceled"
-    ) {
-      // Stored-card charges: reconcile the payment operation. Repeated or
-      // late events never move a success backwards.
-      await reconcilePaymentIntent(db, event.data.object, () =>
-        admin.firestore.FieldValue.serverTimestamp(),
-      );
-    }
-    if (event.type === "payment_intent.succeeded") {
-      const pi = event.data.object;
-      const consultationId = pi.metadata?.consultationId;
-      if (consultationId) {
-        await db.collection("consultations").doc(consultationId).update({
-          status: "paid",
-          paidAt: admin.firestore.FieldValue.serverTimestamp(),
-          paymentIntentId: pi.id,
-        });
-      }
+    try {
+      await handleStripeEvent(event, paidBookingDeps(stripe));
+    } catch (e) {
+      // A 500 makes Stripe retry the event later.
+      console.error("Webhook handling failed:", event.type, e);
+      return res.status(500).send("Webhook handling failed");
     }
     res.json({ received: true });
   }
 );
+
+async function handleStripeEvent(event, deps) {
+  const obj = event.data.object;
+  switch (event.type) {
+    case "payment_intent.succeeded":
+    case "payment_intent.payment_failed":
+    case "payment_intent.canceled":
+      // Repeated or late events never move a success backwards.
+      await reconcilePaymentIntent(db, obj, deps.serverTimestamp);
+      if (event.type === "payment_intent.succeeded"
+        && obj.metadata?.kind === "consultation" && obj.metadata?.operationId) {
+        // The seeker may have closed the app after the bank's screen.
+        await finalizeBooking(deps, obj.metadata.operationId, obj);
+      }
+      return;
+    case "charge.dispute.created": {
+      const piId = typeof obj.payment_intent === "string"
+        ? obj.payment_intent
+        : obj.payment_intent?.id;
+      if (!piId) return;
+      const pi = await deps.stripe.paymentIntents.retrieve(piId);
+      await markDisputed(deps, pi.metadata?.consultationId, obj.id);
+      return;
+    }
+    case "account.updated": {
+      const status = payoutStatusFromAccount(obj);
+      const uid = obj.metadata?.uid;
+      const refs = uid
+        ? [db.collection("users").doc(uid)]
+        : (await db.collection("users").where("stripeAccountId", "==", obj.id).limit(2).get())
+          .docs.map((d) => d.ref);
+      for (const ref of refs) {
+        const user = (await ref.get()).data() || {};
+        if (user.stripeAccountId !== obj.id) continue;
+        await ref.set(
+          {
+            payoutsEnabled: status.payoutsEnabled,
+            payoutsCheckedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+      }
+      return;
+    }
+    default:
+      return;
+  }
+}
 
 /* ============================================================
    🔔 FIRESTORE TRIGGERS
@@ -1152,10 +1172,7 @@ exports.handleStripeWebhook = onRequest(
 const { buildCallInviteFcmMessage } = require("./call_invites/call_invite_fcm_message");
 const { inviteFcmPlan } = require("./call_invites/invite_fcm_plan");
 const { calleeBlockedCaller } = require("./call_invites/blocked_caller");
-const {
-  PRICING_VERSION,
-  resolveChargeAmount,
-} = require("./consultations/consultation_price");
+const { PRICING_VERSION } = require("./consultations/consultation_price");
 const {
   deleteUserData,
   retryUnfinishedDeletions,
@@ -1174,9 +1191,17 @@ const {
 const { assertPaidSessionsEnabled } = require("./payments/paid_sessions");
 const {
   ChargeError,
-  chargeOnce,
   reconcilePaymentIntent,
 } = require("./payments/charge_operation");
+const {
+  bookPaidSession,
+  cancelConsultation: cancelPaidConsultation,
+  finalizeBooking,
+  markDisputed,
+  payoutStatusFromAccount,
+  releaseDue,
+  reportSessionProblem,
+} = require("./payments/paid_booking");
 const { addReviewToRating, validStars } = require("./reviews/review_aggregate");
 
 // A seeker's review of a finished consultation updates the helper's average
