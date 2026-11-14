@@ -1085,22 +1085,24 @@ exports.createStripeCheckoutSession = onCall(
   }
 );
 
-// 6️⃣ Stripe Webhook (endpoint signing secret: STRIPE_WEBHOOK_SECRET).
+// 6️⃣ Stripe Webhook (endpoint signing secrets: STRIPE_WEBHOOK_SECRET).
 exports.handleStripeWebhook = onRequest(
   { region: "us-central1", secrets: [STRIPE_SECRET, STRIPE_WEBHOOK_SECRET] },
   async (req, res) => {
-    const endpointSecret = STRIPE_WEBHOOK_SECRET.value();
-    if (!endpointSecret) {
+    // One secret per endpoint (platform, connected accounts), comma-separated.
+    const endpointSecrets = STRIPE_WEBHOOK_SECRET.value();
+    if (webhookSecrets(endpointSecrets).length === 0) {
       console.error("STRIPE_WEBHOOK_SECRET is not set");
       return res.status(500).send("Webhook not configured");
     }
     const stripe = getStripeClient();
     let event;
     try {
-      event = stripe.webhooks.constructEvent(
+      event = verifyStripeEvent(
+        stripe,
         req.rawBody,
         req.headers["stripe-signature"],
-        endpointSecret,
+        endpointSecrets,
       );
     } catch (e) {
       console.error("Webhook signature failed:", e.message);
@@ -1189,6 +1191,7 @@ const {
   postImageUrls,
 } = require("./safety/image_safety");
 const { assertPaidSessionsEnabled } = require("./payments/paid_sessions");
+const { verifyStripeEvent, webhookSecrets } = require("./payments/webhook_verify");
 const {
   ChargeError,
   reconcilePaymentIntent,
