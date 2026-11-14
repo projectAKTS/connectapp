@@ -69,13 +69,46 @@ service cloud.firestore {
       ];
     }
 
-    // The other side of a two-person chat has not blocked the sender.
+    // Every chat is between exactly two different people, the caller being
+    // one of them. A chat with one or three people would switch off the
+    // block, minor and first-contact checks below, so it cannot be made.
+    function isChatPair(people) {
+      return people is list && people.size() == 2 && people[0] != people[1]
+        && people.hasAny([request.auth.uid]);
+    }
+
+    // Both lists, when present, name the same two people.
+    function chatPeopleValid(data) {
+      return (!data.keys().hasAny(['participants']) || isChatPair(data.participants))
+        && (!data.keys().hasAny(['users']) || isChatPair(data.users))
+        && (!data.keys().hasAll(['participants', 'users'])
+          || data.participants.toSet() == data.users.toSet());
+    }
+
+    // A list that already names two people keeps naming the same two.
+    function keepsChatList(field) {
+      let old = resource.data.get(field, null);
+      return !(old is list && old.size() == 2)
+        || request.resource.data.get(field, []).toSet() == old.toSet();
+    }
+
+    // An update cannot add, drop or swap anyone. Re-writing the same pair
+    // (the chat screen and the missed-call note do) is not a change.
+    function keepsChatPeople() {
+      return !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['participants', 'users'])
+        || (chatPeopleValid(request.resource.data)
+          && keepsChatList('participants') && keepsChatList('users'));
+    }
+
+    // The other side of a two-person chat has not blocked the sender. A chat
+    // without exactly one other person fails, so no check can be skipped.
     function notBlockedInChat(chat) {
       let people = chat.keys().hasAny(['participants'])
         ? chat.participants
         : (chat.keys().hasAny(['users']) ? chat.users : []);
       let others = people.removeAll([request.auth.uid]);
-      return others.size() != 1 ||
+      return others.size() == 1 &&
         !get(/databases/$(database)/documents/users/$(others[0]))
           .data.get('blockedUids', []).hasAny([request.auth.uid]);
     }
@@ -109,7 +142,7 @@ service cloud.firestore {
         ? chat.participants
         : (chat.keys().hasAny(['users']) ? chat.users : []);
       let others = people.removeAll([request.auth.uid]);
-      return others.size() != 1 || notRestrictedMinor(others[0]);
+      return others.size() == 1 && notRestrictedMinor(others[0]);
     }
 
     // ---- First contact (docs/SAFETY_ROADMAP.md #3) ----
@@ -232,8 +265,29 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow create: if request.auth != null
         && request.auth.uid == request.resource.data.userID
+        && newPostHasOnlyDefaults()
         && callerAgeAllowed();
-      
+
+      // A new post starts with zero counts and no boost. The safety and
+      // report flags are the server's: a client cannot pre-set them.
+      function newPostHasOnlyDefaults() {
+        let d = request.resource.data;
+        return !d.keys().hasAny([
+            'imageSafety', 'imageSafetyCheckedAt', 'sensitive', 'hiddenBySafety',
+            'hiddenByReports', 'hiddenByReportsAt', 'hiddenByReportsCount',
+            'countedAt', 'reports'
+          ])
+          && d.get('likes', 0) == 0
+          && d.get('likedBy', []).size() == 0
+          && d.get('commentsCount', 0) == 0
+          && d.get('helpfulVotes', 0) == 0
+          && d.get('engagementScore', 0) == 0
+          && d.get('boostScore', 0) == 0
+          && d.get('isBoosted', false) == false
+          && d.get('boostExpiresAt', null) == null
+          && d.get('isFeatured', false) == false;
+      }
+
       // — Editing content/tags/timestamp (by owner)
       allow update: if request.auth != null
         && request.auth.uid == resource.data.userID
@@ -357,7 +411,16 @@ service cloud.firestore {
       allow read: if request.auth != null
         && (resource.data.fromUid == request.auth.uid
           || resource.data.toUid == request.auth.uid);
-      allow update, delete: if request.auth != null
+      // Either side may move the call along (stages, errors, decline,
+      // cancel), but nobody can rewrite who is calling whom or on which
+      // channel. The app never changes these after creating the invite.
+      allow update: if request.auth != null
+        && (resource.data.fromUid == request.auth.uid
+          || resource.data.toUid == request.auth.uid)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'fromUid', 'toUid', 'fromName', 'toName', 'channel', 'createdAt'
+        ]);
+      allow delete: if request.auth != null
         && (resource.data.fromUid == request.auth.uid
           || resource.data.toUid == request.auth.uid);
     }
@@ -407,7 +470,8 @@ service cloud.firestore {
     // ✅ Chats
     match /chats/{chatId} {
       allow create: if isSignedIn()
-        && !request.resource.data.keys().hasAny(['repliedBy']) && (
+        && !request.resource.data.keys().hasAny(['repliedBy'])
+        && chatPeopleValid(request.resource.data) && (
         (request.resource.data.keys().hasAny(['participants']) &&
           request.resource.data.participants is list &&
           request.resource.data.participants.hasAny([request.auth.uid])) ||
@@ -441,7 +505,8 @@ service cloud.firestore {
       // person whose uid is in the chat id ("uidA_uidB"): a stranger cannot
       // write themselves into someone else's chat. `repliedBy` is server-only.
       allow update: if isSignedIn()
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['repliedBy']) && (
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['repliedBy'])
+        && keepsChatPeople() && (
         (resource.data.keys().hasAny(['participants']) &&
           resource.data.participants is list &&
           resource.data.participants.hasAny([request.auth.uid])) ||
