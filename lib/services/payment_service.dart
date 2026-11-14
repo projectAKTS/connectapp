@@ -5,6 +5,7 @@ import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_stripe/flutter_stripe.dart' show Stripe, StripeException;
 
 /// Result types for payment attempts.
 enum PaymentResult {
@@ -438,54 +439,162 @@ class PaymentService {
     return Map<String, dynamic>.from(response.data as Map);
   }
 
-  /// Creates a Stripe Checkout session (optional hosted flow).
-  Future<void> createCheckoutSession({
-    required String consultationId,
-    required double cost,
-    required String helperStripeAccountId,
+  /// Books and pays a session in one server call (bookPaidSession). The
+  /// server prices it, charges the saved card and writes the booking.
+  /// Pass the same [operationId] for every retry of one attempt.
+  Future<PaidBookingResult> bookPaidSession({
+    required String operationId,
+    required String helperId,
+    required int durationMinutes,
+    required String callType,
+    required DateTime scheduledAt,
   }) async {
-    final functions = await _getAuthedFunctions();
     try {
-      debugPrint('🌐 [PaymentService] Calling createStripeCheckoutSession...');
+      final functions = await _getAuthedFunctions();
       final callable = functions.httpsCallable(
-        'createStripeCheckoutSession',
-        options: HttpsCallableOptions(timeout: Duration(seconds: 30)),
+        'bookPaidSession',
+        options: HttpsCallableOptions(timeout: const Duration(seconds: 45)),
       );
       final response = await callable.call({
-        'consultationId': consultationId,
-        'cost': cost,
-        'helperStripeAccountId': helperStripeAccountId,
-        'currency': 'cad',
-        'successUrl': 'https://yourapp.page.link/success',
-        'cancelUrl': 'https://yourapp.page.link/cancel',
+        'operationId': operationId,
+        'helperId': helperId,
+        'durationMinutes': durationMinutes,
+        'callType': callType,
+        'scheduledAtMs': scheduledAt.millisecondsSinceEpoch,
       });
-
-      final data = Map<String, dynamic>.from(response.data);
-      final checkoutUrl = data['checkoutUrl'] as String?;
-      debugPrint('🧾 [PaymentService] checkoutUrl: $checkoutUrl');
-
-      if (checkoutUrl == null || checkoutUrl.isEmpty) {
-        throw Exception('No checkout URL returned.');
+      final data = Map<String, dynamic>.from(response.data as Map);
+      if (data['success'] == true) {
+        return PaidBookingResult(
+          BookingOutcome.booked,
+          consultationId: data['consultationId'] as String?,
+        );
       }
-
-      final uri = Uri.parse(checkoutUrl);
-      if (!await canLaunchUrl(uri)) {
-        throw Exception('Could not launch Stripe checkout URL.');
+      if (data['requiresAction'] == true && data['clientSecret'] is String) {
+        return PaidBookingResult(
+          BookingOutcome.needsBankConfirmation,
+          clientSecret: data['clientSecret'] as String,
+        );
       }
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-      debugPrint('🚀 [PaymentService] Checkout launched successfully.');
+      return const PaidBookingResult(BookingOutcome.failed);
     } on FirebaseFunctionsException catch (e) {
-      debugPrint(
-        '❌ [PaymentService] createCheckoutSession FirebaseError: ${e.code}',
-      );
-      if (e.code == 'unauthenticated') {
-        throw Exception('Please sign in again.');
-      } else {
-        rethrow;
+      debugPrint('[PaymentService] bookPaidSession: ${e.code} ${e.message}');
+      final message = e.message ?? '';
+      switch (e.code) {
+        case 'failed-precondition':
+          if (message.contains('No stored payment method')) {
+            return const PaidBookingResult(BookingOutcome.needsCard);
+          }
+          if (message.contains('cannot take paid sessions')) {
+            return const PaidBookingResult(BookingOutcome.helperNotReady);
+          }
+          return const PaidBookingResult(BookingOutcome.failed);
+        case 'aborted':
+        case 'unavailable':
+        case 'deadline-exceeded':
+        case 'internal':
+          return const PaidBookingResult(BookingOutcome.pending);
+        case 'unauthenticated':
+          return const PaidBookingResult(BookingOutcome.signedOut);
+        default:
+          return const PaidBookingResult(BookingOutcome.failed);
       }
-    } catch (e, st) {
-      debugPrint('❌ [PaymentService] createCheckoutSession error: $e\n$st');
-      rethrow;
+    } catch (e) {
+      // Network error: the charge may or may not have happened; the same
+      // operation id makes the retry safe.
+      debugPrint('[PaymentService] bookPaidSession error: $e');
+      return const PaidBookingResult(BookingOutcome.pending);
     }
   }
+
+  /// Shows the bank's confirmation (3D Secure). Returns false when the
+  /// seeker closed it or the bank refused; the server has the final word.
+  Future<bool> confirmWithBank(String clientSecret) async {
+    try {
+      await Stripe.instance.handleNextAction(clientSecret);
+      return true;
+    } on StripeException catch (e) {
+      debugPrint('[PaymentService] bank confirmation: ${e.error.code}');
+      return false;
+    } catch (e) {
+      debugPrint('[PaymentService] bank confirmation error: $e');
+      return false;
+    }
+  }
+
+  /// The seeker reports a problem with a past paid session.
+  Future<void> reportSessionProblem(String consultationId, String reason) async {
+    final functions = await _getAuthedFunctions();
+    await functions
+        .httpsCallable(
+          'reportSessionProblem',
+          options: HttpsCallableOptions(timeout: const Duration(seconds: 30)),
+        )
+        .call({'consultationId': consultationId, 'reason': reason});
+  }
+
+  /// The helper's payout account status (also stored by the server).
+  Future<PayoutStatus> getPayoutStatus() async {
+    final functions = await _getAuthedFunctions();
+    final response = await functions
+        .httpsCallable(
+          'getPayoutStatus',
+          options: HttpsCallableOptions(timeout: const Duration(seconds: 30)),
+        )
+        .call();
+    final data = Map<String, dynamic>.from(response.data as Map);
+    return PayoutStatus(
+      connected: data['connected'] == true,
+      payoutsEnabled: data['payoutsEnabled'] == true,
+      detailsSubmitted: data['detailsSubmitted'] == true,
+    );
+  }
+
+  /// Opens Stripe's hosted payout setup for the helper.
+  Future<bool> openPayoutSetup() async {
+    try {
+      final functions = await _getAuthedFunctions();
+      final response = await functions
+          .httpsCallable(
+            'createExpressAccountLink',
+            options: HttpsCallableOptions(timeout: const Duration(seconds: 30)),
+          )
+          .call();
+      final url = (response.data as Map?)?['url'] as String?;
+      if (url == null || url.isEmpty) return false;
+      return launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    } catch (e) {
+      debugPrint('[PaymentService] payout setup error: $e');
+      return false;
+    }
+  }
+}
+
+enum BookingOutcome {
+  booked,
+  needsCard,
+  needsBankConfirmation,
+  helperNotReady,
+  pending, // unknown or still running: retry with the same operation id
+  signedOut,
+  failed,
+}
+
+class PaidBookingResult {
+  final BookingOutcome outcome;
+  final String? consultationId;
+  final String? clientSecret;
+
+  const PaidBookingResult(this.outcome, {this.consultationId, this.clientSecret});
+}
+
+class PayoutStatus {
+  final bool connected;
+  final bool payoutsEnabled;
+  final bool detailsSubmitted;
+
+  const PayoutStatus({
+    required this.connected,
+    required this.payoutsEnabled,
+    required this.detailsSubmitted,
+  });
 }

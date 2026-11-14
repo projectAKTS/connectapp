@@ -1,4 +1,5 @@
 // lib/screens/profile/profile_screen.dart
+import 'package:connect_app/screens/payment/payout_setup_screen.dart';
 import 'package:connect_app/l10n/value_labels.dart';
 import 'package:connect_app/l10n/l10n.dart';
 import 'package:connect_app/l10n/formatters.dart';
@@ -576,6 +577,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final premiumExpiresAt =
         parseFirestoreTimestamp(userData!['premiumExpiresAt']);
     final hasCard = _s(userData!['defaultPaymentMethodId']).isNotEmpty;
+    final isHelperProfile =
+        ['helper', 'both'].contains(_s(userData!['role'])) ||
+            userData!['isHelper'] == true;
+    final payoutsReady = userData!['payoutsEnabled'] == true;
 
     String premiumSubtitle() {
       if (premiumStatus.isEmpty) return context.l10n.profilePremiumNotActive;
@@ -1033,6 +1038,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     .pushNamed('/paymentSetup');
                               },
                             ),
+                            if (isHelperProfile) ...[
+                              const Divider(
+                                  height: 1, color: AppColors.border),
+                              _accountRow(
+                                icon: Icons.account_balance_outlined,
+                                title: context.l10n.payoutTitle,
+                                subtitle: payoutsReady
+                                    ? context.l10n.payoutRowReady
+                                    : context.l10n.payoutRowSetup,
+                                onTap: () {
+                                  Navigator.of(context, rootNavigator: true)
+                                      .push(MaterialPageRoute(
+                                    builder: (_) => const PayoutSetupScreen(),
+                                  ));
+                                },
+                              ),
+                            ],
                           ],
                           if (MvpFeatures.premium) ...[
                             const Divider(height: 1, color: AppColors.border),

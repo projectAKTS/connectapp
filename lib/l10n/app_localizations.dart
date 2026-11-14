@@ -63,7 +63,7 @@ import 'app_localizations_fr.dart';
 /// property.
 abstract class AppLocalizations {
   AppLocalizations(String locale)
-      : localeName = intl.Intl.canonicalizedLocale(locale.toString());
+    : localeName = intl.Intl.canonicalizedLocale(locale.toString());
 
   final String localeName;
 
@@ -86,16 +86,16 @@ abstract class AppLocalizations {
   /// of delegates is preferred or required.
   static const List<LocalizationsDelegate<dynamic>> localizationsDelegates =
       <LocalizationsDelegate<dynamic>>[
-    delegate,
-    GlobalMaterialLocalizations.delegate,
-    GlobalCupertinoLocalizations.delegate,
-    GlobalWidgetsLocalizations.delegate,
-  ];
+        delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+      ];
 
   /// A list of this localizations delegate's supported locales.
   static const List<Locale> supportedLocales = <Locale>[
     Locale('en'),
-    Locale('fr')
+    Locale('fr'),
   ];
 
   /// This language's own name, shown in the language picker.
@@ -3817,6 +3817,138 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'e.g. 3 years helping newcomers find housing'**
   String get editProfileExperienceHint;
+
+  /// No description provided for @bookHelperNotReady.
+  ///
+  /// In en, this message translates to:
+  /// **'This helper can’t take paid sessions yet.'**
+  String get bookHelperNotReady;
+
+  /// No description provided for @bookBankNotConfirmed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your bank didn’t confirm the payment. Tap Book to try again.'**
+  String get bookBankNotConfirmed;
+
+  /// No description provided for @consultCancelBodyHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'The person who booked will get a full refund.'**
+  String get consultCancelBodyHelper;
+
+  /// No description provided for @consultUnderReview.
+  ///
+  /// In en, this message translates to:
+  /// **'Under review'**
+  String get consultUnderReview;
+
+  /// No description provided for @consultReportProblem.
+  ///
+  /// In en, this message translates to:
+  /// **'Report a problem'**
+  String get consultReportProblem;
+
+  /// No description provided for @consultReportTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Report a problem with this session?'**
+  String get consultReportTitle;
+
+  /// No description provided for @consultReportBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Tell us what happened, for example that the helper did not come. The payment is held while we look into it.'**
+  String get consultReportBody;
+
+  /// No description provided for @consultReportHint.
+  ///
+  /// In en, this message translates to:
+  /// **'What happened?'**
+  String get consultReportHint;
+
+  /// No description provided for @consultReportSend.
+  ///
+  /// In en, this message translates to:
+  /// **'Send'**
+  String get consultReportSend;
+
+  /// No description provided for @consultReportSent.
+  ///
+  /// In en, this message translates to:
+  /// **'Thanks. We’ll look into it.'**
+  String get consultReportSent;
+
+  /// No description provided for @consultReportFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not send. Please try again.'**
+  String get consultReportFailed;
+
+  /// No description provided for @payoutTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Get paid'**
+  String get payoutTitle;
+
+  /// No description provided for @payoutRowReady.
+  ///
+  /// In en, this message translates to:
+  /// **'Payouts are set up'**
+  String get payoutRowReady;
+
+  /// No description provided for @payoutRowSetup.
+  ///
+  /// In en, this message translates to:
+  /// **'Set up payouts to take paid sessions'**
+  String get payoutRowSetup;
+
+  /// No description provided for @payoutIntro.
+  ///
+  /// In en, this message translates to:
+  /// **'Helpers are paid through Stripe. Your share of each paid session is sent to your bank account one day after the session.'**
+  String get payoutIntro;
+
+  /// No description provided for @payoutStatusReady.
+  ///
+  /// In en, this message translates to:
+  /// **'Ready: you can take paid sessions.'**
+  String get payoutStatusReady;
+
+  /// No description provided for @payoutStatusPending.
+  ///
+  /// In en, this message translates to:
+  /// **'Stripe is still checking your details. This can take a few minutes.'**
+  String get payoutStatusPending;
+
+  /// No description provided for @payoutStatusNone.
+  ///
+  /// In en, this message translates to:
+  /// **'Not set up yet.'**
+  String get payoutStatusNone;
+
+  /// No description provided for @payoutStart.
+  ///
+  /// In en, this message translates to:
+  /// **'Set up with Stripe'**
+  String get payoutStart;
+
+  /// No description provided for @payoutContinue.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue setup'**
+  String get payoutContinue;
+
+  /// No description provided for @payoutRefresh.
+  ///
+  /// In en, this message translates to:
+  /// **'Check status'**
+  String get payoutRefresh;
+
+  /// No description provided for @payoutOpenFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open Stripe. Please try again.'**
+  String get payoutOpenFailed;
 }
 
 class _AppLocalizationsDelegate
@@ -3846,8 +3978,9 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   }
 
   throw FlutterError(
-      'AppLocalizations.delegate failed to load unsupported locale "$locale". This is likely '
-      'an issue with the localizations generation tool. Please file an issue '
-      'on GitHub with a reproducible sample app and the gen-l10n configuration '
-      'that was used.');
+    'AppLocalizations.delegate failed to load unsupported locale "$locale". This is likely '
+    'an issue with the localizations generation tool. Please file an issue '
+    'on GitHub with a reproducible sample app and the gen-l10n configuration '
+    'that was used.',
+  );
 }

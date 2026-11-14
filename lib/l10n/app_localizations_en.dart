@@ -2047,4 +2047,75 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get editProfileExperienceHint =>
       'e.g. 3 years helping newcomers find housing';
+
+  @override
+  String get bookHelperNotReady => 'This helper can’t take paid sessions yet.';
+
+  @override
+  String get bookBankNotConfirmed =>
+      'Your bank didn’t confirm the payment. Tap Book to try again.';
+
+  @override
+  String get consultCancelBodyHelper =>
+      'The person who booked will get a full refund.';
+
+  @override
+  String get consultUnderReview => 'Under review';
+
+  @override
+  String get consultReportProblem => 'Report a problem';
+
+  @override
+  String get consultReportTitle => 'Report a problem with this session?';
+
+  @override
+  String get consultReportBody =>
+      'Tell us what happened, for example that the helper did not come. The payment is held while we look into it.';
+
+  @override
+  String get consultReportHint => 'What happened?';
+
+  @override
+  String get consultReportSend => 'Send';
+
+  @override
+  String get consultReportSent => 'Thanks. We’ll look into it.';
+
+  @override
+  String get consultReportFailed => 'Could not send. Please try again.';
+
+  @override
+  String get payoutTitle => 'Get paid';
+
+  @override
+  String get payoutRowReady => 'Payouts are set up';
+
+  @override
+  String get payoutRowSetup => 'Set up payouts to take paid sessions';
+
+  @override
+  String get payoutIntro =>
+      'Helpers are paid through Stripe. Your share of each paid session is sent to your bank account one day after the session.';
+
+  @override
+  String get payoutStatusReady => 'Ready: you can take paid sessions.';
+
+  @override
+  String get payoutStatusPending =>
+      'Stripe is still checking your details. This can take a few minutes.';
+
+  @override
+  String get payoutStatusNone => 'Not set up yet.';
+
+  @override
+  String get payoutStart => 'Set up with Stripe';
+
+  @override
+  String get payoutContinue => 'Continue setup';
+
+  @override
+  String get payoutRefresh => 'Check status';
+
+  @override
+  String get payoutOpenFailed => 'Could not open Stripe. Please try again.';
 }

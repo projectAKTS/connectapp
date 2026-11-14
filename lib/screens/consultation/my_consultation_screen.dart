@@ -76,13 +76,16 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  Future<void> _cancelConsultation(String consultationId) async {
+  Future<void> _cancelConsultation(String consultationId,
+      {bool byHelper = false}) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(context.l10n.consultCancelTitle),
         content: Text(
-          context.l10n.consultCancelBody,
+          byHelper
+              ? context.l10n.consultCancelBodyHelper
+              : context.l10n.consultCancelBody,
         ),
         actions: [
           TextButton(
@@ -107,6 +110,47 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
       _snack(msg);
     } catch (e) {
       _snack(context.l10n.consultCancelFailed);
+    }
+  }
+
+  Future<void> _reportProblem(String consultationId) async {
+    final controller = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(context.l10n.consultReportTitle),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(context.l10n.consultReportBody),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              maxLength: 500,
+              maxLines: 3,
+              decoration:
+                  InputDecoration(hintText: context.l10n.consultReportHint),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(context.l10n.commonCancel)),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+              child: Text(context.l10n.consultReportSend)),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (reason == null) return;
+    try {
+      await _paymentService.reportSessionProblem(consultationId, reason);
+      _snack(context.l10n.consultReportSent);
+    } catch (_) {
+      _snack(context.l10n.consultReportFailed);
     }
   }
 
@@ -339,7 +383,12 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                             (data['consultationId'] ?? doc.id).toString();
                         final scheduledAt =
                             parseFirestoreTimestamp(data['scheduledAt']);
-                        final canCancel = (data['userId'] ?? '') == myUid;
+                        // Either person can cancel; the server refunds the
+                        // seeker (in full when the helper cancels).
+                        final isHelperSide =
+                            (data['targetUserId'] ?? '') == myUid;
+                        final canCancel = (data['userId'] ?? '') == myUid ||
+                            isHelperSide;
 
                         final minsRaw =
                             (data['minutesRequested'] ?? data['minutes'] ?? 0);
@@ -420,7 +469,8 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                               ),
                             );
                           },
-                          onCancel: () => _cancelConsultation(consultationId),
+                          onCancel: () => _cancelConsultation(consultationId,
+                              byHelper: isHelperSide),
                         );
                       },
                     ),
@@ -550,13 +600,23 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                                       final avatarUrl =
                                           _resolveAvatar(userData);
 
-                                      final isCancelled =
-                                          (data['status'] ?? '') == 'cancelled';
-                                      final canRate = !isCancelled &&
-                                          data['userId'] == myUid &&
-                                          otherUserId.isNotEmpty &&
-                                          scheduledAt != null &&
-                                          scheduledAt.isBefore(DateTime.now());
+                                      final status =
+                                          (data['status'] ?? '').toString();
+                                      final isCancelled = status == 'cancelled';
+                                      final isPayer = data['userId'] == myUid;
+                                      final paidCents =
+                                          (data['amountCents'] as num?) ?? 0;
+                                      // Reviews need a paid session the
+                                      // server marked completed.
+                                      final canRate = status == 'completed' &&
+                                          paidCents > 0 &&
+                                          isPayer &&
+                                          otherUserId.isNotEmpty;
+                                      // Until the helper is paid, the payer
+                                      // can report a problem.
+                                      final canReport = isPayer &&
+                                          status == 'paid' &&
+                                          data['payoutState'] == 'held';
 
                                       return _ConsultationCard(
                                         isPast: true,
@@ -583,10 +643,15 @@ class _MyConsultationsScreenState extends State<MyConsultationsScreen> {
                                         joinEnabled: false,
                                         joinHint: isCancelled
                                             ? context.l10n.consultCanceled
-                                            : context.l10n.consultCompleted,
+                                            : status == 'under_review'
+                                                ? context.l10n.consultUnderReview
+                                                : context.l10n.consultCompleted,
                                         fmtWhen: _fmtWhen,
                                         fmtMoney: _fmtMoney,
                                         canCancel: false,
+                                        canReport: canReport,
+                                        onReport: () =>
+                                            _reportProblem(consultationId),
                                         onOpenProfile: (uid) {
                                           if (uid.trim().isEmpty) return;
                                           Navigator.of(context).push(
@@ -677,6 +742,8 @@ class _ConsultationCard extends StatelessWidget {
   final bool joinEnabled;
   final String joinHint;
   final bool canCancel;
+  final bool canReport;
+  final VoidCallback? onReport;
 
   final String Function(DateTime) fmtWhen;
   final String Function(num) fmtMoney;
@@ -702,6 +769,8 @@ class _ConsultationCard extends StatelessWidget {
     required this.joinEnabled,
     required this.joinHint,
     required this.canCancel,
+    this.canReport = false,
+    this.onReport,
     required this.fmtWhen,
     required this.fmtMoney,
     required this.onOpenProfile,
@@ -768,6 +837,8 @@ class _ConsultationCard extends StatelessWidget {
           displayName: displayName,
           avatarUrl: avatarUrl,
           canCancel: canCancel,
+          canReport: canReport,
+          onReport: onReport,
           onMessage: onMessage,
           onJoin: onJoin,
           onCancel: onCancel,
@@ -941,6 +1012,8 @@ class _ActionsColumn extends StatelessWidget {
   final String displayName;
   final String avatarUrl;
   final bool canCancel;
+  final bool canReport;
+  final VoidCallback? onReport;
 
   final void Function(String uid, String resolvedName, String avatarUrl)
       onMessage;
@@ -954,6 +1027,8 @@ class _ActionsColumn extends StatelessWidget {
     required this.displayName,
     required this.avatarUrl,
     required this.canCancel,
+    this.canReport = false,
+    this.onReport,
     required this.onMessage,
     required this.onJoin,
     required this.onCancel,
@@ -1024,6 +1099,18 @@ class _ActionsColumn extends StatelessWidget {
               textStyle: const TextStyle(fontWeight: FontWeight.w700),
             ),
             child: Text(context.l10n.commonCancel),
+          ),
+        ],
+
+        if (isPast && canReport) ...[
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: onReport,
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.muted,
+              textStyle: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            child: Text(context.l10n.consultReportProblem),
           ),
         ],
       ],

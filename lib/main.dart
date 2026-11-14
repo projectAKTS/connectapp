@@ -233,8 +233,13 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
     _foregroundBootstrapRunning = true;
     try {
-      Stripe.publishableKey =
-          'pk_live_51Kke4CFsXOZFrRZs9EBuzMeKRdmsrWdHEqx7oEBzbZm3kygcvNboaQkuTu2EXZQ87DDVmTvN4cu2QKkrw8hKxlMr00NHQfAdAp';
+      // Production uses the live key; a staging build passes its Stripe
+      // test key with --dart-define=STRIPE_PUBLISHABLE_KEY=pk_test_...
+      Stripe.publishableKey = const String.fromEnvironment(
+        'STRIPE_PUBLISHABLE_KEY',
+        defaultValue:
+            'pk_live_51Kke4CFsXOZFrRZs9EBuzMeKRdmsrWdHEqx7oEBzbZm3kygcvNboaQkuTu2EXZQ87DDVmTvN4cu2QKkrw8hKxlMr00NHQfAdAp',
+      );
       Stripe.merchantIdentifier = 'merchant.com.connectapp';
       Stripe.urlScheme = 'connectapp';
       await Stripe.instance.applySettings();

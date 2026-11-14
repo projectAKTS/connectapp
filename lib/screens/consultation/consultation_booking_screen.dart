@@ -242,47 +242,39 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
         '🧾 [Booking] App Check token: ${appCheckToken?.substring(0, 12)}...',
       );
 
-      debugPrint('💳 [Booking] Ensuring Stripe customer exists...');
-      await _paymentService.ensureStripeCustomer();
-
-      var charge = const PaymentChargeResult(result: PaymentResult.failed);
       if (_finalPrice > 0) {
-        debugPrint(
-          '🧾 [Booking] Starting payment flow. Amount: $_finalPrice CAD',
-        );
-        // One id per booking attempt, kept until a definite outcome, so a
-        // retry or a second tap after a timeout cannot charge twice.
+        // Paid: one server call prices, charges and books
+        // (bookPaidSession). The same operation id across retries means at
+        // most one charge per attempt.
+        await _paymentService.ensureStripeCustomer();
         final operationId = _paymentOperationId ??= const Uuid().v4();
-        // Assigns the outer `charge` (it was shadowed before, so bookings
-        // never recorded their PaymentIntent and refunds could not run).
-        charge = await _paymentService.processPayment(
-          operationId: operationId,
-          amount: _finalPrice,
-          durationMinutes: _selectedDuration,
-          callType: _callType,
-          helperId: widget.targetUserId,
-        );
-        debugPrint('📤 [Booking] processPayment() returned: ${charge.result}');
+        Future<PaidBookingResult> attempt() => _paymentService.bookPaidSession(
+              operationId: operationId,
+              helperId: widget.targetUserId,
+              durationMinutes: _selectedDuration,
+              callType: _callType,
+              scheduledAt: _scheduledAt!,
+            );
 
-        if (charge.result == PaymentResult.unauthenticated) {
-          debugPrint(
-            '🔁 [Booking] Retrying payment after refreshing tokens...',
-          );
+        var booking = await attempt();
+        if (booking.outcome == BookingOutcome.signedOut) {
           await user.getIdToken(true);
-          await FirebaseAppCheck.instance.getToken(true);
-          charge = await _paymentService.processPayment(
-            operationId: operationId,
-            amount: _finalPrice,
-            durationMinutes: _selectedDuration,
-            callType: _callType,
-            helperId: widget.targetUserId,
-          );
-          debugPrint('📤 [Booking] Retry result: ${charge.result}');
+          booking = await attempt();
         }
+        if (booking.outcome == BookingOutcome.needsBankConfirmation) {
+          // The bank asks the seeker to confirm (3D Secure); then the server
+          // checks the result and finishes the booking.
+          await _paymentService.confirmWithBank(booking.clientSecret!);
+          booking = await attempt();
+        }
+        if (!mounted) return;
 
-        switch (charge.result) {
-          case PaymentResult.needsSetup:
-            debugPrint('⚠️ [Booking] User needs to add a card.');
+        String? problem;
+        switch (booking.outcome) {
+          case BookingOutcome.booked:
+            _paymentOperationId = null;
+            break;
+          case BookingOutcome.needsCard:
             final go = await showDialog<bool>(
               context: context,
               builder: (ctx) => AlertDialog(
@@ -300,64 +292,45 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                 ],
               ),
             );
-            if (go == true) {
-              // ✅ Global route -> ROOT
-              await rootNav.pushNamed('/paymentSetup');
-            }
+            if (go == true) await rootNav.pushNamed('/paymentSetup');
             if (mounted) setState(() => _isProcessing = false);
             return;
-
-          case PaymentResult.unauthenticated:
-            debugPrint('❌ [Booking] Payment failed — unauthenticated.');
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(context.l10n.bookSessionExpired)),
-              );
-              setState(() => _isProcessing = false);
-            }
-            return;
-
-          case PaymentResult.pending:
-            // Keep _paymentOperationId: the next tap checks this attempt.
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(context.l10n.bookPaymentPending)),
-              );
-              setState(() => _isProcessing = false);
-            }
-            return;
-
-          case PaymentResult.failed:
-            debugPrint('❌ [Booking] Payment failed at Stripe layer.');
+          case BookingOutcome.needsBankConfirmation:
+            // Keep the operation: tapping Book again shows the bank again.
+            problem = context.l10n.bookBankNotConfirmed;
+            break;
+          case BookingOutcome.helperNotReady:
             _paymentOperationId = null;
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(context.l10n.bookPaymentFailed)),
-              );
-              setState(() => _isProcessing = false);
-            }
-            return;
-
-          case PaymentResult.success:
-            debugPrint('✅ [Booking] Payment succeeded!');
+            problem = context.l10n.bookHelperNotReady;
+            break;
+          case BookingOutcome.pending:
+            // Keep the operation: the next tap checks this attempt.
+            problem = context.l10n.bookPaymentPending;
+            break;
+          case BookingOutcome.signedOut:
+            problem = context.l10n.bookSessionExpired;
+            break;
+          case BookingOutcome.failed:
             _paymentOperationId = null;
+            problem = context.l10n.bookPaymentFailed;
             break;
         }
+        if (problem != null) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(problem)));
+          setState(() => _isProcessing = false);
+          return;
+        }
       } else {
-        debugPrint('🟢 [Booking] Price is 0 — skipping payment step.');
+        // Free sessions are written by the app (cost 0, no payment).
+        await _consultationService.bookConsultation(
+          widget.targetUserId,
+          _selectedDuration,
+          scheduledAt: _scheduledAt!,
+          costOverride: 0,
+          currency: 'cad',
+        );
       }
-
-      debugPrint('🗓️ [Booking] Saving consultation in Firestore...');
-      await _consultationService.bookConsultation(
-        widget.targetUserId,
-        _selectedDuration,
-        scheduledAt: _scheduledAt!,
-        costOverride: _finalPrice > 0
-            ? (charge.chargedAmount ?? _finalPrice)
-            : 0,
-        paymentIntentId: _finalPrice > 0 ? charge.paymentIntentId : null,
-        currency: 'cad',
-      );
 
       if (_freeAudioEligible) {
         await FirebaseFirestore.instance.collection('users').doc(user.uid).set({

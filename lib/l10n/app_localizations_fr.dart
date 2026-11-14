@@ -2090,4 +2090,79 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get editProfileExperienceHint =>
       'ex. 3 ans à aider des nouveaux arrivants à se loger';
+
+  @override
+  String get bookHelperNotReady =>
+      'Cette personne ne peut pas encore recevoir de séances payantes.';
+
+  @override
+  String get bookBankNotConfirmed =>
+      'Votre banque n\'a pas confirmé le paiement. Touchez Réserver pour réessayer.';
+
+  @override
+  String get consultCancelBodyHelper =>
+      'La personne qui a réservé sera remboursée en totalité.';
+
+  @override
+  String get consultUnderReview => 'En vérification';
+
+  @override
+  String get consultReportProblem => 'Signaler un problème';
+
+  @override
+  String get consultReportTitle => 'Signaler un problème avec cette séance?';
+
+  @override
+  String get consultReportBody =>
+      'Dites-nous ce qui s\'est passé, par exemple que la personne n\'est pas venue. Le paiement est retenu pendant que nous vérifions.';
+
+  @override
+  String get consultReportHint => 'Que s\'est-il passé?';
+
+  @override
+  String get consultReportSend => 'Envoyer';
+
+  @override
+  String get consultReportSent => 'Merci. Nous allons vérifier.';
+
+  @override
+  String get consultReportFailed => 'Envoi impossible. Veuillez réessayer.';
+
+  @override
+  String get payoutTitle => 'Recevoir vos paiements';
+
+  @override
+  String get payoutRowReady => 'Paiements configurés';
+
+  @override
+  String get payoutRowSetup =>
+      'Configurez vos paiements pour offrir des séances payantes';
+
+  @override
+  String get payoutIntro =>
+      'Les aidants sont payés par Stripe. Votre part de chaque séance payante est envoyée à votre compte bancaire un jour après la séance.';
+
+  @override
+  String get payoutStatusReady =>
+      'Prêt : vous pouvez offrir des séances payantes.';
+
+  @override
+  String get payoutStatusPending =>
+      'Stripe vérifie encore vos informations. Cela peut prendre quelques minutes.';
+
+  @override
+  String get payoutStatusNone => 'Pas encore configuré.';
+
+  @override
+  String get payoutStart => 'Configurer avec Stripe';
+
+  @override
+  String get payoutContinue => 'Continuer la configuration';
+
+  @override
+  String get payoutRefresh => 'Vérifier le statut';
+
+  @override
+  String get payoutOpenFailed =>
+      'Impossible d\'ouvrir Stripe. Veuillez réessayer.';
 }

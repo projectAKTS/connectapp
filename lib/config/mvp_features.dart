@@ -11,8 +11,10 @@ class MvpFeatures {
   static const bool premium = false;
   static const bool gamificationStats = false;
 
-  /// Free beta: booking paid sessions and card setup are hidden. The
-  /// server refuses charges anyway (PAID_SESSIONS_ENABLED, default false).
-  /// Direct audio/video calls and messaging stay free.
-  static const bool paidSessions = false;
+  /// Free beta: booking paid sessions, card setup and helper payouts are
+  /// hidden. The server refuses charges anyway (PAID_SESSIONS_ENABLED,
+  /// default false). Direct audio/video calls and messaging stay free.
+  /// A staging build turns them on with --dart-define=PAID_SESSIONS=true.
+  static const bool paidSessions =
+      bool.fromEnvironment('PAID_SESSIONS', defaultValue: false);
 }
