@@ -87,14 +87,19 @@ founder turns them on, after the new build is out.
   `firebase functions:secrets:set STRIPE_SECRET --project helperly-call-v2-dev`;
   the publishable key (`pk_test_…`, not secret) for the staging build
   (`--dart-define=STRIPE_PUBLISHABLE_KEY=…`).
-- A test-mode webhook endpoint at
+- Two webhook endpoints at
   `https://us-central1-helperly-call-v2-dev.cloudfunctions.net/handleStripeWebhook`
-  that also listens to connected accounts, with the events
-  `payment_intent.succeeded`, `payment_intent.payment_failed`,
-  `payment_intent.canceled`, `charge.dispute.created` and
-  `account.updated`; its signing secret with
-  `firebase functions:secrets:set STRIPE_WEBHOOK_SECRET --project helperly-call-v2-dev`.
-  The functions cannot be deployed until this secret exists.
+  (Stripe signs each with its own secret):
+  - platform events: `payment_intent.succeeded`,
+    `payment_intent.payment_failed`, `payment_intent.canceled`,
+    `charge.dispute.created`;
+  - connected-account events (`connect=true`): `account.updated`.
+
+  `STRIPE_WEBHOOK_SECRET` holds both signing secrets, comma-separated
+  (`whsec_platform,whsec_connect`). The functions cannot be deployed until
+  this secret exists. Staging: done 2026-11-14 through the Stripe API with
+  the test key, the secrets stored straight into Secret Manager (never
+  shown).
 - The same in live mode for production, when paid sessions go live.
 - Stripe Connect enabled on the account (Express, Canada).
 - Legal and tax: GST/QST registration, refund policy in the Terms,
