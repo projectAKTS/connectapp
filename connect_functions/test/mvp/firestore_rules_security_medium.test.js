@@ -196,3 +196,32 @@ test("the call screens can still decline, cancel and report progress", async () 
     fromUid: "alice", toUid: "bob", channel: "c_alice_bob_abc", callerLastError: "",
   }, { merge: true }));
 });
+
+// ---- Call invite status roles (2026-11-15) ----
+
+test("only the callee can answer or decline a call", async () => {
+  const alice = as("alice");
+  const bob = as("bob");
+  await assertFails(updateDoc(doc(alice, "callInvites/i1"), { status: "accepted" }));
+  await assertFails(updateDoc(doc(alice, "callInvites/i1"), { status: "joining" }));
+  await assertFails(updateDoc(doc(alice, "callInvites/i1"), { status: "declined" }));
+  await assertSucceeds(updateDoc(doc(bob, "callInvites/i1"), {
+    status: "accepted", calleeStage: "accepted",
+  }));
+  await assertSucceeds(updateDoc(doc(bob, "callInvites/i1"), { status: "joining" }));
+  // Either side reports the media connection and ends the call.
+  await assertSucceeds(updateDoc(doc(alice, "callInvites/i1"), { status: "connected" }));
+  await assertSucceeds(updateDoc(doc(alice, "callInvites/i1"), { status: "ended" }));
+});
+
+test("a finished call cannot be reopened", async () => {
+  const alice = as("alice");
+  const bob = as("bob");
+  await assertSucceeds(updateDoc(doc(alice, "callInvites/i1"), { status: "cancelled" }));
+  await assertFails(updateDoc(doc(alice, "callInvites/i1"), { status: "ringing" }));
+  await assertFails(updateDoc(doc(bob, "callInvites/i1"), { status: "accepted" }));
+  await assertFails(updateDoc(doc(alice, "callInvites/i1"), { status: "connected" }));
+  // Late terminal updates and stage fields still go through.
+  await assertSucceeds(updateDoc(doc(bob, "callInvites/i1"), { status: "missed" }));
+  await assertSucceeds(updateDoc(doc(bob, "callInvites/i1"), { calleeStage: "idle" }));
+});

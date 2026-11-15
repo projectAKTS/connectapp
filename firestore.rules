@@ -111,9 +111,18 @@ service cloud.firestore {
         ? chat.participants
         : (chat.keys().hasAny(['users']) ? chat.users : []);
       let others = people.removeAll([request.auth.uid]);
-      return others.size() == 1 &&
-        !get(/databases/$(database)/documents/users/$(others[0]))
-          .data.get('blockedUids', []).hasAny([request.auth.uid]);
+      return others.size() == 1 && !blocksMe(others[0]);
+    }
+
+    // [uid] blocked the caller. The list is moving from the public profile
+    // to the owner-only users/{uid}/private/safety; both count until every
+    // account is migrated (tool/migrate_blocked_uids.mjs).
+    function blocksMe(uid) {
+      let privatePath = /databases/$(database)/documents/users/$(uid)/private/safety;
+      return get(/databases/$(database)/documents/users/$(uid))
+          .data.get('blockedUids', []).hasAny([request.auth.uid])
+        || (exists(privatePath)
+          && get(privatePath).data.get('blockedUids', []).hasAny([request.auth.uid]));
     }
 
     // ---- 18+ policy (server-side; see lib/models/age_policy.dart) ----
@@ -403,6 +412,20 @@ service cloud.firestore {
     }
 
     // ✅ Call invites
+    // Only the callee answers (accepted, joining) or declines, so a caller
+    // cannot make the other phone join a call. A finished call (declined,
+    // missed, cancelled, ended, failed) never goes back to ringing or
+    // connected. The callInviteTransition function applies the same roles.
+    function callInviteStatusChangeAllowed() {
+      let before = resource.data.get('status', '');
+      let after = request.resource.data.get('status', '');
+      let terminal = ['declined', 'missed', 'cancelled', 'ended', 'failed'];
+      return after == before
+        || ((!(after in ['accepted', 'joining', 'declined'])
+              || request.auth.uid == resource.data.toUid)
+            && (!(before in terminal) || after in terminal));
+    }
+
     match /callInvites/{inviteId} {
       // New calls only between people allowed by the 18+ policy; ending or
       // declining existing calls (update) is unaffected.
@@ -422,7 +445,8 @@ service cloud.firestore {
           || resource.data.toUid == request.auth.uid)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'fromUid', 'toUid', 'fromName', 'toName', 'channel', 'createdAt'
-        ]);
+        ])
+        && callInviteStatusChangeAllowed();
       allow delete: if request.auth != null
         && (resource.data.fromUid == request.auth.uid
           || resource.data.toUid == request.auth.uid);

@@ -1174,6 +1174,7 @@ async function handleStripeEvent(event, deps) {
 const { buildCallInviteFcmMessage } = require("./call_invites/call_invite_fcm_message");
 const { inviteFcmPlan } = require("./call_invites/invite_fcm_plan");
 const { calleeBlockedCaller } = require("./call_invites/blocked_caller");
+const { blockedUidsOf, withBlockedUids } = require("./safety/blocked_uids");
 const { PRICING_VERSION } = require("./consultations/consultation_price");
 const {
   deleteUserData,
@@ -1183,7 +1184,7 @@ const { minutesUntil, pushText } = require("./i18n/push_text");
 const { claimOnce } = require("./notifications/claim_once");
 const { repliedByUpdate } = require("./chat/replied_by");
 const { missingFields } = require("./account/profile_defaults");
-const { POST_HIDE_THRESHOLD, openReporterCount } = require("./safety/report_threshold");
+const { POST_HIDE_THRESHOLD, oldEnough, openReporterCount } = require("./safety/report_threshold");
 const {
   verdictFor,
   worstVerdict,
@@ -1224,11 +1225,26 @@ exports.onReportCreated = onDocumentCreated(
       .where("type", "==", "post")
       .where("targetId", "==", postId)
       .get();
-    const reporters = openReporterCount(snap.docs.map((d) => d.data()));
-    if (reporters < POST_HIDE_THRESHOLD) return;
+    const reports = snap.docs.map((d) => d.data());
     const postRef = db.collection("posts").doc(postId);
     const post = await postRef.get();
     if (!post.exists || post.get("hiddenByReports") === true) return;
+    // Account age comes from Firebase Auth, which users cannot change.
+    const author = `${post.get("userID") || post.get("userId") || ""}`.trim();
+    const nowMs = Date.now();
+    const eligible = new Set();
+    const uids = [...new Set(reports.map((r) => `${r.reporterUid || ""}`.trim()).filter(Boolean))];
+    for (const uid of uids) {
+      if (uid === author) continue;
+      try {
+        const user = await admin.auth().getUser(uid);
+        if (oldEnough(Date.parse(user.metadata.creationTime), nowMs)) eligible.add(uid);
+      } catch (_) {
+        // Deleted account: its report does not count toward hiding.
+      }
+    }
+    const reporters = openReporterCount(reports, (uid) => eligible.has(uid));
+    if (reporters < POST_HIDE_THRESHOLD) return;
     await postRef.update({
       hiddenByReports: true,
       hiddenByReportsAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1322,7 +1338,8 @@ exports.onCallInviteCreated = onDocumentCreated(
     const calleeDoc = await db.collection("users").doc(`${toUid}`).get();
     // The alert fallback is written in the callee's app language.
     const calleeLocale = calleeDoc.data()?.appLocale;
-    if (calleeBlockedCaller(calleeDoc.data(), d.fromUid)) {
+    const calleeWithBlocks = await withBlockedUids(db, `${toUid}`, calleeDoc.data());
+    if (calleeBlockedCaller(calleeWithBlocks, d.fromUid)) {
       await db.runTransaction(async (tx) => {
         const snap = await tx.get(event.data.ref);
         if ((snap.get("status") || "") !== "ringing") return;
@@ -1949,7 +1966,7 @@ exports.onPostCommentCreated = onDocumentCreated(
     const note = commentNotificationFor({
       post,
       comment,
-      authorBlockedUids: author.blockedUids,
+      authorBlockedUids: authorUid ? await blockedUidsOf(db, authorUid, author) : [],
     });
     if (!note) return;
     const title = note.commenterName || pushText(author.appLocale, "someone");

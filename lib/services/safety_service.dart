@@ -12,9 +12,11 @@ import 'package:flutter/material.dart';
 /// Report and block, required by the App Store and Google Play for apps with
 /// user-generated content.
 ///
-/// Reports go to `/reports` for moderation. Blocked uids live on the
-/// blocker's own user doc (`blockedUids`), which only the owner can write;
-/// screens filter blocked people out of the feed, helper lists and chats.
+/// Reports go to `/reports` for moderation. Blocked uids live in the
+/// blocker's owner-only `users/{uid}/private/safety` (`blockedUids`), so
+/// nobody else can see who they blocked. Older builds kept the list on the
+/// public profile; it is read from both and moved on the next change.
+/// Screens filter blocked people out of the feed, helper lists and chats.
 class SafetyService {
   SafetyService._();
 
@@ -39,6 +41,15 @@ class SafetyService {
   final ValueNotifier<Set<String>> hiddenPosts =
       ValueNotifier(const <String>{});
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _sub;
+  Set<String> _legacyBlocked = const <String>{};
+  Set<String> _privateBlocked = const <String>{};
+
+  static Set<String> _uids(Object? raw) => raw is List
+      ? raw.map((e) => '$e').where((e) => e.isNotEmpty).toSet()
+      : const <String>{};
+
+  void _publishBlocked() =>
+      blocked.value = {..._legacyBlocked, ..._privateBlocked};
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _privateSub;
   String? _watchedUid;
 
@@ -53,17 +64,14 @@ class SafetyService {
         .doc(uid)
         .snapshots()
         .listen((snap) {
-      final raw = snap.data()?['blockedUids'];
-      blocked.value = raw is List
-          ? raw.map((e) => '$e').where((e) => e.isNotEmpty).toSet()
-          : const <String>{};
+      _legacyBlocked = _uids(snap.data()?['blockedUids']);
+      _publishBlocked();
     }, onError: (_) {});
     unawaited(_privateSub?.cancel());
     _privateSub = _safetyDoc(uid).snapshots().listen((snap) {
-      final hidden = snap.data()?['hiddenPostIds'];
-      hiddenPosts.value = hidden is List
-          ? hidden.map((e) => '$e').where((e) => e.isNotEmpty).toSet()
-          : const <String>{};
+      hiddenPosts.value = _uids(snap.data()?['hiddenPostIds']);
+      _privateBlocked = _uids(snap.data()?['blockedUids']);
+      _publishBlocked();
     }, onError: (_) {});
   }
 
@@ -73,6 +81,8 @@ class SafetyService {
     unawaited(_privateSub?.cancel());
     _privateSub = null;
     _watchedUid = null;
+    _legacyBlocked = const <String>{};
+    _privateBlocked = const <String>{};
     blocked.value = const <String>{};
     hiddenPosts.value = const <String>{};
   }
@@ -126,11 +136,15 @@ class SafetyService {
     final next = Set<String>.of(blocked.value);
     block ? next.add(targetUid) : next.remove(targetUid);
     blocked.value = next;
-    await HelperlyTestRuntime.firestore.collection('users').doc(uid).set({
-      'blockedUids': block
-          ? FieldValue.arrayUnion([targetUid])
-          : FieldValue.arrayRemove([targetUid]),
-    }, SetOptions(merge: true));
+    // One atomic write: the whole list goes to the private document and the
+    // old public field is removed, so it moves without ever being lost.
+    final db = HelperlyTestRuntime.firestore;
+    final batch = db.batch()
+      ..set(_safetyDoc(uid), {'blockedUids': next.toList()},
+          SetOptions(merge: true))
+      ..set(db.collection('users').doc(uid),
+          {'blockedUids': FieldValue.delete()}, SetOptions(merge: true));
+    await batch.commit();
   }
 
   /// Asks for a reason and files the report. Returns true when sent.

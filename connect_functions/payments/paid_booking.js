@@ -17,6 +17,7 @@
  */
 
 const { ChargeError, OPERATION_ID, chargeOnce } = require("./charge_operation");
+const { blockedUidsOf } = require("../safety/blocked_uids");
 const {
   platformFeeCents,
   resolveChargeAmount,
@@ -119,7 +120,7 @@ async function bookPaidSession(deps, uid, data) {
   if (!helper
     || !isHelperProfile(helper)
     || helper.ageDeclaration === "minor"
-    || (Array.isArray(helper.blockedUids) && helper.blockedUids.includes(uid))
+    || (await blockedUidsOf(db, helperId, helper)).includes(uid)
     || helper.payoutsEnabled !== true
     || !helper.stripeAccountId) {
     throw new ChargeError("failed-precondition", NOT_BOOKABLE);

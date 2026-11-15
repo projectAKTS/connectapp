@@ -24,6 +24,7 @@ function fakeDb() {
   let chain = Promise.resolve();
   const ref = (path) => ({
     path,
+    collection: (name) => ({ doc: (id) => ref(`${path}/${name}/${id}`) }),
     get: async () => ({ exists: docs.has(path), data: () => ({ ...docs.get(path) }) }),
     set: async (v) => docs.set(path, { ...v }),
     update: async (v) => docs.set(path, { ...docs.get(path), ...v }),
@@ -186,6 +187,12 @@ test("a helper must be set up for payouts, not blocked, and not the seeker", asy
   await assert.rejects(bookPaidSession(deps(stripe), "seeker", request()), /cannot take paid sessions/);
   db.docs.set("users/helper", { ...db.docs.get("users/helper"), payoutsEnabled: true, blockedUids: ["seeker"] });
   await assert.rejects(bookPaidSession(deps(stripe), "seeker", request()), /cannot take paid sessions/);
+  // The block list in the owner-only private document counts too.
+  const { blockedUids: _legacy, ...helperNow } = db.docs.get("users/helper");
+  db.docs.set("users/helper", helperNow);
+  db.docs.set("users/helper/private/safety", { blockedUids: ["seeker"] });
+  await assert.rejects(bookPaidSession(deps(stripe), "seeker", request()), /cannot take paid sessions/);
+  db.docs.delete("users/helper/private/safety");
   db.docs.set("users/helper", { ageDeclaration: "adult", payoutsEnabled: true, stripeAccountId: "acct_h" });
   await assert.rejects(bookPaidSession(deps(stripe), "seeker", request()), /cannot take paid sessions/);
   await assert.rejects(bookPaidSession(deps(stripe), "seeker", request({ helperId: "seeker" })), /yourself/);

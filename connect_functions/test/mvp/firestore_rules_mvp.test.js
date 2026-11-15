@@ -114,6 +114,23 @@ test("you cannot message someone who blocked you", async () => {
   );
 });
 
+test("a block kept in the owner-only private document also stops messages", async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, "users/bob"), { fullName: "Bob", ageDeclaration: "adult" });
+    await setDoc(doc(db, "users/bob/private/safety"), { blockedUids: ["mallory"] });
+  });
+  await assertFails(
+    addDoc(collection(as("mallory"), "chats/bob_mallory/messages"), { authorId: "mallory", text: "hi" }),
+  );
+  // Nobody but bob can read his private block list.
+  await assertFails(getDoc(doc(as("mallory"), "users/bob/private/safety")));
+  await assertSucceeds(getDoc(doc(as("bob"), "users/bob/private/safety")));
+  // Bob can move his list there and clear the public field.
+  await assertSucceeds(setDoc(doc(as("bob"), "users/bob/private/safety"),
+    { blockedUids: ["mallory", "x"] }, { merge: true }));
+});
+
 test("profiles stay readable to signed-in users", async () => {
   const snap = await assertSucceeds(getDoc(doc(as("mallory"), "users/alice")));
   assert.equal(snap.data().fullName, "Alice");
