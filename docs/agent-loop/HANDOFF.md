@@ -263,3 +263,17 @@ incident is closed in `docs/legal-drafts/INCIDENT_REGISTER.md`.
 
 **Next sessions** start from `CLAUDE.md`, which holds the context, rules,
 state and next steps, and from `docs/agent-loop/NEW_SESSION_PROMPT.md`.
+
+## Security Fixes And Paid Sessions (2026-11-13 to 2026-11-15)
+
+- **Live in production:** the high and medium Firestore rule fixes and
+  the call-token fix (`docs/SECURITY_REVIEW_2026-11-13.md`).
+- **Paid sessions:** built and tested end to end on staging in Stripe
+  test mode (`docs/PAID_SESSIONS_DESIGN.md`), merged into `call-v2`
+  (`b64825b`), still off everywhere. Staging has the test key
+  (`sk_test`), two test webhooks and the new functions.
+- **Production deploy of the safe parts** (rules plus 9 functions, paid
+  still off) and the paid go-live list: `docs/PRODUCTION_DEPLOY_PLAN.md`,
+  last section.
+- `tool/staging_paid_e2e.mjs setup|run|cleanup` repeats the staging test;
+  `setup` prints a Stripe test onboarding link to complete in a browser.

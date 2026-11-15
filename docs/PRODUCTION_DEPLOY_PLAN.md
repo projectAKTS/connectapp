@@ -298,3 +298,64 @@ firebase deploy --only firestore:rules,functions:onPostCommentCreated,functions:
 [x] Done by the founder 2026-11-09: rules released; `onPostCommentCreated-00001`,
 `onPostCommentDeleted-00001`, `onChatMessageCreated-00042` ACTIVE, no errors.
 Then a new TestFlight build.
+
+## Paid Sessions Code, Still Off (2026-11-15, `call-v2` at `b64825b`)
+
+Design and staging results: `docs/PAID_SESSIONS_DESIGN.md`. Paid sessions
+stay off in production (`PAID_SESSIONS_ENABLED=false`, and the app's
+`PAID_SESSIONS` define is false by default). This deploy only ships the
+safer rules and the server code, so turning paid sessions on later is a
+config change.
+
+Compatibility: no live build can open the booking screen (every entry is
+behind `MvpFeatures.paidSessions`, false in `314a57e`), so the stricter
+`consultations` create rule breaks nothing. Reviews now need a
+server-completed paid session; during the free beta nobody can write one
+(this closes the fake-review hole).
+
+Tests on `b64825b`: node 106/106 (3 skipped), Firestore rules 55/55,
+storage rules 5/5, guards 221/221, staging end to end 28/28 plus the
+Android app.
+
+Founder (production), from `~/connectapp` on `call-v2` after the push:
+```bash
+git push origin call-v2
+```
+```bash
+firebase deploy --only firestore:rules --project connectapp-278b4
+```
+```bash
+firebase deploy --only functions:cancelConsultation,functions:chargeStoredPaymentMethod,functions:createStripeCheckoutSession,functions:createExpressAccountLink,functions:scheduledConsultationReminder,functions:bookPaidSession,functions:reportSessionProblem,functions:releaseHeldPayouts,functions:getPayoutStatus --project connectapp-278b4
+```
+`handleStripeWebhook` is left out on purpose: its new version needs the
+`STRIPE_WEBHOOK_SECRET` secret, which production gets only when the
+live-mode webhooks are created (paid go-live).
+
+Expected: 5 functions updated, 4 created (`bookPaidSession`,
+`reportSessionProblem`, `releaseHeldPayouts`, `getPayoutStatus`).
+`releaseHeldPayouts` runs hourly and finds nothing while paid sessions
+are off.
+
+Rollback: `git checkout 75b5054 -- firestore.rules` and deploy the rules;
+for functions, redeploy the same list from `75b5054` and delete the 4 new
+ones (`firebase functions:delete bookPaidSession reportSessionProblem releaseHeldPayouts getPayoutStatus --region us-central1 --project connectapp-278b4`).
+
+### Paid Go-Live (later, founder decisions first)
+
+1. Stripe live mode: Connect (Express, Canada) on; public business name
+   and URL fixed (now "HELPERLY.APP", another company's domain).
+2. Two live webhook endpoints (platform events, connected-account
+   `account.updated`) to
+   `https://us-central1-connectapp-278b4.cloudfunctions.net/handleStripeWebhook`;
+   both signing secrets in `STRIPE_WEBHOOK_SECRET`, comma-separated.
+   Claude can create them through the API the way staging was done, with
+   the founder's go-ahead.
+3. Deploy `functions:handleStripeWebhook`.
+4. Legal and tax: GST/QST registration, refund policy in the Terms,
+   business registration; prices and fee confirmed.
+5. A TestFlight build with `--dart-define=PAID_SESSIONS=true` (the live
+   `pk_live` key is the default), tested on the iPhone with a real card
+   and a refund.
+6. `PAID_SESSIONS_ENABLED=true` in `.env.connectapp-278b4` and deploy
+   `bookPaidSession`, `getPayoutStatus`, `chargeStoredPaymentMethod`,
+   `createExpressAccountLink`.
