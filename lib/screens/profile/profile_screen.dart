@@ -1033,9 +1033,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               subtitle: hasCard
                                   ? context.l10n.profileCardOnFile
                                   : context.l10n.profileAddCard,
-                              onTap: () {
-                                Navigator.of(context, rootNavigator: true)
+                              // Reload on return: the card status shown
+                              // here comes from the profile document.
+                              onTap: () async {
+                                await Navigator.of(context, rootNavigator: true)
                                     .pushNamed('/paymentSetup');
+                                if (mounted) _loadUserData();
                               },
                             ),
                             if (isHelperProfile) ...[
@@ -1047,11 +1050,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 subtitle: payoutsReady
                                     ? context.l10n.payoutRowReady
                                     : context.l10n.payoutRowSetup,
-                                onTap: () {
-                                  Navigator.of(context, rootNavigator: true)
+                                onTap: () async {
+                                  await Navigator.of(context,
+                                          rootNavigator: true)
                                       .push(MaterialPageRoute(
                                     builder: (_) => const PayoutSetupScreen(),
                                   ));
+                                  if (mounted) _loadUserData();
                                 },
                               ),
                             ],

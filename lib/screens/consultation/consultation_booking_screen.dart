@@ -8,7 +8,6 @@ import 'package:uuid/uuid.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:connect_app/theme/tokens.dart';
 import '/services/consultation_service.dart';
 import '/services/payment_service.dart';
@@ -236,11 +235,9 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
     try {
       debugPrint('🔑 [Booking] Refreshing Firebase ID token...');
       await user.getIdToken(true);
-      debugPrint('🔒 [Booking] Refreshing Firebase App Check token...');
-      final appCheckToken = await FirebaseAppCheck.instance.getToken(true);
-      debugPrint(
-        '🧾 [Booking] App Check token: ${appCheckToken?.substring(0, 12)}...',
-      );
+      // No forced App Check refresh: callables attach the token themselves,
+      // and forcing it on every tap hits App Check's rate limit
+      // ("Too many attempts"), which failed every booking.
 
       if (_finalPrice > 0) {
         // Paid: one server call prices, charges and books
