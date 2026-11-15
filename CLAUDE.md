@@ -212,7 +212,9 @@ or `hiddenBySafety` in the Firestore console.
 5. **Later and needing approval:**
    - retention and TTL (`docs/RETENTION_POLICY_PROPOSAL.md`);
    - Call V2 rollout (off; not deployed);
-   - paid sessions (off).
+   - paid sessions: built, tested on staging in Stripe test mode and
+     merged into `call-v2`, still off. Production steps and the go-live
+     list: last section of `docs/PRODUCTION_DEPLOY_PLAN.md`.
 6. **Tech debt:**
    - upgrade `firebase-functions` (a deploy warning);
    - align local Flutter with CI 3.35.4;
