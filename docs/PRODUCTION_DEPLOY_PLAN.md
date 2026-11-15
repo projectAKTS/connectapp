@@ -340,6 +340,13 @@ Rollback: `git checkout 75b5054 -- firestore.rules` and deploy the rules;
 for functions, redeploy the same list from `75b5054` and delete the 4 new
 ones (`firebase functions:delete bookPaidSession reportSessionProblem releaseHeldPayouts getPayoutStatus --region us-central1 --project connectapp-278b4`).
 
+[x] Done by the founder 2026-11-15: rules released (identical to
+`call-v2`, checked); 5 functions updated, 4 created, all ACTIVE,
+`PAID_SESSIONS_ENABLED=false` on `bookPaidSession`, no errors. The CLI
+asked for `STRIPE_WEBHOOK_SECRET` (it checks every declared secret), so
+production holds the placeholder `not_set_yet` until go-live.
+`handleStripeWebhook` is still the 2026-11-02 version.
+
 ### Paid Go-Live (later, founder decisions first)
 
 1. Stripe live mode: Connect (Express, Canada) on; public business name
@@ -347,7 +354,8 @@ ones (`firebase functions:delete bookPaidSession reportSessionProblem releaseHel
 2. Two live webhook endpoints (platform events, connected-account
    `account.updated`) to
    `https://us-central1-connectapp-278b4.cloudfunctions.net/handleStripeWebhook`;
-   both signing secrets in `STRIPE_WEBHOOK_SECRET`, comma-separated.
+   both signing secrets in `STRIPE_WEBHOOK_SECRET`, comma-separated
+   (replacing the `not_set_yet` placeholder).
    Claude can create them through the API the way staging was done, with
    the founder's go-ahead.
 3. Deploy `functions:handleStripeWebhook`.
