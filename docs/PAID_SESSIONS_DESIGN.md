@@ -104,3 +104,28 @@ founder turns them on, after the new build is out.
 - Stripe Connect enabled on the account (Express, Canada).
 - Legal and tax: GST/QST registration, refund policy in the Terms,
   business registration.
+
+## Staging Test (2026-11-14, Stripe Test Mode)
+
+`node tool/staging_paid_e2e.mjs setup|run|cleanup` (staging only, test
+key only): 28 checks passed. Booking, idempotent retry, seeker cancel
+(100 % and 50 %), helper cancel, report a problem, the hourly release
+with transfers to the helper's Express account (3.59 and 1.79 CAD),
+reviews only on completed paid sessions, 3D Secure, a declined card. 27
+webhook deliveries returned 200.
+
+In the Android app (staging build with `PAID_SESSIONS=true` and the
+`pk_test` key): add a 3D Secure card, book (bank screen, then booked,
+`paid/held`), "helper not ready" for a helper without payouts, cancel
+with a full refund.
+
+Found and fixed: the booking screen forced an App Check refresh that
+App Check rate-limits, so every booking failed; the profile's Billing row
+did not refresh after adding a card.
+
+Paid sessions were turned off again on staging afterwards.
+
+Open for the founder: Stripe shows the business as "HELPERLY.APP" on the
+bank screen and "connectapp-278b4.firebaseapp.com" in helper onboarding
+(Stripe Settings, Public details). `helperly.app` belongs to another
+company.
