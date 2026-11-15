@@ -28,13 +28,19 @@ card write.
   a consultation completed, or turn reviews off until paid sessions exist.
 - **Refund against an invented payment** (`cancelConsultation`): harmless
   while payments are off; fix before turning them on.
-- Two accounts of one person can hide any post (report threshold).
-- `users/{uid}` is readable by every signed-in user, `blockedUids` included.
-  Fixing it means moving `blockedUids` to an owner-only document and
-  changing the app.
-- Call invites: either side can still set any `status` (for example the
-  caller can mark a call accepted). Who may set which status is not
-  limited yet.
+- ~~Two accounts of one person can hide any post (report threshold).~~
+  Fixed 2026-11-15 (`a76f188`): only reporters with accounts at least three
+  days old, and not the author, count.
+- ~~`users/{uid}` is readable by every signed-in user, `blockedUids`
+  included.~~ Fixed 2026-11-15 (`a76f188`): the list moves to the
+  owner-only `users/{uid}/private/safety`; old lists move with
+  `tool/migrate_blocked_uids.mjs`.
+- ~~Call invites: either side can still set any `status`.~~ Fixed
+  2026-11-15 (`a76f188`): only the callee answers or declines; a finished
+  call stays finished.
+- ~~Fake reviews~~ and ~~refund against an invented payment~~: fixed with
+  paid sessions (reviews need a server-completed paid session; refunds
+  only on server-written paid consultations).
 
 ## Fixed On Branch `fix/rules-medium` (2026-11-13)
 

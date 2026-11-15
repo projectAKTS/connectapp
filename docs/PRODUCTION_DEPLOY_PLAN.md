@@ -367,3 +367,26 @@ production holds the placeholder `not_set_yet` until go-live.
 6. `PAID_SESSIONS_ENABLED=true` in `.env.connectapp-278b4` and deploy
    `bookPaidSession`, `getPayoutStatus`, `chargeStoredPaymentMethod`,
    `createExpressAccountLink`.
+
+## Last Security Items (2026-11-15, `a76f188`)
+
+Call answer roles, private block lists, report threshold
+(`docs/SECURITY_REVIEW_2026-11-13.md`). Staging: rules and the 4
+functions deployed, smoke 35/35, a real call between the two emulators
+(rang, accepted, connected, ended; a second one declined).
+
+Founder (production), from `~/connectapp` on `call-v2` after the push:
+```bash
+firebase deploy --only firestore:rules,functions:onCallInviteCreated,functions:onPostCommentCreated,functions:onReportCreated,functions:bookPaidSession --project connectapp-278b4
+```
+Then, **only after testers have the next TestFlight build** (older builds
+read the block list from the profile only, so moving it earlier would
+make their blocked people reappear in their feed; messages and calls stay
+blocked either way):
+```bash
+node tool/migrate_blocked_uids.mjs --project connectapp-278b4
+```
+```bash
+node tool/migrate_blocked_uids.mjs --project connectapp-278b4 --apply
+```
+The first command is a dry run and prints counts only.
