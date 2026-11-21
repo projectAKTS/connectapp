@@ -390,3 +390,13 @@ node tool/migrate_blocked_uids.mjs --project connectapp-278b4
 node tool/migrate_blocked_uids.mjs --project connectapp-278b4 --apply
 ```
 The first command is a dry run and prints counts only.
+
+[x] Done 2026-11-20:
+- The founder ran the rules and functions deploy. Verified read-only:
+  - the live Firestore rules match `call-v2` (`fb1c059`);
+  - the 4 functions are ACTIVE;
+  - no errors in the logs since the deploy.
+- iOS build 1.0.2 (`202611202254`) was uploaded from `fb1c059`, and the
+  founder tested it on the iPhone. It is saved as tag `stable-2026-11-20`.
+- The founder ran the block-list migration with `--apply`: 2 of 71 users
+  moved. A dry run afterwards shows 0 public block lists.
