@@ -10,6 +10,7 @@
 |---|---|---|
 | Android release APK | Passed; 274.1 MB | `flutter build apk --release`; output at `build/app/outputs/flutter-apk/app-release.apk` |
 | Android App Bundle | Passed; 172.1 MB | `flutter build appbundle --release`; output at `build/app/outputs/bundle/release/app-release.aab` |
+| Android debug APK | Artifact integrity passed; `IntegrationTestPlugin` is present in DEX | Existing debug output at `build/app/outputs/flutter-apk/app-debug.apk`; `unzip -tq` passed |
 | iOS release app | Passed without code signing; 154.7 MB | `flutter build ios --release --no-codesign --no-pub`; output at `build/ios/iphoneos/Runner.app` |
 | Flutter tests | 2,556 passed, 0 failed | 2,554 normal tests in a clean worktree plus 2 explicitly enabled stability tests |
 | Firebase Functions and emulator tests | 427 passed, 0 failed, 0 skipped | 202 Node tests plus 225 emulator tests using demo project IDs |
