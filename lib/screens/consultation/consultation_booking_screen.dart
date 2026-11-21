@@ -85,10 +85,10 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
         .doc(uid)
         .snapshots()
         .listen((doc) {
-          if (!doc.exists) return;
-          final data = doc.data() as Map<String, dynamic>;
-          _applyUserBenefits(data);
-        });
+      if (!doc.exists) return;
+      final data = doc.data() as Map<String, dynamic>;
+      _applyUserBenefits(data);
+    });
   }
 
   DateTime? _tsToDate(dynamic v) {
@@ -146,6 +146,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
 
   double get _basePrice => PricingConfig.getPrice(_selectedDuration, _callType);
   double get _finalPrice {
+    if (!MvpFeatures.paidSessions) return 0.0;
     if (_freeAudioEligible) return 0.0;
     if (_isSeekerPremium) {
       final discounted = _basePrice * (1 - (_premiumDiscountPercent / 100));
@@ -154,8 +155,9 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
     return _basePrice;
   }
 
-  double get _payout =>
-      PricingConfig.getHelperPayout(_selectedDuration, _callType);
+  double get _payout => MvpFeatures.paidSessions
+      ? PricingConfig.getHelperPayout(_selectedDuration, _callType)
+      : 0.0;
   String get _priceLabel => AppFormat.money(context, _finalPrice);
   String get _basePriceLabel => AppFormat.money(context, _basePrice);
   String get _payoutLabel =>
@@ -209,9 +211,9 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
       try {
         debugPrint('🟡 [Booking] Waiting for user auth state...');
         user = await FirebaseAuth.instance.authStateChanges().firstWhere(
-          (u) => u != null,
-          orElse: () => null,
-        );
+              (u) => u != null,
+              orElse: () => null,
+            );
       } catch (e) {
         debugPrint('❌ [Booking] Auth state error: $e');
       }
@@ -364,9 +366,8 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
   @override
   Widget build(BuildContext context) {
     final dt = _scheduledAt;
-    final scheduledText = dt == null
-        ? context.l10n.commonNotSet
-        : AppFormat.dayTime(context, dt);
+    final scheduledText =
+        dt == null ? context.l10n.commonNotSet : AppFormat.dayTime(context, dt);
 
     return FullScreenBackGesture(
       child: Scaffold(
@@ -609,10 +610,11 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
                             context.l10n.bookTotal(_priceLabel),
                             style: const TextStyle(color: AppColors.text),
                           ),
-                          Text(
-                            _payoutLabel,
-                            style: const TextStyle(color: AppColors.muted),
-                          ),
+                          if (MvpFeatures.paidSessions)
+                            Text(
+                              _payoutLabel,
+                              style: const TextStyle(color: AppColors.muted),
+                            ),
                         ],
                       ),
                     ),
@@ -653,14 +655,14 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
   }
 
   Widget _card({required Widget child}) => Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: AppColors.card,
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: AppColors.border),
-    ),
-    child: child,
-  );
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.card,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: child,
+      );
 
   Widget _pill({required Widget child, VoidCallback? onTap}) {
     final c = Container(

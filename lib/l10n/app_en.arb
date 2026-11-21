@@ -16,8 +16,12 @@
   "settingsSectionPreferences": "Preferences",
   "settingsHelpSafety": "Help & safety",
   "settingsGuidelines": "Community guidelines",
-  "settingsTerms": "Terms of Use",
-  "settingsPrivacy": "Privacy Policy",
+  "settingsTerms": "Terms of Service (draft)",
+  "settingsPrivacy": "Privacy Policy (draft)",
+  "settingsSupport": "KINDUPP support",
+  "paymentsUnavailableTitle": "Payments are off",
+  "paymentsUnavailableBody": "KINDUPP is free during the MVP launch. Card setup, paid consultations, payouts, and subscriptions are unavailable.",
+  "settingsLinkOpenFailed": "Could not open that website link.",
   "settingsLogOut": "Log out",
   "settingsDeleteAccount": "Delete account",
   "settingsDeleteTitle": "Delete your account?",
@@ -41,7 +45,7 @@
   "languagePickerTitle": "App language",
   "languagePickerNote": "This only changes the app's text. The languages you speak are set in your profile.",
   "settingsUsageStats": "Share usage statistics",
-  "settingsUsageStatsSubtitle": "Which screens and features are used, to help us improve Helperly. Never includes your messages or posts. Off unless you turn it on.",
+  "settingsUsageStatsSubtitle": "Which screens and features are used, to help us improve KINDUPP. Never includes your messages or posts. Off unless you turn it on.",
   "topicMovingToCanada": "Moving to Canada",
   "topicHousing": "Housing",
   "topicJobHunting": "Job hunting",
@@ -250,7 +254,7 @@
   "onboardingTimeZoneHint": "e.g. GMT-5",
   "onboardingCountry": "Country of residence",
   "onboardingSelectCountry": "Select country",
-  "onboardingHowUse": "How will you use Helperly?",
+  "onboardingHowUse": "How will you use KINDUPP?",
   "roleSeeker": "I’m here to get help",
   "roleHelper": "I’m here to give help",
   "roleBoth": "I’m open to both",
@@ -865,16 +869,16 @@
   "badgeCommunityMentor": "Community Mentor",
   "bookPaymentPending": "We couldn’t confirm the payment yet. Tap Book again in a moment; you won’t be charged twice.",
   "ageCheckbox": "I confirm I am 18 or older.",
-  "ageRequired": "Helperly is for people 18 and older.",
-  "ageConfirmTitle": "Helperly is for adults",
-  "ageConfirmBody": "Helperly connects people who don't know each other, including by message and call, so it is only for people 18 and older. Please confirm your age to continue.",
+  "ageRequired": "KINDUPP is for people 18 and older.",
+  "ageConfirmTitle": "KINDUPP is for adults",
+  "ageConfirmBody": "KINDUPP connects people who don't know each other, including by message and call, so it is only for people 18 and older. Please confirm your age to continue.",
   "ageImAdult": "I'm 18 or older",
   "ageImMinor": "I'm under 18",
   "ageMinorConfirmTitle": "Are you under 18?",
   "ageMinorConfirmBody": "Your account will be paused. You can then delete it, or contact us if this was a mistake.",
   "ageMinorConfirm": "Yes, I'm under 18",
   "ageRestrictedTitle": "Your account is paused",
-  "ageRestrictedBody": "Helperly is only for people 18 and older, so this account can't be used. Your data is kept until you delete the account or we review it. If this is a mistake, contact us at {email}.",
+  "ageRestrictedBody": "KINDUPP is only for people 18 and older, so this account can't be used. Your data is kept until you delete the account or we review it. If this is a mistake, contact us at {email}.",
   "@ageRestrictedBody": {
     "placeholders": {
       "email": {
@@ -882,9 +886,9 @@
       }
     }
   },
-  "consentTitle": "Help us improve Helperly",
+  "consentTitle": "Help us improve KINDUPP",
   "consentBody": "Both are optional and off unless you turn them on. You can change them anytime in Settings.",
-  "chatSafetyTips": "Stay safe: never send money, codes or passwords, and keep your conversations in Helperly. Report anything that makes you uncomfortable.",
+  "chatSafetyTips": "Stay safe: never send money, codes or passwords, and keep your conversations in KINDUPP. Report anything that makes you uncomfortable.",
   "chatFirstContactTitle": "First time talking with {name}",
   "@chatFirstContactTitle": {
     "placeholders": {
@@ -903,7 +907,7 @@
     }
   },
   "callNeedsReply": "You can call this person after they reply to your message.",
-  "chatScamWarning": "Be careful: {name} mentioned money, codes or another app. Never send money or codes, and keep your conversations in Helperly.",
+  "chatScamWarning": "Be careful: {name} mentioned money, codes or another app. Never send money or codes, and keep your conversations in KINDUPP.",
   "@chatScamWarning": {
     "placeholders": {
       "name": {
@@ -912,6 +916,7 @@
     }
   },
   "reportCallBehaviour": "Inappropriate behaviour during a call",
+  "reportUnderageAccount": "Underage account",
   "chatTapToView": "Photo hidden · Tap to view",
   "postSensitiveTapToView": "Sensitive content · Tap to view",
   "postComment": "Comment",
@@ -985,7 +990,7 @@
   },
   "editProfileChangePhoto": "Change photo",
   "editProfileBasics": "Basic info",
-  "editProfileUseApp": "How you use Helperly",
+  "editProfileUseApp": "How you use KINDUPP",
   "editProfileInterests": "Interests",
   "editProfileAddCountry": "Choose",
   "editProfileAvailabilityHint": "When people can reach you",

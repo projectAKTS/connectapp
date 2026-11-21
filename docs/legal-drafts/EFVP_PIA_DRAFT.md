@@ -29,7 +29,7 @@ professional must review it. Items marked [VERIFY] need confirmation.
 | Calls | who called whom, when, how long. **No audio or video recording** | Medium |
 | Safety | reports, blocks | High |
 | Device | push tokens, app language, crash reports (opt-in only) | Low |
-| Payments | none during the free beta. Later handled by Stripe, no card numbers stored by Helperly | — |
+| Payments | Payment, saved-card, subscription and payout code is present but disabled by default in this Phase 3 client/Functions branch. Production build and deployed Functions parameters are not verified. If separately enabled, Stripe customer/payment method/PaymentIntent/connected-account and consultation/payout references may be created; exact fields and retention require confirmation. | Conditional / verify production |
 
 ## 3. Where The Information Goes
 
@@ -39,7 +39,7 @@ professional must review it. Items marked [VERIFY] need confirmation.
 | Google Cloud Vision (SafeSearch) | Automatic check of **post** photos and post video thumbnails (one frame, not the video) for adult or violent content. Chat photos are not sent | Global endpoint `vision.googleapis.com`; the processing region is not pinned | Same Google Cloud terms; images are processed and not stored by Vision; only the verdict is kept on the post |
 | Agora | Live audio/video transport | Global network; media is not stored | Encrypted transport; tokens per call; no recording enabled |
 | Apple (APNs) / Google (FCM) | Push delivery | United States | Message previews only (sender name, text) |
-| Stripe (later) | Payments | United States / Canada | PCI DSS; not active during the beta |
+| Stripe (conditional) | Payment setup, payments and payouts if enabled | Account country and processing terms unresolved; production activation not verified |
 | Firebase Crashlytics / Analytics | Crash and usage statistics | United States | **Off by default**; opt-in in the app |
 
 ## 4. Assessment (s. 17 Factors)

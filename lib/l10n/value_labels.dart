@@ -150,6 +150,8 @@ class ValueLabels {
         return l.reportImpersonation;
       case 'Inappropriate behaviour during a call':
         return l.reportCallBehaviour;
+      case 'Underage account':
+        return l.reportUnderageAccount;
       case 'Something else':
         return l.reportOther;
     }

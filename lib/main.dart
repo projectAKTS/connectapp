@@ -39,6 +39,7 @@ import 'screens/profile/profile_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/chat/chat_screen.dart';
 import 'screens/payment/payment_setup_screen.dart';
+import 'screens/payment/payments_disabled_screen.dart';
 import 'screens/premium/premium_screen.dart';
 
 // Core
@@ -178,6 +179,7 @@ Future<void> main() async {
 }
 
 void _handlePurchaseUpdates(List<PurchaseDetails> details) {
+  if (!MvpFeatures.premium) return;
   for (final pd in details) {
     if (pd.status == PurchaseStatus.purchased ||
         pd.status == PurchaseStatus.restored) {
@@ -233,19 +235,17 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
     _foregroundBootstrapRunning = true;
     try {
-      // Production uses the live key; a staging build passes its Stripe
-      // test key with --dart-define=STRIPE_PUBLISHABLE_KEY=pk_test_...
-      Stripe.publishableKey = const String.fromEnvironment(
-        'STRIPE_PUBLISHABLE_KEY',
-        defaultValue:
-            'pk_live_51Kke4CFsXOZFrRZs9EBuzMeKRdmsrWdHEqx7oEBzbZm3kygcvNboaQkuTu2EXZQ87DDVmTvN4cu2QKkrw8hKxlMr00NHQfAdAp',
-      );
-      Stripe.merchantIdentifier = 'merchant.com.connectapp';
-      Stripe.urlScheme = 'connectapp';
-      await Stripe.instance.applySettings();
+      if (MvpFeatures.paymentsEnabled) {
+        Stripe.publishableKey = const String.fromEnvironment(
+          'STRIPE_PUBLISHABLE_KEY',
+          defaultValue: '',
+        );
+        Stripe.merchantIdentifier = 'merchant.com.connectapp';
+        Stripe.urlScheme = 'connectapp';
+        await Stripe.instance.applySettings();
+      }
 
-      final available = await SubscriptionService.init();
-      if (available) {
+      if (MvpFeatures.premium && await SubscriptionService.init()) {
         SubscriptionService.setupListener(_handlePurchaseUpdates);
       }
 
@@ -340,8 +340,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
         '/onboarding': (_) =>
             const FullScreenBackGesture(child: OnboardingScreen()),
-        '/paymentSetup': (_) =>
-            const FullScreenBackGesture(child: PaymentSetupScreen()),
+        '/paymentSetup': (_) => MvpFeatures.paymentsEnabled
+            ? const FullScreenBackGesture(child: PaymentSetupScreen())
+            : const FullScreenBackGesture(child: PaymentsDisabledScreen()),
       },
 
       onGenerateRoute: (settings) {

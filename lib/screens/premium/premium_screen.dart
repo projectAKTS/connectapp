@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 
 import 'package:connect_app/services/subscription_service.dart';
+import 'package:connect_app/config/mvp_features.dart';
+import 'package:connect_app/screens/payment/payments_disabled_screen.dart';
 import 'package:connect_app/theme/tokens.dart';
 
 class PremiumScreen extends StatefulWidget {
@@ -22,6 +24,7 @@ class _PremiumScreenState extends State<PremiumScreen> {
   @override
   void initState() {
     super.initState();
+    if (!MvpFeatures.premium) return;
     _reload();
   }
 
@@ -78,6 +81,7 @@ class _PremiumScreenState extends State<PremiumScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!MvpFeatures.premium) return const PaymentsDisabledScreen();
     final uid = FirebaseAuth.instance.currentUser?.uid;
     final textTheme = Theme.of(context).textTheme;
     final sectionTitle =

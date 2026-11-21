@@ -14,6 +14,7 @@ import 'package:connect_app/theme/tokens.dart';
 import 'package:connect_app/widgets/language_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// Account settings: help and safety, legal texts, app language, usage
 /// statistics, delete account, log out.
@@ -46,6 +47,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => LegalScreen(title: title, markdown: '$note$markdown'),
     ));
+  }
+
+  Future<void> _openExternal(String address) async {
+    var opened = false;
+    try {
+      opened = await launchUrl(
+        Uri.parse(address),
+        mode: LaunchMode.externalApplication,
+      );
+    } catch (_) {}
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.settingsLinkOpenFailed)),
+      );
+    }
   }
 
   Future<void> _deleteAccount(BuildContext context) async {
@@ -194,6 +210,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
           ),
           section(l10n.settingsSectionHelp),
+          row(Icons.support_agent_outlined, l10n.settingsSupport,
+              () => _openExternal(LegalTexts.supportUrl)),
           row(Icons.health_and_safety_outlined, l10n.settingsHelpSafety,
               () => _open(context, l10n.settingsHelpSafety, LegalTexts.safety)),
           row(
@@ -203,9 +221,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   context, l10n.settingsGuidelines, LegalTexts.guidelines)),
           section(l10n.settingsSectionLegal),
           row(Icons.description_outlined, l10n.settingsTerms,
-              () => _open(context, l10n.settingsTerms, LegalTexts.terms)),
+              () => _openExternal(LegalTexts.termsUrl)),
           row(Icons.privacy_tip_outlined, l10n.settingsPrivacy,
-              () => _open(context, l10n.settingsPrivacy, LegalTexts.privacy)),
+              () => _openExternal(LegalTexts.privacyUrl)),
           section(l10n.settingsSectionAccount),
           row(Icons.logout, l10n.settingsLogOut,
               () => SettingsScreen.signOut(context)),

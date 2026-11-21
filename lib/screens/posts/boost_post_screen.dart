@@ -1,5 +1,7 @@
 import 'package:uuid/uuid.dart';
 import 'package:flutter/material.dart';
+import 'package:connect_app/config/mvp_features.dart';
+import 'package:connect_app/screens/payment/payments_disabled_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/services/payment_service.dart';
 import '/services/post_service.dart';
@@ -21,6 +23,7 @@ class _BoostPostScreenState extends State<BoostPostScreen> {
   bool isProcessing = false;
 
   Future<void> _boostPost() async {
+    if (!MvpFeatures.paymentsEnabled) return;
     setState(() => isProcessing = true);
 
     final currentUser = FirebaseAuth.instance.currentUser;
@@ -113,6 +116,7 @@ class _BoostPostScreenState extends State<BoostPostScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!MvpFeatures.paymentsEnabled) return const PaymentsDisabledScreen();
     return Scaffold(
       appBar: AppBar(
         title: const Text('Boost Post'),

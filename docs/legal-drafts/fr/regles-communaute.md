@@ -1,6 +1,6 @@
 ## Règles de la communauté
 
-Helperly fonctionne quand chacun se sent en sécurité pour demander de l'aide.
+KINDUPP fonctionne quand chacun se sent en sécurité pour demander de l'aide.
 
 - **Soyez bienveillant et respectueux.** Aucun harcèlement, propos haineux,
   menace ni intimidation.

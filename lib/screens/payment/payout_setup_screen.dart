@@ -1,4 +1,6 @@
 import 'package:connect_app/l10n/l10n.dart';
+import 'package:connect_app/config/mvp_features.dart';
+import 'package:connect_app/screens/payment/payments_disabled_screen.dart';
 import 'package:connect_app/theme/tokens.dart';
 import 'package:flutter/material.dart';
 
@@ -23,6 +25,7 @@ class _PayoutSetupScreenState extends State<PayoutSetupScreen>
   @override
   void initState() {
     super.initState();
+    if (!MvpFeatures.paidSessions) return;
     WidgetsBinding.instance.addObserver(this);
     _refresh();
   }
@@ -65,6 +68,7 @@ class _PayoutSetupScreenState extends State<PayoutSetupScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (!MvpFeatures.paidSessions) return const PaymentsDisabledScreen();
     final l10n = context.l10n;
     final status = _status;
     final ready = status?.payoutsEnabled == true;

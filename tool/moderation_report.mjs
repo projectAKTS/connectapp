@@ -22,7 +22,7 @@ for (const r of open) {
 }
 
 // Harassment and danger first (24 h target), then by number of reporters.
-const urgent = (g) => [...g.reasons.keys()].some((k) => /harass|threat|danger|violen|self|minor|sexual/i.test(k));
+const urgent = (g) => [...g.reasons.keys()].some((k) => /harass|threat|danger|violen|self|minor|underage|sexual/i.test(k));
 const list = [...groups.values()].sort((a, b) =>
   (urgent(b) - urgent(a)) || (b.reporters.size - a.reporters.size));
 

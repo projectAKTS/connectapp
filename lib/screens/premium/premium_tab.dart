@@ -1,5 +1,7 @@
 // lib/screens/premium/premium_tab.dart
 import 'package:flutter/material.dart';
+import 'package:connect_app/config/mvp_features.dart';
+import 'package:connect_app/screens/payment/payments_disabled_screen.dart';
 import '/services/subscription_service.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 
@@ -16,6 +18,7 @@ class _PremiumTabState extends State<PremiumTab> {
   @override
   void initState() {
     super.initState();
+    if (!MvpFeatures.premium) return;
     _loadProducts();
     SubscriptionService.setupListener(_onPurchaseUpdates);
   }
@@ -34,6 +37,7 @@ class _PremiumTabState extends State<PremiumTab> {
 
   @override
   Widget build(BuildContext context) {
+    if (!MvpFeatures.premium) return const PaymentsDisabledScreen();
     return Scaffold(
       appBar: AppBar(title: const Text('Go Premium')),
       body: _loading

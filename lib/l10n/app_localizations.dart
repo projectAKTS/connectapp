@@ -179,14 +179,38 @@ abstract class AppLocalizations {
   /// No description provided for @settingsTerms.
   ///
   /// In en, this message translates to:
-  /// **'Terms of Use'**
+  /// **'Terms of Service (draft)'**
   String get settingsTerms;
 
   /// No description provided for @settingsPrivacy.
   ///
   /// In en, this message translates to:
-  /// **'Privacy Policy'**
+  /// **'Privacy Policy (draft)'**
   String get settingsPrivacy;
+
+  /// No description provided for @settingsSupport.
+  ///
+  /// In en, this message translates to:
+  /// **'KINDUPP support'**
+  String get settingsSupport;
+
+  /// No description provided for @paymentsUnavailableTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Payments are off'**
+  String get paymentsUnavailableTitle;
+
+  /// No description provided for @paymentsUnavailableBody.
+  ///
+  /// In en, this message translates to:
+  /// **'KINDUPP is free during the MVP launch. Card setup, paid consultations, payouts, and subscriptions are unavailable.'**
+  String get paymentsUnavailableBody;
+
+  /// No description provided for @settingsLinkOpenFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open that website link.'**
+  String get settingsLinkOpenFailed;
 
   /// No description provided for @settingsLogOut.
   ///
@@ -287,7 +311,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsUsageStatsSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Which screens and features are used, to help us improve Helperly. Never includes your messages or posts. Off unless you turn it on.'**
+  /// **'Which screens and features are used, to help us improve KINDUPP. Never includes your messages or posts. Off unless you turn it on.'**
   String get settingsUsageStatsSubtitle;
 
   /// No description provided for @topicMovingToCanada.
@@ -1289,7 +1313,7 @@ abstract class AppLocalizations {
   /// No description provided for @onboardingHowUse.
   ///
   /// In en, this message translates to:
-  /// **'How will you use Helperly?'**
+  /// **'How will you use KINDUPP?'**
   String get onboardingHowUse;
 
   /// No description provided for @roleSeeker.
@@ -3437,19 +3461,19 @@ abstract class AppLocalizations {
   /// No description provided for @ageRequired.
   ///
   /// In en, this message translates to:
-  /// **'Helperly is for people 18 and older.'**
+  /// **'KINDUPP is for people 18 and older.'**
   String get ageRequired;
 
   /// No description provided for @ageConfirmTitle.
   ///
   /// In en, this message translates to:
-  /// **'Helperly is for adults'**
+  /// **'KINDUPP is for adults'**
   String get ageConfirmTitle;
 
   /// No description provided for @ageConfirmBody.
   ///
   /// In en, this message translates to:
-  /// **'Helperly connects people who don\'t know each other, including by message and call, so it is only for people 18 and older. Please confirm your age to continue.'**
+  /// **'KINDUPP connects people who don\'t know each other, including by message and call, so it is only for people 18 and older. Please confirm your age to continue.'**
   String get ageConfirmBody;
 
   /// No description provided for @ageImAdult.
@@ -3491,13 +3515,13 @@ abstract class AppLocalizations {
   /// No description provided for @ageRestrictedBody.
   ///
   /// In en, this message translates to:
-  /// **'Helperly is only for people 18 and older, so this account can\'t be used. Your data is kept until you delete the account or we review it. If this is a mistake, contact us at {email}.'**
+  /// **'KINDUPP is only for people 18 and older, so this account can\'t be used. Your data is kept until you delete the account or we review it. If this is a mistake, contact us at {email}.'**
   String ageRestrictedBody(String email);
 
   /// No description provided for @consentTitle.
   ///
   /// In en, this message translates to:
-  /// **'Help us improve Helperly'**
+  /// **'Help us improve KINDUPP'**
   String get consentTitle;
 
   /// No description provided for @consentBody.
@@ -3509,7 +3533,7 @@ abstract class AppLocalizations {
   /// No description provided for @chatSafetyTips.
   ///
   /// In en, this message translates to:
-  /// **'Stay safe: never send money, codes or passwords, and keep your conversations in Helperly. Report anything that makes you uncomfortable.'**
+  /// **'Stay safe: never send money, codes or passwords, and keep your conversations in KINDUPP. Report anything that makes you uncomfortable.'**
   String get chatSafetyTips;
 
   /// No description provided for @chatFirstContactTitle.
@@ -3539,7 +3563,7 @@ abstract class AppLocalizations {
   /// No description provided for @chatScamWarning.
   ///
   /// In en, this message translates to:
-  /// **'Be careful: {name} mentioned money, codes or another app. Never send money or codes, and keep your conversations in Helperly.'**
+  /// **'Be careful: {name} mentioned money, codes or another app. Never send money or codes, and keep your conversations in KINDUPP.'**
   String chatScamWarning(String name);
 
   /// No description provided for @reportCallBehaviour.
@@ -3547,6 +3571,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Inappropriate behaviour during a call'**
   String get reportCallBehaviour;
+
+  /// No description provided for @reportUnderageAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Underage account'**
+  String get reportUnderageAccount;
 
   /// No description provided for @chatTapToView.
   ///
@@ -3761,7 +3791,7 @@ abstract class AppLocalizations {
   /// No description provided for @editProfileUseApp.
   ///
   /// In en, this message translates to:
-  /// **'How you use Helperly'**
+  /// **'How you use KINDUPP'**
   String get editProfileUseApp;
 
   /// No description provided for @editProfileInterests.

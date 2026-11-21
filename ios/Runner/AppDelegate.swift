@@ -1788,7 +1788,7 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
       handle: fromName,
       type: isVideo ? 1 : 0
     )
-    callData.appName = "Helperly"
+    callData.appName = "KINDUPP"
     callData.iconName = "LaunchImage"
     callData.handleType = "generic"
     callData.supportsVideo = isVideo
@@ -2082,7 +2082,7 @@ final class CallV2NativeAcceptedAudioSessionOwnership {
   private let lateCallObserver = CXCallObserver()
   private lazy var lateCallProvider: CXProvider = {
     // The named initializer also works below iOS 14 (the app's minimum).
-    let config = CXProviderConfiguration(localizedName: "Helperly")
+    let config = CXProviderConfiguration(localizedName: "KINDUPP")
     config.supportsVideo = true
     config.maximumCallsPerCallGroup = 1
     config.includesCallsInRecents = false

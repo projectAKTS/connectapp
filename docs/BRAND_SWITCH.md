@@ -1,28 +1,27 @@
-# Switching To The Final Name And Support Address
+# KINDUPP mobile brand switch
 
-The app is ready for the final brand: the name and the support e-mail are
-set in one place and applied with one command.
+Current public values:
 
-## What The Founder Decides
+- App display name: `KINDUPP`
+- Website: `https://kindupp.com`
+- Support: `support@kindupp.ca`
 
-- The public name (for example Peerway).
-- A monitored support address (and privacy address, if separate).
-- The web domain for the Terms, privacy and delete-account pages.
+The applied changes affect visible Flutter text, Android/iOS display names,
+CallKit and incoming-call names, Settings legal/support links, and the legacy
+Firebase Hosting page copy. The in-app Privacy and Terms rows open the
+corresponding website drafts and label them as drafts.
 
-## What Claude Does Then
+`tool/apply_brand.mjs` updates source copy and hosted pages. It deliberately
+does not rename application IDs, Firebase projects, OAuth redirect schemes,
+Stripe callback schemes, APNs/FCM/PushKit configuration, database names,
+or code identifiers. Review its diff manually and run `flutter gen-l10n`
+after changing localization source strings.
 
-1. `node tool/apply_brand.mjs --name "<Name>" --support "<address>"`
-   changes the app texts (EN, FR), the in-app legal texts, the web pages
-   and the iOS and Android app names (91 places), then
-   `flutter pub get` and the full tests.
-2. A staging build checked on the emulators.
-3. Hosting on the new domain (Firebase Hosting custom domain), only with
-   the founder's go-ahead, since it publishes the legal pages.
-4. A TestFlight build.
+Before any store submission, verify the generated Android label and iOS
+home-screen/CallKit labels in builds, inspect the app icons and splash screens,
+check Firebase Auth email templates and authorized domains, and update the
+App Store / Play Console metadata and Stripe public details separately.
 
-## What Stays The Same
-
-The bundle id (`com.yakup.helperly`), the Firebase projects, the
-repository and code names. Users never see these. App Store Connect and
-Stripe names are changed in their own consoles (Stripe: Settings, Public
-details).
+The current Android and iOS icons are still the existing Flutter default
+assets. Keep them until an approved KINDUPP mark is supplied; do not invent
+or substitute a logo.

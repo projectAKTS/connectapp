@@ -21,7 +21,8 @@ deploys.
 - [ ] **Environment file:** `.env.connectapp-278b4` is present on the
   deploying machine (`defineString` params). The secrets already exist.
 - [ ] **Stripe:**
-  - test mode keys stay in test mode until paid sessions are approved;
+  - test mode keys stay in test mode until paid sessions are separately approved;
+  `MVP_PAYMENTS_ENABLED` and `PAID_SESSIONS_ENABLED` must both be false or omitted for the free MVP;
   - the webhook endpoint subscribes to `payment_intent.succeeded`,
     `payment_intent.payment_failed` and `payment_intent.canceled`.
 
@@ -154,8 +155,9 @@ Existing functions get new code; three are new.
 - [ ] `firebase functions:list --project connectapp-278b4` shows **no**
   Call V2 functions (`startCallV2`, `acceptCallV2`, ...). The deploy
   command lists functions one by one, never `--only functions`.
-- [ ] `.env.connectapp-278b4` contains `PAID_SESSIONS_ENABLED=false` (or
-  omits it; the default is false), and `CALL_V2_ENABLED` is unchanged.
+- [ ] `.env.connectapp-278b4` contains `MVP_PAYMENTS_ENABLED=false` and
+  `PAID_SESSIONS_ENABLED=false` (or omits both; both defaults are false),
+  and `CALL_V2_ENABLED` is unchanged.
 - [ ] In `firestore.rules`, `agePolicyStart()` is set to the rules deploy
   date. Accounts created before it are treated as legacy.
 

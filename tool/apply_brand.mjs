@@ -1,6 +1,5 @@
-// Changes the app's public name and support address everywhere users see
-// them: app texts (EN, FR), in-app legal texts, the hosted web pages, the
-// iOS and Android app names. The current values live in config/brand.json.
+// Updates public brand copy in Flutter and hosted pages. Review the diff
+// manually, then verify native builds and provider consoles separately.
 //
 //   node tool/apply_brand.mjs --name "NewName" --support "help@newname.com"
 //   node tool/apply_brand.mjs --name "NewName" --dry-run
@@ -30,16 +29,26 @@ const files = [
   "lib/l10n/app_fr.arb",
   "lib/config/legal_texts.dart",
   "ios/Runner/Info.plist",
+  "ios/Runner.xcodeproj/project.pbxproj",
   "android/app/src/main/AndroidManifest.xml",
+  "android/app/src/main/res/xml/locales_config.xml",
+  "lib/services/android_incoming_call.dart",
   ...walk("public").filter((f) => f.endsWith(".html")),
 ];
 
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // The e-mail first, so its domain is not caught by the name rule.
+const oldSupportEmails = [...new Set([current.supportEmail, "support@helperly.app"])]
+  .filter((email) => email !== next.supportEmail);
+const oldNames = [...new Set([current.appName, "Helperly"])]
+  .filter((name) => name !== next.appName);
 const rules = [
-  [new RegExp(esc(current.supportEmail), "g"), next.supportEmail],
+  ...oldSupportEmails.map((email) => [new RegExp(esc(email), "g"), next.supportEmail]),
   // Whole word only: never part of an identifier such as HelperlyTestRuntime.
-  [new RegExp(`(?<![A-Za-z0-9_@.])${esc(current.appName)}(?![A-Za-z0-9_])`, "g"), next.appName],
+  ...oldNames.map((name) => [
+    new RegExp(`(?<![A-Za-z0-9_@.])${esc(name)}(?![A-Za-z0-9_])`, "g"),
+    next.appName,
+  ]),
 ];
 
 let total = 0;
@@ -54,6 +63,21 @@ for (const f of files) {
     if (!dry) fs.writeFileSync(f, after);
   }
 }
+// CallKit uses a native display-name field. Avoid changing diagnostic log
+// prefixes or the stable bundle ID while updating only these two values.
+const appDelegate = "ios/Runner/AppDelegate.swift";
+if (fs.existsSync(appDelegate)) {
+  const before = fs.readFileSync(appDelegate, "utf8");
+  let after = before;
+  for (const oldName of oldNames) {
+    after = after.replace(`callData.appName = "${oldName}"`, `callData.appName = "${next.appName}"`);
+    after = after.replace(`CXProviderConfiguration(localizedName: "${oldName}")`, `CXProviderConfiguration(localizedName: "${next.appName}")`);
+  }
+  if (after !== before) {
+    console.log(`${dry ? "would change" : "changed"}\t${appDelegate} (CallKit display names)`);
+    if (!dry) fs.writeFileSync(appDelegate, after);
+  }
+}
 if (!dry) fs.writeFileSync(BRAND, JSON.stringify(next, null, 2) + "\n");
 console.log(`${total} replacements${dry ? " (dry run, nothing written)" : ""}.`);
-if (!dry && total) console.log("Next: flutter pub get, then the tests.");
+if (!dry && total) console.log("Next: flutter gen-l10n, then review the native builds and provider settings.");

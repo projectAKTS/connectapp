@@ -48,10 +48,23 @@ class AppLocalizationsFr extends AppLocalizations {
   String get settingsGuidelines => 'Règles de la communauté';
 
   @override
-  String get settingsTerms => 'Conditions d\'utilisation';
+  String get settingsTerms => 'Conditions d\'utilisation (ébauche)';
 
   @override
-  String get settingsPrivacy => 'Politique de confidentialité';
+  String get settingsPrivacy => 'Politique de confidentialité (ébauche)';
+
+  @override
+  String get settingsSupport => 'Assistance KINDUPP';
+
+  @override
+  String get paymentsUnavailableTitle => 'Paiements désactivés';
+
+  @override
+  String get paymentsUnavailableBody =>
+      'KINDUPP est gratuit pendant le lancement MVP. L’ajout de carte, les séances payantes, les versements et les abonnements ne sont pas disponibles.';
+
+  @override
+  String get settingsLinkOpenFailed => 'Impossible d’ouvrir ce lien.';
 
   @override
   String get settingsLogOut => 'Se déconnecter';
@@ -111,7 +124,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get settingsUsageStatsSubtitle =>
-      'Les écrans et fonctions utilisés, pour nous aider à améliorer Helperly. N\'inclut jamais vos messages ni vos publications. Désactivé sauf si vous l\'activez.';
+      'Les écrans et fonctions utilisés, pour nous aider à améliorer KINDUPP. N\'inclut jamais vos messages ni vos publications. Désactivé sauf si vous l\'activez.';
 
   @override
   String get topicMovingToCanada => 'Déménager au Canada';
@@ -428,7 +441,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get loginContinueApple => 'Continuer avec Apple';
 
   @override
-  String get loginNewHere => 'Nouveau sur Helperly?';
+  String get loginNewHere => 'Nouveau sur KINDUPP?';
 
   @override
   String get loginCreateAccount => 'Créer un compte';
@@ -646,7 +659,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get onboardingSelectCountry => 'Choisir un pays';
 
   @override
-  String get onboardingHowUse => 'Comment utiliserez-vous Helperly?';
+  String get onboardingHowUse => 'Comment utiliserez-vous KINDUPP?';
 
   @override
   String get roleSeeker => 'Je cherche de l\'aide';
@@ -1868,14 +1881,14 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get ageRequired =>
-      'Helperly s\'adresse aux personnes de 18 ans et plus.';
+      'KINDUPP s\'adresse aux personnes de 18 ans et plus.';
 
   @override
-  String get ageConfirmTitle => 'Helperly s\'adresse aux adultes';
+  String get ageConfirmTitle => 'KINDUPP s\'adresse aux adultes';
 
   @override
   String get ageConfirmBody =>
-      'Helperly met en contact des personnes qui ne se connaissent pas, notamment par message et par appel. L\'application est donc réservée aux personnes de 18 ans et plus. Veuillez confirmer votre âge pour continuer.';
+      'KINDUPP met en contact des personnes qui ne se connaissent pas, notamment par message et par appel. L\'application est donc réservée aux personnes de 18 ans et plus. Veuillez confirmer votre âge pour continuer.';
 
   @override
   String get ageImAdult => 'J\'ai 18 ans ou plus';
@@ -1898,11 +1911,11 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String ageRestrictedBody(String email) {
-    return 'Helperly est réservé aux personnes de 18 ans et plus; ce compte ne peut donc pas être utilisé. Vos données sont conservées jusqu\'à ce que vous supprimiez le compte ou que nous l\'examinions. S\'il s\'agit d\'une erreur, écrivez-nous à $email.';
+    return 'KINDUPP est réservé aux personnes de 18 ans et plus; ce compte ne peut donc pas être utilisé. Vos données sont conservées jusqu\'à ce que vous supprimiez le compte ou que nous l\'examinions. S\'il s\'agit d\'une erreur, écrivez-nous à $email.';
   }
 
   @override
-  String get consentTitle => 'Aidez-nous à améliorer Helperly';
+  String get consentTitle => 'Aidez-nous à améliorer KINDUPP';
 
   @override
   String get consentBody =>
@@ -1910,7 +1923,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get chatSafetyTips =>
-      'Restez prudent : n’envoyez jamais d’argent, de codes ni de mots de passe, et gardez vos échanges dans Helperly. Signalez tout ce qui vous met mal à l’aise.';
+      'Restez prudent : n’envoyez jamais d’argent, de codes ni de mots de passe, et gardez vos échanges dans KINDUPP. Signalez tout ce qui vous met mal à l’aise.';
 
   @override
   String chatFirstContactTitle(String name) {
@@ -1932,11 +1945,14 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String chatScamWarning(String name) {
-    return 'Prudence : $name a parlé d’argent, de codes ou d’une autre application. N’envoyez jamais d’argent ni de codes, et gardez vos échanges dans Helperly.';
+    return 'Prudence : $name a parlé d’argent, de codes ou d’une autre application. N’envoyez jamais d’argent ni de codes, et gardez vos échanges dans KINDUPP.';
   }
 
   @override
   String get reportCallBehaviour => 'Comportement inapproprié pendant un appel';
+
+  @override
+  String get reportUnderageAccount => 'Compte de mineur';
 
   @override
   String get chatTapToView => 'Photo masquée · Touchez pour voir';
@@ -2061,7 +2077,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get editProfileBasics => 'Informations';
 
   @override
-  String get editProfileUseApp => 'Votre utilisation de Helperly';
+  String get editProfileUseApp => 'Votre utilisation de KINDUPP';
 
   @override
   String get editProfileInterests => 'Centres d’intérêt';

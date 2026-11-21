@@ -1,6 +1,6 @@
 # Paid Sessions: Design (2026-11-14)
 
-Paid sessions stay off (`PAID_SESSIONS_ENABLED=false`) until this is built,
+Paid sessions stay off (`MVP_PAYMENTS_ENABLED=false` and `PAID_SESSIONS_ENABLED=false`) until this is built,
 tested end to end in Stripe test mode on staging, and the founder turns
 them on. This file records how money moves and why.
 
@@ -114,7 +114,7 @@ with transfers to the helper's Express account (3.59 and 1.79 CAD),
 reviews only on completed paid sessions, 3D Secure, a declined card. 27
 webhook deliveries returned 200.
 
-In the Android app (staging build with `PAID_SESSIONS=true` and the
+In the Android app (staging build with `HELPERLY_ENV=staging`, `MVP_PAYMENTS_ENABLED=true`, and `PAID_SESSIONS=true` and the
 `pk_test` key): add a 3D Secure card, book (bank screen, then booked,
 `paid/held`), "helper not ready" for a helper without payouts, cancel
 with a full refund.

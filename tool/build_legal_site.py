@@ -69,7 +69,19 @@ PAGE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title} · Helperly</title>
+<title>{title} · KINDUPP</title>
+<link rel="icon" type="image/svg+xml" href="https://kindupp.com/favicon.svg">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="KINDUPP">
+<meta property="og:title" content="{title} · KINDUPP">
+<meta property="og:description" content="Real help from people who've been there.">
+<meta property="og:image" content="https://kindupp.com/og-kindupp.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{title} · KINDUPP">
+<meta name="twitter:description" content="Real help from people who've been there.">
+<meta name="twitter:image" content="https://kindupp.com/og-kindupp.png">
 <style>
   body {{ margin: 0; background: #ffffff; color: #2D2C2B;
     font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
@@ -85,11 +97,11 @@ PAGE = """<!doctype html>
 </head>
 <body>
 <main>
-<header><a href="/">Helperly</a></header>
+<header><a href="https://kindupp.com/">KINDUPP</a></header>
 {body}
 <footer>
-  <a href="/privacy.html">Privacy</a><a href="/terms.html">Terms</a><a href="/safety.html">Safety</a>
-  <a href="/delete-account.html">Delete account</a>
+  <a href="https://kindupp.com/privacy/">Privacy draft</a><a href="https://kindupp.com/terms/">Terms draft</a><a href="https://kindupp.com/community-guidelines/">Community guidelines</a>
+  <a href="https://kindupp.com/delete-account/">Delete account</a>
   <a href="mailto:{email}">Contact</a>
 </footer>
 </main>
@@ -103,43 +115,43 @@ def write(name, title, body):
     (OUT / name).write_text(PAGE.format(title=html.escape(title), body=body, email=VARS["supportEmail"]))
 
 
-write("privacy.html", "Privacy Policy", markdown(const("privacy")))
-write("terms.html", "Terms of Use", markdown(const("terms")))
+write("privacy.html", "Privacy Policy (Draft)", markdown(const("privacy")))
+write("terms.html", "Terms of Service (Draft)", markdown(const("terms")))
 write("safety.html", "Help & safety", markdown(const("safety")) + markdown(const("guidelines")))
 write("index.html", "Real help from people who've been there", """
 <h1>Real help from people who've been there</h1>
 <div class="card">
-<p>Helperly connects newcomers to Canada with people who share their own
-experience: settling in, finding housing and work, student life and more.
-Ask the community, message helpers, or book a short call.</p>
-<p>Helpers share personal experience. Helperly is not legal, immigration or
+<p>KINDUPP connects people with others who share their own experience.
+Ask the community, exchange messages, and arrange free calls.</p>
+<p>Members share personal experience. KINDUPP is not legal, immigration or
 medical advice.</p>
 </div>""")
 write("delete-account.html", "Delete your account", f"""
-<h1>Delete your Helperly account</h1>
+<h1>Delete your KINDUPP account</h1>
 <div class="card">
 <h2>In the app</h2>
-<p>Open <strong>Profile</strong>, tap the <strong>settings</strong> icon, then
-<strong>Delete account</strong>. Your account is deleted right away.</p>
+<p>Open <strong>Settings</strong> and choose <strong>Delete account</strong>.
+The app removes the sign-in account and most profile data; some records may
+remain as described in the Privacy Policy draft.</p>
 <h2>Without the app</h2>
-<p>Email <a href="mailto:{VARS["supportEmail"]}?subject=Delete%20my%20Helperly%20account">{html.escape(VARS["supportEmail"])}</a>
-from the address you signed up with and ask us to delete your account. We
-confirm and delete it within 30 days.</p>
+<p>Email <a href="mailto:{VARS["supportEmail"]}?subject=Delete%20my%20KINDUPP%20account">{html.escape(VARS["supportEmail"])}</a>
+from the address you used to sign up. We will follow up to verify and
+process the request; contact support for current status.</p>
 </div>
-<h2>What is deleted</h2>
+<h2>Data removed through the app flow</h2>
 <ul>
-<li>Your profile, photos, posts and comments</li>
-<li>Your sign-in account and notification settings</li>
+<li>Your sign-in account, profile, posts, and related user media</li>
+<li>Some profile references, comments, and review text</li>
 </ul>
-<h2>What we keep</h2>
+<h2>Records that can remain</h2>
 <ul>
-<li>Payment records we must keep by law</li>
-<li>Messages you already sent, which stay in the other person's conversation</li>
+<li>Messages/media in another participant's conversation, safety reports, and call records</li>
+<li>Consultation/payment records and data retained by providers or backups</li>
 </ul>""")
 write("stripe/return.html", "Payout setup", """
 <h1>You're all set</h1>
-<p>Your payout details were sent to Stripe. You can return to the Helperly app.</p>""")
+<p>Your payout details were sent to Stripe. You can return to the KINDUPP app.</p>""")
 write("stripe/refresh.html", "Payout setup", """
 <h1>Let's try that again</h1>
-<p>The setup link expired. Go back to the Helperly app and open payout setup again.</p>""")
+<p>The setup link expired. Go back to the KINDUPP app and open payout setup again.</p>""")
 print("built", sorted(str(p.relative_to(OUT)) for p in OUT.rglob("*.html")))

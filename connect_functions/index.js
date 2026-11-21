@@ -46,6 +46,11 @@ const CALL_V2_ENABLED = defineBoolean("CALL_V2_ENABLED", { default: false });
 const PAID_SESSIONS_ENABLED = defineBoolean("PAID_SESSIONS_ENABLED", {
   default: false,
 });
+// Master kill switch for card setup, charges, refunds, subscriptions and
+// payouts. This stays off unless explicitly enabled in a reviewed build.
+const MVP_PAYMENTS_ENABLED = defineBoolean("MVP_PAYMENTS_ENABLED", {
+  default: false,
+});
 const CALL_V2_INTERNAL_TASKS_ENABLED = defineBoolean(
   "CALL_V2_INTERNAL_TASKS_ENABLED",
   { default: false }
@@ -757,6 +762,7 @@ exports.createStripeCustomer = onCall(
   { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated");
+    assertMvpPaymentsEnabled(MVP_PAYMENTS_ENABLED.value(), HttpsError);
     const id = await getOrCreateCustomer(request.auth.uid);
     return { stripeCustomerId: id };
   }
@@ -767,6 +773,7 @@ exports.createSetupIntent = onCall(
   { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated");
+    assertMvpPaymentsEnabled(MVP_PAYMENTS_ENABLED.value(), HttpsError);
     const stripe = getStripeClient();
     const uid = request.auth.uid;
     const customerId = await getOrCreateCustomer(uid);
@@ -791,6 +798,7 @@ exports.listPaymentMethods = onCall(
   { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated");
+    assertMvpPaymentsEnabled(MVP_PAYMENTS_ENABLED.value(), HttpsError);
     const uid = request.auth.uid;
 
     const userDoc = await db.collection("users").doc(uid).get();
@@ -823,6 +831,7 @@ exports.setDefaultPaymentMethod = onCall(
   { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated");
+    assertMvpPaymentsEnabled(MVP_PAYMENTS_ENABLED.value(), HttpsError);
     const { paymentMethodId } = request.data || {};
     if (!paymentMethodId)
       throw new HttpsError("invalid-argument", "paymentMethodId required");
@@ -849,6 +858,7 @@ exports.removePaymentMethod = onCall(
   { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated");
+    assertMvpPaymentsEnabled(MVP_PAYMENTS_ENABLED.value(), HttpsError);
     const { paymentMethodId } = request.data || {};
     if (!paymentMethodId)
       throw new HttpsError("invalid-argument", "paymentMethodId required");
@@ -879,6 +889,16 @@ exports.cancelConsultation = onCall(
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated");
     const { consultationId } = request.data || {};
+    const consultation = consultationId
+      ? await db.collection("consultations").doc(`${consultationId}`).get()
+      : null;
+    const existing = consultation?.data() || {};
+    // Free consultations remain cancellable. A Stripe-backed booking cannot
+    // initiate a refund while the master payment switch is off.
+    if (existing.paymentIntentId || Number(existing.amountCents || 0) > 0) {
+      assertMvpPaymentsEnabled(MVP_PAYMENTS_ENABLED.value(), HttpsError);
+      assertPaidSessionsEnabled(PAID_SESSIONS_ENABLED.value(), HttpsError);
+    }
     // Either person may cancel. Only server-written paid bookings are
     // refunded, from the amounts the server charged
     // (payments/paid_booking.js); nothing a client wrote is trusted.
@@ -900,6 +920,7 @@ exports.bookPaidSession = onCall(
   { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated");
+    assertMvpPaymentsEnabled(MVP_PAYMENTS_ENABLED.value(), HttpsError);
     assertPaidSessionsEnabled(PAID_SESSIONS_ENABLED.value(), HttpsError);
     try {
       return await bookPaidSession(
@@ -937,6 +958,10 @@ exports.reportSessionProblem = onCall(
 exports.releaseHeldPayouts = onSchedule(
   { schedule: "every 60 minutes", region: "us-central1", secrets: [STRIPE_SECRET] },
   async () => {
+    if (!MVP_PAYMENTS_ENABLED.value() || !PAID_SESSIONS_ENABLED.value()) {
+      console.log("releaseHeldPayouts skipped: MVP payment gates are off");
+      return;
+    }
     const snap = await db
       .collection("consultations")
       .where("releaseAfter", "<=", admin.firestore.Timestamp.now())
@@ -957,6 +982,7 @@ exports.getPayoutStatus = onCall(
   { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated");
+    assertMvpPaymentsEnabled(MVP_PAYMENTS_ENABLED.value(), HttpsError);
     assertPaidSessionsEnabled(PAID_SESSIONS_ENABLED.value(), HttpsError);
     const ref = db.collection("users").doc(request.auth.uid);
     const accountId = (await ref.get()).data()?.stripeAccountId;
@@ -981,6 +1007,7 @@ exports.chargeStoredPaymentMethod = onCall(
   { region: "us-central1", invoker: "public" },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated");
+    assertMvpPaymentsEnabled(MVP_PAYMENTS_ENABLED.value(), HttpsError);
     assertPaidSessionsEnabled(PAID_SESSIONS_ENABLED.value(), HttpsError);
     throw new HttpsError("failed-precondition", "Please update the app to book a paid session");
   }
@@ -1044,6 +1071,7 @@ exports.createExpressAccountLink = onCall(
   { region: "us-central1", invoker: "public", secrets: [STRIPE_SECRET] },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated");
+    assertMvpPaymentsEnabled(MVP_PAYMENTS_ENABLED.value(), HttpsError);
     assertPaidSessionsEnabled(PAID_SESSIONS_ENABLED.value(), HttpsError);
     const stripe = getStripeClient();
     const uid = request.auth.uid;
@@ -1191,7 +1219,10 @@ const {
   gcsUriFromDownloadUrl,
   postImageUrls,
 } = require("./safety/image_safety");
-const { assertPaidSessionsEnabled } = require("./payments/paid_sessions");
+const {
+  assertMvpPaymentsEnabled,
+  assertPaidSessionsEnabled,
+} = require("./payments/paid_sessions");
 const { verifyStripeEvent, webhookSecrets } = require("./payments/webhook_verify");
 const {
   ChargeError,

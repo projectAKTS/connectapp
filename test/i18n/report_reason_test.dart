@@ -39,4 +39,35 @@ void main() {
     final report = (await firestore.collection('reports').get()).docs.single;
     expect(report.data()['reason'], 'Spam or scam');
   });
+
+  testWidgets('underage report reason is translated and stored consistently',
+      (tester) async {
+    final firestore = FakeFirebaseFirestore();
+    HelperlyTestRuntime.configureForTest(
+        firestore: firestore, currentUid: 'me');
+    late BuildContext ctx;
+    await tester.pumpWidget(MaterialApp(
+      locale: const Locale('fr'),
+      supportedLocales: AppLanguages.supported,
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      home: Scaffold(body: Builder(builder: (c) {
+        ctx = c;
+        return const SizedBox();
+      })),
+    ));
+    final sent = SafetyService.instance
+        .reportWithSheet(ctx, type: 'user', targetId: 'u2', targetUid: 'u2');
+    await tester.pumpAndSettle();
+    expect(find.text('Compte de mineur'), findsOneWidget);
+    await tester.tap(find.text('Compte de mineur'));
+    await tester.pumpAndSettle();
+    expect(await sent, isTrue);
+    final report = (await firestore.collection('reports').get()).docs.single;
+    expect(report.data()['reason'], 'Underage account');
+  });
 }

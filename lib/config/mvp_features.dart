@@ -8,13 +8,21 @@
 class MvpFeatures {
   MvpFeatures._();
 
-  static const bool premium = false;
+  /// Payments can be exercised only by an explicitly opted-in staging build.
+  /// A production build cannot expose payment features through dart-defines.
+  static const String _environment =
+      String.fromEnvironment('HELPERLY_ENV', defaultValue: 'production');
+  static const bool paymentsEnabled = _environment == 'staging' &&
+      bool.fromEnvironment('MVP_PAYMENTS_ENABLED', defaultValue: false);
+
+  static const bool subscriptionsEnabled = paymentsEnabled &&
+      bool.fromEnvironment('MVP_SUBSCRIPTIONS_ENABLED', defaultValue: false);
+  static const bool premium = subscriptionsEnabled;
   static const bool gamificationStats = false;
 
-  /// Free beta: booking paid sessions, card setup and helper payouts are
-  /// hidden. The server refuses charges anyway (PAID_SESSIONS_ENABLED,
-  /// default false). Direct audio/video calls and messaging stay free.
-  /// A staging build turns them on with --dart-define=PAID_SESSIONS=true.
-  static const bool paidSessions =
+  /// Paid bookings have a second, staging-only opt-in. Both this flag and the
+  /// server's MVP_PAYMENTS_ENABLED + PAID_SESSIONS_ENABLED gates must be on.
+  /// Direct audio/video calls and messaging stay free.
+  static const bool paidSessions = paymentsEnabled &&
       bool.fromEnvironment('PAID_SESSIONS', defaultValue: false);
 }

@@ -1,5 +1,7 @@
 // lib/screens/payment/payment_setup_screen.dart
 import 'package:connect_app/l10n/l10n.dart';
+import 'package:connect_app/config/mvp_features.dart';
+import 'package:connect_app/screens/payment/payments_disabled_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -40,6 +42,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
   @override
   void initState() {
     super.initState();
+    if (!MvpFeatures.paymentsEnabled) return;
     _loadCachedCards();
     _refreshCards();
   }
@@ -258,6 +261,7 @@ class _PaymentSetupScreenState extends State<PaymentSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!MvpFeatures.paymentsEnabled) return const PaymentsDisabledScreen();
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(

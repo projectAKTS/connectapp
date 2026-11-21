@@ -5,7 +5,9 @@ import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_stripe/flutter_stripe.dart' show Stripe, StripeException;
+import 'package:connect_app/config/mvp_features.dart';
+import 'package:flutter_stripe/flutter_stripe.dart'
+    show Stripe, StripeException;
 
 /// Result types for payment attempts.
 enum PaymentResult {
@@ -73,6 +75,14 @@ class PaymentMethodsData {
 class PaymentService {
   static PaymentMethodsData? _memoryCache;
 
+  void _requirePaymentsEnabled() {
+    if (MvpFeatures.paymentsEnabled) return;
+    throw FirebaseFunctionsException(
+      code: 'failed-precondition',
+      message: 'Payments are not available in the KINDUPP MVP.',
+    );
+  }
+
   /// Ensures the user is signed in and refreshes their ID token.
   Future<User> _requireUser() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -115,6 +125,7 @@ class PaymentService {
 
   /// Ensures a Stripe customer exists for this user.
   Future<bool> ensureStripeCustomer() async {
+    _requirePaymentsEnabled();
     try {
       final functions = await _getAuthedFunctions();
       debugPrint('💳 [PaymentService] Calling createStripeCustomer...');
@@ -141,6 +152,7 @@ class PaymentService {
 
   /// Creates a SetupIntent for adding a new payment method.
   Future<SetupIntentData?> createSetupIntent() async {
+    _requirePaymentsEnabled();
     try {
       final functions = await _getAuthedFunctions();
       debugPrint('🪄 [PaymentService] Calling createSetupIntent...');
@@ -187,8 +199,7 @@ class PaymentService {
 
       final customerId =
           data['customerId'] as String? ?? data['customer'] as String?;
-      final ephemeralKey =
-          data['ephemeralKeySecret'] as String? ??
+      final ephemeralKey = data['ephemeralKeySecret'] as String? ??
           data['ephemeralKey'] as String?;
       debugPrint(
         '🎫 [PaymentService] SetupIntent clientSecret: ${clientSecret?.substring(0, 10)}...',
@@ -218,6 +229,7 @@ class PaymentService {
 
   /// Fetch saved payment methods for the current user.
   Future<PaymentMethodsData> listPaymentMethods() async {
+    _requirePaymentsEnabled();
     final functions = await _getAuthedFunctions();
     debugPrint('💳 [PaymentService] Calling listPaymentMethods...');
     final callable = functions.httpsCallable(
@@ -286,10 +298,8 @@ class PaymentService {
           .toList();
 
       final cached = PaymentMethodsData(
-        defaultPaymentMethodId:
-            (data['paymentMethodsCacheDefaultId'] ??
-                    data['defaultPaymentMethodId'])
-                as String?,
+        defaultPaymentMethodId: (data['paymentMethodsCacheDefaultId'] ??
+            data['defaultPaymentMethodId']) as String?,
         paymentMethods: methods,
       );
       _memoryCache = cached;
@@ -325,6 +335,7 @@ class PaymentService {
   }
 
   Future<void> setDefaultPaymentMethod(String paymentMethodId) async {
+    _requirePaymentsEnabled();
     final functions = await _getAuthedFunctions();
     debugPrint('💳 [PaymentService] Calling setDefaultPaymentMethod...');
     final callable = functions.httpsCallable(
@@ -335,6 +346,7 @@ class PaymentService {
   }
 
   Future<void> removePaymentMethod(String paymentMethodId) async {
+    _requirePaymentsEnabled();
     final functions = await _getAuthedFunctions();
     debugPrint('💳 [PaymentService] Calling removePaymentMethod...');
     final callable = functions.httpsCallable(
@@ -357,6 +369,7 @@ class PaymentService {
     String? callType,
     String? helperId,
   }) async {
+    _requirePaymentsEnabled();
     debugPrint('💳 [PaymentService] processPayment() started. Amount: $amount');
     try {
       final functions = await _getAuthedFunctions();
@@ -449,6 +462,7 @@ class PaymentService {
     required String callType,
     required DateTime scheduledAt,
   }) async {
+    if (!MvpFeatures.paidSessions) _requirePaymentsEnabled();
     try {
       final functions = await _getAuthedFunctions();
       final callable = functions.httpsCallable(
@@ -509,6 +523,7 @@ class PaymentService {
   /// Shows the bank's confirmation (3D Secure). Returns false when the
   /// seeker closed it or the bank refused; the server has the final word.
   Future<bool> confirmWithBank(String clientSecret) async {
+    _requirePaymentsEnabled();
     try {
       await Stripe.instance.handleNextAction(clientSecret);
       return true;
@@ -522,18 +537,20 @@ class PaymentService {
   }
 
   /// The seeker reports a problem with a past paid session.
-  Future<void> reportSessionProblem(String consultationId, String reason) async {
+  Future<void> reportSessionProblem(
+      String consultationId, String reason) async {
     final functions = await _getAuthedFunctions();
     await functions
         .httpsCallable(
-          'reportSessionProblem',
-          options: HttpsCallableOptions(timeout: const Duration(seconds: 30)),
-        )
+      'reportSessionProblem',
+      options: HttpsCallableOptions(timeout: const Duration(seconds: 30)),
+    )
         .call({'consultationId': consultationId, 'reason': reason});
   }
 
   /// The helper's payout account status (also stored by the server).
   Future<PayoutStatus> getPayoutStatus() async {
+    if (!MvpFeatures.paidSessions) _requirePaymentsEnabled();
     final functions = await _getAuthedFunctions();
     final response = await functions
         .httpsCallable(
@@ -551,6 +568,7 @@ class PaymentService {
 
   /// Opens Stripe's hosted payout setup for the helper.
   Future<bool> openPayoutSetup() async {
+    if (!MvpFeatures.paidSessions) _requirePaymentsEnabled();
     try {
       final functions = await _getAuthedFunctions();
       final response = await functions
@@ -584,7 +602,8 @@ class PaidBookingResult {
   final String? consultationId;
   final String? clientSecret;
 
-  const PaidBookingResult(this.outcome, {this.consultationId, this.clientSecret});
+  const PaidBookingResult(this.outcome,
+      {this.consultationId, this.clientSecret});
 }
 
 class PayoutStatus {

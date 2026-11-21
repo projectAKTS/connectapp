@@ -14,7 +14,8 @@ shortened (`abcd…`). It lists:
 
 - open reports grouped by what was reported, with reasons and how long
   they have waited;
-- 🔴 harassment, threats, danger, sexual content or minors: act within
+- 🔴 harassment, threats, danger, sexual content or minors (including the
+  “Underage account” report reason): act within
   24 hours;
 - 🟠 anything else waiting more than 3 days;
 - posts already hidden automatically: by 3 or more reporters
