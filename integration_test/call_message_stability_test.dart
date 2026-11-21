@@ -5,7 +5,16 @@ import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:connect_app/services/call_session_manager.dart';
+import 'package:connect_app/services/call_invite_signaling.dart';
 import 'package:connect_app/services/helperly_test_runtime.dart';
+
+class _OfflineCallInviteSignaling implements CallInviteSignaling {
+  @override
+  Future<Map<String, dynamic>?> transition(
+    String action,
+    Map<String, Object?> data,
+  ) async => null;
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -122,6 +131,9 @@ void main() {
     );
     await seedUsers();
     CallSessionManager.instance.configure(
+      // This suite uses FakeFirebaseFirestore; use the manager's Firestore
+      // fallback instead of invoking the production HTTPS callable.
+      callInviteSignalingForTest: _OfflineCallInviteSignaling(),
       listNativeCalls: () async => const <NativeCallSnapshot>[],
       endNativeCall: (_) async {},
       clearStoredAcceptedCallRecovery: ({

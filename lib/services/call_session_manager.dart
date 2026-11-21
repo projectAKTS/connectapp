@@ -1904,27 +1904,45 @@ class CallSessionManager {
     }
 
     await forceIdleForTest();
+    final outgoingReservation = _callLifecycleArbiter.reserveOutgoing();
+    if (!outgoingReservation.reserved) {
+      throw StateError('A call is already in progress');
+    }
     final channel = generateChannelName(meUid, toUid);
     final inviteRef = _db.collection('callInvites').doc();
     final authName = (HelperlyTestRuntime.currentDisplayName ?? '').trim();
     final fromName = authName.isEmpty ? 'Caller' : authName;
 
-    await inviteRef.set({
-      'fromUid': meUid,
-      'fromName': fromName,
-      'toUid': toUid,
-      'toName': toName,
-      'channel': channel,
-      'isVideo': isVideo,
-      'status': CallInviteStatus.ringing.name,
-      'createdAt': FieldValue.serverTimestamp(),
-      'callerStage': 'ringing',
-      'calleeStage': 'idle',
-      'callerLastError': '',
-      'calleeLastError': '',
-      'endReason': '',
-      'endedBy': '',
-    });
+    try {
+      await inviteRef.set({
+        'fromUid': meUid,
+        'fromName': fromName,
+        'toUid': toUid,
+        'toName': toName,
+        'channel': channel,
+        'isVideo': isVideo,
+        'status': CallInviteStatus.ringing.name,
+        'createdAt': FieldValue.serverTimestamp(),
+        'callerStage': 'ringing',
+        'calleeStage': 'idle',
+        'callerLastError': '',
+        'calleeLastError': '',
+        'endReason': '',
+        'endedBy': '',
+      });
+    } catch (_) {
+      _callLifecycleArbiter.releaseOutgoingReservation(
+        outgoingReservation.generation,
+      );
+      rethrow;
+    }
+
+    if (!_callLifecycleArbiter.outgoingInviteCreated(
+      generation: outgoingReservation.generation,
+      inviteId: inviteRef.id,
+    )) {
+      throw StateError('The test call reservation was lost');
+    }
 
     final session = _CallSession(
       inviteId: inviteRef.id,
@@ -1935,6 +1953,7 @@ class CallSessionManager {
       otherUserName: toName,
       phase: CallSessionPhase.outgoingRinging,
       status: CallInviteStatus.ringing,
+      lifecycleGeneration: outgoingReservation.generation,
     );
 
     await _activateSession(session, openScreen: false, source: 'caller_start');
