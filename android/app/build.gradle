@@ -6,22 +6,43 @@ plugins {
     id "com.google.firebase.crashlytics"
 }
 
+// Play upload key. android/key.properties and the keystore stay out of git;
+// without them a release build is signed with the debug key (local tests only).
+def keyProperties = new Properties()
+def keyPropertiesFile = rootProject.file("key.properties")
+if (keyPropertiesFile.exists()) {
+    keyPropertiesFile.withInputStream { keyProperties.load(it) }
+}
+
 android {
     namespace = "com.yakup.helperly"
-    compileSdk = 35
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     defaultConfig {
         applicationId = "com.yakup.helperly"
         minSdk = 24
-        targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        // Google Play requires API 36 for new apps and updates since 2026-08-31.
+        targetSdk = 36
+        // From pubspec.yaml / --build-number, so each Play upload gets a new code.
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+    }
+
+    signingConfigs {
+        if (keyPropertiesFile.exists()) {
+            upload {
+                storeFile = rootProject.file(keyProperties["storeFile"])
+                storePassword = keyProperties["storePassword"]
+                keyAlias = keyProperties["keyAlias"]
+                keyPassword = keyProperties["keyPassword"]
+            }
+        }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.debug
+            signingConfig = keyPropertiesFile.exists() ? signingConfigs.upload : signingConfigs.debug
             // Enable Proguard for better optimization
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'

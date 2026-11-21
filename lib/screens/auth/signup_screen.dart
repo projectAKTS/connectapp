@@ -5,6 +5,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../config/legal_texts.dart';
+import '../../config/mvp_features.dart';
 import '../../services/firebase_auth_service.dart';
 import '../../theme/tokens.dart';
 import '../settings/legal_screen.dart';
@@ -99,12 +100,15 @@ class _SignupScreenState extends State<SignupScreen> {
           .doc(user.uid)
           .set(userData, SetOptions(merge: true));
 
-      // Optional Stripe customer
-      try {
-        final callable = _functions.httpsCallable('createStripeCustomer');
-        await callable();
-      } catch (_) {
-        // ignore
+      // Stripe customer only when payments are on: otherwise no user data
+      // goes to Stripe at signup.
+      if (MvpFeatures.paymentsEnabled) {
+        try {
+          final callable = _functions.httpsCallable('createStripeCustomer');
+          await callable();
+        } catch (_) {
+          // ignore
+        }
       }
 
       if (!mounted) return;
