@@ -54,14 +54,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsPrivacy => 'Privacy Policy (draft)';
 
   @override
-  String get settingsSupport => 'KINDUPP support';
+  String get settingsSupport => 'Kindupp support';
 
   @override
   String get paymentsUnavailableTitle => 'Payments are off';
 
   @override
   String get paymentsUnavailableBody =>
-      'KINDUPP is free during the MVP launch. Card setup, paid consultations, payouts, and subscriptions are unavailable.';
+      'Kindupp is free during the MVP launch. Card setup, paid consultations, payouts, and subscriptions are unavailable.';
 
   @override
   String get settingsLinkOpenFailed => 'Could not open that website link.';
@@ -124,7 +124,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsUsageStatsSubtitle =>
-      'Which screens and features are used, to help us improve KINDUPP. Never includes your messages or posts. Off unless you turn it on.';
+      'Which screens and features are used, to help us improve Kindupp. Never includes your messages or posts. Off unless you turn it on.';
 
   @override
   String get topicMovingToCanada => 'Moving to Canada';
@@ -647,7 +647,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get onboardingSelectCountry => 'Select country';
 
   @override
-  String get onboardingHowUse => 'How will you use KINDUPP?';
+  String get onboardingHowUse => 'How will you use Kindupp?';
 
   @override
   String get roleSeeker => 'I’m here to get help';
@@ -1838,14 +1838,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get ageCheckbox => 'I confirm I am 18 or older.';
 
   @override
-  String get ageRequired => 'KINDUPP is for people 18 and older.';
+  String get ageRequired => 'Kindupp is for people 18 and older.';
 
   @override
-  String get ageConfirmTitle => 'KINDUPP is for adults';
+  String get ageConfirmTitle => 'Kindupp is for adults';
 
   @override
   String get ageConfirmBody =>
-      'KINDUPP connects people who don\'t know each other, including by message and call, so it is only for people 18 and older. Please confirm your age to continue.';
+      'Kindupp connects people who don\'t know each other, including by message and call, so it is only for people 18 and older. Please confirm your age to continue.';
 
   @override
   String get ageImAdult => 'I\'m 18 or older';
@@ -1868,11 +1868,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String ageRestrictedBody(String email) {
-    return 'KINDUPP is only for people 18 and older, so this account can\'t be used. Your data is kept until you delete the account or we review it. If this is a mistake, contact us at $email.';
+    return 'Kindupp is only for people 18 and older, so this account can\'t be used. Your data is kept until you delete the account or we review it. If this is a mistake, contact us at $email.';
   }
 
   @override
-  String get consentTitle => 'Help us improve KINDUPP';
+  String get consentTitle => 'Help us improve Kindupp';
 
   @override
   String get consentBody =>
@@ -1880,7 +1880,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get chatSafetyTips =>
-      'Stay safe: never send money, codes or passwords, and keep your conversations in KINDUPP. Report anything that makes you uncomfortable.';
+      'Stay safe: never send money, codes or passwords, and keep your conversations in Kindupp. Report anything that makes you uncomfortable.';
 
   @override
   String chatFirstContactTitle(String name) {
@@ -1902,7 +1902,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String chatScamWarning(String name) {
-    return 'Be careful: $name mentioned money, codes or another app. Never send money or codes, and keep your conversations in KINDUPP.';
+    return 'Be careful: $name mentioned money, codes or another app. Never send money or codes, and keep your conversations in Kindupp.';
   }
 
   @override
@@ -2034,7 +2034,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get editProfileBasics => 'Basic info';
 
   @override
-  String get editProfileUseApp => 'How you use KINDUPP';
+  String get editProfileUseApp => 'How you use Kindupp';
 
   @override
   String get editProfileInterests => 'Interests';

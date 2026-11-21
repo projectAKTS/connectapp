@@ -1,4 +1,4 @@
-# KINDUPP Android QA and Rebrand Verification
+# Kindupp Android QA and Rebrand Verification
 
 **Candidate:** `feature/kindupp-rebranding` (source only; no Play upload).
 **Package identity preserved:** `com.yakup.helperly`.
@@ -34,14 +34,14 @@ production release.
 
 ## Manual staging/device checklist
 
-- [ ] Launcher/app switcher displays KINDUPP in English and French.
+- [ ] Launcher/app switcher displays Kindupp in English and French.
 - [ ] Email/password, Google, and Apple sign-in paths work; OAuth return uses
       the existing registered scheme/client.
 - [ ] FCM token registration and ordinary message notifications work.
 - [ ] Incoming call notification opens/accepts/declines correctly in foreground,
       background and locked states; existing app identity is unchanged.
 - [ ] Audio/video calls connect over Agora; no recording behavior is introduced.
-- [ ] Settings opens KINDUPP Privacy/Terms draft URLs and support site; failure
+- [ ] Settings opens Kindupp Privacy/Terms draft URLs and support site; failure
       to open URLs is handled.
 - [ ] Payment setup route shows the disabled screen. Free call booking shows no
       price/payout and still creates the intended free consultation.

@@ -1,4 +1,4 @@
-# KINDUPP MVP Release Checklist
+# Kindupp MVP Release Checklist
 
 Status as of Phase 3: **not ready for production release**. No production
 website publish, DNS edit, Firebase deployment/configuration change, or mobile

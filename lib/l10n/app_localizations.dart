@@ -63,7 +63,7 @@ import 'app_localizations_fr.dart';
 /// property.
 abstract class AppLocalizations {
   AppLocalizations(String locale)
-      : localeName = intl.Intl.canonicalizedLocale(locale.toString());
+    : localeName = intl.Intl.canonicalizedLocale(locale.toString());
 
   final String localeName;
 
@@ -86,16 +86,16 @@ abstract class AppLocalizations {
   /// of delegates is preferred or required.
   static const List<LocalizationsDelegate<dynamic>> localizationsDelegates =
       <LocalizationsDelegate<dynamic>>[
-    delegate,
-    GlobalMaterialLocalizations.delegate,
-    GlobalCupertinoLocalizations.delegate,
-    GlobalWidgetsLocalizations.delegate,
-  ];
+        delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+      ];
 
   /// A list of this localizations delegate's supported locales.
   static const List<Locale> supportedLocales = <Locale>[
     Locale('en'),
-    Locale('fr')
+    Locale('fr'),
   ];
 
   /// This language's own name, shown in the language picker.
@@ -191,7 +191,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsSupport.
   ///
   /// In en, this message translates to:
-  /// **'KINDUPP support'**
+  /// **'Kindupp support'**
   String get settingsSupport;
 
   /// No description provided for @paymentsUnavailableTitle.
@@ -203,7 +203,7 @@ abstract class AppLocalizations {
   /// No description provided for @paymentsUnavailableBody.
   ///
   /// In en, this message translates to:
-  /// **'KINDUPP is free during the MVP launch. Card setup, paid consultations, payouts, and subscriptions are unavailable.'**
+  /// **'Kindupp is free during the MVP launch. Card setup, paid consultations, payouts, and subscriptions are unavailable.'**
   String get paymentsUnavailableBody;
 
   /// No description provided for @settingsLinkOpenFailed.
@@ -311,7 +311,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsUsageStatsSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Which screens and features are used, to help us improve KINDUPP. Never includes your messages or posts. Off unless you turn it on.'**
+  /// **'Which screens and features are used, to help us improve Kindupp. Never includes your messages or posts. Off unless you turn it on.'**
   String get settingsUsageStatsSubtitle;
 
   /// No description provided for @topicMovingToCanada.
@@ -1313,7 +1313,7 @@ abstract class AppLocalizations {
   /// No description provided for @onboardingHowUse.
   ///
   /// In en, this message translates to:
-  /// **'How will you use KINDUPP?'**
+  /// **'How will you use Kindupp?'**
   String get onboardingHowUse;
 
   /// No description provided for @roleSeeker.
@@ -3461,19 +3461,19 @@ abstract class AppLocalizations {
   /// No description provided for @ageRequired.
   ///
   /// In en, this message translates to:
-  /// **'KINDUPP is for people 18 and older.'**
+  /// **'Kindupp is for people 18 and older.'**
   String get ageRequired;
 
   /// No description provided for @ageConfirmTitle.
   ///
   /// In en, this message translates to:
-  /// **'KINDUPP is for adults'**
+  /// **'Kindupp is for adults'**
   String get ageConfirmTitle;
 
   /// No description provided for @ageConfirmBody.
   ///
   /// In en, this message translates to:
-  /// **'KINDUPP connects people who don\'t know each other, including by message and call, so it is only for people 18 and older. Please confirm your age to continue.'**
+  /// **'Kindupp connects people who don\'t know each other, including by message and call, so it is only for people 18 and older. Please confirm your age to continue.'**
   String get ageConfirmBody;
 
   /// No description provided for @ageImAdult.
@@ -3515,13 +3515,13 @@ abstract class AppLocalizations {
   /// No description provided for @ageRestrictedBody.
   ///
   /// In en, this message translates to:
-  /// **'KINDUPP is only for people 18 and older, so this account can\'t be used. Your data is kept until you delete the account or we review it. If this is a mistake, contact us at {email}.'**
+  /// **'Kindupp is only for people 18 and older, so this account can\'t be used. Your data is kept until you delete the account or we review it. If this is a mistake, contact us at {email}.'**
   String ageRestrictedBody(String email);
 
   /// No description provided for @consentTitle.
   ///
   /// In en, this message translates to:
-  /// **'Help us improve KINDUPP'**
+  /// **'Help us improve Kindupp'**
   String get consentTitle;
 
   /// No description provided for @consentBody.
@@ -3533,7 +3533,7 @@ abstract class AppLocalizations {
   /// No description provided for @chatSafetyTips.
   ///
   /// In en, this message translates to:
-  /// **'Stay safe: never send money, codes or passwords, and keep your conversations in KINDUPP. Report anything that makes you uncomfortable.'**
+  /// **'Stay safe: never send money, codes or passwords, and keep your conversations in Kindupp. Report anything that makes you uncomfortable.'**
   String get chatSafetyTips;
 
   /// No description provided for @chatFirstContactTitle.
@@ -3563,7 +3563,7 @@ abstract class AppLocalizations {
   /// No description provided for @chatScamWarning.
   ///
   /// In en, this message translates to:
-  /// **'Be careful: {name} mentioned money, codes or another app. Never send money or codes, and keep your conversations in KINDUPP.'**
+  /// **'Be careful: {name} mentioned money, codes or another app. Never send money or codes, and keep your conversations in Kindupp.'**
   String chatScamWarning(String name);
 
   /// No description provided for @reportCallBehaviour.
@@ -3791,7 +3791,7 @@ abstract class AppLocalizations {
   /// No description provided for @editProfileUseApp.
   ///
   /// In en, this message translates to:
-  /// **'How you use KINDUPP'**
+  /// **'How you use Kindupp'**
   String get editProfileUseApp;
 
   /// No description provided for @editProfileInterests.
@@ -4008,8 +4008,9 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   }
 
   throw FlutterError(
-      'AppLocalizations.delegate failed to load unsupported locale "$locale". This is likely '
-      'an issue with the localizations generation tool. Please file an issue '
-      'on GitHub with a reproducible sample app and the gen-l10n configuration '
-      'that was used.');
+    'AppLocalizations.delegate failed to load unsupported locale "$locale". This is likely '
+    'an issue with the localizations generation tool. Please file an issue '
+    'on GitHub with a reproducible sample app and the gen-l10n configuration '
+    'that was used.',
+  );
 }

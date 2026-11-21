@@ -1,4 +1,4 @@
-# KINDUPP Payment-Disabled Report
+# Kindupp Payment-Disabled Report
 
 **Intended MVP:** free calls and messaging; no paid consultations, card setup,
 subscriptions, boosts, helper onboarding, charges, refunds, or payouts.

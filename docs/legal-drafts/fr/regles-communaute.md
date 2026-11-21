@@ -1,6 +1,6 @@
 ## Règles de la communauté
 
-KINDUPP fonctionne quand chacun se sent en sécurité pour demander de l'aide.
+Kindupp fonctionne quand chacun se sent en sécurité pour demander de l'aide.
 
 - **Soyez bienveillant et respectueux.** Aucun harcèlement, propos haineux,
   menace ni intimidation.

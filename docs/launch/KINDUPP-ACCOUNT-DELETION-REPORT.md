@@ -1,4 +1,4 @@
-# KINDUPP Account Deletion Review
+# Kindupp Account Deletion Review
 
 ## What the reviewed callable does
 

@@ -6,14 +6,14 @@
 - **Moins de 20 ans :** Jeunesse, J'écoute, appelez le **1-800-668-6868** ou
   textez **686868**.
 
-KINDUPP est une communauté d'entraide. Les membres partagent leur propre
+Kindupp est une communauté d'entraide. Les membres partagent leur propre
 expérience. Ce ne sont pas des avocats, des consultants en immigration
-autorisés, des médecins ni des thérapeutes, et rien sur KINDUPP ne constitue
+autorisés, des médecins ni des thérapeutes, et rien sur Kindupp ne constitue
 un conseil juridique, d'immigration, médical ou financier.
 
 ## Restez en sécurité
 
-- Effectuez vos paiements dans KINDUPP. N'envoyez jamais d'argent en dehors
+- Effectuez vos paiements dans Kindupp. N'envoyez jamais d'argent en dehors
   de l'application.
 - Ne communiquez pas vos mots de passe, renseignements bancaires ou pièces
   d'identité.

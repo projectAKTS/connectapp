@@ -54,14 +54,14 @@ class AppLocalizationsFr extends AppLocalizations {
   String get settingsPrivacy => 'Politique de confidentialité (ébauche)';
 
   @override
-  String get settingsSupport => 'Assistance KINDUPP';
+  String get settingsSupport => 'Assistance Kindupp';
 
   @override
   String get paymentsUnavailableTitle => 'Paiements désactivés';
 
   @override
   String get paymentsUnavailableBody =>
-      'KINDUPP est gratuit pendant le lancement MVP. L’ajout de carte, les séances payantes, les versements et les abonnements ne sont pas disponibles.';
+      'Kindupp est gratuit pendant le lancement MVP. L’ajout de carte, les séances payantes, les versements et les abonnements ne sont pas disponibles.';
 
   @override
   String get settingsLinkOpenFailed => 'Impossible d’ouvrir ce lien.';
@@ -124,7 +124,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get settingsUsageStatsSubtitle =>
-      'Les écrans et fonctions utilisés, pour nous aider à améliorer KINDUPP. N\'inclut jamais vos messages ni vos publications. Désactivé sauf si vous l\'activez.';
+      'Les écrans et fonctions utilisés, pour nous aider à améliorer Kindupp. N\'inclut jamais vos messages ni vos publications. Désactivé sauf si vous l\'activez.';
 
   @override
   String get topicMovingToCanada => 'Déménager au Canada';
@@ -441,7 +441,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get loginContinueApple => 'Continuer avec Apple';
 
   @override
-  String get loginNewHere => 'Nouveau sur KINDUPP?';
+  String get loginNewHere => 'Nouveau sur Kindupp?';
 
   @override
   String get loginCreateAccount => 'Créer un compte';
@@ -659,7 +659,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get onboardingSelectCountry => 'Choisir un pays';
 
   @override
-  String get onboardingHowUse => 'Comment utiliserez-vous KINDUPP?';
+  String get onboardingHowUse => 'Comment utiliserez-vous Kindupp?';
 
   @override
   String get roleSeeker => 'Je cherche de l\'aide';
@@ -1881,14 +1881,14 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get ageRequired =>
-      'KINDUPP s\'adresse aux personnes de 18 ans et plus.';
+      'Kindupp s\'adresse aux personnes de 18 ans et plus.';
 
   @override
-  String get ageConfirmTitle => 'KINDUPP s\'adresse aux adultes';
+  String get ageConfirmTitle => 'Kindupp s\'adresse aux adultes';
 
   @override
   String get ageConfirmBody =>
-      'KINDUPP met en contact des personnes qui ne se connaissent pas, notamment par message et par appel. L\'application est donc réservée aux personnes de 18 ans et plus. Veuillez confirmer votre âge pour continuer.';
+      'Kindupp met en contact des personnes qui ne se connaissent pas, notamment par message et par appel. L\'application est donc réservée aux personnes de 18 ans et plus. Veuillez confirmer votre âge pour continuer.';
 
   @override
   String get ageImAdult => 'J\'ai 18 ans ou plus';
@@ -1911,11 +1911,11 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String ageRestrictedBody(String email) {
-    return 'KINDUPP est réservé aux personnes de 18 ans et plus; ce compte ne peut donc pas être utilisé. Vos données sont conservées jusqu\'à ce que vous supprimiez le compte ou que nous l\'examinions. S\'il s\'agit d\'une erreur, écrivez-nous à $email.';
+    return 'Kindupp est réservé aux personnes de 18 ans et plus; ce compte ne peut donc pas être utilisé. Vos données sont conservées jusqu\'à ce que vous supprimiez le compte ou que nous l\'examinions. S\'il s\'agit d\'une erreur, écrivez-nous à $email.';
   }
 
   @override
-  String get consentTitle => 'Aidez-nous à améliorer KINDUPP';
+  String get consentTitle => 'Aidez-nous à améliorer Kindupp';
 
   @override
   String get consentBody =>
@@ -1923,7 +1923,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get chatSafetyTips =>
-      'Restez prudent : n’envoyez jamais d’argent, de codes ni de mots de passe, et gardez vos échanges dans KINDUPP. Signalez tout ce qui vous met mal à l’aise.';
+      'Restez prudent : n’envoyez jamais d’argent, de codes ni de mots de passe, et gardez vos échanges dans Kindupp. Signalez tout ce qui vous met mal à l’aise.';
 
   @override
   String chatFirstContactTitle(String name) {
@@ -1945,7 +1945,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String chatScamWarning(String name) {
-    return 'Prudence : $name a parlé d’argent, de codes ou d’une autre application. N’envoyez jamais d’argent ni de codes, et gardez vos échanges dans KINDUPP.';
+    return 'Prudence : $name a parlé d’argent, de codes ou d’une autre application. N’envoyez jamais d’argent ni de codes, et gardez vos échanges dans Kindupp.';
   }
 
   @override
@@ -2077,7 +2077,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get editProfileBasics => 'Informations';
 
   @override
-  String get editProfileUseApp => 'Votre utilisation de KINDUPP';
+  String get editProfileUseApp => 'Votre utilisation de Kindupp';
 
   @override
   String get editProfileInterests => 'Centres d’intérêt';

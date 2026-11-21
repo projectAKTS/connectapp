@@ -1,8 +1,8 @@
-# KINDUPP mobile brand switch
+# Kindupp mobile brand switch
 
 Current public values:
 
-- App display name: `KINDUPP`
+- App display name: `Kindupp`
 - Website: `https://kindupp.com`
 - Support: `support@kindupp.ca`
 
@@ -23,5 +23,5 @@ check Firebase Auth email templates and authorized domains, and update the
 App Store / Play Console metadata and Stripe public details separately.
 
 The current Android and iOS icons are still the existing Flutter default
-assets. Keep them until an approved KINDUPP mark is supplied; do not invent
+assets. Keep them until an approved Kindupp mark is supplied; do not invent
 or substitute a logo.

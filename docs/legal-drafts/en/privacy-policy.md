@@ -2,13 +2,13 @@
 
 _Last updated: [DATE]_
 
-This policy explains what personal information KINDUPP collects, why, who
+This policy explains what personal information Kindupp collects, why, who
 receives it, and your rights. It is written for Canada's PIPEDA and
 Québec's Act respecting the protection of personal information in the
 private sector (Law 25). [LEGAL REVIEW]
 
 ### Who is responsible
-KINDUPP is operated by [LEGAL NAME OF THE SOLE PROPRIETOR / BUSINESS NAME],
+Kindupp is operated by [LEGAL NAME OF THE SOLE PROPRIETOR / BUSINESS NAME],
 [CITY], Québec. [VERIFY: business registration]
 
 **Person in charge of the protection of personal information:**
@@ -22,7 +22,7 @@ KINDUPP is operated by [LEGAL NAME OF THE SOLE PROPRIETOR / BUSINESS NAME],
 - **Content you create:** posts, comments, messages and attachments (photos,
   videos), reviews you give after a booked session.
 - **Calls:** who called whom, when, call type and status. The audio and
-  video of calls are not recorded or stored by KINDUPP.
+  video of calls are not recorded or stored by Kindupp.
 - **Bookings and payment-related records:** free consultations and related
   records. The Phase 3 client and Functions code has payment collection,
   card setup, subscription, and payout flows disabled by default; the
@@ -49,7 +49,7 @@ KINDUPP is operated by [LEGAL NAME OF THE SOLE PROPRIETOR / BUSINESS NAME],
 We do not use your information for advertising and we do not sell it.
 
 ### Why we use it
-- To run KINDUPP: accounts, profiles, matching people by topic and language,
+- To run Kindupp: accounts, profiles, matching people by topic and language,
   posts, messages, calls, bookings and payments.
 - To keep the community safe: moderation, reports, blocking, preventing
   abuse and fraud.
@@ -118,7 +118,7 @@ Settings.
   the Office of the Privacy Commissioner of Canada.
 
 ### Children
-KINDUPP is intended for people aged 18 and over. The app uses a self-
+Kindupp is intended for people aged 18 and over. The app uses a self-
 declaration; the reviewed code does not verify age using identity documents
 or a date of birth. [Confirm 18+ policy and underage-account handling.]
 

@@ -1,4 +1,4 @@
-# KINDUPP Domain Checklist
+# Kindupp Domain Checklist
 
 **No DNS was changed; no production domain was connected.** The actual current
 registrar-zone records were not exported in this phase. Preserve all existing

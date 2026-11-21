@@ -1,4 +1,4 @@
-# KINDUPP iOS QA and Rebrand Verification
+# Kindupp iOS QA and Rebrand Verification
 
 **Candidate:** `feature/kindupp-rebranding` (source only; no App Store upload).
 **Bundle identity preserved:** `com.yakup.helperly`.
@@ -30,7 +30,7 @@ No signing, TestFlight, or App Store upload is authorized.
 ## Manual staging/device checklist
 
 - [ ] Home screen, app switcher, notifications and CallKit sheets display
-      KINDUPP in English and French.
+      Kindupp in English and French.
 - [ ] Google and Apple sign-in callbacks use existing OAuth clients/schemes.
 - [ ] APNs, PushKit `.voip` and FCM token delivery remain intact for the current
       bundle/project identity.

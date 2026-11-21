@@ -1,6 +1,6 @@
-# KINDUPP Brand Asset Status
+# Kindupp Brand Asset Status
 
-No separate approved KINDUPP logo or brand-kit file was found in the app/web
+No separate approved Kindupp logo or brand-kit file was found in the app/web
 assets reviewed. The approved existing website wordmark is the text treatment
 `kindupp.` with an orange dot. Existing launcher/web app icons are generic
 Flutter icons, not an approved brand mark; they remain unchanged.

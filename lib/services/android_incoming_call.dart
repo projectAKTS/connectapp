@@ -89,7 +89,7 @@ class AndroidIncomingCall {
       params: CallKitParams(
         id: callkitId,
         nameCaller: fromName,
-        appName: 'KINDUPP',
+        appName: 'Kindupp',
         handle: isVideo ? l.callVideoTitle : l.callAudioTitle,
         type: isVideo ? 1 : 0,
         duration: ring.inMilliseconds,

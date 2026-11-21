@@ -1,8 +1,8 @@
-# KINDUPP Rebranding Report
+# Kindupp Rebranding Report
 
 **Status:** prepared on `feature/kindupp-rebranding`; not released.
 **Base:** `fb1c0596be7ca5b26d548f0ddd39292b9329ed29` (`call-v2`, snapshot `snapshot-2026-11-20`).
-**Targets:** app display name KINDUPP, `https://kindupp.com`, `support@kindupp.ca`.
+**Targets:** app display name Kindupp, `https://kindupp.com`, `support@kindupp.ca`.
 
 ## Completed in this checkout
 
@@ -12,7 +12,7 @@
 - Settings now links to the draft Privacy and Terms pages and support page;
   legal rows visibly identify the documents as drafts.
 - Kept the existing text wordmark. Added `public/favicon.svg` and
-  `public/og-kindupp.png` using only the existing KINDUPP text treatment and
+  `public/og-kindupp.png` using only the existing Kindupp text treatment and
   palette; the social image is 1200×630. No logo mark was invented.
 - Updated the existing brand helper to use reviewed, targeted paths and to
   print the localization-generation step.
@@ -41,8 +41,8 @@ without a separate migration plan.
 
 | Reference/path | Disposition |
 |---|---|
-| `android/app/build.gradle`, `android/app/src/main/AndroidManifest.xml`, Kotlin package paths/classes, Android Firebase `google-services.json` | Keep `com.yakup.helperly`; this is the registered package/Firebase app identity. The manifest's user-visible label is KINDUPP. |
-| `ios/Runner.xcodeproj/project.pbxproj`, `ios/Runner/Info.plist`, `ios/Runner/GoogleService-Info.plist`, `lib/services/firebase_options.dart` | Keep bundle/Firebase client IDs and URL schemes. Display-name keys are KINDUPP; callback and identity configuration stays unchanged. |
+| `android/app/build.gradle`, `android/app/src/main/AndroidManifest.xml`, Kotlin package paths/classes, Android Firebase `google-services.json` | Keep `com.yakup.helperly`; this is the registered package/Firebase app identity. The manifest's user-visible label is Kindupp. |
+| `ios/Runner.xcodeproj/project.pbxproj`, `ios/Runner/Info.plist`, `ios/Runner/GoogleService-Info.plist`, `lib/services/firebase_options.dart` | Keep bundle/Firebase client IDs and URL schemes. Display-name keys are Kindupp; callback and identity configuration stays unchanged. |
 | `android/app/src/main/kotlin/com/yakup/helperly/HelperlyApplication.kt`, `MainActivity.kt` | Keep class/package names and the `helperly:accepted_call` event key; native registration and Dart event handling are coupled. |
 | `lib/services/helperly_test_runtime.dart` and its imports across `lib/` | Test harness/internal dependency injection name; not shown to users. Renaming touches many call, feed, chat, profile and notification paths without a brand benefit. |
 | `HELPERLY_ENV`, `HELPERLY_TEST_MODE`, `firebase_options_staging.dart`, `tool/build_staging.sh`, staging smoke/deploy scripts, `helperly-call-v2-dev` | Preserve environment switches and staging project references; these identify service environments and guarded operations. |

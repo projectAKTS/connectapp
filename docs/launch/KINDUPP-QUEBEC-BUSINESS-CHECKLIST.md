@@ -1,4 +1,4 @@
-# KINDUPP Québec Business Setup Checklist
+# Kindupp Québec Business Setup Checklist
 
 This is an administrative research checklist, not legal or tax advice. No
 business registration, NEQ request, tax registration, payment or government
@@ -6,7 +6,7 @@ submission was made.
 
 ## Decisions and checks
 
-- [ ] Confirm the legal operator and whether `KINDUPP` will be used as an
+- [ ] Confirm the legal operator and whether `Kindupp` will be used as an
       enterprise/assumed name by a sole proprietor.
 - [ ] Check Québec name availability, French-language name rules and the exact
       registration requirement for the chosen name with the Registraire des

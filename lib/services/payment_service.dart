@@ -79,7 +79,7 @@ class PaymentService {
     if (MvpFeatures.paymentsEnabled) return;
     throw FirebaseFunctionsException(
       code: 'failed-precondition',
-      message: 'Payments are not available in the KINDUPP MVP.',
+      message: 'Payments are not available in the Kindupp MVP.',
     );
   }
 

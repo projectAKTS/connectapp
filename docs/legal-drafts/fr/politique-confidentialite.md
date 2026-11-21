@@ -2,14 +2,14 @@
 
 _Dernière mise à jour : [DATE]_
 
-La présente politique explique quels renseignements personnels KINDUPP
+La présente politique explique quels renseignements personnels Kindupp
 recueille, pourquoi, à qui ils sont communiqués et quels sont vos droits.
 Elle est rédigée en fonction de la LPRPDE (Canada) et de la Loi sur la
 protection des renseignements personnels dans le secteur privé du Québec
 (Loi 25). [RÉVISION JURIDIQUE]
 
 ### Qui est responsable
-KINDUPP est exploité par [NOM LÉGAL DE L'ENTREPRISE INDIVIDUELLE / NOM
+Kindupp est exploité par [NOM LÉGAL DE L'ENTREPRISE INDIVIDUELLE / NOM
 D'ENTREPRISE], [VILLE], Québec. [À VÉRIFIER : immatriculation]
 
 **Personne responsable de la protection des renseignements personnels :**
@@ -25,7 +25,7 @@ D'ENTREPRISE], [VILLE], Québec. [À VÉRIFIER : immatriculation]
 - **Contenu que vous créez :** publications, commentaires, messages et
   pièces jointes (photos, vidéos), avis donnés après une séance réservée.
 - **Appels :** qui a appelé qui, quand, type et statut de l'appel. L'audio
-  et la vidéo des appels ne sont ni enregistrés ni conservés par KINDUPP.
+  et la vidéo des appels ne sont ni enregistrés ni conservés par Kindupp.
 - **Réservations et renseignements liés aux paiements :** consultations
   gratuites et dossiers connexes. Le code Phase 3 de l'application et des
   Cloud Functions désactive par défaut la perception de paiements, la
@@ -57,7 +57,7 @@ Nous n'utilisons pas vos renseignements à des fins publicitaires et nous ne
 les vendons pas.
 
 ### Pourquoi nous les utilisons
-- Pour faire fonctionner KINDUPP : comptes, profils, mise en relation
+- Pour faire fonctionner Kindupp : comptes, profils, mise en relation
   selon les sujets et les langues, publications, messages, appels,
   réservations et paiements.
 - Pour assurer la sécurité de la communauté : modération, signalements,
@@ -138,7 +138,7 @@ temps dans les Paramètres.
   privée du Canada.
 
 ### Âge
-KINDUPP s'adresse aux personnes de 18 ans et plus. L'application utilise
+Kindupp s'adresse aux personnes de 18 ans et plus. L'application utilise
 une déclaration personnelle; le code examiné ne vérifie pas l'âge à l'aide
 d'une pièce d'identité ou d'une date de naissance. [Confirmer la politique
 18+ et la procédure pour les comptes de mineurs.]

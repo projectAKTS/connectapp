@@ -19,13 +19,13 @@ class LegalTexts {
 - **Suicide or mental health crisis:** call or text **988** (Canada, 24/7).
 - **Under 20:** Kids Help Phone, call **1-800-668-6868** or text **686868**.
 
-KINDUPP is a peer community. Helpers share their own experience. They are
+Kindupp is a peer community. Helpers share their own experience. They are
 not lawyers, licensed immigration consultants, doctors or counsellors, and
-nothing on KINDUPP is legal, immigration, medical or financial advice.
+nothing on Kindupp is legal, immigration, medical or financial advice.
 
 ## Stay safe
 
-- Keep payments inside KINDUPP. Never send money outside the app.
+- Keep payments inside Kindupp. Never send money outside the app.
 - Do not share passwords, banking details or ID documents.
 - For immigration applications, use a licensed consultant (RCIC) or a lawyer.
 - Report anyone who makes you uncomfortable. Use the **...** menu on a post,
@@ -38,7 +38,7 @@ Questions? Contact us at $supportEmail.
   static const String guidelines = '''
 ## Community guidelines
 
-KINDUPP works when people feel safe asking for help.
+Kindupp works when people feel safe asking for help.
 
 - **Be kind and respectful.** No harassment, hate, threats or bullying.
 - **Share experience, not professional advice.** Say what worked for you.

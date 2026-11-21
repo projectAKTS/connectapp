@@ -1,4 +1,4 @@
-# KINDUPP Privacy and Integration Review
+# Kindupp Privacy and Integration Review
 
 **Scope:** reviewed the current `call-v2` client, Functions code, English
 Privacy Policy draft, French Privacy draft, Terms draft, Community Guidelines,
