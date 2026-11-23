@@ -48,10 +48,10 @@ class AppLocalizationsFr extends AppLocalizations {
   String get settingsGuidelines => 'Règles de la communauté';
 
   @override
-  String get settingsTerms => 'Conditions d\'utilisation (ébauche)';
+  String get settingsTerms => 'Conditions d\'utilisation';
 
   @override
-  String get settingsPrivacy => 'Politique de confidentialité (ébauche)';
+  String get settingsPrivacy => 'Politique de confidentialité';
 
   @override
   String get settingsSupport => 'Assistance Kindupp';

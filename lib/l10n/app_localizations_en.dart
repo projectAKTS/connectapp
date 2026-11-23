@@ -48,10 +48,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsGuidelines => 'Community guidelines';
 
   @override
-  String get settingsTerms => 'Terms of Service (draft)';
+  String get settingsTerms => 'Terms of Service';
 
   @override
-  String get settingsPrivacy => 'Privacy Policy (draft)';
+  String get settingsPrivacy => 'Privacy Policy';
 
   @override
   String get settingsSupport => 'Kindupp support';
