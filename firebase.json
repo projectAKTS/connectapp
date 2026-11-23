@@ -25,6 +25,10 @@
       "**/node_modules/**"
     ],
     "rewrites": [
+      { "regex": "^/privacy/?$", "destination": "/privacy.html" },
+      { "regex": "^/terms/?$", "destination": "/terms.html" },
+      { "regex": "^/(support|safety|community-guidelines)/?$", "destination": "/safety.html" },
+      { "regex": "^/delete-account/?$", "destination": "/delete-account.html" },
       {
         "source": "**",
         "destination": "/index.html"
