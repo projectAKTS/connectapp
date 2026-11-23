@@ -100,7 +100,7 @@ PAGE = """<!doctype html>
 <header><a href="https://kindupp.com/">Kindupp</a></header>
 {body}
 <footer>
-  <a href="https://kindupp.com/privacy/">Privacy draft</a><a href="https://kindupp.com/terms/">Terms draft</a><a href="https://kindupp.com/community-guidelines/">Community guidelines</a>
+  <a href="https://kindupp.com/privacy/">Privacy</a><a href="https://kindupp.com/terms/">Terms</a><a href="https://kindupp.com/community-guidelines/">Community guidelines</a>
   <a href="https://kindupp.com/delete-account/">Delete account</a>
   <a href="mailto:{email}">Contact</a>
 </footer>
@@ -115,8 +115,8 @@ def write(name, title, body):
     (OUT / name).write_text(PAGE.format(title=html.escape(title), body=body, email=VARS["supportEmail"]))
 
 
-write("privacy.html", "Privacy Policy (Draft)", markdown(const("privacy")))
-write("terms.html", "Terms of Service (Draft)", markdown(const("terms")))
+write("privacy.html", "Privacy Policy", markdown(const("privacy")))
+write("terms.html", "Terms of Service", markdown(const("terms")))
 write("safety.html", "Help & safety", markdown(const("safety")) + markdown(const("guidelines")))
 write("index.html", "Real help from people who've been there", """
 <h1>Real help from people who've been there</h1>
@@ -132,7 +132,7 @@ write("delete-account.html", "Delete your account", f"""
 <h2>In the app</h2>
 <p>Open <strong>Settings</strong> and choose <strong>Delete account</strong>.
 The app removes the sign-in account and most profile data; some records may
-remain as described in the Privacy Policy draft.</p>
+remain as described in the Privacy Policy.</p>
 <h2>Without the app</h2>
 <p>Email <a href="mailto:{VARS["supportEmail"]}?subject=Delete%20my%20Kindupp%20account">{html.escape(VARS["supportEmail"])}</a>
 from the address you used to sign up. We will follow up to verify and
