@@ -1,5 +1,10 @@
 # Kindupp App Store listing (v1.0.2, iOS, free MVP)
 
+Submitted for App Review on 2026-11-23 with build 202611231836 (iPhone only,
+Canada and United States, free, automatic release after approval). Production
+test data was cleared the same day; the review account is
+kindupp.team+review@gmail.com (password kept by the founder, not here).
+
 Draft copy for App Store Connect. Payments are off, so the listing must not
 mention paid sessions, prices or payouts.
 
