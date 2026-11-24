@@ -63,15 +63,56 @@ Terms: https://kindupp.com/terms/
 
 ## App Review notes
 
-Kindupp is a free community app. Paid features are disabled in this version.
+First submission (build 202611231836) came back on 2026-11-24 as
+"Guideline 2.1 - Information Needed". Apple asked for a screen recording on a
+physical device plus the answers below. Paste this text into App Review
+Information > Notes and attach the recording.
 
-Sign in with the demo account below, or create a new account with
-Sign in with Apple or email.
+```
+1. Screen recording
+Attached. Recorded on a physical iPhone running the latest iOS. Part 1
+starts at app launch and shows login with the demo account and reporting a
+post. Part 2 shows sign-up of a new account, onboarding, creating a post,
+blocking a user, and deleting the account (Profile > Settings > Delete
+account). The password field is blurred. The app has no paid content.
 
-To test calls, open the menu on a post in the home feed and choose audio or
-video call. Users can block
-and report from any profile, post or chat. Account deletion: Profile >
-Settings > Delete account.
+2. Purpose and audience
+Kindupp is a free peer-support community for adults (18+). People facing a
+life change (moving to a new country, a first job, finding housing) ask
+questions and get answers from people who already went through the same
+thing. They can comment, send private messages, and arrange free voice or
+video calls. Members share personal experience only; the app states that
+nothing on Kindupp is legal, immigration, medical or financial advice.
+
+3. How to use it
+Sign in with the demo account in the Sign-In Information section, or create
+a new account with email, Sign in with Apple or Google.
+- Home feed: read posts, tap one to comment.
+- "Post" tab: create a post (text, optional photo or video).
+- Calls: open the "..." menu on a post or profile and choose audio or video
+  call.
+- Report and block: "..." menu on any post, profile or chat.
+- Delete account: Profile > Settings > Delete account.
+
+4. External services
+- Google Firebase: Authentication, Cloud Firestore, Cloud Storage, Cloud
+  Functions, Cloud Messaging, App Check, Crashlytics and Analytics (both
+  opt-in, off by default).
+- Sign in with Apple and Google Sign-In.
+- Apple Push Notification service and PushKit/CallKit for incoming calls.
+- Agora: real-time voice and video calls (not recorded).
+- Google Cloud Vision SafeSearch: automatic safety check of post images.
+
+No payment processor is used. Payments are turned off.
+
+5. Regions
+Available in Canada and the United States. The app works the same in both
+regions.
+
+6. Regulated industry
+Not applicable. Kindupp does not provide regulated professional services
+and contains no protected third-party material.
+```
 
 The demo account username and password are typed into App Store Connect by
 the owner. They are not stored in this file.
