@@ -9,6 +9,7 @@ import 'package:connect_app/models/profile_languages.dart';
 import 'package:connect_app/models/age_policy.dart';
 import 'package:connect_app/screens/age/age_gate_screens.dart';
 import 'package:connect_app/widgets/telemetry_consent_prompt.dart';
+import 'package:connect_app/services/account_deletion.dart';
 import 'package:connect_app/services/app_prefs.dart';
 import 'package:connect_app/services/locale_controller.dart';
 import 'package:connect_app/services/user_doc_sign_in_patch.dart';
@@ -101,8 +102,10 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       now: DateTime.now(),
       ownInstallationId: await PushInstallationId.read(),
     );
-    debugPrint('[DIAG][android_call] background_decision '
-        'kind=${decision.kind.name} reason=${decision.reason}');
+    debugPrint(
+      '[DIAG][android_call] background_decision '
+      'kind=${decision.kind.name} reason=${decision.reason}',
+    );
     await AndroidIncomingCall.apply(decision);
     // Not awaited: FlutterFire runs background messages one at a time and
     // waits for each handler, so awaiting the ring window would hold back a
@@ -116,27 +119,26 @@ Future<void> main() async {
 
   // Device settings load alongside Firebase, so startup takes no longer.
   final prefsLoading = AppPrefs.load();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   StagingFirebaseOptions.assertIsolated(Firebase.app().options.projectId);
   await prefsLoading;
   LocaleController.instance.loadSaved();
   await AppFormat.init();
   await AppTelemetry.init();
-  unawaited(
-    FirestoreReadHelper.ensureNetworkEnabled(reason: 'app_start'),
-  );
+  unawaited(FirestoreReadHelper.ensureNetworkEnabled(reason: 'app_start'));
 
-  const useDebugAppCheck =
-      bool.fromEnvironment('APP_CHECK_DEBUG', defaultValue: false);
+  const useDebugAppCheck = bool.fromEnvironment(
+    'APP_CHECK_DEBUG',
+    defaultValue: false,
+  );
   try {
     await FirebaseAppCheck.instance.activate(
       // DeviceCheck is the configured Apple provider. App Attest needs the
       // App Attest entitlement plus Firebase registration; until both exist,
       // every App Attest token exchange is rejected (403).
-      appleProvider:
-          useDebugAppCheck ? AppleProvider.debug : AppleProvider.deviceCheck,
+      appleProvider: useDebugAppCheck
+          ? AppleProvider.debug
+          : AppleProvider.deviceCheck,
       androidProvider: useDebugAppCheck
           ? AndroidProvider.debug
           : AndroidProvider.playIntegrity,
@@ -272,9 +274,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
-    unawaited(
-      FirestoreReadHelper.ensureNetworkEnabled(reason: 'app_resumed'),
-    );
+    unawaited(FirestoreReadHelper.ensureNetworkEnabled(reason: 'app_resumed'));
     unawaited(_ensureForegroundBootstrap());
   }
 
@@ -431,6 +431,8 @@ class _AuthGateState extends State<AuthGate> {
   late final StreamSubscription<User?> _sub;
 
   Future<void> _ensureUserDoc(User user) async {
+    // Would write the profile doc back while the server is deleting it.
+    if (accountDeletionInProgress.value) return;
     final ref = FirebaseFirestore.instance.collection('users').doc(user.uid);
     try {
       final snap = await FirestoreReadHelper.getDoc(
@@ -514,49 +516,59 @@ class _AuthGateState extends State<AuthGate> {
         }
 
         final user = snap.data!;
-        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          stream: FirebaseFirestore.instance
-              .collection('users')
-              .doc(user.uid)
-              .snapshots(),
-          builder: (_, userSnap) {
-            if (userSnap.hasError) {
-              return const MainScaffold();
-            }
-            if (userSnap.connectionState == ConnectionState.waiting) {
-              return const Scaffold(
-                body: Center(child: CircularProgressIndicator()),
-              );
-            }
-
-            final data = userSnap.data?.data() ?? const <String, dynamic>{};
-            final hasOnboardingFlag = data['onboardingComplete'] == true;
-            final hasName = ((data['displayName'] ?? data['fullName'] ?? '')
-                .toString()
-                .trim()
-                .isNotEmpty);
-            // spokenLanguages or the legacy single `language` field.
-            final hasLanguage = ProfileLanguages.hasAny(data);
-            final hasTopics = data['interestTags'] is List &&
-                (data['interestTags'] as List).isNotEmpty;
-
-            final needsOnboarding =
-                !(hasOnboardingFlag && hasName && hasLanguage && hasTopics);
-            if (needsOnboarding) {
-              return const FullScreenBackGesture(child: OnboardingScreen());
-            }
-            // 18+ policy: accounts from before it confirm once; declared
-            // minors are restricted (not deleted).
-            switch (AgePolicy.statusOf(data)) {
-              case AgeStatus.minor:
-                return const AgeRestrictedScreen();
-              case AgeStatus.unknown:
-                return const AgeConfirmScreen();
-              case AgeStatus.adult:
-                return const TelemetryConsentPrompt(child: MainScaffold());
-            }
-          },
+        return ValueListenableBuilder<bool>(
+          valueListenable: accountDeletionInProgress,
+          builder: (_, deleting, __) => deleting
+              ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+              : _profileGate(user),
         );
+      },
+    );
+  }
+
+  Widget _profileGate(User user) {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .snapshots(),
+      builder: (_, userSnap) {
+        if (userSnap.hasError) {
+          return const MainScaffold();
+        }
+        if (userSnap.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final data = userSnap.data?.data() ?? const <String, dynamic>{};
+        final hasOnboardingFlag = data['onboardingComplete'] == true;
+        final hasName = ((data['displayName'] ?? data['fullName'] ?? '')
+            .toString()
+            .trim()
+            .isNotEmpty);
+        // spokenLanguages or the legacy single `language` field.
+        final hasLanguage = ProfileLanguages.hasAny(data);
+        final hasTopics =
+            data['interestTags'] is List &&
+            (data['interestTags'] as List).isNotEmpty;
+
+        final needsOnboarding =
+            !(hasOnboardingFlag && hasName && hasLanguage && hasTopics);
+        if (needsOnboarding) {
+          return const FullScreenBackGesture(child: OnboardingScreen());
+        }
+        // 18+ policy: accounts from before it confirm once; declared
+        // minors are restricted (not deleted).
+        switch (AgePolicy.statusOf(data)) {
+          case AgeStatus.minor:
+            return const AgeRestrictedScreen();
+          case AgeStatus.unknown:
+            return const AgeConfirmScreen();
+          case AgeStatus.adult:
+            return const TelemetryConsentPrompt(child: MainScaffold());
+        }
       },
     );
   }
