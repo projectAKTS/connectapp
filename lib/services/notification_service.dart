@@ -13,6 +13,8 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../call_v2/diagnostics/call_v2_durable_boundary_diagnostics.dart';
 import '../call_v2/diagnostics/call_v2_physical_diagnostic_ledger.dart';
+import '../l10n/l10n.dart';
+import 'app_telemetry.dart';
 import 'call_session_manager.dart';
 import 'android_incoming_call.dart';
 import 'callkit_id.dart';
@@ -240,6 +242,7 @@ class NotificationService with WidgetsBindingObserver {
 
   bool _initialized = false;
   bool _observerBound = false;
+  bool _consentListenerBound = false;
   bool _notificationsAllowed = false;
   bool _localInitialized = false;
   bool _nativePushHandlerBound = false;
@@ -980,6 +983,16 @@ class NotificationService with WidgetsBindingObserver {
     if (!_observerBound) {
       WidgetsBinding.instance.addObserver(this);
       _observerBound = true;
+    }
+    if (!_consentListenerBound) {
+      // Call permissions wait for the first-run consent sheet; ask when
+      // it closes.
+      AppTelemetry.consentPromptOpen.addListener(() {
+        if (!AppTelemetry.consentPromptOpen.value) {
+          unawaited(_primeCallPermissionsIfNeeded());
+        }
+      });
+      _consentListenerBound = true;
     }
 
     final appActuallyForeground = await _isAppActuallyForeground();
@@ -1731,18 +1744,36 @@ class NotificationService with WidgetsBindingObserver {
     if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
       return;
     }
+    // Asked ahead of the first call (an incoming call answered on the lock
+    // screen cannot show the system prompt), but never on top of the
+    // first-run consent sheet; its listener calls this again on close.
+    if (!AppTelemetry.consentPromptDone) return;
     _callPermissionsPrimed = true;
+    bool needsAsking(PermissionStatus s) =>
+        !s.isGranted && !s.isPermanentlyDenied;
     try {
-      final micStatus = await Permission.microphone.status;
-      if (!micStatus.isGranted && !micStatus.isPermanentlyDenied) {
-        await Permission.microphone.request();
+      final askMic = needsAsking(await Permission.microphone.status);
+      final askCamera = needsAsking(await Permission.camera.status);
+      if (!askMic && !askCamera) return;
+      final context = navigatorKey?.currentContext;
+      if (context != null && context.mounted) {
+        final l10n = context.l10n;
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text(l10n.callPermissionTitle),
+            content: Text(l10n.callPermissionBody),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(l10n.commonContinue),
+              ),
+            ],
+          ),
+        );
       }
-    } catch (_) {}
-    try {
-      final cameraStatus = await Permission.camera.status;
-      if (!cameraStatus.isGranted && !cameraStatus.isPermanentlyDenied) {
-        await Permission.camera.request();
-      }
+      if (askMic) await Permission.microphone.request();
+      if (askCamera) await Permission.camera.request();
     } catch (_) {}
   }
 

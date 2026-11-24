@@ -3979,6 +3979,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Could not open Stripe. Please try again.'**
   String get payoutOpenFailed;
+
+  /// No description provided for @callPermissionTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Calls on Kindupp'**
+  String get callPermissionTitle;
+
+  /// No description provided for @callPermissionBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Kindupp uses your microphone and camera for voice and video calls. Allow access next so you can answer calls, even when your phone is locked.'**
+  String get callPermissionBody;
 }
 
 class _AppLocalizationsDelegate

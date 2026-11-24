@@ -33,6 +33,18 @@ class AppTelemetry {
   static bool get crashReportsEnabled =>
       AppPrefs.getBool(crashReportsPrefKey) ?? false;
 
+  /// [AppPrefs] key set once the first-run consent sheet has been shown.
+  static const String consentPromptShownPrefKey = 'telemetryPromptShown';
+
+  /// True while the first-run consent sheet is open.
+  static final ValueNotifier<bool> consentPromptOpen = ValueNotifier(false);
+
+  /// Other first-run prompts wait for this, so they never stack on the
+  /// consent sheet.
+  static bool get consentPromptDone =>
+      AppPrefs.getBool(consentPromptShownPrefKey) == true &&
+      !consentPromptOpen.value;
+
   /// Saves the user's crash-report choice and applies it.
   static Future<void> setCrashReportsEnabled(bool enabled) async {
     await AppPrefs.set(crashReportsPrefKey, enabled);

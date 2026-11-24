@@ -646,5 +646,7 @@
   "payoutStart": "Configurer avec Stripe",
   "payoutContinue": "Continuer la configuration",
   "payoutRefresh": "Vérifier le statut",
-  "payoutOpenFailed": "Impossible d'ouvrir Stripe. Veuillez réessayer."
+  "payoutOpenFailed": "Impossible d'ouvrir Stripe. Veuillez réessayer.",
+  "callPermissionTitle": "Appels sur Kindupp",
+  "callPermissionBody": "Kindupp utilise votre micro et votre caméra pour les appels vocaux et vidéo. Autorisez l'accès à l'étape suivante pour pouvoir répondre aux appels, même quand votre téléphone est verrouillé."
 }

@@ -14,7 +14,7 @@ class TelemetryConsentPrompt extends StatefulWidget {
   final Widget child;
   const TelemetryConsentPrompt({super.key, required this.child});
 
-  static const String shownPrefKey = 'telemetryPromptShown';
+  static const String shownPrefKey = AppTelemetry.consentPromptShownPrefKey;
 
   @override
   State<TelemetryConsentPrompt> createState() => _TelemetryConsentPromptState();
@@ -32,13 +32,18 @@ class _TelemetryConsentPromptState extends State<TelemetryConsentPrompt> {
     if (!mounted) return;
     // Marked before showing, so a dismissal or a crash never re-asks.
     unawaited(AppPrefs.set(TelemetryConsentPrompt.shownPrefKey, true));
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AppColors.canvas,
-      showDragHandle: true,
-      builder: (_) => const _ConsentSheet(),
-    );
+    AppTelemetry.consentPromptOpen.value = true;
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: AppColors.canvas,
+        showDragHandle: true,
+        builder: (_) => const _ConsentSheet(),
+      );
+    } finally {
+      AppTelemetry.consentPromptOpen.value = false;
+    }
   }
 
   @override

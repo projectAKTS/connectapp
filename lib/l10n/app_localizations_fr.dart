@@ -2181,4 +2181,11 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get payoutOpenFailed =>
       'Impossible d\'ouvrir Stripe. Veuillez réessayer.';
+
+  @override
+  String get callPermissionTitle => 'Appels sur Kindupp';
+
+  @override
+  String get callPermissionBody =>
+      'Kindupp utilise votre micro et votre caméra pour les appels vocaux et vidéo. Autorisez l\'accès à l\'étape suivante pour pouvoir répondre aux appels, même quand votre téléphone est verrouillé.';
 }

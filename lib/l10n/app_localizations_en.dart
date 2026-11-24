@@ -2134,4 +2134,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get payoutOpenFailed => 'Could not open Stripe. Please try again.';
+
+  @override
+  String get callPermissionTitle => 'Calls on Kindupp';
+
+  @override
+  String get callPermissionBody =>
+      'Kindupp uses your microphone and camera for voice and video calls. Allow access next so you can answer calls, even when your phone is locked.';
 }
