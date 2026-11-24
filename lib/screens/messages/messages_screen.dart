@@ -8,6 +8,7 @@ import 'package:connect_app/services/safety_service.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:connect_app/screens/search/find_helper_screen.dart';
 import 'package:connect_app/theme/tokens.dart';
 import 'package:connect_app/services/firestore_read_helper.dart';
 import 'package:connect_app/widgets/full_screen_back_gesture.dart';
@@ -176,10 +177,33 @@ class _MessagesScreenState extends State<MessagesScreen> {
 
         final rows = snap.data ?? const <Map<String, String>>[];
         if (rows.isEmpty) {
+          // Point somewhere useful instead of a dead end.
           return Center(
-            child: Text(
-              context.l10n.messagesEmpty,
-              style: const TextStyle(color: AppColors.muted, fontSize: 16),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.chat_bubble_outline,
+                      size: 40, color: AppColors.muted),
+                  const SizedBox(height: 12),
+                  Text(
+                    context.l10n.messagesEmpty,
+                    textAlign: TextAlign.center,
+                    style:
+                        const TextStyle(color: AppColors.muted, fontSize: 16),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                          builder: (_) => const FindHelperScreen()),
+                    ),
+                    icon: const Icon(Icons.search_rounded),
+                    label: Text(context.l10n.findHelperTitle),
+                  ),
+                ],
+              ),
             ),
           );
         }

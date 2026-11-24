@@ -152,10 +152,22 @@ class _SearchScreenState extends State<SearchScreen> {
       for (final d in _userScan ?? const []) {
         userDocs.putIfAbsent(d.id, () => d.data());
       }
+      // A topic name also finds helpers whose expertise answers it
+      // ("Moving to Canada" -> "Settlement tips").
+      final topic = _topicNamedBy(query);
       final scoredPeople = <(int, _UserHit)>[];
       userDocs.forEach((id, m) {
         final hit = _userFromDoc(id, m);
         if (hit == null) return;
+        if (topic != null &&
+            HelpTopics.helperFitsTopic(
+              topic: topic,
+              expertiseTags: strings(m['expertiseTags']),
+              legacyTags: strings(m['interestTags']),
+            )) {
+          scoredPeople.add((1, hit));
+          return;
+        }
         final score = searchScore(
           query: raw,
           name: hit.name,
@@ -225,6 +237,17 @@ class _SearchScreenState extends State<SearchScreen> {
     } finally {
       if (mounted && seq == _searchSeq) setState(() => _loading = false);
     }
+  }
+
+  /// The seeker topic that [query] names exactly, in any app language.
+  String? _topicNamedBy(String query) {
+    final locales =
+        AppLocalizations.supportedLocales.map(lookupAppLocalizations).toList();
+    for (final id in HelpTopics.topics) {
+      final names = {id, for (final l in locales) ValueLabels.topic(l, id)};
+      if (names.any((n) => _norm(n) == query)) return id;
+    }
+    return null;
   }
 
   /// A person result, or null for yourself, blocked people and accounts
@@ -735,14 +758,7 @@ class _Tabs extends StatelessWidget {
         label: Text(label),
         selected: sel,
         onSelected: (_) => onChanged(t),
-        selectedColor: AppColors.button,
-        backgroundColor: AppColors.card,
-        side: const BorderSide(color: AppColors.border),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        labelStyle: const TextStyle(
-          fontWeight: FontWeight.w600,
-          color: AppColors.text,
-        ),
       );
     }
 

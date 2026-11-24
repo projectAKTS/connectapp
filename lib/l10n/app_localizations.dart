@@ -1247,7 +1247,7 @@ abstract class AppLocalizations {
   /// No description provided for @onboardingTitle.
   ///
   /// In en, this message translates to:
-  /// **'Onboarding'**
+  /// **'Set up your profile'**
   String get onboardingTitle;
 
   /// No description provided for @onboardingProfileTitle.
@@ -1337,13 +1337,13 @@ abstract class AppLocalizations {
   /// No description provided for @onboardingHelperTitle.
   ///
   /// In en, this message translates to:
-  /// **'Helper setup'**
+  /// **'What can you help with?'**
   String get onboardingHelperTitle;
 
   /// No description provided for @onboardingHelperSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Set your preferred support mode and availability.'**
+  /// **'Pick what you have lived through and can share.'**
   String get onboardingHelperSubtitle;
 
   /// No description provided for @onboardingExpertise.
@@ -1385,13 +1385,13 @@ abstract class AppLocalizations {
   /// No description provided for @onboardingTopicsTitle.
   ///
   /// In en, this message translates to:
-  /// **'Topics'**
+  /// **'What do you need help with?'**
   String get onboardingTopicsTitle;
 
   /// No description provided for @onboardingTopicsSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Pick what you need help with or can help others with.'**
+  /// **'Pick a few topics. We\'ll show you posts and helpers for them.'**
   String get onboardingTopicsSubtitle;
 
   /// No description provided for @onboardingPickTopics.
@@ -3991,6 +3991,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Kindupp uses your microphone and camera for voice and video calls. Allow access next so you can answer calls, even when your phone is locked.'**
   String get callPermissionBody;
+
+  /// No description provided for @profileNewMember.
+  ///
+  /// In en, this message translates to:
+  /// **'New on Kindupp'**
+  String get profileNewMember;
+
+  /// No description provided for @homeHelpPrompt.
+  ///
+  /// In en, this message translates to:
+  /// **'What do you need help with?'**
+  String get homeHelpPrompt;
 }
 
 class _AppLocalizationsDelegate

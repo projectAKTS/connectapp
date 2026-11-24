@@ -1,5 +1,7 @@
 // lib/screens/posts/create_post_screen.dart
 import 'package:connect_app/l10n/l10n.dart';
+import 'package:connect_app/l10n/value_labels.dart';
+import 'package:connect_app/models/help_topics.dart';
 import 'dart:io';
 
 import 'package:connect_app/services/content_filter.dart';
@@ -889,7 +891,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                               children: [
                                 for (final t in selectedTags)
                                   _TagChip(
-                                    label: t,
+                                    label: ValueLabels.topic(context.l10n, t),
                                     onRemove: () =>
                                         setState(() => selectedTags.remove(t)),
                                   ),
@@ -911,6 +913,38 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                             ),
                           ],
                         ],
+                      ),
+                    ),
+                    // Topics drive matching and search, so they sit in view
+                    // instead of behind the # button.
+                    Container(
+                      color: Colors.white,
+                      height: 48,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        itemCount: HelpTopics.topics.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        itemBuilder: (context, i) {
+                          final topic = HelpTopics.topics[i];
+                          final on = selectedTags.contains(topic);
+                          return FilterChip(
+                            label:
+                                Text(ValueLabels.topic(context.l10n, topic)),
+                            selected: on,
+                            visualDensity: VisualDensity.compact,
+                            shape: const StadiumBorder(),
+                            onSelected: _isPosting
+                                ? null
+                                : (_) {
+                                    HapticFeedback.selectionClick();
+                                    setState(() => on
+                                        ? selectedTags.remove(topic)
+                                        : selectedTags.add(topic));
+                                  },
+                          );
+                        },
                       ),
                     ),
                     Container(

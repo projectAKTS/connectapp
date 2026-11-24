@@ -1,6 +1,8 @@
 // lib/screens/home/home_content_screen.dart
 import 'package:connect_app/config/mvp_features.dart';
 import 'package:connect_app/l10n/l10n.dart';
+import 'package:connect_app/l10n/value_labels.dart';
+import 'package:connect_app/models/help_topics.dart';
 import 'package:connect_app/services/safety_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
@@ -299,9 +301,10 @@ class HomeContentScreenState extends State<HomeContentScreen>
                 child: currentUid.isEmpty
                     ? _WelcomeCard(
                         name: firstFrom(fallbackName),
-                        onFindHelper: () => Navigator.of(context).push(
+                        onFindHelper: ([topic]) => Navigator.of(context).push(
                           MaterialPageRoute(
-                              builder: (_) => const FindHelperScreen()),
+                              builder: (_) =>
+                                  FindHelperScreen(initialTopic: topic)),
                         ),
                       )
                     : StreamBuilder<DocumentSnapshot>(
@@ -315,9 +318,10 @@ class HomeContentScreenState extends State<HomeContentScreen>
                               .toString();
                           return _WelcomeCard(
                             name: firstFrom(name),
-                            onFindHelper: () => Navigator.of(context).push(
+                            onFindHelper: ([topic]) => Navigator.of(context).push(
                               MaterialPageRoute(
-                                  builder: (_) => const FindHelperScreen()),
+                                  builder: (_) =>
+                                      FindHelperScreen(initialTopic: topic)),
                             ),
                           );
                         },
@@ -502,7 +506,7 @@ Widget homeTopBarForTest({required String currentUid}) =>
 
 @visibleForTesting
 Widget homeWelcomeCardForTest({required String name}) =>
-    _WelcomeCard(name: name, onFindHelper: () {});
+    _WelcomeCard(name: name, onFindHelper: ([_]) {});
 
 // ===== Top bar =====
 class _HomeTopBar extends StatefulWidget {
@@ -683,7 +687,9 @@ class _HomeTopBarState extends State<_HomeTopBar> {
 // ===== Welcome Card =====
 class _WelcomeCard extends StatefulWidget {
   final String name;
-  final VoidCallback onFindHelper;
+
+  /// Opens Find a helper, filtered by a topic when one is given.
+  final void Function([String? topic]) onFindHelper;
 
   const _WelcomeCard({
     required this.name,
@@ -729,38 +735,92 @@ class _WelcomeCardState extends State<_WelcomeCard> {
     final uid = HelperlyTestRuntime.currentUid;
     if (uid != null) _bindStreams(uid);
 
+    // Compact: greeting, one "what do you need?" field and topic chips,
+    // so the feed starts higher on the screen.
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      padding: const EdgeInsets.all(10),
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
       decoration: BoxDecoration(
-        color: AppColors.canvas,
-        borderRadius: BorderRadius.circular(AppRadius.xl),
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.border),
         boxShadow: const [AppShadows.soft],
       ),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(14, 16, 14, 14),
-        decoration: BoxDecoration(
-          color: AppColors.card,
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(
-            color: AppColors.border.withOpacity(0.45),
-            width: 1,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  context.l10n.homeWelcome(name),
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontSize: 19),
+                ),
+              ),
+              if (uid != null) _connectionsButton(uid),
+            ],
           ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(context.l10n.homeWelcome(name),
-                style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 14),
-            _TaupePill(
-              icon: Icons.manage_search_rounded,
-              label: context.l10n.findHelperTitle,
-              onTap: onFindHelper,
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: Material(
+              color: AppColors.button,
+              borderRadius: BorderRadius.circular(AppRadius.xl),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(AppRadius.xl),
+                onTap: () => onFindHelper(),
+                child: SizedBox(
+                  height: 48,
+                  child: Row(
+                    children: [
+                      const SizedBox(width: 14),
+                      const Icon(Icons.search_rounded,
+                          color: AppColors.primary, size: 22),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          context.l10n.homeHelpPrompt,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.muted,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
-            const SizedBox(height: 12),
-            if (uid != null)
-              StreamBuilder<DocumentSnapshot>(
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 36,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: HelpTopics.topics.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (context, i) {
+                final topic = HelpTopics.topics[i];
+                return ActionChip(
+                  label: Text(ValueLabels.topic(context.l10n, topic)),
+                  onPressed: () => onFindHelper(topic),
+                  shape: const StadiumBorder(),
+                  visualDensity: VisualDensity.compact,
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _connectionsButton(String uid) {
+    return StreamBuilder<DocumentSnapshot>(
                 stream: _userStream,
                 builder: (context, userSnap) {
                   int seenCount = 0;
@@ -832,11 +892,18 @@ class _WelcomeCardState extends State<_WelcomeCard> {
                                   (peerIds.length - seenCount).clamp(0, 9999);
 
                               return Stack(
+                                clipBehavior: Clip.none,
                                 children: [
-                                  _TaupePill(
-                                    icon: Icons.people_alt_outlined,
-                                    label: context.l10n.homeMyConnections,
-                                    onTap: () {
+                                  IconButton(
+                                    tooltip: context.l10n.homeMyConnections,
+                                    style: IconButton.styleFrom(
+                                      backgroundColor: AppColors.button,
+                                    ),
+                                    icon: const Icon(
+                                      Icons.people_alt_outlined,
+                                      color: AppColors.text,
+                                    ),
+                                    onPressed: () {
                                       Navigator.of(context).push(
                                         MaterialPageRoute(
                                           builder: (_) =>
@@ -847,8 +914,8 @@ class _WelcomeCardState extends State<_WelcomeCard> {
                                   ),
                                   if (recentCount > 0)
                                     Positioned(
-                                      right: 14,
-                                      top: 10,
+                                      right: -4,
+                                      top: -4,
                                       child: Container(
                                         padding: const EdgeInsets.symmetric(
                                           horizontal: 8,
@@ -878,55 +945,7 @@ class _WelcomeCardState extends State<_WelcomeCard> {
                     },
                   );
                 },
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TaupePill extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  const _TaupePill({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.button,
-      borderRadius: BorderRadius.circular(28),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(28),
-        child: SizedBox(
-          height: 56,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                Icon(icon, color: AppColors.muted, size: 22),
-                const SizedBox(width: 12),
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.text,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+              );
   }
 }
 

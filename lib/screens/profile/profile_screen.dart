@@ -267,6 +267,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  void _openChat() {
+    Navigator.of(context, rootNavigator: true).pushNamed(
+      '/chat',
+      arguments: {
+        'otherUserId': widget.userID,
+        'otherUserName': (userData?['fullName'] as String?) ?? 'Unknown',
+        'otherUserAvatar': (userData?['profilePicture'] ?? '').toString(),
+      },
+    );
+  }
+
   void _openConnectSheet() {
     final otherName = (userData?['fullName'] as String?) ?? 'Unknown';
     final ratePerMinute = (userData?['ratePerMinute'] is num)
@@ -327,18 +338,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   );
                 }),
 
-              // ✅ Global route -> ROOT
-              item(Icons.chat_bubble_outline, context.l10n.actionMessage, () {
-                rootNav.pushNamed(
-                  '/chat',
-                  arguments: {
-                    'otherUserId': widget.userID,
-                    'otherUserName': otherName,
-                    'otherUserAvatar':
-                        (userData?['profilePicture'] ?? '').toString(),
-                  },
-                );
-              }),
+              item(Icons.chat_bubble_outline, context.l10n.actionMessage,
+                  _openChat),
 
               item(Icons.call, context.l10n.actionAudioCall,
                   () => _startCall(isVideo: false)),
@@ -723,7 +724,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               _i((d.data() as Map<String, dynamic>)['likes']));
                       return StreamBuilder<QuerySnapshot>(
                         stream: _followersStream,
-                        builder: (context, followersSnap) => _HeaderStats(
+                        builder: (context, followersSnap) {
+                          final followers =
+                              followersSnap.data?.docs.length ?? 0;
+                          final following =
+                              _stringList(userData!['following']).length;
+                          // A row of zeros reads as empty: say "new" instead.
+                          if (posts.isEmpty &&
+                              followers == 0 &&
+                              following == 0 &&
+                              helpful == 0 &&
+                              ratingCount == 0) {
+                            return Align(
+                              alignment: Alignment.centerLeft,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: AppColors.accent
+                                      .withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(99),
+                                ),
+                                child: Text(
+                                  context.l10n.profileNewMember,
+                                  style: const TextStyle(
+                                    color: Color(0xFFA85A2A),
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+                          return _HeaderStats(
                           cells: [
                             (
                               '${posts.length}',
@@ -731,12 +764,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               null,
                             ),
                             (
-                              '${followersSnap.data?.docs.length ?? 0}',
+                              '$followers',
                               context.l10n.profileFollowers,
                               () => _openFollowList(FollowListType.followers),
                             ),
                             (
-                              '${_stringList(userData!['following']).length}',
+                              '$following',
                               context.l10n.profileFollowingList,
                               () => _openFollowList(FollowListType.following),
                             ),
@@ -748,7 +781,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 null,
                               ),
                           ],
-                        ),
+                        );
+                        },
                       );
                     },
                   ),
@@ -825,40 +859,54 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       label: context.l10n.profileEditProfile,
                       onTap: _openEditProfile,
                     )
-                  else
+                  else ...[
+                    // Getting help is the point: Message first, calls next
+                    // to it, Follow below.
                     Row(
                       children: [
                         Expanded(
-                          child: AbsorbPointer(
-                            absorbing: _followBusy,
-                            child: AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 160),
-                              child: isFollowing
-                                  ? _OutlinedActionButton(
-                                      key: const ValueKey('following-pill'),
-                                      icon: Icons.check_circle,
-                                      label: context.l10n.profileFollowing,
-                                      onTap: _toggleFollow,
-                                    )
-                                  : _FilledActionButton(
-                                      key: const ValueKey('follow-pill'),
-                                      icon: Icons.person_add_alt_1,
-                                      label: context.l10n.profileFollow,
-                                      onTap: _toggleFollow,
-                                    ),
-                            ),
+                          child: _FilledActionButton(
+                            icon: Icons.chat_bubble_outline,
+                            label: context.l10n.actionMessage,
+                            onTap: _openChat,
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _OutlinedActionButton(
-                            icon: Icons.flash_on_outlined,
-                            label: context.l10n.actionConnect,
+                        const SizedBox(width: 8),
+                        _IconActionButton(
+                          icon: Icons.call_outlined,
+                          tooltip: context.l10n.actionAudioCall,
+                          onTap: () => _startCall(isVideo: false),
+                        ),
+                        const SizedBox(width: 8),
+                        _IconActionButton(
+                          icon: Icons.videocam_outlined,
+                          tooltip: context.l10n.actionVideoCall,
+                          onTap: () => _startCall(isVideo: true),
+                        ),
+                        if (MvpFeatures.paidSessions) ...[
+                          const SizedBox(width: 8),
+                          _IconActionButton(
+                            icon: Icons.more_horiz,
+                            tooltip: context.l10n.actionConnect,
                             onTap: _openConnectSheet,
                           ),
-                        ),
+                        ],
                       ],
                     ),
+                    const SizedBox(height: 8),
+                    AbsorbPointer(
+                      absorbing: _followBusy,
+                      child: _OutlinedActionButton(
+                        icon: isFollowing
+                            ? Icons.check_circle
+                            : Icons.person_add_alt_1,
+                        label: isFollowing
+                            ? context.l10n.profileFollowing
+                            : context.l10n.profileFollow,
+                        onTap: _toggleFollow,
+                      ),
+                    ),
+                  ],
 
                   // ✅ Account hub (ONLY for current user)
                   if (isCurrentUser) ...[
@@ -973,6 +1021,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               );
                             },
                           ),
+                          // Bookings exist only with paid sessions on.
+                          if (MvpFeatures.paidSessions) ...[
                           const Divider(height: 1, color: AppColors.border),
                           StreamBuilder<DocumentSnapshot>(
                             stream: FirebaseFirestore.instance
@@ -1025,6 +1075,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               );
                             },
                           ),
+                          ],
                           if (MvpFeatures.paidSessions) ...[
                             const Divider(height: 1, color: AppColors.border),
                             _accountRow(
@@ -1596,6 +1647,38 @@ class _FilledActionButton extends StatelessWidget {
           const SizedBox(width: 8),
           Text(label),
         ],
+      ),
+    );
+  }
+}
+
+/// Square icon button next to Message (audio and video call).
+class _IconActionButton extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  const _IconActionButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: OutlinedButton(
+        onPressed: onTap,
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(52, 48),
+          padding: EdgeInsets.zero,
+          backgroundColor: AppColors.card,
+          foregroundColor: AppColors.primary,
+          side: const BorderSide(color: AppColors.border),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+        child: Icon(icon, size: 22, semanticLabel: tooltip),
       ),
     );
   }

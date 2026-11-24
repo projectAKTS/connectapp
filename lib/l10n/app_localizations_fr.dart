@@ -625,7 +625,7 @@ class AppLocalizationsFr extends AppLocalizations {
       'Impossible de téléverser la photo. Veuillez réessayer.';
 
   @override
-  String get onboardingTitle => 'Bienvenue';
+  String get onboardingTitle => 'Créez votre profil';
 
   @override
   String get onboardingProfileTitle => 'Votre profil';
@@ -671,11 +671,11 @@ class AppLocalizationsFr extends AppLocalizations {
   String get roleBoth => 'Les deux';
 
   @override
-  String get onboardingHelperTitle => 'Partager mon expérience';
+  String get onboardingHelperTitle => 'Pour quoi pouvez-vous aider ?';
 
   @override
   String get onboardingHelperSubtitle =>
-      'Choisissez votre mode d\'aide préféré et vos disponibilités.';
+      'Choisissez ce que vous avez vécu et pouvez partager.';
 
   @override
   String get onboardingExpertise => 'Domaines d\'expérience';
@@ -696,11 +696,11 @@ class AppLocalizationsFr extends AppLocalizations {
   String get onboardingAvailability => 'Disponibilités';
 
   @override
-  String get onboardingTopicsTitle => 'Sujets';
+  String get onboardingTopicsTitle => 'Pour quoi cherchez-vous de l\'aide ?';
 
   @override
   String get onboardingTopicsSubtitle =>
-      'Choisissez les sujets pour lesquels vous cherchez ou offrez de l\'aide.';
+      'Choisissez quelques sujets. Nous vous montrerons les publications et les personnes qui peuvent aider.';
 
   @override
   String get onboardingPickTopics => 'Choisissez quelques sujets';
@@ -2188,4 +2188,10 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get callPermissionBody =>
       'Kindupp utilise votre micro et votre caméra pour les appels vocaux et vidéo. Autorisez l\'accès à l\'étape suivante pour pouvoir répondre aux appels, même quand votre téléphone est verrouillé.';
+
+  @override
+  String get profileNewMember => 'Nouveau sur Kindupp';
+
+  @override
+  String get homeHelpPrompt => 'De quoi avez-vous besoin ?';
 }

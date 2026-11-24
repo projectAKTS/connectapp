@@ -122,6 +122,23 @@ ThemeData buildAppTheme() {
       clipBehavior: Clip.none,
     ),
 
+    // Selected chips read clearly: green tint, green border and text.
+    chipTheme: ChipThemeData(
+      backgroundColor: AppColors.card,
+      selectedColor: AppColors.selected,
+      side: WidgetStateBorderSide.resolveWith((states) => BorderSide(
+            color: states.contains(WidgetState.selected)
+                ? AppColors.selectedBorder
+                : AppColors.border,
+          )),
+      // A state-resolved label style rendered invisible text: keep it fixed.
+      labelStyle: const TextStyle(
+        fontWeight: FontWeight.w600,
+        color: AppColors.text,
+      ),
+      checkmarkColor: AppColors.primary,
+    ),
+
     listTileTheme: const ListTileThemeData(
       iconColor: AppColors.muted,
       textColor: AppColors.text,

@@ -22,7 +22,9 @@ import 'package:connect_app/widgets/full_screen_back_gesture.dart';
 
 /// FindHelperScreen — people-only search with helper-focused filters.
 class FindHelperScreen extends StatefulWidget {
-  const FindHelperScreen({Key? key}) : super(key: key);
+  /// A topic to filter by from the start (a Home topic chip).
+  final String? initialTopic;
+  const FindHelperScreen({Key? key, this.initialTopic}) : super(key: key);
 
   @override
   State<FindHelperScreen> createState() => _FindHelperScreenState();
@@ -52,6 +54,8 @@ class _FindHelperScreenState extends State<FindHelperScreen> {
   @override
   void initState() {
     super.initState();
+    final topic = widget.initialTopic;
+    if (topic != null) _selectedCategories.add(topic);
     _q.addListener(_onQueryChanged);
     _load();
   }

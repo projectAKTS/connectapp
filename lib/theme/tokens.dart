@@ -4,11 +4,18 @@ class AppColors {
   // Brand / accent
   static const primary = Color(0xFF0F4C46);
 
-  // Core surfaces
-  static const canvas = Color(0xFFFFFFFF); // Pure white background
-  static const card   = Color(0xFFFBFAF8); // Ultra-white cards
-  static const postCard = card;            // Home posts also pure white
-  static const button = Color(0xFFF7F5F2); // Soft beige for pills/buttons
+  /// Warm accent, used sparingly: Helpful, highlights.
+  static const accent = Color(0xFFE8915B);
+
+  /// Selected chips and options: light green fill, green border and text.
+  static const selected = Color(0xFFE3EFEC);
+  static const selectedBorder = Color(0x730F4C46); // primary at 45%
+
+  // Core surfaces: a warm off-white page so white cards stand out.
+  static const canvas = Color(0xFFFAF8F5);
+  static const card   = Color(0xFFFFFFFF);
+  static const postCard = card;
+  static const button = Color(0xFFF1EDE7); // Soft beige for pills/buttons
   static const surface = canvas;
   static const surfaceTonal = button;
 

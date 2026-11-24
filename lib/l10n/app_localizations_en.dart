@@ -613,7 +613,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'Couldn’t upload the photo. Please try again.';
 
   @override
-  String get onboardingTitle => 'Onboarding';
+  String get onboardingTitle => 'Set up your profile';
 
   @override
   String get onboardingProfileTitle => 'Profile basics';
@@ -659,11 +659,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get roleBoth => 'I’m open to both';
 
   @override
-  String get onboardingHelperTitle => 'Helper setup';
+  String get onboardingHelperTitle => 'What can you help with?';
 
   @override
   String get onboardingHelperSubtitle =>
-      'Set your preferred support mode and availability.';
+      'Pick what you have lived through and can share.';
 
   @override
   String get onboardingExpertise => 'Areas of expertise';
@@ -684,11 +684,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get onboardingAvailability => 'Availability';
 
   @override
-  String get onboardingTopicsTitle => 'Topics';
+  String get onboardingTopicsTitle => 'What do you need help with?';
 
   @override
   String get onboardingTopicsSubtitle =>
-      'Pick what you need help with or can help others with.';
+      'Pick a few topics. We\'ll show you posts and helpers for them.';
 
   @override
   String get onboardingPickTopics => 'Pick a few topics';
@@ -2141,4 +2141,10 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get callPermissionBody =>
       'Kindupp uses your microphone and camera for voice and video calls. Allow access next so you can answer calls, even when your phone is locked.';
+
+  @override
+  String get profileNewMember => 'New on Kindupp';
+
+  @override
+  String get homeHelpPrompt => 'What do you need help with?';
 }

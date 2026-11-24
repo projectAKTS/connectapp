@@ -377,7 +377,7 @@ class _ActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = active ? AppColors.primary : AppColors.muted;
+    final color = active ? AppColors.accent : AppColors.muted;
     return Semantics(
       button: onTap != null,
       label: count > 0 ? '$label, $count' : label,
