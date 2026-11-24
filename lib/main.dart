@@ -102,10 +102,8 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       now: DateTime.now(),
       ownInstallationId: await PushInstallationId.read(),
     );
-    debugPrint(
-      '[DIAG][android_call] background_decision '
-      'kind=${decision.kind.name} reason=${decision.reason}',
-    );
+    debugPrint('[DIAG][android_call] background_decision '
+        'kind=${decision.kind.name} reason=${decision.reason}');
     await AndroidIncomingCall.apply(decision);
     // Not awaited: FlutterFire runs background messages one at a time and
     // waits for each handler, so awaiting the ring window would hold back a
@@ -119,26 +117,27 @@ Future<void> main() async {
 
   // Device settings load alongside Firebase, so startup takes no longer.
   final prefsLoading = AppPrefs.load();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   StagingFirebaseOptions.assertIsolated(Firebase.app().options.projectId);
   await prefsLoading;
   LocaleController.instance.loadSaved();
   await AppFormat.init();
   await AppTelemetry.init();
-  unawaited(FirestoreReadHelper.ensureNetworkEnabled(reason: 'app_start'));
-
-  const useDebugAppCheck = bool.fromEnvironment(
-    'APP_CHECK_DEBUG',
-    defaultValue: false,
+  unawaited(
+    FirestoreReadHelper.ensureNetworkEnabled(reason: 'app_start'),
   );
+
+  const useDebugAppCheck =
+      bool.fromEnvironment('APP_CHECK_DEBUG', defaultValue: false);
   try {
     await FirebaseAppCheck.instance.activate(
       // DeviceCheck is the configured Apple provider. App Attest needs the
       // App Attest entitlement plus Firebase registration; until both exist,
       // every App Attest token exchange is rejected (403).
-      appleProvider: useDebugAppCheck
-          ? AppleProvider.debug
-          : AppleProvider.deviceCheck,
+      appleProvider:
+          useDebugAppCheck ? AppleProvider.debug : AppleProvider.deviceCheck,
       androidProvider: useDebugAppCheck
           ? AndroidProvider.debug
           : AndroidProvider.playIntegrity,
@@ -274,7 +273,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
-    unawaited(FirestoreReadHelper.ensureNetworkEnabled(reason: 'app_resumed'));
+    unawaited(
+      FirestoreReadHelper.ensureNetworkEnabled(reason: 'app_resumed'),
+    );
     unawaited(_ensureForegroundBootstrap());
   }
 
@@ -519,7 +520,9 @@ class _AuthGateState extends State<AuthGate> {
         return ValueListenableBuilder<bool>(
           valueListenable: accountDeletionInProgress,
           builder: (_, deleting, __) => deleting
-              ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+              ? const Scaffold(
+                  body: Center(child: CircularProgressIndicator()),
+                )
               : _profileGate(user),
         );
       },
@@ -550,8 +553,7 @@ class _AuthGateState extends State<AuthGate> {
             .isNotEmpty);
         // spokenLanguages or the legacy single `language` field.
         final hasLanguage = ProfileLanguages.hasAny(data);
-        final hasTopics =
-            data['interestTags'] is List &&
+        final hasTopics = data['interestTags'] is List &&
             (data['interestTags'] as List).isNotEmpty;
 
         final needsOnboarding =

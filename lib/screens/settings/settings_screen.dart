@@ -27,10 +27,8 @@ class SettingsScreen extends StatefulWidget {
     SafetyService.instance.stop();
     await FirebaseAuth.instance.signOut();
     if (!context.mounted) return;
-    Navigator.of(
-      context,
-      rootNavigator: true,
-    ).pushNamedAndRemoveUntil('/login', (route) => false);
+    Navigator.of(context, rootNavigator: true)
+        .pushNamedAndRemoveUntil('/login', (route) => false);
   }
 
   @override
@@ -47,11 +45,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final note = Localizations.localeOf(context).languageCode == 'en'
         ? ''
         : '_${context.l10n.settingsLegalEnglishOnly}_\n\n';
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => LegalScreen(title: title, markdown: '$note$markdown'),
-      ),
-    );
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => LegalScreen(title: title, markdown: '$note$markdown'),
+    ));
   }
 
   Future<void> _openExternal(String address) async {
@@ -83,10 +79,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(
-              l10n.commonDelete,
-              style: const TextStyle(color: AppColors.danger),
-            ),
+            child: Text(l10n.commonDelete,
+                style: const TextStyle(color: AppColors.danger)),
           ),
         ],
       ),
@@ -107,12 +101,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       try {
         final result =
             await FirebaseFunctions.instanceFor(region: 'us-central1')
-                .httpsCallable(
-                  'deleteAccount',
-                  options: HttpsCallableOptions(
-                    timeout: const Duration(seconds: 60),
-                  ),
-                )
+                .httpsCallable('deleteAccount',
+                    options: HttpsCallableOptions(
+                        timeout: const Duration(seconds: 60)))
                 .call<Object?>();
         // complete=false: the account is gone but some cleanup is retried
         // later, so the message says "within 30 days" rather than "deleted".
@@ -127,9 +118,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             'isHelper': false,
           }, SetOptions(merge: true));
         } catch (_) {
-          messenger.showSnackBar(
-            SnackBar(content: Text(l10n.settingsDeleteFailed)),
-          );
+          messenger.showSnackBar(SnackBar(
+            content: Text(l10n.settingsDeleteFailed),
+          ));
           return;
         }
       }
@@ -143,21 +134,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     if (!rootNavigator.mounted) return;
     unawaited(
-      rootNavigator.pushNamedAndRemoveUntil('/login', (route) => false),
-    );
+        rootNavigator.pushNamedAndRemoveUntil('/login', (route) => false));
     await showDialog<void>(
       context: rootNavigator.context,
       builder: (ctx) => AlertDialog(
-        title: Text(
-          deletedNow
-              ? l10n.settingsDeletedTitle
-              : l10n.settingsDeletionRequestedTitle,
-        ),
-        content: Text(
-          deletedNow
-              ? l10n.settingsDeletedBody
-              : l10n.settingsDeletionRequestedBody,
-        ),
+        title: Text(deletedNow
+            ? l10n.settingsDeletedTitle
+            : l10n.settingsDeletionRequestedTitle),
+        content: Text(deletedNow
+            ? l10n.settingsDeletedBody
+            : l10n.settingsDeletionRequestedBody),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -170,12 +156,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    Widget row(
-      IconData icon,
-      String title,
-      VoidCallback onTap, {
-      Color color = AppColors.text,
-    }) {
+    Widget row(IconData icon, String title, VoidCallback onTap,
+        {Color color = AppColors.text}) {
       return ListTile(
         leading: Icon(icon, color: color),
         title: Text(title, style: TextStyle(color: color)),
@@ -185,20 +167,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
 
     Widget section(String title) => Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 6),
-      child: Text(
-        title,
-        style: const TextStyle(
-          color: AppColors.muted,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 6),
+          child: Text(title,
+              style: const TextStyle(
+                  color: AppColors.muted, fontWeight: FontWeight.w600)),
+        );
 
     final l10n = context.l10n;
-    final languageName = lookupAppLocalizations(
-      LocaleController.instance.effective,
-    ).languageName;
+    final languageName =
+        lookupAppLocalizations(LocaleController.instance.effective)
+            .languageName;
     return Scaffold(
       backgroundColor: AppColors.canvas,
       appBar: AppBar(title: Text(l10n.settingsTitle)),
@@ -215,10 +193,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           SwitchListTile(
             key: const Key('settings_usage_stats'),
-            secondary: const Icon(
-              Icons.insights_outlined,
-              color: AppColors.text,
-            ),
+            secondary:
+                const Icon(Icons.insights_outlined, color: AppColors.text),
             title: Text(l10n.settingsUsageStats),
             subtitle: Text(l10n.settingsUsageStatsSubtitle),
             value: _usageStats,
@@ -229,10 +205,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           SwitchListTile(
             key: const Key('settings_crash_reports'),
-            secondary: const Icon(
-              Icons.bug_report_outlined,
-              color: AppColors.text,
-            ),
+            secondary:
+                const Icon(Icons.bug_report_outlined, color: AppColors.text),
             title: Text(l10n.settingsCrashReports),
             subtitle: Text(l10n.settingsCrashReportsSubtitle),
             value: _crashReports,
@@ -242,45 +216,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
           ),
           section(l10n.settingsSectionHelp),
+          row(Icons.support_agent_outlined, l10n.settingsSupport,
+              () => _openExternal(LegalTexts.supportUrl)),
+          row(Icons.health_and_safety_outlined, l10n.settingsHelpSafety,
+              () => _open(context, l10n.settingsHelpSafety, LegalTexts.safety)),
           row(
-            Icons.support_agent_outlined,
-            l10n.settingsSupport,
-            () => _openExternal(LegalTexts.supportUrl),
-          ),
-          row(
-            Icons.health_and_safety_outlined,
-            l10n.settingsHelpSafety,
-            () => _open(context, l10n.settingsHelpSafety, LegalTexts.safety),
-          ),
-          row(
-            Icons.groups_outlined,
-            l10n.settingsGuidelines,
-            () =>
-                _open(context, l10n.settingsGuidelines, LegalTexts.guidelines),
-          ),
+              Icons.groups_outlined,
+              l10n.settingsGuidelines,
+              () => _open(
+                  context, l10n.settingsGuidelines, LegalTexts.guidelines)),
           section(l10n.settingsSectionLegal),
-          row(
-            Icons.description_outlined,
-            l10n.settingsTerms,
-            () => _openExternal(LegalTexts.termsUrl),
-          ),
-          row(
-            Icons.privacy_tip_outlined,
-            l10n.settingsPrivacy,
-            () => _openExternal(LegalTexts.privacyUrl),
-          ),
+          row(Icons.description_outlined, l10n.settingsTerms,
+              () => _openExternal(LegalTexts.termsUrl)),
+          row(Icons.privacy_tip_outlined, l10n.settingsPrivacy,
+              () => _openExternal(LegalTexts.privacyUrl)),
           section(l10n.settingsSectionAccount),
-          row(
-            Icons.logout,
-            l10n.settingsLogOut,
-            () => SettingsScreen.signOut(context),
-          ),
-          row(
-            Icons.delete_outline,
-            l10n.settingsDeleteAccount,
-            () => _deleteAccount(context),
-            color: AppColors.danger,
-          ),
+          row(Icons.logout, l10n.settingsLogOut,
+              () => SettingsScreen.signOut(context)),
+          row(Icons.delete_outline, l10n.settingsDeleteAccount,
+              () => _deleteAccount(context),
+              color: AppColors.danger),
           const SizedBox(height: 32),
         ],
       ),
