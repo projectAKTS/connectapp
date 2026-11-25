@@ -2,7 +2,7 @@ import 'package:connect_app/navigation/swipe_back.dart';
 import 'package:flutter/material.dart';
 import 'tokens.dart';
 
-/// Global theme tuned to the soft, mostly-white palette.
+/// Global theme, design B "Ink & Sage".
 ThemeData buildAppTheme() {
   const family = 'SF Pro';
 
@@ -11,19 +11,19 @@ ThemeData buildAppTheme() {
       fontFamily: AppFonts.serif,
       fontFamilyFallback: AppFonts.serifFallback,
       fontSize: 32,
-      height: 1.15,
-      fontWeight: FontWeight.w400,
+      height: 1.1,
+      fontWeight: FontWeight.w700,
       color: AppColors.text,
-      letterSpacing: -0.2,
+      letterSpacing: -1.0,
     ),
     titleMedium: TextStyle(
       fontFamily: AppFonts.serif,
       fontFamilyFallback: AppFonts.serifFallback,
-      fontSize: 22,
+      fontSize: 21,
       height: 1.25,
-      fontWeight: FontWeight.w400,
+      fontWeight: AppFonts.displayWeight,
       color: AppColors.text,
-      letterSpacing: -0.2,
+      letterSpacing: -0.5,
     ),
     bodyLarge: TextStyle(
       fontSize: 16,
@@ -66,8 +66,9 @@ ThemeData buildAppTheme() {
         fontFamily: AppFonts.serif,
         fontFamilyFallback: AppFonts.serifFallback,
         color: AppColors.text,
-        fontSize: 21,
-        fontWeight: FontWeight.w400,
+        fontSize: 18,
+        fontWeight: AppFonts.displayWeight,
+        letterSpacing: -0.3,
       ),
     ),
 
@@ -89,9 +90,7 @@ ThemeData buildAppTheme() {
         foregroundColor: AppColors.text,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadius.sm),
-        ),
+        shape: const StadiumBorder(),
       ).copyWith(
         overlayColor: MaterialStateProperty.all(
           AppColors.button.withOpacity(0.65),
@@ -104,11 +103,13 @@ ThemeData buildAppTheme() {
       style: ElevatedButton.styleFrom(
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        // Ink pill: the signature button of design B.
+        shape: const StadiumBorder(),
         elevation: 0,
         shadowColor: Colors.transparent,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        textStyle: const TextStyle(
+            fontWeight: FontWeight.w600, fontSize: 16, letterSpacing: -0.2),
       ),
     ),
 
@@ -119,10 +120,7 @@ ThemeData buildAppTheme() {
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        side: BorderSide(
-          color: AppColors.border.withOpacity(0.6),
-          width: 1,
-        ),
+        side: BorderSide.none,
       ),
       shadowColor: Colors.transparent,
       clipBehavior: Clip.none,

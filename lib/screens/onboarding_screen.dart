@@ -57,7 +57,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   bool get _needsHelperSetup => _role == 'helper' || _role == 'both';
 
   // Booking parity (CTA + pills)
-  static const _evergreen = Color(0xFF0F4C46);
+  static const _evergreen = AppColors.primary;
   static const _evergreenPressed = Color(0xFF0C3D39);
 
   ButtonStyle _ctaStyle() => ButtonStyle(

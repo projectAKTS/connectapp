@@ -628,9 +628,9 @@ class _HomeTopBarState extends State<_HomeTopBar> {
                         clipBehavior: Clip.none,
                         children: [
                           Container(
-                            decoration: BoxDecoration(
-                              color: AppColors.chip,
-                              borderRadius: BorderRadius.circular(AppRadius.md),
+                            decoration: const BoxDecoration(
+                              color: AppColors.card,
+                              shape: BoxShape.circle,
                             ),
                             child: IconButton(
                               icon: const Icon(
@@ -735,66 +735,74 @@ class _WelcomeCardState extends State<_WelcomeCard> {
     final uid = HelperlyTestRuntime.currentUid;
     if (uid != null) _bindStreams(uid);
 
-    // Compact: greeting, one "what do you need?" field and topic chips,
-    // so the feed starts higher on the screen.
-    // No card around it: the greeting sits on the ivory page.
+    // Design B: greeting and the help field sit in one ink panel, topic
+    // chips follow on the porcelain page.
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 16, 14),
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  context.l10n.homeWelcome(name),
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontSize: 26, letterSpacing: -0.3),
-                ),
-              ),
-              if (uid != null) _connectionsButton(uid),
-            ],
-          ),
-          const SizedBox(height: 14),
           Container(
-            margin: const EdgeInsets.only(right: 4),
+            padding: const EdgeInsets.fromLTRB(20, 20, 14, 16),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(AppRadius.md),
-              boxShadow: const [AppShadows.soft],
+              color: AppColors.primary,
+              borderRadius: BorderRadius.circular(AppRadius.xl),
             ),
-            child: Material(
-              color: AppColors.card,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.md),
-                side: const BorderSide(color: AppColors.border),
-              ),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(AppRadius.md),
-                onTap: () => onFindHelper(),
-                child: SizedBox(
-                  height: 52,
-                  child: Row(
-                    children: [
-                      const SizedBox(width: 14),
-                      const Icon(Icons.search_rounded,
-                          color: AppColors.primary, size: 22),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          context.l10n.homeHelpPrompt,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w500,
-                            color: AppColors.muted,
-                          ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        context.l10n.homeWelcome(name),
+                        style: const TextStyle(
+                          color: AppColors.canvas,
+                          fontSize: 28,
+                          height: 1.15,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.8,
                         ),
                       ),
-                    ],
+                    ),
+                    if (uid != null) _connectionsButton(uid),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: Material(
+                    color: AppColors.card,
+                    shape: const StadiumBorder(),
+                    child: InkWell(
+                      customBorder: const StadiumBorder(),
+                      onTap: () => onFindHelper(),
+                      child: SizedBox(
+                        height: 52,
+                        child: Row(
+                          children: [
+                            const SizedBox(width: 18),
+                            const Icon(Icons.search_rounded,
+                                color: AppColors.accentText, size: 22),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                context.l10n.homeHelpPrompt,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w500,
+                                  color: AppColors.muted,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-              ),
+              ],
             ),
           ),
           const SizedBox(height: 10),
@@ -898,11 +906,11 @@ class _WelcomeCardState extends State<_WelcomeCard> {
                                   IconButton(
                                     tooltip: context.l10n.homeMyConnections,
                                     style: IconButton.styleFrom(
-                                      backgroundColor: AppColors.button,
+                                      backgroundColor: const Color(0x1FF1F1EE),
                                     ),
                                     icon: const Icon(
                                       Icons.people_alt_outlined,
-                                      color: AppColors.text,
+                                      color: AppColors.canvas,
                                     ),
                                     onPressed: () {
                                       Navigator.of(context).push(
@@ -923,14 +931,14 @@ class _WelcomeCardState extends State<_WelcomeCard> {
                                           vertical: 2,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: AppColors.primary,
+                                          color: AppColors.accent,
                                           borderRadius:
                                               BorderRadius.circular(12),
                                         ),
                                         child: Text(
                                           '+$recentCount',
                                           style: const TextStyle(
-                                            color: Colors.white,
+                                            color: AppColors.primary,
                                             fontSize: 12,
                                             fontWeight: FontWeight.bold,
                                           ),

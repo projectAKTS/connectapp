@@ -148,33 +148,95 @@ class _MainScaffoldState extends State<MainScaffold> {
             ),
           ],
         ),
-        bottomNavigationBar: BottomNavigationBar(
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: AppColors.card,
-          currentIndex: _selectedIndex,
-          selectedItemColor: AppColors.primary,
-          unselectedItemColor: AppColors.muted,
-          selectedIconTheme: const IconThemeData(color: AppColors.primary),
-          unselectedIconTheme: const IconThemeData(color: AppColors.muted),
-          selectedLabelStyle: const TextStyle(
-            fontWeight: FontWeight.w600,
-            fontSize: 12,
-          ),
-          unselectedLabelStyle: const TextStyle(
-            fontWeight: FontWeight.w500,
-            fontSize: 12,
-          ),
+        bottomNavigationBar: _InkTabBar(
+          index: _selectedIndex,
           onTap: _onItemTapped,
           items: [
-            BottomNavigationBarItem(
-                icon: const Icon(Icons.home), label: context.l10n.tabHome),
-            BottomNavigationBarItem(
-                icon: const Icon(Icons.search), label: context.l10n.tabSearch),
-            BottomNavigationBarItem(
-                icon: const Icon(Icons.add_box), label: context.l10n.tabPost),
-            BottomNavigationBarItem(
-                icon: const Icon(Icons.person), label: context.l10n.tabProfile),
+            (Icons.home_outlined, Icons.home_rounded, context.l10n.tabHome),
+            (Icons.search_rounded, Icons.search_rounded, context.l10n.tabSearch),
+            (Icons.add_rounded, Icons.add_rounded, context.l10n.tabPost),
+            (Icons.person_outline_rounded, Icons.person_rounded,
+                context.l10n.tabProfile),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Floating ink capsule; the active tab sits in a porcelain circle.
+class _InkTabBar extends StatelessWidget {
+  final int index;
+  final ValueChanged<int> onTap;
+  final List<(IconData, IconData, String)> items;
+
+  const _InkTabBar({
+    required this.index,
+    required this.onTap,
+    required this.items,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: AppColors.canvas,
+      child: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.only(bottom: 8),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 6, 24, 4),
+          child: Container(
+            height: 62,
+            decoration: BoxDecoration(
+              color: AppColors.primary,
+              borderRadius: BorderRadius.circular(31),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x3315171A),
+                  blurRadius: 24,
+                  offset: Offset(0, 10),
+                  spreadRadius: -8,
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                for (var i = 0; i < items.length; i++)
+                  Semantics(
+                    button: true,
+                    selected: i == index,
+                    label: items[i].$3,
+                    child: Tooltip(
+                      message: items[i].$3,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => onTap(i),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 220),
+                          curve: Curves.easeOutCubic,
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: i == index
+                                ? AppColors.canvas
+                                : Colors.transparent,
+                          ),
+                          child: Icon(
+                            i == index ? items[i].$2 : items[i].$1,
+                            size: 24,
+                            color: i == index
+                                ? AppColors.primary
+                                : const Color(0xB3F1F1EE),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ),
       ),
     );

@@ -1481,7 +1481,7 @@ class _QuickEditor extends StatelessWidget {
           fontFamilyFallback: AppFonts.serifFallback,
           color: Color(0xFF9C9A96),
           fontSize: 19,
-          fontWeight: FontWeight.w400,
+          fontWeight: AppFonts.displayWeight,
         ),
       ),
       onChanged: (_) => onChanged(),

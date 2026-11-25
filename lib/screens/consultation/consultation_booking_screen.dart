@@ -45,7 +45,7 @@ class _ConsultationBookingScreenState extends State<ConsultationBookingScreen> {
   /// The current booking attempt's payment id; see processPayment.
   String? _paymentOperationId;
 
-  static const _evergreen = Color(0xFF0F4C46);
+  static const _evergreen = AppColors.primary;
 
   User? _user;
   late final StreamSubscription<User?> _authSub;
