@@ -2,7 +2,7 @@ import 'package:connect_app/navigation/swipe_back.dart';
 import 'package:flutter/material.dart';
 import 'tokens.dart';
 
-/// Global theme, design B "Ink & Sage".
+/// Global theme, design D "Paper & Clay": flat and quiet.
 ThemeData buildAppTheme() {
   const family = 'SF Pro';
 
@@ -10,20 +10,20 @@ ThemeData buildAppTheme() {
     displaySmall: TextStyle(
       fontFamily: AppFonts.serif,
       fontFamilyFallback: AppFonts.serifFallback,
-      fontSize: 32,
-      height: 1.1,
-      fontWeight: FontWeight.w700,
+      fontSize: 28,
+      height: 1.15,
+      fontWeight: FontWeight.w600,
       color: AppColors.text,
-      letterSpacing: -1.0,
+      letterSpacing: -0.5,
     ),
     titleMedium: TextStyle(
       fontFamily: AppFonts.serif,
       fontFamilyFallback: AppFonts.serifFallback,
-      fontSize: 21,
-      height: 1.25,
+      fontSize: 18,
+      height: 1.3,
       fontWeight: AppFonts.displayWeight,
       color: AppColors.text,
-      letterSpacing: -0.5,
+      letterSpacing: -0.2,
     ),
     bodyLarge: TextStyle(
       fontSize: 16,
@@ -66,16 +66,16 @@ ThemeData buildAppTheme() {
         fontFamily: AppFonts.serif,
         fontFamilyFallback: AppFonts.serifFallback,
         color: AppColors.text,
-        fontSize: 18,
+        fontSize: 17,
         fontWeight: AppFonts.displayWeight,
-        letterSpacing: -0.3,
+        letterSpacing: -0.2,
       ),
     ),
 
     // Inputs / search pill
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: AppColors.button, // Soft Surface
+      fillColor: AppColors.button, // flat field, no border
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       border: OutlineInputBorder(
         borderSide: BorderSide.none,
@@ -103,11 +103,11 @@ ThemeData buildAppTheme() {
       style: ElevatedButton.styleFrom(
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
-        // Ink pill: the signature button of design B.
-        shape: const StadiumBorder(),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.sm)),
         elevation: 0,
         shadowColor: Colors.transparent,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
         textStyle: const TextStyle(
             fontWeight: FontWeight.w600, fontSize: 16, letterSpacing: -0.2),
       ),
@@ -120,7 +120,7 @@ ThemeData buildAppTheme() {
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        side: BorderSide.none,
+        side: const BorderSide(color: AppColors.border),
       ),
       shadowColor: Colors.transparent,
       clipBehavior: Clip.none,

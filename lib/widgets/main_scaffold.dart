@@ -154,7 +154,8 @@ class _MainScaffoldState extends State<MainScaffold> {
           items: [
             (Icons.home_outlined, Icons.home_rounded, context.l10n.tabHome),
             (Icons.search_rounded, Icons.search_rounded, context.l10n.tabSearch),
-            (Icons.add_rounded, Icons.add_rounded, context.l10n.tabPost),
+            (Icons.add_circle_outline_rounded, Icons.add_circle_rounded,
+                context.l10n.tabPost),
             (Icons.person_outline_rounded, Icons.person_rounded,
                 context.l10n.tabProfile),
           ],
@@ -164,7 +165,8 @@ class _MainScaffoldState extends State<MainScaffold> {
   }
 }
 
-/// Floating ink capsule; the active tab sits in a porcelain circle.
+/// Quiet paper bar: icons only, a hairline on top, a clay dot under the
+/// active tab. Labels stay for screen readers.
 class _InkTabBar extends StatelessWidget {
   final int index;
   final ValueChanged<int> onTap;
@@ -178,64 +180,55 @@ class _InkTabBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: AppColors.canvas,
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        color: AppColors.canvas,
+        border: Border(top: BorderSide(color: AppColors.border)),
+      ),
       child: SafeArea(
         top: false,
-        minimum: const EdgeInsets.only(bottom: 8),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 6, 24, 4),
-          child: Container(
-            height: 62,
-            decoration: BoxDecoration(
-              color: AppColors.primary,
-              borderRadius: BorderRadius.circular(31),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x3315171A),
-                  blurRadius: 24,
-                  offset: Offset(0, 10),
-                  spreadRadius: -8,
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                for (var i = 0; i < items.length; i++)
-                  Semantics(
+        child: SizedBox(
+          height: 56,
+          child: Row(
+            children: [
+              for (var i = 0; i < items.length; i++)
+                Expanded(
+                  child: Semantics(
                     button: true,
                     selected: i == index,
                     label: items[i].$3,
-                    child: Tooltip(
-                      message: items[i].$3,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => onTap(i),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 220),
-                          curve: Curves.easeOutCubic,
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: i == index
-                                ? AppColors.canvas
-                                : Colors.transparent,
-                          ),
-                          child: Icon(
+                    excludeSemantics: true,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => onTap(i),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
                             i == index ? items[i].$2 : items[i].$1,
-                            size: 24,
+                            size: 25,
                             color: i == index
                                 ? AppColors.primary
-                                : const Color(0xB3F1F1EE),
+                                : AppColors.muted,
                           ),
-                        ),
+                          const SizedBox(height: 5),
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            width: 4,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: i == index
+                                  ? AppColors.accent
+                                  : Colors.transparent,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
-              ],
-            ),
+                ),
+            ],
           ),
         ),
       ),

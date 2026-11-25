@@ -561,13 +561,25 @@ class _HomeTopBarState extends State<_HomeTopBar> {
   @override
   Widget build(BuildContext context) {
     final currentUid = widget.currentUid;
-    final titleStyle = Theme.of(context).textTheme.displaySmall;
-
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+      padding: const EdgeInsets.fromLTRB(20, 6, 8, 0),
       child: Row(
         children: [
-          Text(context.l10n.homeTitle, style: titleStyle),
+          Semantics(
+            header: true,
+            label: context.l10n.homeTitle,
+            child: const ExcludeSemantics(
+              child: Text(
+                'Kindupp',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.4,
+                  color: AppColors.text,
+                ),
+              ),
+            ),
+          ),
           const Spacer(),
           StreamBuilder<DocumentSnapshot>(
             stream: _userStream,
@@ -627,27 +639,21 @@ class _HomeTopBarState extends State<_HomeTopBar> {
                       return Stack(
                         clipBehavior: Clip.none,
                         children: [
-                          Container(
-                            decoration: const BoxDecoration(
-                              color: AppColors.card,
-                              shape: BoxShape.circle,
+                          IconButton(
+                            icon: const Icon(
+                              Icons.chat_bubble_outline_rounded,
+                              color: AppColors.primary,
                             ),
-                            child: IconButton(
-                              icon: const Icon(
-                                Icons.chat_bubble_outline_rounded,
-                                color: AppColors.primary,
-                              ),
-                              tooltip: context.l10n.homeMessages,
-                              onPressed: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => MessagesScreen(
-                                      userId: currentUid,
-                                    ),
+                            tooltip: context.l10n.homeMessages,
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => MessagesScreen(
+                                    userId: currentUid,
                                   ),
-                                );
-                              },
-                            ),
+                                ),
+                              );
+                            },
                           ),
                           if (unread > 0)
                             Positioned(
@@ -657,7 +663,7 @@ class _HomeTopBarState extends State<_HomeTopBar> {
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: AppColors.primary,
+                                  color: AppColors.accent,
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Text(
@@ -735,74 +741,53 @@ class _WelcomeCardState extends State<_WelcomeCard> {
     final uid = HelperlyTestRuntime.currentUid;
     if (uid != null) _bindStreams(uid);
 
-    // Design B: greeting and the help field sit in one ink panel, topic
-    // chips follow on the porcelain page.
+    // Design D: greeting, one flat help field, quiet topic chips.
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 14),
+      padding: const EdgeInsets.fromLTRB(20, 18, 12, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(20, 20, 14, 16),
-            decoration: BoxDecoration(
-              color: AppColors.primary,
-              borderRadius: BorderRadius.circular(AppRadius.xl),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        context.l10n.homeWelcome(name),
-                        style: const TextStyle(
-                          color: AppColors.canvas,
-                          fontSize: 28,
-                          height: 1.15,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.8,
-                        ),
-                      ),
-                    ),
-                    if (uid != null) _connectionsButton(uid),
-                  ],
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  context.l10n.homeWelcome(name),
+                  style: Theme.of(context).textTheme.displaySmall,
                 ),
-                const SizedBox(height: 18),
-                Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: Material(
-                    color: AppColors.card,
-                    shape: const StadiumBorder(),
-                    child: InkWell(
-                      customBorder: const StadiumBorder(),
-                      onTap: () => onFindHelper(),
-                      child: SizedBox(
-                        height: 52,
-                        child: Row(
-                          children: [
-                            const SizedBox(width: 18),
-                            const Icon(Icons.search_rounded,
-                                color: AppColors.accentText, size: 22),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                context.l10n.homeHelpPrompt,
-                                style: const TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w500,
-                                  color: AppColors.muted,
-                                ),
-                              ),
-                            ),
-                          ],
+              ),
+              if (uid != null) _connectionsButton(uid),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Material(
+              color: AppColors.button,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                onTap: () => onFindHelper(),
+                child: SizedBox(
+                  height: 48,
+                  child: Row(
+                    children: [
+                      const SizedBox(width: 14),
+                      const Icon(Icons.search_rounded,
+                          color: AppColors.muted, size: 21),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          context.l10n.homeHelpPrompt,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            color: AppColors.muted,
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ),
           ),
           const SizedBox(height: 10),
@@ -817,6 +802,13 @@ class _WelcomeCardState extends State<_WelcomeCard> {
                 return ActionChip(
                   label: Text(ValueLabels.topic(context.l10n, topic)),
                   onPressed: () => onFindHelper(topic),
+                  backgroundColor: AppColors.canvas,
+                  side: const BorderSide(color: AppColors.border),
+                  labelStyle: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.text,
+                  ),
                   shape: const StadiumBorder(),
                   visualDensity: VisualDensity.compact,
                 );
@@ -905,12 +897,9 @@ class _WelcomeCardState extends State<_WelcomeCard> {
                                 children: [
                                   IconButton(
                                     tooltip: context.l10n.homeMyConnections,
-                                    style: IconButton.styleFrom(
-                                      backgroundColor: const Color(0x1FF1F1EE),
-                                    ),
                                     icon: const Icon(
                                       Icons.people_alt_outlined,
-                                      color: AppColors.canvas,
+                                      color: AppColors.text,
                                     ),
                                     onPressed: () {
                                       Navigator.of(context).push(
@@ -938,7 +927,7 @@ class _WelcomeCardState extends State<_WelcomeCard> {
                                         child: Text(
                                           '+$recentCount',
                                           style: const TextStyle(
-                                            color: AppColors.primary,
+                                            color: Colors.white,
                                             fontSize: 12,
                                             fontWeight: FontWeight.bold,
                                           ),
@@ -964,8 +953,15 @@ class _SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-        child: Text(text, style: Theme.of(context).textTheme.titleMedium),
+        padding: const EdgeInsets.fromLTRB(20, 14, 16, 4),
+        child: Text(
+          text,
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: AppColors.muted,
+          ),
+        ),
       );
 }
 
