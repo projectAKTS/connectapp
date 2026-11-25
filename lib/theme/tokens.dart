@@ -5,26 +5,29 @@ class AppColors {
   static const primary = Color(0xFF0F4C46);
 
   /// Warm accent, used sparingly: Helpful, highlights.
-  static const accent = Color(0xFFE8915B);
+  static const accent = Color(0xFFB08D57); // brass gold
+
+  /// Gold text on light surfaces (accent is too light for small text).
+  static const accentText = Color(0xFF7A5C2E);
 
   /// Selected chips and options: light green fill, green border and text.
   static const selected = Color(0xFFE3EFEC);
   static const selectedBorder = Color(0x730F4C46); // primary at 45%
 
   // Core surfaces: a warm off-white page so white cards stand out.
-  static const canvas = Color(0xFFFAF8F5);
-  static const card   = Color(0xFFFFFFFF);
+  static const canvas = Color(0xFFF7F3EC); // warm ivory
+  static const card   = Color(0xFFFFFDF9);
   static const postCard = card;
-  static const button = Color(0xFFF1EDE7); // Soft beige for pills/buttons
+  static const button = Color(0xFFEFE7DA); // Soft beige for pills/buttons
   static const surface = canvas;
   static const surfaceTonal = button;
 
   // Text
-  static const text  = Color(0xFF2D2C2B);
-  static const muted = Color(0xFF757370);
+  static const text  = Color(0xFF23211E);
+  static const muted = Color(0xFF6E6A63);
 
   // Lines / borders
-  static const border = Color(0xFFEFEAE3);
+  static const border = Color(0xFFE8E1D5);
 
   // Semantic
   static const danger = Color(0xFFD75A4A);
@@ -33,12 +36,19 @@ class AppColors {
   static const chip = button;
 
   // Softer default avatar so it doesn’t shout on Home/Profile
-  static const avatarBg = Color(0xFFF2EFE9); // lighter, closer to canvas
+  static const avatarBg = Color(0xFFEFE7DA); // lighter, closer to canvas
   static const avatarFg = muted;             // softer icon color
 
   // Pills (for PillButton, etc.)
   static const pillBg   = button;
   static const pillIcon = muted;
+}
+
+/// Serif for headings and big numbers; body text stays sans.
+class AppFonts {
+  // System serif: no bundled font file, falls back to the platform serif.
+  static const serif = 'Georgia';
+  static const serifFallback = ['Times New Roman', 'serif'];
 }
 
 class AppRadius {

@@ -737,15 +737,9 @@ class _WelcomeCardState extends State<_WelcomeCard> {
 
     // Compact: greeting, one "what do you need?" field and topic chips,
     // so the feed starts higher on the screen.
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-      padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: AppColors.border),
-        boxShadow: const [AppShadows.soft],
-      ),
+    // No card around it: the greeting sits on the ivory page.
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 16, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -757,23 +751,30 @@ class _WelcomeCardState extends State<_WelcomeCard> {
                   style: Theme.of(context)
                       .textTheme
                       .titleMedium
-                      ?.copyWith(fontSize: 19),
+                      ?.copyWith(fontSize: 26, letterSpacing: -0.3),
                 ),
               ),
               if (uid != null) _connectionsButton(uid),
             ],
           ),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.only(right: 4),
+          const SizedBox(height: 14),
+          Container(
+            margin: const EdgeInsets.only(right: 4),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              boxShadow: const [AppShadows.soft],
+            ),
             child: Material(
-              color: AppColors.button,
-              borderRadius: BorderRadius.circular(AppRadius.xl),
+              color: AppColors.card,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                side: const BorderSide(color: AppColors.border),
+              ),
               child: InkWell(
-                borderRadius: BorderRadius.circular(AppRadius.xl),
+                borderRadius: BorderRadius.circular(AppRadius.md),
                 onTap: () => onFindHelper(),
                 child: SizedBox(
-                  height: 48,
+                  height: 52,
                   child: Row(
                     children: [
                       const SizedBox(width: 14),

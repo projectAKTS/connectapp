@@ -497,9 +497,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         foregroundColor: AppColors.text,
         iconTheme: IconThemeData(color: AppColors.text),
         titleTextStyle: TextStyle(
+          fontFamily: AppFonts.serif,
+          fontFamilyFallback: AppFonts.serifFallback,
           color: AppColors.text,
-          fontSize: 20,
-          fontWeight: FontWeight.w700,
+          fontSize: 21,
+          fontWeight: FontWeight.w400,
         ),
       ),
       textTheme: Theme.of(context).textTheme.apply(
@@ -668,7 +670,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               top: -2,
                               child: CircleAvatar(
                                 radius: 12,
-                                backgroundColor: Colors.orange,
+                                backgroundColor: AppColors.accent,
                                 child: Icon(Icons.star,
                                     color: Colors.white, size: 15),
                               ),
@@ -685,9 +687,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w800,
+                                fontFamily: AppFonts.serif,
+                                fontFamilyFallback: AppFonts.serifFallback,
+                                fontSize: 25,
+                                fontWeight: FontWeight.w400,
                                 height: 1.15,
+                                letterSpacing: -0.3,
                               ),
                             ),
                             if (roleAndCity.isNotEmpty) ...[
@@ -742,13 +747,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     horizontal: 10, vertical: 5),
                                 decoration: BoxDecoration(
                                   color: AppColors.accent
-                                      .withValues(alpha: 0.12),
+                                      .withValues(alpha: 0.14),
                                   borderRadius: BorderRadius.circular(99),
                                 ),
                                 child: Text(
                                   context.l10n.profileNewMember,
                                   style: const TextStyle(
-                                    color: Color(0xFFA85A2A),
+                                    color: AppColors.accentText,
                                     fontWeight: FontWeight.w600,
                                     fontSize: 13,
                                   ),
@@ -1294,8 +1299,10 @@ class _HeaderStats extends StatelessWidget {
                     Text(
                       value,
                       style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
+                        fontFamily: AppFonts.serif,
+                        fontFamilyFallback: AppFonts.serifFallback,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w400,
                         color: AppColors.text,
                       ),
                     ),
@@ -1419,7 +1426,11 @@ class _ReviewsTab extends StatelessWidget {
             const SizedBox(width: 6),
             Text(
               rating.toStringAsFixed(1),
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+              style: const TextStyle(
+                  fontFamily: AppFonts.serif,
+                  fontFamilyFallback: AppFonts.serifFallback,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w400),
             ),
             const SizedBox(width: 8),
             Text(

@@ -97,6 +97,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     };
   }
 
+  /// Post types in the order shown; null is a quick post.
+  static const _postTypes = <String?>[
+    null,
+    'Advice Request',
+    'Experience',
+    'How-To Guide',
+    'Lessons Learned',
+  ];
+
   Map<String, String> get templateDescriptions {
     final l = context.l10n;
     return {
@@ -225,7 +234,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.card,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
@@ -435,7 +444,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   void _selectTemplate(String name) {
     setState(() {
       _selectedTemplate = name;
-      _quickController.clear();
     });
     Future.microtask(() => FocusScope.of(context).unfocus());
   }
@@ -443,100 +451,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   void _setQuickPost() {
     setState(() {
       _selectedTemplate = null;
-      _a1.clear();
-      _a2.clear();
-      _a3.clear();
     });
     Future.microtask(() => _quickFocus.requestFocus());
-  }
-
-  void _openTemplateSheet() {
-    HapticFeedback.lightImpact();
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-      ),
-      builder: (_) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.border,
-                    borderRadius: BorderRadius.circular(99),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Text(
-                      context.l10n.createTemplates,
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.text,
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                    const Spacer(),
-                    TextButton(
-                      onPressed: () {
-                        _setQuickPost();
-                        Navigator.pop(context);
-                      },
-                      style: TextButton.styleFrom(
-                        backgroundColor: Colors.transparent,
-                        padding: EdgeInsets.zero,
-                      ),
-                      child: Text(
-                        context.l10n.createSetQuick,
-                        style: TextStyle(
-                          color: AppColors.muted,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                _TemplateRowPro(
-                  title: context.l10n.createQuickPost,
-                  subtitle: templateDescriptions['Quick post']!,
-                  selected: _selectedTemplate == null,
-                  icon: Icons.flash_on_rounded,
-                  onTap: () {
-                    Navigator.pop(context);
-                    _setQuickPost();
-                  },
-                ),
-                const SizedBox(height: 8),
-                const Divider(height: 1, color: AppColors.border),
-                const SizedBox(height: 10),
-                ...templates.keys.map((k) {
-                  return _TemplateRowPro(
-                    title: _templateLabel(k),
-                    subtitle: templateDescriptions[k] ?? '',
-                    selected: _selectedTemplate == k,
-                    icon: Icons.view_list_outlined,
-                    onTap: () {
-                      Navigator.pop(context);
-                      _selectTemplate(k);
-                    },
-                  );
-                }),
-              ],
-            ),
-          ),
-        );
-      },
-    );
   }
 
   // —— Clear everything after successful post ——————————————————————
@@ -754,10 +670,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   @override
   Widget build(BuildContext context) {
     final localTheme = Theme.of(context).copyWith(
-      scaffoldBackgroundColor: Colors.white,
-      canvasColor: Colors.white,
-      appBarTheme: const AppBarTheme(
-        backgroundColor: Colors.white,
+      scaffoldBackgroundColor: AppColors.canvas,
+      canvasColor: AppColors.canvas,
+      appBarTheme: Theme.of(context).appBarTheme.copyWith(
+        backgroundColor: AppColors.canvas,
         elevation: 0,
         scrolledUnderElevation: 0,
       ),
@@ -787,14 +703,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     onPressed: () => Navigator.of(context).maybePop(),
                   )
                 : null,
-            title: Text(
-              context.l10n.createTitle,
-              style: const TextStyle(
-                color: AppColors.text,
-                fontWeight: FontWeight.w700,
-                fontSize: 17,
-              ),
-            ),
+            title: Text(context.l10n.createTitle),
             centerTitle: true,
             actions: [
               Padding(
@@ -854,18 +763,70 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                                           color: AppColors.text,
                                         ),
                                       ),
-                                    const SizedBox(height: 4),
-                                    _TypeSelector(
-                                      label: _templateLabel(_selectedTemplate),
-                                      onTap: _openTemplateSheet,
-                                    ),
                                   ],
                                 ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 14),
-                          _selectedTemplate == null
+                          // Post types in view, not behind a menu: asking
+                          // for advice is the main reason to post here.
+                          SizedBox(
+                            height: 36,
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: _postTypes.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(width: 8),
+                              itemBuilder: (context, i) {
+                                final k = _postTypes[i];
+                                return ChoiceChip(
+                                  label: Text(_templateLabel(k)),
+                                  selected: _selectedTemplate == k,
+                                  showCheckmark: false,
+                                  shape: const StadiumBorder(),
+                                  visualDensity: VisualDensity.compact,
+                                  onSelected: _isPosting
+                                      ? null
+                                      : (_) {
+                                          HapticFeedback.selectionClick();
+                                          k == null
+                                              ? _setQuickPost()
+                                              : _selectTemplate(k);
+                                        },
+                                );
+                              },
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            templateDescriptions[
+                                _selectedTemplate ?? 'Quick post']!,
+                            style: const TextStyle(
+                              color: AppColors.muted,
+                              fontSize: 13,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          // Tapping anywhere on the card starts writing.
+                          GestureDetector(
+                            onTap: _isPosting
+                                ? null
+                                : () => (_selectedTemplate == null
+                                        ? _quickFocus
+                                        : _a1Focus)
+                                    .requestFocus(),
+                            child: Container(
+                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                            constraints: const BoxConstraints(minHeight: 180),
+                            decoration: BoxDecoration(
+                              color: AppColors.card,
+                              borderRadius:
+                                  BorderRadius.circular(AppRadius.lg),
+                              border: Border.all(color: AppColors.border),
+                              boxShadow: const [AppShadows.soft],
+                            ),
+                            child: _selectedTemplate == null
                               ? _QuickEditor(
                                   controller: _quickController,
                                   focusNode: _quickFocus,
@@ -883,6 +844,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                                   onChanged: () => setState(() {}),
                                   readOnly: _isPosting,
                                 ),
+                          ),
+                          ),
                           if (selectedTags.isNotEmpty) ...[
                             const SizedBox(height: 12),
                             Wrap(
@@ -917,8 +880,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     ),
                     // Topics drive matching and search, so they sit in view
                     // instead of behind the # button.
-                    Container(
-                      color: Colors.white,
+                    SizedBox(
                       height: 48,
                       child: ListView.separated(
                         scrollDirection: Axis.horizontal,
@@ -949,7 +911,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     ),
                     Container(
                       decoration: const BoxDecoration(
-                        color: Colors.white,
+                        color: AppColors.canvas,
                         border:
                             Border(top: BorderSide(color: AppColors.border)),
                       ),
@@ -1002,7 +964,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               if (_isPosting)
                 Positioned.fill(
                   child: Container(
-                    color: Colors.white.withValues(alpha: 0.65),
+                    color: AppColors.canvas.withValues(alpha: 0.7),
                     child: Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -1238,43 +1200,6 @@ class _ToolButton extends StatelessWidget {
   }
 }
 
-/// "Quick post ▾": picks the post type.
-class _TypeSelector extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-  const _TypeSelector({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      shape: const StadiumBorder(side: BorderSide(color: AppColors.border)),
-      child: InkWell(
-        customBorder: const StadiumBorder(),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 4, 6, 4),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                label,
-                style: const TextStyle(
-                  color: AppColors.text,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                ),
-              ),
-              const Icon(Icons.arrow_drop_down_rounded,
-                  color: AppColors.muted, size: 20),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// A chosen tag under the text, with an x to drop it.
 class _TagChip extends StatelessWidget {
   final String label;
@@ -1323,7 +1248,7 @@ void _chooseMediaType(
 }) {
   showModalBottomSheet(
     context: context,
-    backgroundColor: Colors.white,
+    backgroundColor: AppColors.card,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
     ),
@@ -1442,7 +1367,7 @@ class _InlineTagsComposer extends StatelessWidget {
                   hintStyle: const TextStyle(
                       color: AppColors.muted, fontWeight: FontWeight.w600),
                   filled: true,
-                  fillColor: Colors.white,
+                  fillColor: AppColors.card,
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   border: OutlineInputBorder(
@@ -1501,7 +1426,7 @@ class _InlineTagsComposer extends StatelessWidget {
                             fontWeight: FontWeight.w800,
                           ),
                         ),
-                        backgroundColor: Colors.white,
+                        backgroundColor: AppColors.card,
                         shape: const StadiumBorder(
                             side: BorderSide(color: AppColors.border)),
                         deleteIcon: const Icon(Icons.close,
@@ -1551,9 +1476,12 @@ class _QuickEditor extends StatelessWidget {
       ),
       decoration: InputDecoration(
         hintText: context.l10n.createQuickHint,
-        hintStyle: TextStyle(
+        hintStyle: const TextStyle(
+          fontFamily: AppFonts.serif,
+          fontFamilyFallback: AppFonts.serifFallback,
           color: Color(0xFF9C9A96),
-          fontWeight: FontWeight.w500,
+          fontSize: 19,
+          fontWeight: FontWeight.w400,
         ),
       ),
       onChanged: (_) => onChanged(),
@@ -1638,90 +1566,6 @@ class _TemplateEditor extends StatelessWidget {
         block(template['q2']!, a2, a2Focus),
         block(template['q3']!, a3, a3Focus),
       ],
-    );
-  }
-}
-
-// ===== UI components =====
-
-class _TemplateRowPro extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final bool selected;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  const _TemplateRowPro({
-    required this.title,
-    required this.subtitle,
-    required this.selected,
-    required this.icon,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final leadingBg =
-        selected ? AppColors.primary.withOpacity(0.10) : AppColors.button;
-    final leadingFg = selected ? AppColors.primary : AppColors.muted;
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: leadingBg,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Icon(selected ? Icons.check_rounded : icon,
-                    color: leadingFg),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.text,
-                        fontSize: 15,
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: const TextStyle(
-                        color: AppColors.muted,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Icon(
-                selected
-                    ? Icons.check_circle_rounded
-                    : Icons.chevron_right_rounded,
-                color: selected ? AppColors.primary : AppColors.border,
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }

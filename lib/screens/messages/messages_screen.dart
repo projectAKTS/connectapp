@@ -358,13 +358,16 @@ class _MessagesScreenState extends State<MessagesScreen> {
           elevation: 0,
           centerTitle: true,
           iconTheme: const IconThemeData(color: AppColors.text),
-          title: Text(
-            context.l10n.messagesTitle,
-            style: const TextStyle(
-                color: AppColors.text,
-                fontWeight: FontWeight.w600,
-                fontSize: 18),
-          ),
+          title: Text(context.l10n.messagesTitle),
+          actions: [
+            IconButton(
+              tooltip: context.l10n.findHelperTitle,
+              icon: const Icon(Icons.rate_review_outlined),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const FindHelperScreen()),
+              ),
+            ),
+          ],
         ),
         body: StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance

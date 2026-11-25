@@ -8,16 +8,20 @@ ThemeData buildAppTheme() {
 
   final baseText = const TextTheme(
     displaySmall: TextStyle(
+      fontFamily: AppFonts.serif,
+      fontFamilyFallback: AppFonts.serifFallback,
       fontSize: 32,
       height: 1.15,
-      fontWeight: FontWeight.w700,
+      fontWeight: FontWeight.w400,
       color: AppColors.text,
       letterSpacing: -0.2,
     ),
     titleMedium: TextStyle(
+      fontFamily: AppFonts.serif,
+      fontFamilyFallback: AppFonts.serifFallback,
       fontSize: 22,
       height: 1.25,
-      fontWeight: FontWeight.w700,
+      fontWeight: FontWeight.w400,
       color: AppColors.text,
       letterSpacing: -0.2,
     ),
@@ -59,9 +63,11 @@ ThemeData buildAppTheme() {
       foregroundColor: AppColors.text,
       // One title style for every screen (some were light, some bold).
       titleTextStyle: TextStyle(
+        fontFamily: AppFonts.serif,
+        fontFamilyFallback: AppFonts.serifFallback,
         color: AppColors.text,
-        fontSize: 20,
-        fontWeight: FontWeight.w700,
+        fontSize: 21,
+        fontWeight: FontWeight.w400,
       ),
     ),
 
@@ -155,8 +161,8 @@ ThemeData buildAppTheme() {
     colorScheme: const ColorScheme.light(
       primary: AppColors.primary,
       onPrimary: Colors.white,
-      secondary: AppColors.button,
-      onSecondary: AppColors.text,
+      secondary: AppColors.accent,
+      onSecondary: Colors.white,
       surface: AppColors.card,
       onSurface: AppColors.text,
       background: AppColors.canvas,

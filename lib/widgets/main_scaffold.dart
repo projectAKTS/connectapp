@@ -150,7 +150,7 @@ class _MainScaffoldState extends State<MainScaffold> {
         ),
         bottomNavigationBar: BottomNavigationBar(
           type: BottomNavigationBarType.fixed,
-          backgroundColor: AppColors.canvas,
+          backgroundColor: AppColors.card,
           currentIndex: _selectedIndex,
           selectedItemColor: AppColors.primary,
           unselectedItemColor: AppColors.muted,

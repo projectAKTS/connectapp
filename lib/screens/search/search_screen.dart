@@ -708,13 +708,22 @@ class _SearchPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.button,
-      borderRadius: BorderRadius.circular(28),
+    // Same card style as the search field on Home.
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        boxShadow: const [AppShadows.soft],
+      ),
+      child: Material(
+      color: AppColors.card,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        side: const BorderSide(color: AppColors.border),
+      ),
       child: Row(
         children: [
-          const SizedBox(width: 12),
-          const Icon(Icons.search, color: AppColors.muted),
+          const SizedBox(width: 14),
+          const Icon(Icons.search_rounded, color: AppColors.primary),
           const SizedBox(width: 6),
           Expanded(
             child: TextField(
@@ -740,6 +749,7 @@ class _SearchPill extends StatelessWidget {
             ),
           const SizedBox(width: 8),
         ],
+      ),
       ),
     );
   }
