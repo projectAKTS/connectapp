@@ -151,8 +151,11 @@ class _ThanksSheetState extends State<_ThanksSheet> {
             children: [
               Text(
                 l10n.thanksTitle(widget.toName),
-                style:
-                    const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.text,
+                ),
               ),
               const SizedBox(height: 4),
               Text(
