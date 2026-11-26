@@ -8,6 +8,7 @@ import 'dart:io';
 
 import 'package:connect_app/services/content_filter.dart';
 import 'package:connect_app/services/safety_service.dart';
+import 'package:connect_app/services/thanks_service.dart';
 import 'package:connect_app/services/scam_signals.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -380,6 +381,14 @@ class _ChatScreenState extends State<ChatScreen> {
         : context.l10n.chatThisPerson;
     final safety = SafetyService.instance;
     switch (action) {
+      case 'thanks':
+        await ThanksService.instance.thankWithSheet(
+          context,
+          chatId: _chatId,
+          toUid: widget.otherUserId,
+          toName: name,
+        );
+        return;
       case 'report':
         await safety.reportWithSheet(
           context,
@@ -709,6 +718,11 @@ class _ChatScreenState extends State<ChatScreen> {
                   tooltip: context.l10n.profileMore,
                   onSelected: _onSafetyAction,
                   itemBuilder: (_) => [
+                    if (_otherHasWritten)
+                      PopupMenuItem(
+                        value: 'thanks',
+                        child: Text(context.l10n.thanksAction),
+                      ),
                     PopupMenuItem(
                       value: 'report',
                       child: Text(context.l10n.chatReport),

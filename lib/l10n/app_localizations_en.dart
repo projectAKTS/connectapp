@@ -1563,6 +1563,44 @@ class AppLocalizationsEn extends AppLocalizations {
   String get reviewSubmit => 'Submit rating';
 
   @override
+  String get thanksAction => 'Say thanks';
+
+  @override
+  String thanksTitle(String name) {
+    return 'Thank $name';
+  }
+
+  @override
+  String get thanksShownOnProfile =>
+      'Your note is shown on their profile, without your name.';
+
+  @override
+  String get thanksHint => 'What did they help you with?';
+
+  @override
+  String get thanksSend => 'Send thanks';
+
+  @override
+  String get thanksSent => 'Thanks sent.';
+
+  @override
+  String get thanksSaveFailed => 'Could not send your note. Please try again.';
+
+  @override
+  String thanksAlreadySent(String name) {
+    return 'You already thanked $name for this chat.';
+  }
+
+  @override
+  String get profileKindWords => 'Kind words';
+
+  @override
+  String get thanksRemove => 'Remove from my profile';
+
+  @override
+  String get thanksRemoved => 'Removed from your profile.';
+
+  @override
   String reviewHowWas(String name) {
     return 'How was your session with $name?';
   }

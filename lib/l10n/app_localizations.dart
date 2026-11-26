@@ -63,7 +63,7 @@ import 'app_localizations_fr.dart';
 /// property.
 abstract class AppLocalizations {
   AppLocalizations(String locale)
-      : localeName = intl.Intl.canonicalizedLocale(locale.toString());
+    : localeName = intl.Intl.canonicalizedLocale(locale.toString());
 
   final String localeName;
 
@@ -86,16 +86,16 @@ abstract class AppLocalizations {
   /// of delegates is preferred or required.
   static const List<LocalizationsDelegate<dynamic>> localizationsDelegates =
       <LocalizationsDelegate<dynamic>>[
-    delegate,
-    GlobalMaterialLocalizations.delegate,
-    GlobalCupertinoLocalizations.delegate,
-    GlobalWidgetsLocalizations.delegate,
-  ];
+        delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+      ];
 
   /// A list of this localizations delegate's supported locales.
   static const List<Locale> supportedLocales = <Locale>[
     Locale('en'),
-    Locale('fr')
+    Locale('fr'),
   ];
 
   /// This language's own name, shown in the language picker.
@@ -2954,6 +2954,72 @@ abstract class AppLocalizations {
   /// **'Submit rating'**
   String get reviewSubmit;
 
+  /// No description provided for @thanksAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Say thanks'**
+  String get thanksAction;
+
+  /// No description provided for @thanksTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Thank {name}'**
+  String thanksTitle(String name);
+
+  /// No description provided for @thanksShownOnProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Your note is shown on their profile, without your name.'**
+  String get thanksShownOnProfile;
+
+  /// No description provided for @thanksHint.
+  ///
+  /// In en, this message translates to:
+  /// **'What did they help you with?'**
+  String get thanksHint;
+
+  /// No description provided for @thanksSend.
+  ///
+  /// In en, this message translates to:
+  /// **'Send thanks'**
+  String get thanksSend;
+
+  /// No description provided for @thanksSent.
+  ///
+  /// In en, this message translates to:
+  /// **'Thanks sent.'**
+  String get thanksSent;
+
+  /// No description provided for @thanksSaveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not send your note. Please try again.'**
+  String get thanksSaveFailed;
+
+  /// No description provided for @thanksAlreadySent.
+  ///
+  /// In en, this message translates to:
+  /// **'You already thanked {name} for this chat.'**
+  String thanksAlreadySent(String name);
+
+  /// No description provided for @profileKindWords.
+  ///
+  /// In en, this message translates to:
+  /// **'Kind words'**
+  String get profileKindWords;
+
+  /// No description provided for @thanksRemove.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove from my profile'**
+  String get thanksRemove;
+
+  /// No description provided for @thanksRemoved.
+  ///
+  /// In en, this message translates to:
+  /// **'Removed from your profile.'**
+  String get thanksRemoved;
+
   /// No description provided for @reviewHowWas.
   ///
   /// In en, this message translates to:
@@ -4032,8 +4098,9 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   }
 
   throw FlutterError(
-      'AppLocalizations.delegate failed to load unsupported locale "$locale". This is likely '
-      'an issue with the localizations generation tool. Please file an issue '
-      'on GitHub with a reproducible sample app and the gen-l10n configuration '
-      'that was used.');
+    'AppLocalizations.delegate failed to load unsupported locale "$locale". This is likely '
+    'an issue with the localizations generation tool. Please file an issue '
+    'on GitHub with a reproducible sample app and the gen-l10n configuration '
+    'that was used.',
+  );
 }

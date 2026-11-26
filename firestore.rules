@@ -644,6 +644,42 @@ service cloud.firestore {
         && callerAgeAllowed();
     }
 
+    // Thank-you notes: after a chat, a person may thank the other once per
+    // chat, and only if the other actually wrote there (they helped). The
+    // doc id is "<chatId>_<fromUid>", so a second note is an update, which is
+    // denied. The sender or the recipient may delete it (the recipient
+    // decides what stays on their profile).
+    match /thanks/{thanksId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(
+          ['chatId', 'fromUid', 'toUid', 'text', 'createdAt'])
+        && thanksId == request.resource.data.chatId + '_' + request.auth.uid
+        && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.toUid is string
+        && request.resource.data.toUid != request.auth.uid
+        && request.resource.data.text is string
+        && request.resource.data.text.trim().size() > 0
+        && request.resource.data.text.size() <= 280
+        && request.resource.data.createdAt == request.time
+        && thankableChat(request.resource.data.chatId, request.resource.data.toUid)
+        && callerAgeAllowed();
+      allow update: if false;
+      allow delete: if isSignedIn()
+        && (resource.data.fromUid == request.auth.uid
+          || resource.data.toUid == request.auth.uid);
+    }
+
+    function thankableChat(chatId, toUid) {
+      let path = /databases/$(database)/documents/chats/$(chatId);
+      let chat = exists(path) ? get(path).data : {};
+      let people = chat.keys().hasAny(['participants'])
+        ? chat.participants
+        : (chat.keys().hasAny(['users']) ? chat.users : []);
+      return people.hasAll([request.auth.uid, toUid])
+        && chat.get('repliedBy', []).hasAny([toUid]);
+    }
+
     // Reviews: the payer rates a paid consultation once, after the server
     // marked it completed (the helper was paid; no problem was reported). The doc id is the consultation id, so a second
     // review is an update, which is denied. The server adds `countedAt` when

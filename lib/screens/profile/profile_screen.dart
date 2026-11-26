@@ -7,6 +7,7 @@ import 'package:connect_app/screens/settings/settings_screen.dart';
 import 'package:connect_app/utils/profile_text.dart';
 import 'package:connect_app/services/safety_service.dart';
 import 'package:connect_app/services/review_service.dart';
+import 'package:connect_app/services/thanks_service.dart';
 import 'package:connect_app/config/mvp_features.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
@@ -913,6 +914,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ],
 
+                  _KindWords(uid: widget.userID, canRemove: isCurrentUser),
+
                   // ✅ Account hub (ONLY for current user)
                   if (isCurrentUser) ...[
                     const SizedBox(height: 16),
@@ -1489,6 +1492,108 @@ class _MediaTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ---------- Kind words ----------
+/// Thank-you notes from people this person helped in chat, newest first.
+/// Senders stay anonymous. Hidden when there are none. On your own profile
+/// a long press removes a note.
+class _KindWords extends StatelessWidget {
+  final String uid;
+  final bool canRemove;
+  const _KindWords({required this.uid, required this.canRemove});
+
+  static const int _shown = 3;
+
+  Future<void> _confirmRemove(BuildContext context, String noteId) async {
+    final l10n = context.l10n;
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: AppColors.canvas,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: ListTile(
+          leading: const Icon(Icons.delete_outline),
+          title: Text(l10n.thanksRemove),
+          onTap: () => Navigator.pop(ctx, true),
+        ),
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await ThanksService.instance.remove(noteId);
+      messenger.showSnackBar(SnackBar(content: Text(l10n.thanksRemoved)));
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<MapEntry<String, Map<String, dynamic>>>>(
+      stream: ThanksService.instance.notesTo(uid),
+      builder: (context, snap) {
+        final notes = (snap.data ?? const [])
+            .where((e) => '${e.value['text'] ?? ''}'.trim().isNotEmpty)
+            .take(_shown)
+            .toList();
+        if (notes.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(top: 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                context.l10n.profileKindWords,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 10),
+              for (final n in notes) ...[
+                GestureDetector(
+                  onLongPress:
+                      canRemove ? () => _confirmRemove(context, n.key) : null,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppColors.card,
+                      borderRadius: BorderRadius.circular(14),
+                      border: const Border.fromBorderSide(
+                          BorderSide(color: AppColors.border)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '\u201C${'${n.value['text']}'.trim()}\u201D',
+                          style: const TextStyle(
+                            fontFamily: AppFonts.serif,
+                            fontFamilyFallback: AppFonts.serifFallback,
+                            fontSize: 15.5,
+                            height: 1.4,
+                            color: AppColors.text,
+                          ),
+                        ),
+                        if (parseFirestoreTimestamp(n.value['createdAt'])
+                            case final at?) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            AppFormat.date(context, at),
+                            style: const TextStyle(
+                                color: AppColors.muted, fontSize: 12.5),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 }

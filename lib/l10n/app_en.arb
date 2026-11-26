@@ -747,6 +747,31 @@
   "reviewShownOnProfile": "Your rating and comment are shown on their profile.",
   "reviewHint": "What helped? (optional)",
   "reviewSubmit": "Submit rating",
+  "thanksAction": "Say thanks",
+  "thanksTitle": "Thank {name}",
+  "@thanksTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "thanksShownOnProfile": "Your note is shown on their profile, without your name.",
+  "thanksHint": "What did they help you with?",
+  "thanksSend": "Send thanks",
+  "thanksSent": "Thanks sent.",
+  "thanksSaveFailed": "Could not send your note. Please try again.",
+  "thanksAlreadySent": "You already thanked {name} for this chat.",
+  "@thanksAlreadySent": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "profileKindWords": "Kind words",
+  "thanksRemove": "Remove from my profile",
+  "thanksRemoved": "Removed from your profile.",
   "reviewHowWas": "How was your session with {name}?",
   "@reviewHowWas": {
     "placeholders": {

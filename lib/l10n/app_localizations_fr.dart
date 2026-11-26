@@ -1601,6 +1601,44 @@ class AppLocalizationsFr extends AppLocalizations {
   String get reviewSubmit => 'Envoyer l\'évaluation';
 
   @override
+  String get thanksAction => 'Dire merci';
+
+  @override
+  String thanksTitle(String name) {
+    return 'Remercier $name';
+  }
+
+  @override
+  String get thanksShownOnProfile =>
+      'Votre mot s\'affiche sur son profil, sans votre nom.';
+
+  @override
+  String get thanksHint => 'En quoi cette personne vous a-t-elle aidé ?';
+
+  @override
+  String get thanksSend => 'Envoyer';
+
+  @override
+  String get thanksSent => 'Merci envoyé.';
+
+  @override
+  String get thanksSaveFailed => 'Impossible d\'envoyer votre mot. Réessayez.';
+
+  @override
+  String thanksAlreadySent(String name) {
+    return 'Vous avez déjà remercié $name pour cette conversation.';
+  }
+
+  @override
+  String get profileKindWords => 'Mots de remerciement';
+
+  @override
+  String get thanksRemove => 'Retirer de mon profil';
+
+  @override
+  String get thanksRemoved => 'Retiré de votre profil.';
+
+  @override
   String reviewHowWas(String name) {
     return 'Comment s\'est passée votre séance avec $name?';
   }
