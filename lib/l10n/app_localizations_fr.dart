@@ -1601,7 +1601,16 @@ class AppLocalizationsFr extends AppLocalizations {
   String get reviewSubmit => 'Envoyer l\'évaluation';
 
   @override
-  String get thanksAction => 'Dire merci';
+  String thanksOfferTitle(String name) {
+    return 'Afficher votre merci sur le profil de $name ?';
+  }
+
+  @override
+  String get thanksOfferBody =>
+      'Cela aide les autres à voir qui aide vraiment.';
+
+  @override
+  String get thanksOfferAdd => 'Ajouter';
 
   @override
   String thanksTitle(String name) {

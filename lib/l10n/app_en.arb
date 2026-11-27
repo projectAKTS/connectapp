@@ -747,7 +747,16 @@
   "reviewShownOnProfile": "Your rating and comment are shown on their profile.",
   "reviewHint": "What helped? (optional)",
   "reviewSubmit": "Submit rating",
-  "thanksAction": "Say thanks",
+  "thanksOfferTitle": "Show your thanks on {name}'s profile?",
+  "@thanksOfferTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "thanksOfferBody": "It helps others see who really helps.",
+  "thanksOfferAdd": "Add",
   "thanksTitle": "Thank {name}",
   "@thanksTitle": {
     "placeholders": {

@@ -2954,11 +2954,23 @@ abstract class AppLocalizations {
   /// **'Submit rating'**
   String get reviewSubmit;
 
-  /// No description provided for @thanksAction.
+  /// No description provided for @thanksOfferTitle.
   ///
   /// In en, this message translates to:
-  /// **'Say thanks'**
-  String get thanksAction;
+  /// **'Show your thanks on {name}\'s profile?'**
+  String thanksOfferTitle(String name);
+
+  /// No description provided for @thanksOfferBody.
+  ///
+  /// In en, this message translates to:
+  /// **'It helps others see who really helps.'**
+  String get thanksOfferBody;
+
+  /// No description provided for @thanksOfferAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'Add'**
+  String get thanksOfferAdd;
 
   /// No description provided for @thanksTitle.
   ///

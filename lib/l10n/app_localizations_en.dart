@@ -1563,7 +1563,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get reviewSubmit => 'Submit rating';
 
   @override
-  String get thanksAction => 'Say thanks';
+  String thanksOfferTitle(String name) {
+    return 'Show your thanks on $name\'s profile?';
+  }
+
+  @override
+  String get thanksOfferBody => 'It helps others see who really helps.';
+
+  @override
+  String get thanksOfferAdd => 'Add';
 
   @override
   String thanksTitle(String name) {

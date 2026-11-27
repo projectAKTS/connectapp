@@ -24,6 +24,30 @@ class ThanksService {
 
   static String noteId(String chatId, String fromUid) => '${chatId}_$fromUid';
 
+  // Words people use to say thanks in a chat; when one appears, the chat
+  // offers to put it on the helper's profile.
+  static final RegExp _thanksWords = RegExp(
+    r'\b(thank(s|ful)?|thx|ty|tysm|merci|gracias|danke|grazie|obrigad[oa])\b'
+    r'|te[sş]ekk[uü]r|sa[gğ] ?ol|شكرا',
+    caseSensitive: false,
+  );
+
+  static bool soundsLikeThanks(String text) => _thanksWords.hasMatch(text);
+
+  // Chats where the offer was closed, for this app session.
+  final Set<String> _dismissedPrompts = <String>{};
+
+  bool isPromptDismissed(String chatId) => _dismissedPrompts.contains(chatId);
+
+  void dismissPrompt(String chatId) => _dismissedPrompts.add(chatId);
+
+  /// Whether the signed-in user has a note in [chatId], live.
+  Stream<bool> watchThanked(String chatId) {
+    final uid = HelperlyTestRuntime.currentUid ?? '';
+    if (uid.isEmpty) return Stream<bool>.value(false);
+    return _col.doc(noteId(chatId, uid)).snapshots().map((s) => s.exists);
+  }
+
   /// Notes to [uid], newest first, with their doc ids. Sorted here rather
   /// than with orderBy so the query needs no composite index.
   Stream<List<MapEntry<String, Map<String, dynamic>>>> notesTo(String uid,
@@ -74,6 +98,7 @@ class ThanksService {
     required String chatId,
     required String toUid,
     required String toName,
+    String initialText = '',
   }) async {
     final messenger = ScaffoldMessenger.of(context);
     final l10n = context.l10n;
@@ -94,7 +119,7 @@ class ThanksService {
       isScrollControlled: true,
       backgroundColor: AppColors.canvas,
       showDragHandle: true,
-      builder: (_) => _ThanksSheet(toName: toName),
+      builder: (_) => _ThanksSheet(toName: toName, initialText: initialText),
     );
     if (text == null || text.trim().isEmpty) return false;
     try {
@@ -111,14 +136,16 @@ class ThanksService {
 
 class _ThanksSheet extends StatefulWidget {
   final String toName;
-  const _ThanksSheet({required this.toName});
+  final String initialText;
+  const _ThanksSheet({required this.toName, this.initialText = ''});
 
   @override
   State<_ThanksSheet> createState() => _ThanksSheetState();
 }
 
 class _ThanksSheetState extends State<_ThanksSheet> {
-  final TextEditingController _text = TextEditingController();
+  late final TextEditingController _text =
+      TextEditingController(text: widget.initialText.trim());
   String? _error;
 
   @override

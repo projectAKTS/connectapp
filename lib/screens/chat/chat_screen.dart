@@ -75,6 +75,9 @@ class _ChatScreenState extends State<ChatScreen> {
   final Set<String> _revealedImages = <String>{};
   bool _chatDocLoaded = false;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _chatDocSub;
+  // Thank-you offer: true until we know no note exists, so it never flashes.
+  bool _alreadyThanked = true;
+  StreamSubscription<bool>? _thankedSub;
   static final _linkPattern =
       RegExp(r'(https?://|www\.)', caseSensitive: false);
 
@@ -99,6 +102,37 @@ class _ChatScreenState extends State<ChatScreen> {
         _chatDocLoaded = true;
       });
     }, onError: (_) {});
+    _thankedSub = ThanksService.instance.watchThanked(_chatId).listen((v) {
+      if (mounted) setState(() => _alreadyThanked = v);
+    }, onError: (_) {});
+  }
+
+  /// The newest message I sent, when it says thanks to someone who helped
+  /// in the last 3 days: the moment to offer a note on their profile.
+  types.TextMessage? _thanksToOffer(List<types.Message> msgs) {
+    if (_alreadyThanked || !_otherHasWritten) return null;
+    if (ThanksService.instance.isPromptDismissed(_chatId)) return null;
+    for (final m in msgs) {
+      if (m.author.id != _me) continue;
+      if (m is! types.TextMessage || !ThanksService.soundsLikeThanks(m.text)) {
+        return null;
+      }
+      final at = m.createdAt ?? 0;
+      final fresh = DateTime.now().millisecondsSinceEpoch - at <
+          const Duration(days: 3).inMilliseconds;
+      return fresh ? m : null;
+    }
+    return null;
+  }
+
+  Future<void> _thank(String initialText) async {
+    await ThanksService.instance.thankWithSheet(
+      context,
+      chatId: _chatId,
+      toUid: widget.otherUserId,
+      toName: _otherName,
+      initialText: initialText,
+    );
   }
 
   void _explainWaitingForReply() {
@@ -292,6 +326,7 @@ class _ChatScreenState extends State<ChatScreen> {
       CurrentChat.otherUserId = null;
     }
     _chatDocSub?.cancel();
+    _thankedSub?.cancel();
     _inputCtrl.dispose();
     super.dispose();
   }
@@ -381,14 +416,6 @@ class _ChatScreenState extends State<ChatScreen> {
         : context.l10n.chatThisPerson;
     final safety = SafetyService.instance;
     switch (action) {
-      case 'thanks':
-        await ThanksService.instance.thankWithSheet(
-          context,
-          chatId: _chatId,
-          toUid: widget.otherUserId,
-          toName: name,
-        );
-        return;
       case 'report':
         await safety.reportWithSheet(
           context,
@@ -718,11 +745,6 @@ class _ChatScreenState extends State<ChatScreen> {
                   tooltip: context.l10n.profileMore,
                   onSelected: _onSafetyAction,
                   itemBuilder: (_) => [
-                    if (_otherHasWritten)
-                      PopupMenuItem(
-                        value: 'thanks',
-                        child: Text(context.l10n.thanksAction),
-                      ),
                     PopupMenuItem(
                       value: 'report',
                       child: Text(context.l10n.chatReport),
@@ -791,6 +813,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     m is types.TextMessage &&
                     m.author.id != _me &&
                     ScamSignals.matches(m.text));
+                final thanksMsg = _thanksToOffer(msgs);
                 return Column(
                   children: [
                     _ChatSafetyBanner(
@@ -820,29 +843,42 @@ class _ChatScreenState extends State<ChatScreen> {
                         onMessageTap: (ctx, msg) async {
                           if (msg is types.FileMessage) await _openUri(msg.uri);
                         },
-                        customBottomWidget: _Composer(
-                          controller: _inputCtrl,
-                          sending: _sending,
-                          onAttach: _pickAttachment,
-                          onSend: _sendText,
-                          pendingAttachmentName: _pendingAttachment == null
-                              ? null
-                              : p.basename(_pendingAttachment!.path),
-                          pendingAttachmentType: _pendingAttachment == null
-                              ? null
-                              : (_pendingIsImage
-                                  ? context.l10n.messagePhoto
-                                  : context.l10n.messageVideo),
-                          pendingAttachmentPath: _pendingAttachment == null
-                              ? null
-                              : _pendingAttachment!.path,
-                          pendingIsImage: _pendingAttachment == null
-                              ? null
-                              : _pendingIsImage,
-                          onClearPending: () {
-                            setState(() => _pendingAttachment = null);
-                          },
-                          onSendPending: _sendPendingAttachment,
+                        customBottomWidget: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (thanksMsg != null)
+                              _ThanksOffer(
+                                name: _otherName,
+                                onAdd: () => _thank(thanksMsg.text),
+                                onClose: () => setState(() => ThanksService
+                                    .instance
+                                    .dismissPrompt(_chatId)),
+                              ),
+                            _Composer(
+                              controller: _inputCtrl,
+                              sending: _sending,
+                              onAttach: _pickAttachment,
+                              onSend: _sendText,
+                              pendingAttachmentName: _pendingAttachment == null
+                                  ? null
+                                  : p.basename(_pendingAttachment!.path),
+                              pendingAttachmentType: _pendingAttachment == null
+                                  ? null
+                                  : (_pendingIsImage
+                                      ? context.l10n.messagePhoto
+                                      : context.l10n.messageVideo),
+                              pendingAttachmentPath: _pendingAttachment == null
+                                  ? null
+                                  : _pendingAttachment!.path,
+                              pendingIsImage: _pendingAttachment == null
+                                  ? null
+                                  : _pendingIsImage,
+                              onClearPending: () {
+                                setState(() => _pendingAttachment = null);
+                              },
+                              onSendPending: _sendPendingAttachment,
+                            ),
+                          ],
                         ),
                         imageMessageBuilder: (m, {required int messageWidth}) {
                           final image = ImageMessage(
@@ -878,6 +914,71 @@ class _ChatScreenState extends State<ChatScreen> {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+/// Shown above the composer right after I thank someone in the chat: offers
+/// to keep that thanks on their profile, where others can see it.
+class _ThanksOffer extends StatelessWidget {
+  final String name;
+  final VoidCallback onAdd;
+  final VoidCallback onClose;
+
+  const _ThanksOffer({
+    required this.name,
+    required this.onAdd,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return Container(
+      key: const Key('thanks_offer'),
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+      padding: const EdgeInsets.fromLTRB(14, 10, 4, 10),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.favorite_border, color: AppColors.primary, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  l10n.thanksOfferTitle(name),
+                  style: const TextStyle(
+                    color: AppColors.text,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  l10n.thanksOfferBody,
+                  style: const TextStyle(color: AppColors.muted, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            key: const Key('thanks_offer_add'),
+            onPressed: onAdd,
+            child: Text(l10n.thanksOfferAdd),
+          ),
+          IconButton(
+            tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
+            icon: const Icon(Icons.close, size: 18, color: AppColors.muted),
+            onPressed: onClose,
+          ),
+        ],
       ),
     );
   }

@@ -46,6 +46,46 @@ void main() {
     expect(notes.map((e) => e.key), ['b', 'a']);
   });
 
+  test('spots thanks in a chat message, not in unrelated words', () {
+    for (final yes in [
+      'Thank you so much!',
+      'thanks a lot',
+      'Merci beaucoup',
+      'Çok teşekkürler',
+      'tesekkur ederim',
+      'sağol',
+      'thx!',
+    ]) {
+      expect(ThanksService.soundsLikeThanks(yes), isTrue, reason: yes);
+    }
+    for (final no in ['Can you help me?', 'Thanksgiving plans', 'mercy', 'type']) {
+      expect(ThanksService.soundsLikeThanks(no), isFalse, reason: no);
+    }
+  });
+
+  testWidgets('the sheet starts with the thanks I wrote in the chat',
+      (tester) async {
+    late BuildContext ctx;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: Builder(builder: (c) {
+        ctx = c;
+        return const SizedBox();
+      })),
+    ));
+    final saved = thanks.thankWithSheet(ctx,
+        chatId: 'me_leo',
+        toUid: 'leo',
+        toName: 'Leo',
+        initialText: ' Thank you, you saved my month! ');
+    await tester.pumpAndSettle();
+    expect(find.text('Thank you, you saved my month!'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('thanks_submit')));
+    await tester.pumpAndSettle();
+    expect(await saved, isTrue);
+    final doc = await firestore.collection('thanks').doc('me_leo_me').get();
+    expect(doc.data()!['text'], 'Thank you, you saved my month!');
+  });
+
   testWidgets('the sheet needs text, filters it, then saves', (tester) async {
     late BuildContext ctx;
     await tester.pumpWidget(MaterialApp(
