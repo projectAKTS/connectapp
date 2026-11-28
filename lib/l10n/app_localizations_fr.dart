@@ -429,6 +429,74 @@ class AppLocalizationsFr extends AppLocalizations {
   String get loginSubtitle => 'Connectez-vous pour continuer';
 
   @override
+  String get welcomeEyebrow => 'De l’expérience réelle. Des liens humains.';
+
+  @override
+  String get welcomeTitle =>
+      'Quelqu’un a déjà résolu le problème que vous vivez.';
+
+  @override
+  String get welcomeLede =>
+      'Décrivez ce qui vous bloque. Rencontrez des gens qui l’ont déjà vécu.';
+
+  @override
+  String get welcomeYouAsk => 'Vous le décrivez';
+
+  @override
+  String get welcomeYouMeet => 'Vous rencontrez des gens qui ont';
+
+  @override
+  String get welcomeExampleNote => 'Un exemple illustratif.';
+
+  @override
+  String get welcomeStart => 'Commencer';
+
+  @override
+  String get welcomeHaveAccount => 'J’ai déjà un compte';
+
+  @override
+  String get welcomeEx1Ask =>
+      'Je veux vendre sur Amazon, mais je ne sais pas par où commencer.';
+
+  @override
+  String get welcomeEx1A => 'lancé leur premier produit sur Amazon';
+
+  @override
+  String get welcomeEx1B =>
+      'géré l’expédition et les stocks d’une boutique en ligne';
+
+  @override
+  String get welcomeEx1C =>
+      'appris les frais et les règles des vendeurs à la dure';
+
+  @override
+  String get welcomeEx2Ask =>
+      'Je viens d’arriver à Montréal et je cherche un logement. Par où commencer ?';
+
+  @override
+  String get welcomeEx2A => 'trouvé un logement à Montréal en arrivant';
+
+  @override
+  String get welcomeEx2B =>
+      'signé un bail au Québec et en connaissent les règles';
+
+  @override
+  String get welcomeEx2C => 'fait face à un propriétaire trop exigeant';
+
+  @override
+  String get welcomeEx3Ask =>
+      'J’ai mon premier entretien d’embauche au Canada la semaine prochaine.';
+
+  @override
+  String get welcomeEx3A => 'été embauchés après leur arrivée au Canada';
+
+  @override
+  String get welcomeEx3B => 'adapté leur CV pour les employeurs canadiens';
+
+  @override
+  String get welcomeEx3C => 'été de l’autre côté de la table d’entretien';
+
+  @override
   String get loginButton => 'Se connecter';
 
   @override

@@ -427,6 +427,71 @@ class AppLocalizationsEn extends AppLocalizations {
   String get loginSubtitle => 'Sign in to continue';
 
   @override
+  String get welcomeEyebrow => 'Real experience. Human connection.';
+
+  @override
+  String get welcomeTitle =>
+      'Someone has already solved the problem you’re facing.';
+
+  @override
+  String get welcomeLede =>
+      'Describe what you’re stuck on. Meet people who have done it themselves.';
+
+  @override
+  String get welcomeYouAsk => 'You describe it';
+
+  @override
+  String get welcomeYouMeet => 'You meet people who have';
+
+  @override
+  String get welcomeExampleNote => 'An illustrative example.';
+
+  @override
+  String get welcomeStart => 'Get started';
+
+  @override
+  String get welcomeHaveAccount => 'I already have an account';
+
+  @override
+  String get welcomeEx1Ask =>
+      'I want to start selling on Amazon, but I don’t know where to begin.';
+
+  @override
+  String get welcomeEx1A => 'Launched their first product on Amazon';
+
+  @override
+  String get welcomeEx1B => 'Run shipping and inventory for an online shop';
+
+  @override
+  String get welcomeEx1C => 'Learned the fees and seller rules the hard way';
+
+  @override
+  String get welcomeEx2Ask =>
+      'I just moved to Montreal and need a flat. Where do I even start?';
+
+  @override
+  String get welcomeEx2A => 'Found a flat in Montreal as newcomers';
+
+  @override
+  String get welcomeEx2B => 'Signed a Quebec lease and know the rules';
+
+  @override
+  String get welcomeEx2C => 'Dealt with a landlord who asked too much upfront';
+
+  @override
+  String get welcomeEx3Ask =>
+      'I have my first job interview in Canada next week.';
+
+  @override
+  String get welcomeEx3A => 'Got hired after moving to Canada';
+
+  @override
+  String get welcomeEx3B => 'Rewrote their CV for Canadian employers';
+
+  @override
+  String get welcomeEx3C => 'Sat on the other side of the interview table';
+
+  @override
   String get loginButton => 'Log in';
 
   @override

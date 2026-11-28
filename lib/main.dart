@@ -29,6 +29,7 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 // Screens
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/signup_screen.dart';
+import 'screens/auth/welcome_screen.dart';
 import 'screens/auth/forgot_password_screen.dart';
 import 'screens/search/search_screen.dart';
 import 'screens/posts/create_post_screen.dart';
@@ -513,7 +514,8 @@ class _AuthGateState extends State<AuthGate> {
         }
 
         if (!snap.hasData) {
-          return const FullScreenBackGesture(child: LoginScreen());
+          // Signing out goes to /login; a fresh install starts here.
+          return const WelcomeScreen();
         }
 
         final user = snap.data!;

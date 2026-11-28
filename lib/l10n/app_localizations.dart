@@ -884,6 +884,126 @@ abstract class AppLocalizations {
   /// **'Sign in to continue'**
   String get loginSubtitle;
 
+  /// No description provided for @welcomeEyebrow.
+  ///
+  /// In en, this message translates to:
+  /// **'Real experience. Human connection.'**
+  String get welcomeEyebrow;
+
+  /// No description provided for @welcomeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Someone has already solved the problem you’re facing.'**
+  String get welcomeTitle;
+
+  /// No description provided for @welcomeLede.
+  ///
+  /// In en, this message translates to:
+  /// **'Describe what you’re stuck on. Meet people who have done it themselves.'**
+  String get welcomeLede;
+
+  /// No description provided for @welcomeYouAsk.
+  ///
+  /// In en, this message translates to:
+  /// **'You describe it'**
+  String get welcomeYouAsk;
+
+  /// No description provided for @welcomeYouMeet.
+  ///
+  /// In en, this message translates to:
+  /// **'You meet people who have'**
+  String get welcomeYouMeet;
+
+  /// No description provided for @welcomeExampleNote.
+  ///
+  /// In en, this message translates to:
+  /// **'An illustrative example.'**
+  String get welcomeExampleNote;
+
+  /// No description provided for @welcomeStart.
+  ///
+  /// In en, this message translates to:
+  /// **'Get started'**
+  String get welcomeStart;
+
+  /// No description provided for @welcomeHaveAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'I already have an account'**
+  String get welcomeHaveAccount;
+
+  /// No description provided for @welcomeEx1Ask.
+  ///
+  /// In en, this message translates to:
+  /// **'I want to start selling on Amazon, but I don’t know where to begin.'**
+  String get welcomeEx1Ask;
+
+  /// No description provided for @welcomeEx1A.
+  ///
+  /// In en, this message translates to:
+  /// **'Launched their first product on Amazon'**
+  String get welcomeEx1A;
+
+  /// No description provided for @welcomeEx1B.
+  ///
+  /// In en, this message translates to:
+  /// **'Run shipping and inventory for an online shop'**
+  String get welcomeEx1B;
+
+  /// No description provided for @welcomeEx1C.
+  ///
+  /// In en, this message translates to:
+  /// **'Learned the fees and seller rules the hard way'**
+  String get welcomeEx1C;
+
+  /// No description provided for @welcomeEx2Ask.
+  ///
+  /// In en, this message translates to:
+  /// **'I just moved to Montreal and need a flat. Where do I even start?'**
+  String get welcomeEx2Ask;
+
+  /// No description provided for @welcomeEx2A.
+  ///
+  /// In en, this message translates to:
+  /// **'Found a flat in Montreal as newcomers'**
+  String get welcomeEx2A;
+
+  /// No description provided for @welcomeEx2B.
+  ///
+  /// In en, this message translates to:
+  /// **'Signed a Quebec lease and know the rules'**
+  String get welcomeEx2B;
+
+  /// No description provided for @welcomeEx2C.
+  ///
+  /// In en, this message translates to:
+  /// **'Dealt with a landlord who asked too much upfront'**
+  String get welcomeEx2C;
+
+  /// No description provided for @welcomeEx3Ask.
+  ///
+  /// In en, this message translates to:
+  /// **'I have my first job interview in Canada next week.'**
+  String get welcomeEx3Ask;
+
+  /// No description provided for @welcomeEx3A.
+  ///
+  /// In en, this message translates to:
+  /// **'Got hired after moving to Canada'**
+  String get welcomeEx3A;
+
+  /// No description provided for @welcomeEx3B.
+  ///
+  /// In en, this message translates to:
+  /// **'Rewrote their CV for Canadian employers'**
+  String get welcomeEx3B;
+
+  /// No description provided for @welcomeEx3C.
+  ///
+  /// In en, this message translates to:
+  /// **'Sat on the other side of the interview table'**
+  String get welcomeEx3C;
+
   /// No description provided for @loginButton.
   ///
   /// In en, this message translates to:
