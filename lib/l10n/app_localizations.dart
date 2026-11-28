@@ -1103,7 +1103,7 @@ abstract class AppLocalizations {
   /// No description provided for @signupSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Join the community and start connecting.'**
+  /// **'Meet people who have already done what you’re trying to do.'**
   String get signupSubtitle;
 
   /// No description provided for @signupFirstName.
@@ -1373,13 +1373,13 @@ abstract class AppLocalizations {
   /// No description provided for @onboardingProfileTitle.
   ///
   /// In en, this message translates to:
-  /// **'Profile basics'**
+  /// **'A bit about you'**
   String get onboardingProfileTitle;
 
   /// No description provided for @onboardingProfileSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Add basics so we can personalize your experience.'**
+  /// **'So people know who they’re talking to. Your city and languages help us find the right people for you.'**
   String get onboardingProfileSubtitle;
 
   /// No description provided for @onboardingDisplayName.
@@ -1439,37 +1439,37 @@ abstract class AppLocalizations {
   /// No description provided for @roleSeeker.
   ///
   /// In en, this message translates to:
-  /// **'I’m here to get help'**
+  /// **'I need help with something'**
   String get roleSeeker;
 
   /// No description provided for @roleHelper.
   ///
   /// In en, this message translates to:
-  /// **'I’m here to give help'**
+  /// **'I have experience to share'**
   String get roleHelper;
 
   /// No description provided for @roleBoth.
   ///
   /// In en, this message translates to:
-  /// **'I’m open to both'**
+  /// **'Both'**
   String get roleBoth;
 
   /// No description provided for @onboardingHelperTitle.
   ///
   /// In en, this message translates to:
-  /// **'What can you help with?'**
+  /// **'What have you been through?'**
   String get onboardingHelperTitle;
 
   /// No description provided for @onboardingHelperSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Pick what you have lived through and can share.'**
+  /// **'What you’ve learned is worth sharing. Pick what you’ve done yourself.'**
   String get onboardingHelperSubtitle;
 
   /// No description provided for @onboardingExpertise.
   ///
   /// In en, this message translates to:
-  /// **'Areas of expertise'**
+  /// **'Your experience'**
   String get onboardingExpertise;
 
   /// No description provided for @onboardingPreferredMode.
@@ -1505,13 +1505,13 @@ abstract class AppLocalizations {
   /// No description provided for @onboardingTopicsTitle.
   ///
   /// In en, this message translates to:
-  /// **'What do you need help with?'**
+  /// **'Which topics matter to you?'**
   String get onboardingTopicsTitle;
 
   /// No description provided for @onboardingTopicsSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Pick a few topics. We\'ll show you posts and helpers for them.'**
+  /// **'We’ll show you people who have faced something similar.'**
   String get onboardingTopicsSubtitle;
 
   /// No description provided for @onboardingPickTopics.

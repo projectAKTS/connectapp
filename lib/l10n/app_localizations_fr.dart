@@ -552,7 +552,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get signupSubtitle =>
-      'Rejoignez la communauté et commencez à échanger.';
+      'Rencontrez des gens qui ont déjà fait ce que vous essayez de faire.';
 
   @override
   String get signupFirstName => 'Prénom';
@@ -696,11 +696,11 @@ class AppLocalizationsFr extends AppLocalizations {
   String get onboardingTitle => 'Créez votre profil';
 
   @override
-  String get onboardingProfileTitle => 'Votre profil';
+  String get onboardingProfileTitle => 'Un peu sur vous';
 
   @override
   String get onboardingProfileSubtitle =>
-      'Ajoutez l\'essentiel pour personnaliser votre expérience.';
+      'Pour que les gens sachent à qui ils parlent. Votre ville et vos langues nous aident à trouver les bonnes personnes.';
 
   @override
   String get onboardingDisplayName => 'Nom affiché';
@@ -730,23 +730,23 @@ class AppLocalizationsFr extends AppLocalizations {
   String get onboardingHowUse => 'Comment utiliserez-vous Kindupp?';
 
   @override
-  String get roleSeeker => 'Je cherche de l\'aide';
+  String get roleSeeker => 'J’ai besoin d’aide pour quelque chose';
 
   @override
-  String get roleHelper => 'Je veux partager mon expérience';
+  String get roleHelper => 'J’ai de l’expérience à partager';
 
   @override
   String get roleBoth => 'Les deux';
 
   @override
-  String get onboardingHelperTitle => 'Pour quoi pouvez-vous aider ?';
+  String get onboardingHelperTitle => 'Qu’avez-vous vécu ?';
 
   @override
   String get onboardingHelperSubtitle =>
-      'Choisissez ce que vous avez vécu et pouvez partager.';
+      'Ce que vous avez appris mérite d’être partagé. Choisissez ce que vous avez fait vous-même.';
 
   @override
-  String get onboardingExpertise => 'Domaines d\'expérience';
+  String get onboardingExpertise => 'Votre expérience';
 
   @override
   String get onboardingPreferredMode => 'Mode préféré';
@@ -764,11 +764,11 @@ class AppLocalizationsFr extends AppLocalizations {
   String get onboardingAvailability => 'Disponibilités';
 
   @override
-  String get onboardingTopicsTitle => 'Pour quoi cherchez-vous de l\'aide ?';
+  String get onboardingTopicsTitle => 'Quels sujets vous concernent ?';
 
   @override
   String get onboardingTopicsSubtitle =>
-      'Choisissez quelques sujets. Nous vous montrerons les publications et les personnes qui peuvent aider.';
+      'Nous vous montrerons des gens qui ont vécu quelque chose de semblable.';
 
   @override
   String get onboardingPickTopics => 'Choisissez quelques sujets';

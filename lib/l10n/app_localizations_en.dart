@@ -542,7 +542,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get signupTitle => 'Create account';
 
   @override
-  String get signupSubtitle => 'Join the community and start connecting.';
+  String get signupSubtitle =>
+      'Meet people who have already done what you’re trying to do.';
 
   @override
   String get signupFirstName => 'First name';
@@ -681,11 +682,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get onboardingTitle => 'Set up your profile';
 
   @override
-  String get onboardingProfileTitle => 'Profile basics';
+  String get onboardingProfileTitle => 'A bit about you';
 
   @override
   String get onboardingProfileSubtitle =>
-      'Add basics so we can personalize your experience.';
+      'So people know who they’re talking to. Your city and languages help us find the right people for you.';
 
   @override
   String get onboardingDisplayName => 'Display name';
@@ -715,23 +716,23 @@ class AppLocalizationsEn extends AppLocalizations {
   String get onboardingHowUse => 'How will you use Kindupp?';
 
   @override
-  String get roleSeeker => 'I’m here to get help';
+  String get roleSeeker => 'I need help with something';
 
   @override
-  String get roleHelper => 'I’m here to give help';
+  String get roleHelper => 'I have experience to share';
 
   @override
-  String get roleBoth => 'I’m open to both';
+  String get roleBoth => 'Both';
 
   @override
-  String get onboardingHelperTitle => 'What can you help with?';
+  String get onboardingHelperTitle => 'What have you been through?';
 
   @override
   String get onboardingHelperSubtitle =>
-      'Pick what you have lived through and can share.';
+      'What you’ve learned is worth sharing. Pick what you’ve done yourself.';
 
   @override
-  String get onboardingExpertise => 'Areas of expertise';
+  String get onboardingExpertise => 'Your experience';
 
   @override
   String get onboardingPreferredMode => 'Preferred mode';
@@ -749,11 +750,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get onboardingAvailability => 'Availability';
 
   @override
-  String get onboardingTopicsTitle => 'What do you need help with?';
+  String get onboardingTopicsTitle => 'Which topics matter to you?';
 
   @override
   String get onboardingTopicsSubtitle =>
-      'Pick a few topics. We\'ll show you posts and helpers for them.';
+      'We’ll show you people who have faced something similar.';
 
   @override
   String get onboardingPickTopics => 'Pick a few topics';
